@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.MarshalException;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
@@ -427,7 +428,7 @@ public class ThriftValidation
         if (!column.isSetTimestamp())
             throw new InvalidRequestException("Column timestamp is required");
 
-        ColumnDefinition columnDef = metadata.getColumnDefinition(column.name);
+        ColumnDefinition columnDef = getColumnDefinition(metadata, column.name);
         try
         {
             AbstractType<?> validator = metadata.getValueValidator(columnDef);
@@ -452,6 +453,26 @@ public class ThriftValidation
                                                                      columnDef.getIndexName(),
                                                                      metadata.cfName,
                                                                      metadata.ksName));
+    }
+
+    private static ColumnDefinition getColumnDefinition(CFMetaData metadata, ByteBuffer columnName)
+    {
+        if (metadata.comparator instanceof CompositeType)
+        {
+            CompositeType composite = (CompositeType)metadata.comparator;
+            ByteBuffer[] components = composite.split(columnName);
+            for (ColumnDefinition def : metadata.getColumn_metadata().values())
+            {
+                ByteBuffer toCompare = def.componentIndex == null ? columnName : components[def.componentIndex];
+                if (columnName.equals(toCompare))
+                    return def;
+            }
+            return null;
+        }
+        else
+        {
+            return metadata.getColumnDefinition(columnName);
+        }
     }
 
     /**

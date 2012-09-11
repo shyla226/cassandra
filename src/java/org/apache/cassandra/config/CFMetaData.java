@@ -826,12 +826,7 @@ public final class CFMetaData
         def.setKey_alias(keyAlias);
         List<org.apache.cassandra.thrift.ColumnDef> column_meta = new ArrayList<org.apache.cassandra.thrift.ColumnDef>(column_metadata.size());
         for (ColumnDefinition cd : column_metadata.values())
-        {
-            // Non-null componentIndex are only used by CQL (so far) so we don't expose
-            // them through thrift
-            if (cd.componentIndex == null)
                 column_meta.add(cd.toThrift());
-        }
         def.setColumn_metadata(column_meta);
         def.setCompaction_strategy(compactionStrategyClass.getName());
         def.setCompaction_strategy_options(new HashMap<String, String>(compactionStrategyOptions));
@@ -1340,6 +1335,23 @@ public final class CFMetaData
     {
         assert cqlCfDef != null;
         return cqlCfDef;
+    }
+
+    /**
+     * Returns whether this CFMetaData has information non exposed on thrift so
+     * that it cannot be correctly handled automatically by thrift clients.
+     */
+    public boolean isThriftIncompatible()
+    {
+        if (!cqlCfDef.isComposite)
+            return false;
+
+        for (ColumnDefinition columnDef : column_metadata.values())
+        {
+            if (columnDef.componentIndex != null)
+                return true;
+        }
+        return false;
     }
 
     @Override
