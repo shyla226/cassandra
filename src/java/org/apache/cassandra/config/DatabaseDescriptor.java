@@ -46,7 +46,6 @@ import org.apache.cassandra.scheduler.IRequestScheduler;
 import org.apache.cassandra.scheduler.NoScheduler;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.MigrationManager;
-import org.apache.cassandra.thrift.CassandraDaemon;
 import org.apache.cassandra.utils.FBUtilities;
 import org.yaml.snakeyaml.Loader;
 import org.yaml.snakeyaml.TypeDescription;
@@ -71,7 +70,7 @@ public class DatabaseDescriptor
     private static Config conf;
 
     private static IAuthenticator authenticator = new AllowAllAuthenticator();
-    private static IAuthority authority = new AllowAllAuthority();
+    private static IAuthorizer authorizer = new AllowAllAuthorizer();
 
     private final static String DEFAULT_CONFIGURATION = "cassandra.yaml";
 
@@ -198,10 +197,21 @@ public class DatabaseDescriptor
             /* Authentication and authorization backend, implementing IAuthenticator and IAuthority */
             if (conf.authenticator != null)
                 authenticator = FBUtilities.<IAuthenticator>construct(conf.authenticator, "authenticator");
+
+
             if (conf.authority != null)
-                authority = FBUtilities.<IAuthority>construct(conf.authority, "authority");
+            {
+                logger.warn("Please rename 'authority' to 'authorizer' in cassandra.yaml");
+                if (!conf.authority.equals("org.apache.cassandra.auth.AllowAllAuthority"))
+                    throw new ConfigurationException("IAuthority interface has been deprecated,"
+                                                     + " please implement IAuthorizer instead.");
+            }
+
+            if (conf.authorizer != null)
+                authorizer = FBUtilities.<IAuthorizer>construct(conf.authorizer, "authorizer");
+
             authenticator.validateConfiguration();
-            authority.validateConfiguration();
+            authorizer.validateConfiguration();
 
             /* Hashing strategy */
             if (conf.partitioner == null)
@@ -565,9 +575,9 @@ public class DatabaseDescriptor
         return authenticator;
     }
 
-    public static IAuthority getAuthority()
+    public static IAuthorizer getAuthorizer()
     {
-        return authority;
+        return authorizer;
     }
 
     public static int getThriftMaxMessageLength()

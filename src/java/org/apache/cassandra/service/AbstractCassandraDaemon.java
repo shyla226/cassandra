@@ -188,6 +188,10 @@ public abstract class AbstractCassandraDaemon implements CassandraDaemon
             System.exit(100);
         }
 
+        // TODO: setup authenticator
+        // setup Authorizer.
+        DatabaseDescriptor.getAuthorizer().setup();
+
         // clean up debris in the rest of the tables
         for (String table : Schema.instance.getTables())
         {

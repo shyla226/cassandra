@@ -103,8 +103,8 @@ public class QueryProcessor
     private static CqlResult processStatement(CQLStatement statement, ClientState clientState, List<ByteBuffer> variables)
     throws  UnavailableException, InvalidRequestException, TimedOutException, SchemaDisagreementException
     {
-        statement.checkAccess(clientState);
         statement.validate(clientState);
+        statement.checkAccess(clientState);
         CqlResult result = statement.execute(clientState, variables);
         if (result == null)
         {
@@ -254,7 +254,7 @@ public class QueryProcessor
         return statement.prepare();
     }
 
-    private static ParsedStatement parseStatement(String queryStr) throws InvalidRequestException, RecognitionException
+    public static ParsedStatement parseStatement(String queryStr) throws InvalidRequestException, RecognitionException
     {
         try
         {
