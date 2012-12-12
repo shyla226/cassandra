@@ -34,7 +34,7 @@ public interface IAuthorizer
      * @param resource Resource for which the authorization is being requested. @see DataResource.
      * @return Set of permissions of the user on the resource. Should never return null. Use Permission.NONE instead.
      */
-    public Set<Permission> authorize(AuthenticatedUser user, IResource resource);
+    Set<Permission> authorize(AuthenticatedUser user, IResource resource);
 
     /**
      * Grants a set of permissions on a resource to a user.
@@ -48,8 +48,8 @@ public interface IAuthorizer
      * @throws UnauthorizedException if the granting user isn't allowed to grant (and revoke) the permissions on the resource.
      * @throws InvalidRequestException upon parameter misconfiguration or internal error.
      */
-    public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String to)
-    throws UnauthorizedException, InvalidRequestException;
+    void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String to)
+    throws InvalidRequestException;
 
     /**
      * Revokes a set of permissions on a resource from a user.
@@ -63,8 +63,8 @@ public interface IAuthorizer
      * @throws UnauthorizedException if the revoking user isn't allowed to revoke the permissions on the resource.
      * @throws InvalidRequestException upon parameter misconfiguration or internal error.
      */
-    public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String from)
-    throws UnauthorizedException, InvalidRequestException;
+    void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String from)
+    throws InvalidRequestException;
 
     /**
      * Returns a list of permissions on a resource of a user.
@@ -80,8 +80,8 @@ public interface IAuthorizer
      * @throws UnauthorizedException if the user isn't allowed to view the requested permissions.
      * @throws InvalidRequestException upon parameter misconfiguration or internal error.
      */
-    public Set<PermissionDetails> listPermissions(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String of)
-            throws UnauthorizedException, InvalidRequestException;
+    Set<PermissionDetails> list(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String of)
+    throws InvalidRequestException;
 
     /**
      * This method is called before deleting a user with DROP USER query so that a new user with the same
@@ -89,33 +89,33 @@ public interface IAuthorizer
      *
      * @param droppedUser The user to revoke all permissions from.
      */
-    public void revokeAll(String droppedUser);
+    void revokeAll(String droppedUser);
 
     /**
      * This method is called after a resource is removed (i.e. keyspace or a table is dropped).
      *
      * @param droppedResource The resource to revoke all permissions on.
      */
-    public void revokeAll(IResource droppedResource);
+    void revokeAll(IResource droppedResource);
 
     /**
      * Set of resources that should be made inaccessible to users and only accessible internally.
      *
      * @return Keyspaces, column families that will be unreadable and unmodifiable by users; other resources.
      */
-    public Set<? extends IResource> protectedResources();
+    Set<? extends IResource> protectedResources();
 
     /**
      * Validates configuration of IAuthorizer implementation (if configurable).
      *
      * @throws ConfigurationException when there is a configuration error.
      */
-    public void validateConfiguration() throws ConfigurationException;
+    void validateConfiguration() throws ConfigurationException;
 
     /**
      * Setup is called once upon system startup to initialize the IAuthorizer.
      *
      * For example, use this method to create any required keyspaces/column families.
      */
-    public void setup();
+    void setup();
 }

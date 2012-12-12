@@ -121,10 +121,11 @@ public class QueryProcessor
         return processStatement(getStatement(queryString, clientState).statement, clientState, Collections.<ByteBuffer>emptyList());
     }
 
-    public static CqlResult processInternal(String query, ClientState state)
+    public static CqlResult processInternal(String query) throws UnavailableException, InvalidRequestException, TimedOutException
     {
         try
         {
+            ClientState state = new ClientState(true);
             CQLStatement statement = getStatement(query, state).statement;
 
             statement.validate(state);
@@ -140,19 +141,7 @@ public class QueryProcessor
         }
         catch (RecognitionException e)
         {
-            throw new RuntimeException(e);
-        }
-        catch (UnavailableException e)
-        {
-            throw new RuntimeException(e);
-        }
-        catch (InvalidRequestException e)
-        {
             throw new AssertionError(e);
-        }
-        catch (TimedOutException e)
-        {
-            throw new RuntimeException(e);
         }
         catch (SchemaDisagreementException e)
         {

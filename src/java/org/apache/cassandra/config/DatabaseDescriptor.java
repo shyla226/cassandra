@@ -443,7 +443,6 @@ public class DatabaseDescriptor
             rowCacheProvider = FBUtilities.newCacheProvider(conf.row_cache_provider);
 
             // Hardcoded system tables
-            KSMetaData systemMeta = KSMetaData.systemKeyspace();
             Schema.instance.load(CFMetaData.StatusCf);
             Schema.instance.load(CFMetaData.HintsCf);
             Schema.instance.load(CFMetaData.MigrationsCf);
@@ -455,7 +454,10 @@ public class DatabaseDescriptor
             Schema.instance.load(CFMetaData.SchemaColumnFamiliesCf);
             Schema.instance.load(CFMetaData.SchemaColumnsCf);
 
-            Schema.instance.addSystemTable(systemMeta);
+            Schema.instance.load(CFMetaData.AuthUsersCf);
+
+            Schema.instance.addSystemTable(KSMetaData.systemKeyspace());
+            Schema.instance.addSystemTable(KSMetaData.authKeyspace());
 
             /* Load the seeds for node contact points */
             if (conf.seed_provider == null)

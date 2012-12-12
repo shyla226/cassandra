@@ -149,6 +149,10 @@ cqlStatement returns [ParsedStatement stmt]
     | st16=grantStatement              { $stmt = st16; }
     | st17=revokeStatement             { $stmt = st17; }
     | st18=listPermissionsStatement    { $stmt = st18; }
+    | st19=createUserStatement         { $stmt = st19; }
+    | st20=alterUserStatement          { $stmt = st20; }
+    | st21=dropUserStatement           { $stmt = st21; }
+    | st22=listUsersStatement          { $stmt = st22; }
     ;
 
 /*
@@ -504,11 +508,6 @@ permissionOrAll returns [Set<Permission> perms]
     | p=permission ( K_PERMISSION )? { $perms = EnumSet.of($p.perm); }
     ;
 
-username
-    : IDENT
-    | STRING_LITERAL
-    ;
-
 resource returns [IResource res]
     : r=dataResource { $res = $r.res; }
     ;
@@ -518,6 +517,56 @@ dataResource returns [DataResource res]
     | K_KEYSPACE ks = keyspaceName { $res = DataResource.keyspace($ks.id); }
     | ( K_COLUMNFAMILY )? cf = columnFamilyName
       { $res = DataResource.columnFamily($cf.name.getKeyspace(), $cf.name.getColumnFamily()); }
+    ;
+
+/**
+ * CREATE USER <username> [WITH PASSWORD <password>] [SUPERUSER|NOSUPERUSER]
+ */
+createUserStatement returns [CreateUserStatement stmt]
+    @init {
+        UserOptions opts = new UserOptions();
+        boolean superuser = false;
+    }
+    : K_CREATE K_USER username
+      ( K_WITH userOptions[opts] )?
+      ( K_SUPERUSER { superuser = true; } | K_NOSUPERUSER { superuser = false; } )?
+      { $stmt = new CreateUserStatement($username.text, opts, superuser); }
+    ;
+
+/**
+ * ALTER USER <username> [WITH PASSWORD <password>] [SUPERUSER|NOSUPERUSER]
+ */
+alterUserStatement returns [AlterUserStatement stmt]
+    @init {
+        UserOptions opts = new UserOptions();
+        Boolean superuser = null;
+    }
+    : K_ALTER K_USER username
+      ( K_WITH userOptions[opts] )?
+      ( K_SUPERUSER { superuser = true; } | K_NOSUPERUSER { superuser = false; } )?
+      { $stmt = new AlterUserStatement($username.text, opts, superuser); }
+    ;
+
+/**
+ * DROP USER <username>
+ */
+dropUserStatement returns [DropUserStatement stmt]
+    : K_DROP K_USER username { $stmt = new DropUserStatement($username.text); }
+    ;
+
+/**
+ * LIST USERS
+ */
+listUsersStatement returns [ListUsersStatement stmt]
+    : K_LIST K_USERS { $stmt = new ListUsersStatement(); }
+    ;
+
+userOptions[UserOptions opts]
+    : userOption[opts]
+    ;
+
+userOption[UserOptions opts]
+    : k=K_PASSWORD v=STRING_LITERAL { opts.put($k.text, $v.text); }
     ;
 
 /** DEFINITIONS **/
@@ -631,6 +680,11 @@ native_type returns [String str]
       ) { return $c.text; }
     ;
 
+username
+    : IDENT
+    | STRING_LITERAL
+    ;
+
 unreserved_keyword returns [String str]
     : k=( K_KEY
         | K_CONSISTENCY
@@ -649,6 +703,11 @@ unreserved_keyword returns [String str]
         | K_KEYSPACES
         | K_MODIFY
         | K_AUTHORIZE
+        | K_USER
+        | K_USERS
+        | K_SUPERUSER
+        | K_NOSUPERUSER
+        | K_PASSWORD
         ) { $str = $k.text; }
     | t=native_type { $str = t; }
     ;
@@ -737,6 +796,12 @@ K_MODIFY:      M O D I F Y;
 K_AUTHORIZE:   A U T H O R I Z E;
 K_NORECURSIVE: N O R E C U R S I V E;
 K_LIST:        L I S T;
+
+K_USER:        U S E R;
+K_USERS:       U S E R S;
+K_SUPERUSER:   S U P E R U S E R;
+K_NOSUPERUSER: N O S U P E R U S E R;
+K_PASSWORD:    P A S S W O R D;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

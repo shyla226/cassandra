@@ -20,13 +20,14 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.thrift.CqlResult;
 import org.apache.cassandra.thrift.InvalidRequestException;
+import org.apache.cassandra.thrift.TimedOutException;
+import org.apache.cassandra.thrift.UnavailableException;
 
-public abstract class AuthorizationStatement extends ParsedStatement implements CQLStatement
+public abstract class AuthenticationStatement extends ParsedStatement implements CQLStatement
 {
     @Override
     public Prepared prepare()
@@ -39,12 +40,7 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
         return 0;
     }
 
-    public abstract CqlResult execute(ClientState state, List<ByteBuffer> variables) throws InvalidRequestException;
-
-    public static DataResource maybeCorrectResource(DataResource resource, ClientState state) throws InvalidRequestException
-    {
-        if (resource.isColumnFamilyLevel() && resource.getKeyspace() == null)
-            return DataResource.columnFamily(state.getKeyspace(), resource.getColumnFamily());
-        return resource;
-    }
+    public abstract CqlResult execute(ClientState state, List<ByteBuffer> variables)
+    throws InvalidRequestException, UnavailableException, TimedOutException;
 }
+

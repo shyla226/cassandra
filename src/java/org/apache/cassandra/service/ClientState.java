@@ -59,12 +59,12 @@ public class ClientState
         for (String cf : cfs)
             READABLE_SYSTEM_RESOURCES.add(DataResource.columnFamily(Table.SYSTEM_TABLE, cf));
 
+        PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthenticator().protectedResources());
         PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthorizer().protectedResources());
-        // TODO: the same with IAuthenticator once it's done.
     }
 
     // Current user for the session
-    private AuthenticatedUser user;
+    private volatile AuthenticatedUser user;
     private String keyspace;
     // Reusable array for authorization
     private final List<Object> resource = new ArrayList<Object>();
@@ -141,9 +141,14 @@ public class ClientState
     /**
      * Attempts to login this client with the given credentials map.
      */
-    public void login(Map<? extends CharSequence,? extends CharSequence> credentials) throws AuthenticationException
+    public void login(Map<String, String> credentials) throws AuthenticationException
     {
         AuthenticatedUser user = DatabaseDescriptor.getAuthenticator().authenticate(credentials);
+
+        if (!user.isAnonymous() && !Auth.isExistingUser(user.getName()))
+            throw new AuthenticationException(String.format("User %s doesn't exist - create it with CREATE USER query first",
+                                                            user.getName()));
+
         if (logger.isDebugEnabled())
             logger.debug("logged in: {}", user);
         this.user = user;
@@ -156,7 +161,7 @@ public class ClientState
         reset();
     }
 
-    public void hasAllKeyspacesAccess(Permission perm) throws UnauthorizedException, InvalidRequestException
+    public void hasAllKeyspacesAccess(Permission perm) throws InvalidRequestException
     {
         if (internalCall)
             return;
@@ -164,19 +169,19 @@ public class ClientState
         ensureHasPermission(perm, DataResource.root());
     }
 
-    public void hasKeyspaceAccess(String keyspace, Permission perm) throws UnauthorizedException, InvalidRequestException
+    public void hasKeyspaceAccess(String keyspace, Permission perm) throws InvalidRequestException
     {
         hasAccess(keyspace, perm, DataResource.keyspace(keyspace));
     }
 
     public void hasColumnFamilyAccess(String keyspace, String columnFamily, Permission perm)
-    throws UnauthorizedException, InvalidRequestException
+    throws InvalidRequestException
     {
         hasAccess(keyspace, perm, DataResource.columnFamily(keyspace, columnFamily));
     }
 
     private void hasAccess(String keyspace, Permission perm, DataResource resource)
-    throws UnauthorizedException, InvalidRequestException
+    throws InvalidRequestException
     {
         validateKeyspace(keyspace);
         if (internalCall)
@@ -198,7 +203,7 @@ public class ClientState
                 return;
         }
         throw new UnauthorizedException(String.format("User %s has no %s permission on %s or any of its parents",
-                                                      user.username,
+                                                      user.getName(),
                                                       perm,
                                                       resource));
     }
@@ -212,17 +217,25 @@ public class ClientState
 
     public void reset()
     {
-        user = DatabaseDescriptor.getAuthenticator().defaultUser();
+        if (!DatabaseDescriptor.getAuthenticator().requireAuthentication())
+            this.user = AuthenticatedUser.ANONYMOUS_USER;
         keyspace = null;
         prepared.clear();
         cql3Prepared.clear();
         cqlVersion = DEFAULT_CQL_VERSION;
     }
 
-    private void validateLogin() throws InvalidRequestException
+    public void validateLogin() throws UnauthorizedException
     {
         if (user == null)
-            throw new InvalidRequestException("You have not logged in");
+            throw new UnauthorizedException("You have not logged in");
+    }
+
+    public void ensureNotAnonymous() throws UnauthorizedException
+    {
+        validateLogin();
+        if (user.isAnonymous())
+            throw new UnauthorizedException("You have to be logged in to perform this query");
     }
 
     private static void validateKeyspace(String keyspace) throws InvalidRequestException
@@ -270,6 +283,11 @@ public class ClientState
                                                             StringUtils.join(getCQLSupportedVersion(), ", ")));
     }
 
+    public AuthenticatedUser getUser()
+    {
+        return user;
+    }
+
     public SemanticVersion getCQLVersion()
     {
         return cqlVersion;
@@ -286,23 +304,5 @@ public class ClientState
     public Set<Permission> authorize(IResource resource)
     {
         return DatabaseDescriptor.getAuthorizer().authorize(user, resource);
-    }
-
-    public void grantPermission(Set<Permission> permissions, IResource resource, String to)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        DatabaseDescriptor.getAuthorizer().grant(user, permissions, resource, to);
-    }
-
-    public void revokePermission(Set<Permission> permissions, IResource resource, String from)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        DatabaseDescriptor.getAuthorizer().revoke(user, permissions, resource, from);
-    }
-
-    public Set<PermissionDetails> listPermissions(Set<Permission> permissions, IResource resource, String of)
-    throws UnauthorizedException, InvalidRequestException
-    {
-        return DatabaseDescriptor.getAuthorizer().listPermissions(user, permissions, resource, of);
     }
 }

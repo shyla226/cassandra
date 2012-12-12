@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.thrift.*;
@@ -47,12 +48,21 @@ public class ListPermissionsStatement extends AuthorizationStatement
     // TODO: user existence check (when IAuthenticator rewrite is done)
     public void validate(ClientState state) throws InvalidRequestException
     {
+        // a check to ensure the existence of the user isn't being leaked by user existence check.
+        if (username != null && !Auth.isExistingUser(username))
+            throw new InvalidRequestException(String.format("User %s doesn't exist", username));
+
         if (resource != null)
         {
             resource = maybeCorrectResource(resource, state);
             if (!resource.exists())
                 throw new InvalidRequestException(String.format("%s doesn't exist", resource));
         }
+    }
+
+    public void checkAccess(ClientState state) throws InvalidRequestException
+    {
+        state.ensureNotAnonymous();
     }
 
     public CqlResult execute(ClientState state, List<ByteBuffer> variables) throws InvalidRequestException
@@ -62,11 +72,11 @@ public class ListPermissionsStatement extends AuthorizationStatement
         if (resource != null && recursive)
         {
             for (IResource r : Resources.chain(resource))
-                details.addAll(state.listPermissions(permissions, r, username));
+                details.addAll(list(state, r));
         }
         else
         {
-            details.addAll(state.listPermissions(permissions, resource, username));
+            details.addAll(list(state, resource));
         }
 
         Collections.sort(details);
@@ -101,5 +111,10 @@ public class ListPermissionsStatement extends AuthorizationStatement
     private Column createColumn(String name, String value)
     {
         return new Column(UTF8Type.instance.decompose(name)).setValue(UTF8Type.instance.decompose(value));
+    }
+
+    private Set<PermissionDetails> list(ClientState state, IResource resource) throws UnauthorizedException, InvalidRequestException
+    {
+        return DatabaseDescriptor.getAuthorizer().list(state.getUser(), permissions, resource, username);
     }
 }

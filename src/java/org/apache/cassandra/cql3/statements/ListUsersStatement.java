@@ -20,31 +20,26 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-import org.apache.cassandra.auth.DataResource;
-import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.auth.Auth;
+import org.apache.cassandra.auth.UnauthorizedException;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.thrift.CqlResult;
-import org.apache.cassandra.thrift.InvalidRequestException;
+import org.apache.cassandra.thrift.*;
 
-public abstract class AuthorizationStatement extends ParsedStatement implements CQLStatement
+public class ListUsersStatement extends AuthenticationStatement
 {
-    @Override
-    public Prepared prepare()
+    public void validate(ClientState state)
     {
-        return new Prepared(this);
     }
 
-    public int getBoundsTerms()
+    public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        return 0;
+        state.ensureNotAnonymous();
     }
 
-    public abstract CqlResult execute(ClientState state, List<ByteBuffer> variables) throws InvalidRequestException;
-
-    public static DataResource maybeCorrectResource(DataResource resource, ClientState state) throws InvalidRequestException
+    public CqlResult execute(ClientState state, List<ByteBuffer> variables)
+    throws InvalidRequestException, UnavailableException, TimedOutException
     {
-        if (resource.isColumnFamilyLevel() && resource.getKeyspace() == null)
-            return DataResource.columnFamily(state.getKeyspace(), resource.getColumnFamily());
-        return resource;
+        return QueryProcessor.processInternal(String.format("SELECT * FROM %s.%s", Auth.AUTH_KS, Auth.USERS_CF));
     }
 }

@@ -19,6 +19,7 @@ package org.apache.cassandra.auth;
 
 import java.util.*;
 
+import org.apache.cassandra.config.ConfigurationException;
 import org.apache.cassandra.thrift.InvalidRequestException;
 
 /**
@@ -39,10 +40,7 @@ public abstract class LegacyAuthorizer implements IAuthorizer
      */
     public abstract EnumSet<Permission> authorize(AuthenticatedUser user, List<Object> resource);
 
-    @Override
-    public void setup()
-    {
-    }
+    public abstract void validateConfiguration() throws ConfigurationException;
 
     /**
      * Translates new-style authorize() method call to the old-style (including permissions and the hierarchy).
@@ -73,14 +71,14 @@ public abstract class LegacyAuthorizer implements IAuthorizer
 
     @Override
     public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String to)
-    throws InvalidRequestException, UnauthorizedException
+    throws InvalidRequestException
     {
         throw new InvalidRequestException("GRANT operation is not supported by LegacyAuthorizer");
     }
 
     @Override
     public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String from)
-    throws InvalidRequestException, UnauthorizedException
+    throws InvalidRequestException
     {
         throw new InvalidRequestException("REVOKE operation is not supported by LegacyAuthorizer");
     }
@@ -96,8 +94,8 @@ public abstract class LegacyAuthorizer implements IAuthorizer
     }
 
     @Override
-    public Set<PermissionDetails> listPermissions(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String of)
-    throws InvalidRequestException, UnauthorizedException
+    public Set<PermissionDetails> list(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, String of)
+    throws InvalidRequestException
     {
         throw new InvalidRequestException("LIST PERMISSIONS operation is not supported by LegacyAuthorizer");
     }
@@ -106,5 +104,10 @@ public abstract class LegacyAuthorizer implements IAuthorizer
     public Set<IResource> protectedResources()
     {
         return Collections.emptySet();
+    }
+
+    @Override
+    public void setup()
+    {
     }
 }

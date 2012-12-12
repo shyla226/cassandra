@@ -30,6 +30,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.auth.Auth;
 import org.apache.cassandra.db.ColumnFamilyType;
 import org.apache.cassandra.db.Row;
 import org.apache.cassandra.db.SystemTable;
@@ -71,7 +72,7 @@ public class Schema
 
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
-    public static final ImmutableSet<String> systemKeyspaceNames = ImmutableSet.of(Table.SYSTEM_TABLE);
+    public static final ImmutableSet<String> systemKeyspaceNames = ImmutableSet.of(Table.SYSTEM_TABLE, Auth.AUTH_KS);
 
     static
     {
@@ -289,6 +290,7 @@ public class Schema
     {
         List<String> tablesList = new ArrayList<String>(tables.keySet());
         tablesList.remove(Table.SYSTEM_TABLE);
+        tablesList.remove(Auth.AUTH_KS);
         return Collections.unmodifiableList(tablesList);
     }
 

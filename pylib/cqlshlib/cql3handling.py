@@ -187,6 +187,7 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                   | <selectStatement>
                   | <dataChangeStatement>
                   | <schemaChangeStatement>
+                  | <authenticationStatement>
                   | <authorizationStatement>
                   ;
 
@@ -205,6 +206,12 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                           | <dropIndexStatement>
                           | <alterTableStatement>
                           ;
+
+<authenticationStatement> ::= <createUserStatement>
+                            | <alterUserStatement>
+                            | <dropUserStatement>
+                            | <listUsersStatement>
+                            ;
 
 <authorizationStatement> ::= <grantStatement>
                            | <revokeStatement>
@@ -684,6 +691,27 @@ completer_for('alterInstructions', 'optval') \
     (create_cf_option_val_completer)
 
 syntax_rules += r'''
+<username> ::= user=( <identifier> | <stringLiteral> )
+             ;
+
+<createUserStatement> ::= "CREATE" "USER" <username>
+                              ( "WITH" "PASSWORD" <stringLiteral> )?
+                              ( "SUPERUSER" | "NOSUPERUSER" )?
+                        ;
+
+<alterUserStatement> ::= "ALTER" "USER" <username>
+                              ( "WITH" "PASSWORD" <stringLiteral> )?
+                              ( "SUPERUSER" | "NOSUPERUSER" )?
+                       ;
+
+<dropUserStatement> ::= "DROP" "USER" <username>
+                      ;
+
+<listUsersStatement> ::= "LIST" "USERS"
+                       ;
+'''
+
+syntax_rules += r'''
 <grantStatement> ::= "GRANT" <permissionExpr> "ON" <resource> "TO" <username>
                    ;
 
@@ -713,10 +741,8 @@ syntax_rules += r'''
                  | ( "KEYSPACE" <keyspaceName> )
                  | ( "TABLE"? <columnFamilyName> )
                  ;
-
-<username> ::= user=( <identifier> | <stringLiteral> )
-             ;
 '''
+
 # END SYNTAX/COMPLETION RULE DEFINITIONS
 
 CqlRuleSet.append_rules(syntax_rules)

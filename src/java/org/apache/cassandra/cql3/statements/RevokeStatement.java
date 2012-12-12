@@ -24,6 +24,7 @@ import java.util.Set;
 
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.thrift.CqlResult;
 import org.apache.cassandra.thrift.InvalidRequestException;
@@ -37,7 +38,7 @@ public class RevokeStatement extends PermissionAlteringStatement
 
     public CqlResult execute(ClientState state, List<ByteBuffer> variables) throws InvalidRequestException
     {
-        state.revokePermission(permissions, resource, username);
+        DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, username);
         return null;
     }
 }
