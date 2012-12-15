@@ -48,7 +48,7 @@ public class CreateUserStatement extends AuthenticationStatement
         if (username.isEmpty())
             throw new InvalidRequestException("Username can't be an empty string");
         opts.validate();
-        if (Auth.isExistingUser(username))
+        if (isExistingUser(username))
             throw new InvalidRequestException(String.format("User %s already exists", username));
     }
 

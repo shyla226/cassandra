@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.auth.Auth;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.thrift.CqlResult;
@@ -38,6 +39,18 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
     public int getBoundsTerms()
     {
         return 0;
+    }
+
+    protected boolean isExistingUser(String username) throws InvalidRequestException
+    {
+        try
+        {
+            return Auth.isExistingUser(username);
+        }
+        catch (Exception e)
+        {
+            throw new InvalidRequestException(e.toString());
+        }
     }
 
     public abstract CqlResult execute(ClientState state, List<ByteBuffer> variables)

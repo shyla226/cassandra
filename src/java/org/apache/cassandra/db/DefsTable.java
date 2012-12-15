@@ -494,7 +494,7 @@ public class DefsTable
             Table.open(ksm.name);
     }
 
-    private static void addColumnFamily(CFMetaData cfm) throws IOException
+    public static void addColumnFamily(CFMetaData cfm)
     {
         assert Schema.instance.getCFMetaData(cfm.ksName, cfm.cfName) == null;
         KSMetaData ksm = Schema.instance.getTableDefinition(cfm.ksName);

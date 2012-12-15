@@ -145,9 +145,22 @@ public class ClientState
     {
         AuthenticatedUser user = DatabaseDescriptor.getAuthenticator().authenticate(credentials);
 
-        if (!user.isAnonymous() && !Auth.isExistingUser(user.getName()))
-            throw new AuthenticationException(String.format("User %s doesn't exist - create it with CREATE USER query first",
-                                                            user.getName()));
+        if (!user.isAnonymous())
+        {
+            boolean isExisting;
+            try
+            {
+                isExisting = Auth.isExistingUser(user.getName());
+            }
+            catch (Exception e)
+            {
+                throw new AuthenticationException(e.toString());
+            }
+
+            if (!isExisting)
+                throw new AuthenticationException(String.format("User %s doesn't exist - create it with CREATE USER query first",
+                                                                user.getName()));
+        }
 
         if (logger.isDebugEnabled())
             logger.debug("logged in: {}", user);

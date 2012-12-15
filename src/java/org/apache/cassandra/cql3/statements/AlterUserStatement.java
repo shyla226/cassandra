@@ -52,7 +52,7 @@ public class AlterUserStatement extends AuthenticationStatement
         if (superuser == null && opts.isEmpty())
             throw new InvalidRequestException("ALTER USER can't be empty");
 
-        if (!Auth.isExistingUser(username))
+        if (!isExistingUser(username))
             throw new InvalidRequestException(String.format("User %s doesn't exist", username));
     }
 

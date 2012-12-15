@@ -43,24 +43,10 @@ public class Auth
      * @return whether or not Cassandra knows about the user.
      */
     public static boolean isExistingUser(String username)
+    throws InvalidRequestException, UnavailableException, TimedOutException
     {
         String query = String.format("SELECT * FROM %s.%s WHERE name = '%s'", AUTH_KS, USERS_CF, escape(username));
-        try
-        {
-            return !QueryProcessor.processInternal(query).type.equals(CqlResultType.VOID);
-        }
-        catch (InvalidRequestException e)
-        {
-            throw new RuntimeException(e);
-        }
-        catch (TimedOutException e)
-        {
-            throw new RuntimeException(e);
-        }
-        catch (UnavailableException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return !QueryProcessor.processInternal(query).type.equals(CqlResultType.VOID);
     }
 
     /**
@@ -77,17 +63,10 @@ public class Auth
             CqlResult result = QueryProcessor.processInternal(query);
             return !result.type.equals(CqlResultType.VOID) && new UntypedResultSet(result.rows).one().getBoolean("super");
         }
-        catch (InvalidRequestException e)
+        catch (Exception e)
         {
-            throw new RuntimeException(e);
-        }
-        catch (TimedOutException e)
-        {
-            throw new RuntimeException(e);
-        }
-        catch (UnavailableException e)
-        {
-            throw new RuntimeException(e);
+            logger.error("Superuser check failed for user {}: {}", username, e.toString());
+            return false;
         }
     }
 
@@ -138,12 +117,15 @@ public class Auth
         try
         {
             // insert a default superuser if AUTH_KS.USERS_CF is empty.
-            if(QueryProcessor.processInternal(String.format("SELECT * FROM %s.%s", AUTH_KS, USERS_CF)).type.equals(CqlResultType.VOID))
+            if (QueryProcessor.processInternal(String.format("SELECT * FROM %s.%s", AUTH_KS, USERS_CF)).type.equals(CqlResultType.VOID))
+            {
                 insertUser(DEFAULT_SUPERUSER_NAME, true);
+                logger.info("Created default superuser {}", DEFAULT_SUPERUSER_NAME);
+            }
         }
         catch (Exception e)
         {
-            logger.warn("Skipping default superuser setup: some nodes are not ready");
+            logger.warn("Skipping default superuser setup: one or more nodes were unavailable or timed out");
         }
     }
 

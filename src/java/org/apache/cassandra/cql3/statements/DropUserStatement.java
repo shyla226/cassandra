@@ -41,7 +41,7 @@ public class DropUserStatement extends AuthenticationStatement
 
     public void validate(ClientState state) throws InvalidRequestException
     {
-        if (!Auth.isExistingUser(username))
+        if (!isExistingUser(username))
             throw new InvalidRequestException(String.format("User %s doesn't exists", username));
 
         AuthenticatedUser user = state.getUser();

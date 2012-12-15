@@ -49,7 +49,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
     public void validate(ClientState state) throws InvalidRequestException
     {
         // a check to ensure the existence of the user isn't being leaked by user existence check.
-        if (username != null && !Auth.isExistingUser(username))
+        if (username != null && !isExistingUser(username))
             throw new InvalidRequestException(String.format("User %s doesn't exist", username));
 
         if (resource != null)

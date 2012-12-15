@@ -162,7 +162,7 @@ public final class CFMetaData
 
         AuthUsersCf = newSystemMetadata(Auth.AUTH_KS,
                                         Auth.USERS_CF,
-                                        118,
+                                        19,
                                         "known users and their superuser status",
                                         UTF8Type.instance,
                                         null)
