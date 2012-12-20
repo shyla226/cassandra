@@ -36,6 +36,7 @@ import com.google.common.base.Supplier;
 import com.google.common.collect.*;
 
 import org.apache.cassandra.metrics.ClientRequestMetrics;
+
 import org.apache.log4j.Level;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -543,8 +544,10 @@ public class StorageService implements IEndpointStateChangeSubscriber, StorageSe
         Gossiper.instance.register(this);
         Gossiper.instance.register(migrationManager);
         Gossiper.instance.start(SystemTable.incrementAndGetGeneration()); // needed for node-ring gathering.
-        // gossip schema version when gossiper is running
-        Schema.instance.updateVersionAndAnnounce();
+
+        // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
+        Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
+
         // add rpc listening info
         Gossiper.instance.addLocalApplicationState(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(DatabaseDescriptor.getRpcAddress()));
         if (null != DatabaseDescriptor.getReplaceToken())
@@ -552,7 +555,6 @@ public class StorageService implements IEndpointStateChangeSubscriber, StorageSe
 
         MessagingService.instance().listen(FBUtilities.getLocalAddress());
         LoadBroadcaster.instance.startBroadcasting();
-        MigrationManager.passiveAnnounce(Schema.instance.getVersion());
         Gossiper.instance.addLocalApplicationState(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
 
         HintedHandOffManager.instance.start();
@@ -1272,7 +1274,9 @@ public class StorageService implements IEndpointStateChangeSubscriber, StorageSe
                 // grab any data we are now responsible for and notify responsible node
                 restoreReplicaCount(endpoint, tokenMetadata_.getEndpoint(coordtoken));
             }
-        } // not a member, nothing to do
+        }
+        else // now that the gossiper has told us about this nonexistent member, notify the gossiper to remove it
+            Gossiper.instance.removeEndpoint(endpoint);
     }
 
     private void excise(Token token, InetAddress endpoint)
@@ -2184,28 +2188,50 @@ public class StorageService implements IEndpointStateChangeSubscriber, StorageSe
     }
 
     /**
-     * @return list of Tokens (_not_ keys!) breaking up the data this node is responsible for into pieces of roughly keysPerSplit
+     * @return list of Token ranges (_not_ keys!) together with estimated key count,
+     *      breaking up the data this node is responsible for into pieces of roughly keysPerSplit
      */
-    public List<Token> getSplits(String table, String cfName, Range<Token> range, int keysPerSplit)
+    public List<Pair<Range<Token>, Long>> getSplits(String table, String cfName, Range<Token> range, int keysPerSplit)
     {
-        List<Token> tokens = new ArrayList<Token>();
-        // we use the actual Range token for the first and last brackets of the splits to ensure correctness
-        tokens.add(range.left);
-
         Table t = Table.open(table);
         ColumnFamilyStore cfs = t.getColumnFamilyStore(cfName);
         List<DecoratedKey> keys = keySamples(Collections.singleton(cfs), range);
-        int splits = keys.size() * DatabaseDescriptor.getIndexInterval() / keysPerSplit;
 
-        if (keys.size() >= splits)
+        final long totalRowCountEstimate = (keys.size() + 1) * DatabaseDescriptor.getIndexInterval();
+
+        // splitCount should be much smaller than number of key samples, to avoid huge sampling error
+        final int minSamplesPerSplit = 4;
+        final int maxSplitCount = keys.size() / minSamplesPerSplit + 1;
+        final int splitCount = Math.max(1, Math.min(maxSplitCount, (int)(totalRowCountEstimate / keysPerSplit)));
+
+        List<Token> tokens = keysToTokens(range, keys);
+        return getSplits(tokens, splitCount);
+    }
+
+    private List<Pair<Range<Token>, Long>> getSplits(List<Token> tokens, int splitCount)
+    {
+        final double step = (double) (tokens.size() - 1) / splitCount;
+        int prevIndex = 0;
+        Token prevToken = tokens.get(0);
+        List<Pair<Range<Token>, Long>> splits = Lists.newArrayListWithExpectedSize(splitCount);
+        for (int i = 1; i <= splitCount; i++)
         {
-            for (int i = 1; i < splits; i++)
-            {
-                int index = i * (keys.size() / splits);
-                tokens.add(keys.get(index).token);
-            }
+            int index = (int) Math.round(i * step);
+            Token token = tokens.get(index);
+            long rowCountEstimate = (index - prevIndex) * DatabaseDescriptor.getIndexInterval();
+            splits.add(Pair.create(new Range<Token>(prevToken, token), rowCountEstimate));
+            prevIndex = index;
+            prevToken = token;
         }
+        return splits;
+    }
 
+    private List<Token> keysToTokens(Range<Token> range, List<DecoratedKey> keys)
+    {
+        List<Token> tokens = Lists.newArrayListWithExpectedSize(keys.size() + 2);
+        tokens.add(range.left);
+        for (DecoratedKey key : keys)
+            tokens.add(key.token);
         tokens.add(range.right);
         return tokens;
     }
