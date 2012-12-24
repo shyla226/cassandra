@@ -30,6 +30,8 @@ import java.util.zip.Inflater;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Maps;
+import org.apache.cassandra.hadoop.ColumnFamilySplit;
+import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

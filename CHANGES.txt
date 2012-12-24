@@ -1,6 +1,4 @@
 1.1.8
- * reset getRangeSlice filter after finishing a row for get_paged_slice
-   (CASSANDRA-4919)
  * fix temporarily missing schema after upgrade from pre-1.1.5 (CASSANDRA-5061)
  * reduce log spam from invalid counter shards (CASSANDRA-5026)
  * Improve schema propagation performance (CASSANDRA-5025)
@@ -12,11 +10,12 @@
  * Fix wrong index_options in cli 'show schema' (CASSANDRA-5008)
  * Allow overriding number of available processor (CASSANDRA-4790)
 
-
 1.1.7
  * cqlsh: improve COPY FROM performance (CASSANDRA-4921)
  * add basic authentication support for Pig CassandraStorage (CASSANDRA-3042)
  * fix CQL2 ALTER TABLE compaction_strategy_class altering (CASSANDRA-4965)
+ * reset getRangeSlice filter after finishing a row for get_paged_slice
+   (CASSANDRA-4919)
  * expunge row cache post-truncate (CASSANDRA-4940)
  * remove IAuthority2 (CASSANDRA-4875)
  * add get[Row|Key]CacheEntries to CacheServiceMBean (CASSANDRA-4859)
@@ -41,7 +40,6 @@
  * Remove all remnants of removed nodes (CASSANDRA-4840)
  * Add aut-reloading of the log4j file in debian package (CASSANDRA-4855)
  * Fix estimated row cache entry size (CASSANDRA-4860)
-
 
 1.1.6
  * Wait for writes on synchronous read digest mismatch (CASSANDRA-4792)
