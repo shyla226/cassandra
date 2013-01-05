@@ -1,4 +1,4 @@
-1.1.8-1
+1.1.8.1
  * Accept all thrift update on CQL3 cf but don't expose their metadata (CASSANDRA-4377)
 
 
