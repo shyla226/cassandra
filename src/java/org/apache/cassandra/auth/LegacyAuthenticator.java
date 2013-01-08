@@ -73,7 +73,6 @@ public abstract class LegacyAuthenticator implements IAuthenticator
     @Override
     public void alter(String username, Map<Option, Object> options) throws InvalidRequestException
     {
-        throw new InvalidRequestException("ALTER USER operation is not supported by LegacyAuthenticator");
     }
 
     @Override
