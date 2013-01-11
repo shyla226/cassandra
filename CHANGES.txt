@@ -1,3 +1,7 @@
+1.1.8.1
+ * Fix CQL3 BATCH authorization caching (CASSANDRA-5145)
+
+
 1.1.8
  * fix temporarily missing schema after upgrade from pre-1.1.5 (CASSANDRA-5061)
  * reduce log spam from invalid counter shards (CASSANDRA-5026)
