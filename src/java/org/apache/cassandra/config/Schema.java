@@ -290,7 +290,6 @@ public class Schema
     {
         List<String> tablesList = new ArrayList<String>(tables.keySet());
         tablesList.remove(Table.SYSTEM_TABLE);
-        tablesList.remove(Auth.AUTH_KS);
         return Collections.unmodifiableList(tablesList);
     }
 
