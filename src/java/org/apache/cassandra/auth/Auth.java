@@ -126,13 +126,13 @@ public class Auth
         // A hack to make the next hack work properly.
         // Issue: if a node is a seed, then there is no delay to see the peers.
         // A fresh new node starts up, sees that it's the only node in the ring and it doesn't yet have dse_auth keyspace.
-        // But by the time that keyspace gets to validating schema agreement, its peers are up, and schema versions don't
+        // But by the time that keyspace creation gets to validating schema agreement, its peers are up, and schema versions don't
         // match, and an SDE is thrown since validateSchemaAgreement() fails.
         // Solution: add a small delay so that even if the node is a seed, it'll still wait a little for its peers to show
         // up and sync schema.
         try
         {
-            TimeUnit.MILLISECONDS.sleep(1000);
+            TimeUnit.MILLISECONDS.sleep(2000);
         }
         catch (InterruptedException e)
         {
