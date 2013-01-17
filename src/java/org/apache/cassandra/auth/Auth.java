@@ -256,6 +256,9 @@ public class Auth
 
     private static boolean isSchemaCreatorNode()
     {
+        if (Gossiper.instance.getLiveMembers().size() == 1)
+            return true;
+
         List<InetAddress> candidates = new ArrayList<InetAddress>(Sets.intersection(Gossiper.instance.getLiveMembers(),
                                                                                     DatabaseDescriptor.getSeeds()));
 
