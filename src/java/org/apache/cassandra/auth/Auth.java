@@ -238,7 +238,7 @@ public class Auth
         }
         catch (Throwable e)
         {
-            logger.warn("Skipping default superuser setup: one or more nodes were unavailable or timed out");
+            logger.warn("Skipping default superuser setup: {}", e.getMessage());
         }
     }
 
