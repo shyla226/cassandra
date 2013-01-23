@@ -155,7 +155,6 @@ public class Auth
                 logger.info("Done creating auth schema");
             }
 
-            setupDefaultSuperuser();
             authenticator().setup();
             authorizer().setup();
         }
@@ -187,6 +186,8 @@ public class Auth
 
             throw new RuntimeException("Auth setup failed");
         }
+
+        setupDefaultSuperuser();
     }
 
     // Create auth keyspace unless it's already been loaded.
