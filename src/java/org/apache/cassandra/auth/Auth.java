@@ -22,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.*;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -261,8 +260,7 @@ public class Auth
 
     private static boolean isSchemaCreatorNode()
     {
-        List<InetAddress> candidates = new ArrayList<InetAddress>(Sets.intersection(Gossiper.instance.getLiveMembers(),
-                                                                                    DatabaseDescriptor.getSeeds()));
+        List<InetAddress> candidates = new ArrayList<InetAddress>(Gossiper.instance.getLiveMembers());
 
         Collections.sort(candidates, new Comparator<InetAddress>(){
             public int compare(InetAddress a, InetAddress b)
@@ -271,7 +269,7 @@ public class Auth
             }
         });
 
-        return !candidates.isEmpty() && candidates.get(0).equals(FBUtilities.getBroadcastAddress());
+        return candidates.get(0).equals(FBUtilities.getBroadcastAddress());
     }
 
     private static boolean isSchemaCreated()
