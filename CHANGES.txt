@@ -1,6 +1,7 @@
 1.1.9.1
  * Replace IAuthority with new IAuthorizer (CASSANDRA-4874)
  * Update IAuthenticator to match the new IAuthorizer (CASSANDRA-5003)
+ * Pulled in fix for "Start token sorts after end token (CASSANDRA-5106)
 
 1.1.9
  * Simplify CompressedRandomAccessReader to work around JDK FD bug (CASSANDRA-5088)
