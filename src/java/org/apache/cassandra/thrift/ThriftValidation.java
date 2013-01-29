@@ -26,6 +26,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.auth.Auth;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -507,25 +508,33 @@ public class ThriftValidation
         if ((range.start_key == null) == (range.start_token == null)
             || (range.end_key == null) == (range.end_token == null))
         {
-            throw new InvalidRequestException("exactly one of {start key, end key} or {start token, end token} must be specified");
+            throw new InvalidRequestException("exactly one each of {start key, start token} and {end key, end token} must be specified");
         }
 
         // (key, token) is supported (for wide-row CFRR) but not (token, key)
         if (range.start_token != null && range.end_key != null)
             throw new InvalidRequestException("start token + end key is not a supported key range");
 
+        IPartitioner p = StorageService.getPartitioner();
+
         if (range.start_key != null && range.end_key != null)
         {
-            IPartitioner p = StorageService.getPartitioner();
             Token startToken = p.getToken(range.start_key);
             Token endToken = p.getToken(range.end_key);
             if (startToken.compareTo(endToken) > 0 && !endToken.isMinimum(p))
             {
-                if (p instanceof RandomPartitioner)
-                    throw new InvalidRequestException("start key's md5 sorts after end key's md5.  this is not allowed; you probably should not specify end key at all, under RandomPartitioner");
-                else
+                if (p.preservesOrder())
                     throw new InvalidRequestException("start key must sort before (or equal to) finish key in your partitioner!");
+                else
+                    throw new InvalidRequestException("start key's md5 sorts after end key's md5.  this is not allowed; you probably should not specify end key at all, under RandomPartitioner");
             }
+        }
+        else if (range.start_key != null && range.end_token != null)
+        {
+            // start_token/end_token can wrap, but key/token should not
+            RowPosition stop = p.getTokenFactory().fromString(range.end_token).maxKeyBound(p);
+            if (RowPosition.forKey(range.start_key, p).compareTo(stop) > 0  && !stop.isMinimum())
+                throw new InvalidRequestException("Start key's token sorts after end token");
         }
 
         validateFilterClauses(metadata, range.row_filter);
@@ -630,6 +639,6 @@ public class ThriftValidation
     public static void validateKeyspaceNotSystem(String modifiedKeyspace) throws InvalidRequestException
     {
         if (modifiedKeyspace.equalsIgnoreCase(Table.SYSTEM_TABLE))
-            throw new InvalidRequestException("system keyspace is not user-modifiable");
+            throw new InvalidRequestException("system keyspace schema is not user-modifiable");
     }
 }
