@@ -2517,9 +2517,9 @@ class Shell(cmd.Cmd):
           SELECT: required for SELECT
         """
 
-    def help_grant_permissions(self):
+    def help_grant(self):
         print """
-        GRANT PERMISSIONS: granting permissions to a user [CQL3 only]
+        GRANT: granting permissions to a user [CQL3 only]
 
           GRANT (<permission> [PERMISSION] | ALL [PERMISSIONS])
                     ON ALL KEYSPACES
@@ -2537,9 +2537,9 @@ class Shell(cmd.Cmd):
         See HELP PERMISSIONS for more info on the available permissions.
         """
 
-    def help_revoke_permissions(self):
+    def help_revoke(self):
         print """
-        REVOKE PERMISSIONS: revoking permissions from a user [CQL3 only]
+        REVOKE: revoking permissions from a user [CQL3 only]
 
           REVOKE (<permission> [PERMISSION] | ALL [PERMISSIONS])
                     ON ALL KEYSPACES
@@ -2639,6 +2639,15 @@ class Shell(cmd.Cmd):
     help_apply = help_begin
 
     def help_alter(self):
+        print """
+        There are different variants of ALTER. For more information, see
+        one of the following:
+
+          HELP ALTER_TABLE;
+          HELP ALTER_USER;
+        """
+
+    def help_alter_table(self):
         print """
         ALTER TABLE <tablename> ALTER <columnname> TYPE <type>;
         ALTER TABLE <tablename> ADD <columnname> <type>;
