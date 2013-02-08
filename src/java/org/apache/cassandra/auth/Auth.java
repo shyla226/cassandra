@@ -41,6 +41,8 @@ public class Auth
 
     public static final String DEFAULT_SUPERUSER_NAME = "cassandra";
 
+    private static final long SUPERUSER_SETUP_DELAY = 10; // seconds
+
     // 'system_auth' in 1.2.
     public static final String AUTH_KS = "dse_auth";
     public static final String USERS_CF = "users";
@@ -198,7 +200,7 @@ public class Auth
             }
         };
 
-        StorageService.tasks.schedule(r, 1, TimeUnit.SECONDS);
+        StorageService.tasks.schedule(r, SUPERUSER_SETUP_DELAY, TimeUnit.SECONDS);
     }
 
     // we only worry about one character ('). Make sure it's properly escaped.
