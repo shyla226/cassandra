@@ -35,7 +35,6 @@ import org.apache.cassandra.db.SystemTable;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.*;
 
-
 public class Auth
 {
     private static final Logger logger = LoggerFactory.getLogger(Auth.class);
@@ -48,7 +47,8 @@ public class Auth
 
     private static final String USERS_CF_SCHEMA =
         String.format("CREATE TABLE %s.%s (name text PRIMARY KEY, super boolean) WITH gc_grace_seconds=864000",
-                      AUTH_KS, USERS_CF);
+                      AUTH_KS,
+                      USERS_CF);
 
     /**
      * Checks if the username is stored in AUTH_KS.USERS_CF.
@@ -59,7 +59,10 @@ public class Auth
     public static boolean isExistingUser(String username)
     throws InvalidRequestException, UnavailableException, TimedOutException
     {
-        String query = String.format("SELECT * FROM %s.%s WHERE name = '%s'", AUTH_KS, USERS_CF, escape(username));
+        String query = String.format("SELECT * FROM %s.%s USING CONSISTENCY QUORUM WHERE name = '%s'",
+                                     AUTH_KS,
+                                     USERS_CF,
+                                     escape(username));
         return !QueryProcessor.processInternal(query).type.equals(CqlResultType.VOID);
     }
 
@@ -71,7 +74,10 @@ public class Auth
      */
     public static boolean isSuperuser(String username)
     {
-        String query = String.format("SELECT super FROM %s.%s WHERE name = '%s'", AUTH_KS, USERS_CF, escape(username));
+        String query = String.format("SELECT super FROM %s.%s USING CONSISTENCY QUORUM WHERE name = '%s'",
+                                     AUTH_KS,
+                                     USERS_CF,
+                                     escape(username));
         try
         {
             CqlResult result = QueryProcessor.processInternal(query);
@@ -93,7 +99,7 @@ public class Auth
     public static void insertUser(String username, boolean isSuper)
     throws InvalidRequestException, UnavailableException, TimedOutException
     {
-        QueryProcessor.processInternal(String.format("INSERT INTO %s.%s (name, super) VALUES ('%s', '%s')",
+        QueryProcessor.processInternal(String.format("INSERT INTO %s.%s (name, super) VALUES ('%s', '%s') USING CONSISTENCY QUORUM",
                                                      AUTH_KS,
                                                      USERS_CF,
                                                      escape(username),
@@ -108,7 +114,7 @@ public class Auth
     public static void deleteUser(String username)
     throws InvalidRequestException, UnavailableException, TimedOutException
     {
-        QueryProcessor.processInternal(String.format("DELETE FROM %s.%s WHERE name = '%s'",
+        QueryProcessor.processInternal(String.format("DELETE FROM %s.%s USING CONSISTENCY QUORUM WHERE name = '%s'",
                                                      AUTH_KS,
                                                      USERS_CF,
                                                      escape(username)));
@@ -168,9 +174,13 @@ public class Auth
                 try
                 {
                     // insert a default superuser if AUTH_KS.USERS_CF is empty.
-                    if (QueryProcessor.processInternal(String.format("SELECT * FROM %s.%s", AUTH_KS, USERS_CF)).type.equals(CqlResultType.VOID))
+                    if (QueryProcessor.processInternal(String.format("SELECT * FROM %s.%s USING CONSISTENCY QUORUM",
+                                                                     AUTH_KS,
+                                                                     USERS_CF))
+                                      .type.equals(CqlResultType.VOID))
                     {
-                        insertUser(DEFAULT_SUPERUSER_NAME, true);
+                        String query = "INSERT INTO %s.%s (name, super) VALUES ('%s', '%s') USING CONSISTENCY QUORUM AND TIMESTAMP 0";
+                        QueryProcessor.processInternal(String.format(query, AUTH_KS, USERS_CF, DEFAULT_SUPERUSER_NAME, true));
                         logger.info("Created default superuser {}", DEFAULT_SUPERUSER_NAME);
                     }
                 }
