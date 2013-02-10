@@ -117,4 +117,11 @@ public interface IAuthenticator
      * For example, use this method to create any required keyspaces/column families.
      */
     void setup();
+
+    /**
+     * setupDefaultUser is called after the node joins the ring.
+     *
+     * If you store credentials in C*, use this method to setup a default user.
+     */
+    void setupDefaultUser();
 }
