@@ -130,7 +130,6 @@ public class Auth
         setupUsersTable();
         authenticator().setup();
         authorizer().setup();
-        setupDefaultSuperuser();
     }
 
     /**
