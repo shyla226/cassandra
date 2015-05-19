@@ -100,7 +100,8 @@ public class SystemKeyspace
     {
         NEEDS_BOOTSTRAP,
         COMPLETED,
-        IN_PROGRESS
+        IN_PROGRESS,
+        DECOMMISSIONED
     }
 
     private static DecoratedKey decorate(ByteBuffer key)
@@ -713,6 +714,11 @@ public class SystemKeyspace
     public static boolean bootstrapInProgress()
     {
         return getBootstrapState() == BootstrapState.IN_PROGRESS;
+    }
+
+    public static boolean wasDecommissioned()
+    {
+        return getBootstrapState() == BootstrapState.DECOMMISSIONED;
     }
 
     public static void setBootstrapState(BootstrapState state)
