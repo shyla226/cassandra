@@ -24,6 +24,13 @@ Upgrading
      materialized view was erroneously accepted (and ignored). It is now
      properly rejected.
 
+New Features
+------------
+   - Collision checks are performed when joining the token ring, regardless of whether
+     the node should bootstrap. Additionally, replace_address can legitimately be used
+     without bootstrapping to help with recovery of nodes with partially failed disks.
+     See CASSANDRA-10134 for more details.
+
 3.0.10
 =====
 

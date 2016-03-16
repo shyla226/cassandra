@@ -19,8 +19,8 @@ package org.apache.cassandra.db.view;
 
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
 
 import com.google.common.util.concurrent.Striped;
@@ -31,9 +31,8 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.partitions.*;
-
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.service.StorageService;
 
 /**
  * Manages {@link View}'s for a single {@link ColumnFamilyStore}. All of the views for that table are created when this
@@ -124,6 +123,20 @@ public class ViewManager
         {
             if (!viewsByName.containsKey(entry.getKey()))
                 addView(entry.getValue());
+        }
+
+        // Building views involves updating view build status in the system_distributed
+        // keyspace and therefore it requires ring information. This check prevents builds
+        // being submitted when Keyspaces are initialized during CassandraDaemon::setup as
+        // that happens before StorageService & gossip are initialized. After SS has been
+        // init'd we schedule builds for *all* views anyway, so this doesn't have any effect
+        // on startup. It does mean however, that builds will not be triggered if gossip is
+        // disabled via JMX or nodetool as that sets SS to an uninitialized state.
+        if (!StorageService.instance.isInitialized())
+        {
+            logger.info("Not submitting build tasks for views in keyspace {} as " +
+                        "storage service is not initialized", keyspace.getName());
+            return;
         }
 
         for (View view : allViews())
