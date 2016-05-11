@@ -518,4 +518,9 @@ public abstract class AbstractCompactionStrategy
     {
         return SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, cfs.metadata, meta, header, txn);
     }
+
+    public boolean supportsEarlyOpen()
+    {
+        return true;
+    }
 }

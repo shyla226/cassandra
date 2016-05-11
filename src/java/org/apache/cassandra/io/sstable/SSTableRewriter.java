@@ -93,9 +93,9 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         this.preemptiveOpenInterval = preemptiveOpenInterval;
     }
 
-    public static SSTableRewriter constructKeepingOriginals(LifecycleTransaction transaction, boolean keepOriginals, long maxAge, boolean isOffline)
+    public static SSTableRewriter constructKeepingOriginals(LifecycleTransaction transaction, boolean keepOriginals, long maxAge, boolean isOffline, boolean shouldOpenEarly)
     {
-        return new SSTableRewriter(transaction, maxAge, isOffline, calculateOpenInterval(true), keepOriginals);
+        return new SSTableRewriter(transaction, maxAge, isOffline, calculateOpenInterval(shouldOpenEarly), keepOriginals);
     }
 
     private static long calculateOpenInterval(boolean shouldOpenEarly)
