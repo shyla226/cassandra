@@ -117,6 +117,9 @@ public class Info extends NodeToolCmd
                 probe.getCacheMetric("CounterCache", "HitRate"),
                 cacheService.getCounterCacheSavePeriodInSeconds());
 
+        // Global table stats
+        System.out.printf("%-23s: %s%%%n", "Percent Repaired", probe.getColumnFamilyMetric(null, null, "PercentRepaired"));
+
         // check if node is already joined, before getting tokens, since it throws exception if not.
         if (probe.isJoined())
         {

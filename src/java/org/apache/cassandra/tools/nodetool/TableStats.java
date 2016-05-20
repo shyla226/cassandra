@@ -162,6 +162,7 @@ public class TableStats extends NodeToolCmd
                 Long compressionMetadataOffHeapSize = null;
 
                 Long offHeapSize = null;
+                Double percentRepaired = null;
 
                 try
                 {
@@ -171,6 +172,7 @@ public class TableStats extends NodeToolCmd
                     compressionMetadataOffHeapSize = (Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "CompressionMetadataOffHeapMemoryUsed");
 
                     offHeapSize = memtableOffHeapSize + bloomFilterOffHeapSize + indexSummaryOffHeapSize + compressionMetadataOffHeapSize;
+                    percentRepaired = (Double) probe.getColumnFamilyMetric(keyspaceName, tableName, "PercentRepaired");
                 }
                 catch (RuntimeException e)
                 {
@@ -207,6 +209,7 @@ public class TableStats extends NodeToolCmd
                 double localWLatency = localWriteLatency > 0 ? localWriteLatency : Double.NaN;
                 System.out.printf("\t\tLocal write latency: %01.3f ms%n", localWLatency);
                 System.out.println("\t\tPending flushes: " + probe.getColumnFamilyMetric(keyspaceName, tableName, "PendingFlushes"));
+                System.out.printf("\t\tPercent repaired: %s%%%n", percentRepaired);
                 System.out.println("\t\tBloom filter false positives: " + probe.getColumnFamilyMetric(keyspaceName, tableName, "BloomFilterFalsePositives"));
                 System.out.printf("\t\tBloom filter false ratio: %s%n", String.format("%01.5f", probe.getColumnFamilyMetric(keyspaceName, tableName, "RecentBloomFilterFalseRatio")));
                 System.out.println("\t\tBloom filter space used: " + format((Long) probe.getColumnFamilyMetric(keyspaceName, tableName, "BloomFilterDiskSpaceUsed"), humanReadable));

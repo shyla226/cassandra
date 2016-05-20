@@ -6,6 +6,7 @@ DSE 5.0.6
  * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
  * Always die on AssertionError and log flush failure errors. (APOLLO-227)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
+ * Add repaired percentage metric (Backport CASSANDRA-11503)
 Merged from 3.0.X
  * Abort or retry on failed hints delivery (CASSANDRA-13124)
  * Fix handling of partition with partition-level deletion plus
