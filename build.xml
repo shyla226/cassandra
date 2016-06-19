@@ -35,7 +35,6 @@
     <property name="build.src" value="${basedir}/src"/>
     <property name="build.src.java" value="${basedir}/src/java"/>
     <property name="build.src.antlr" value="${basedir}/src/antlr"/>
-    <property name="build.src.jdkoverride" value="${basedir}/src/jdkoverride" />
     <property name="build.src.resources" value="${basedir}/src/resources"/>
     <property name="build.src.gen-java" value="${basedir}/src/gen-java"/>
     <property name="build.lib" value="${basedir}/lib"/>
@@ -44,6 +43,7 @@
     <property name="build.test.dir" value="${build.dir}/test"/>
     <property name="build.classes" value="${build.dir}/classes"/>
     <property name="build.classes.main" value="${build.classes}/main" />
+    <property name="build.j9-classes" value="${build.dir}/j9classes" />
     <property name="javadoc.dir" value="${build.dir}/javadoc"/>
     <property name="javadoc.jars.dir" value="${build.dir}/javadocs"/>
     <property name="interface.dir" value="${basedir}/interface"/>
@@ -71,6 +71,7 @@
 
     <property name="source.version" value="1.8"/>
     <property name="target.version" value="1.8"/>
+    <property name="release.version" value="8"/>
 
     <condition property="version" value="${base.version}">
       <isset property="release"/>
@@ -115,8 +116,9 @@
     <property name="jacoco.version" value="0.7.5.201505241946"/>
 
     <property name="byteman.version" value="3.0.3"/>
-
-    <property name="ecj.version" value="4.4.2"/>
+    <property name="jamm.version" value="0.3.2-SNAPSHOT"/>
+    <property name="ecj.version" value="4.5.1"/>
+    <property name="ohc.version" value="0.5.1"/>
 
     <condition property="maven-ant-tasks.jar.exists">
       <available file="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar" />
@@ -392,7 +394,7 @@
           <dependency groupId="org.codehaus.jackson" artifactId="jackson-mapper-asl" version="1.9.2"/>
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
-          <dependency groupId="com.github.jbellis" artifactId="jamm" version="0.3.0"/>
+          <dependency groupId="com.github.jbellis" artifactId="jamm" version="${jamm.version}"/>
 
           <dependency groupId="org.yaml" artifactId="snakeyaml" version="1.11">
             <exclusion groupId="org.springframework" artifactId="spring"/>
@@ -442,11 +444,11 @@
             <exclusion groupId="io.netty" artifactId="netty-transport"/>
             <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
-          <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj" version="4.4.2" />
-          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="0.4.4">
+          <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj" version="${ecj.version}" />
+          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="${ohc.version}">
             <exclusion groupId="org.slf4j" artifactId="slf4j-api"/>
           </dependency>
-          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8" version="0.4.4" />
+          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core-j8" version="${ohc.version}" />
           <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" />
           <dependency groupId="org.fusesource" artifactId="sigar" version="1.6.4">
               <exclusion groupId="log4j" artifactId="log4j"/>
@@ -911,7 +913,7 @@
       </propertyfile>
     </target>
 
-    <target name="test-run" depends="build"
+    <target name="test-run" depends="setup-java9, build"
             description="Run in test mode.  Not for production use!">
       <java classname="org.apache.cassandra.service.CassandraDaemon" fork="true">
         <classpath>
@@ -919,8 +921,9 @@
           <pathelement location="${test.conf}"/>
         </classpath>
         <jvmarg value="-Dstorage-config=${test.conf}"/>
-        <jvmarg value="-javaagent:${basedir}/lib/jamm-0.3.0.jar" />
+        <jvmarg value="-javaagent:${basedir}/lib/jamm-${jamm.version}.jar" />
         <jvmarg value="-ea"/>
+        <jvmarg line="${java9-jvmargs}"/>
       </java>
     </target>
 
@@ -931,7 +934,7 @@
         depends="maven-ant-tasks-retrieve-build,maven-ant-tasks-retrieve-sources,build-project" description="Compile Cassandra classes"/>
     <target name="codecoverage" depends="jacoco-run,jacoco-report" description="Create code coverage report"/>
 
-    <target depends="init,gen-cql3-grammar,generate-cql-html,generate-jflex-java"
+    <target depends="init,gen-cql3-grammar,generate-cql-html,generate-jflex-java,setup-java9"
             name="build-project">
         <echo message="${ant.project.name}: ${ant.file}"/>
         <!-- Order matters! -->
@@ -941,9 +944,11 @@
                memorymaximumsize="512M">
             <src path="${build.src.java}"/>
             <src path="${build.src.gen-java}"/>
-            <compilerarg value="-XDignore.symbol.file"/>
-            <compilerarg value="-Xbootclasspath/p:${build.src.jdkoverride}"/>
-            <classpath refid="cassandra.classpath"/>
+        	<compilerarg value="-XDignore.symbol.file"/>
+            <classpath>
+                <path refid="cassandra.classpath"/>
+                <path path="${build.j9-classes}/classes"/>
+            </classpath>
         </javac>
         <antcall target="createVersionPropFile"/>
         <copy todir="${build.classes.main}">
@@ -972,13 +977,18 @@
                 <path refid="cassandra.classpath"/>
                 <pathelement location="${stress.build.classes}" />
             </classpath>
+            <!--
+                When compiling with Java 9 (which does not work yet), remove source&target attributes
+                and use the release argument.
+                <compilerarg value="- -release"/><compilerarg value="${release.version}"/>
+            -->
             <src path="${stress.test.src}"/>
         </javac>
     </target>
 
     <target name="stress-build" depends="build" description="build stress tool">
     	<mkdir dir="${stress.build.classes}" />
-        <javac compiler="modern" debug="true" debuglevel="${debuglevel}" encoding="utf-8" destdir="${stress.build.classes}" includeantruntime="true" source="${source.version}" target="${target.version}">
+        <javac compiler="modern" debug="true" debuglevel="${debuglevel}" encoding="utf-8" destdir="${stress.build.classes}" includeantruntime="true">
             <src path="${stress.build.src}" />
             <classpath>
                 <path refid="cassandra.classes" />
@@ -988,13 +998,18 @@
                     </fileset>
                 </path>
             </classpath>
+            <!--
+                When compiling with Java 9 (which does not work yet), remove source&target attributes
+                and use the release argument.
+                <compilerarg value="- -release"/><compilerarg value="${release.version}"/>
+            -->
         </javac>
         <copy todir="${stress.build.classes}">
             <fileset dir="${stress.build.src}/resources" />
         </copy>
     </target>
 
-    <target name="stress-test" depends="stress-build-test, build-test" description="Runs stress tests">
+    <target name="stress-test" depends="setup-java9, stress-build-test, build-test" description="Runs stress tests">
         <testmacro inputdir="${stress.test.src}"
                        timeout="${test.timeout}">
         </testmacro>
@@ -1275,8 +1290,14 @@
      encoding="utf-8">
      <classpath>
         <path refid="cassandra.classpath"/>
+        <path path="${build.j9-classes}/classes"/>
      </classpath>
-     <compilerarg value="-XDignore.symbol.file"/>
+	 <compilerarg value="-XDignore.symbol.file"/>
+     <!--
+         When compiling with Java 9 (which does not work yet), remove source&target attributes
+         and use the release argument.
+         <compilerarg value="- -release"/><compilerarg value="${release.version}"/>
+     -->
      <src path="${test.unit.src}"/>
      <src path="${test.long.src}"/>
      <src path="${test.burn.src}"/>
@@ -1322,7 +1343,7 @@
         <jvmarg value="-Dstorage-config=${test.conf}"/>
         <jvmarg value="-Djava.awt.headless=true"/>
         <!-- Cassandra 3.0+ needs <jvmarg line="... ${additionalagent}" /> here! (not value=) -->
-        <jvmarg line="-javaagent:${basedir}/lib/jamm-0.3.0.jar ${additionalagent}" />
+        <jvmarg line="-javaagent:${basedir}/lib/jamm-${jamm.version}.jar ${additionalagent}" />
         <jvmarg value="-ea"/>
         <!--Disable ref count debugging as it is very slow (uses getStackTrace)-->
         <!--jvmarg value="-Dcassandra.debugrefcount=true"/-->
@@ -1337,6 +1358,7 @@
         <jvmarg value="-Djava.security.egd=file:/dev/urandom" />
         <jvmarg value="-Dcassandra.testtag=@{testtag}"/>
         <jvmarg value="-Dcassandra.keepBriefBrief=${cassandra.keepBriefBrief}" />
+        <jvmarg line="${java9-jvmargs}"/>
 	<optjvmargs/>
         <classpath>
           <pathelement path="${java.class.path}"/>
@@ -1371,7 +1393,7 @@
     </sequential>
   </macrodef>
 
-  <target name="testold" depends="build-test" description="Execute unit tests">
+  <target name="testold" depends="setup-java9, build-test" description="Execute unit tests">
     <testmacro inputdir="${test.unit.src}" timeout="${test.timeout}">
       <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
       <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
@@ -1479,7 +1501,7 @@
   <!-- Use this with an FQDN for test class, and a csv list of methods like this:
     ant testsome -Dtest.name=org.apache.cassandra.service.StorageServiceServerTest -Dtest.methods=testRegularMode,testGetAllRangesEmpty
   -->
-  <target name="testsome" depends="build-test" description="Execute specific unit tests" >
+  <target name="testsome" depends="setup-java9, build-test" description="Execute specific unit tests" >
     <testmacro inputdir="${test.unit.src}" timeout="${test.timeout}">
       <test name="${test.name}" methods="${test.methods}"/>
       <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
@@ -1491,7 +1513,7 @@
     </testmacro>
   </target>
 
-  <target name="test-compression" depends="build-test,stress-build" description="Execute unit tests with sstable compression enabled">
+  <target name="test-compression" depends="setup-java9,build-test,stress-build" description="Execute unit tests with sstable compression enabled">
     <property name="compressed_yaml" value="${build.test.dir}/cassandra.compressed.yaml"/>
     <concat destfile="${compressed_yaml}">
       <fileset file="${test.conf}/cassandra.yaml"/>
@@ -1504,7 +1526,7 @@
     <testparallel testdelegate="testlist-compression" />
   </target>
 
-  <target name="test-cdc" depends="build-test" description="Execute unit tests with change-data-capture enabled">
+  <target name="test-cdc" depends="setup-java9, build-test" description="Execute unit tests with change-data-capture enabled">
     <property name="cdc_yaml" value="${build.test.dir}/cassandra.cdc.yaml"/>
     <concat destfile="${cdc_yaml}">
       <fileset file="${test.conf}/cassandra.yaml"/>
@@ -1551,13 +1573,13 @@
     </testmacro>
   </target>
 
-  <target name="test-burn" depends="build-test" description="Execute functional tests">
+  <target name="test-burn" depends="setup-java9, build-test" description="Execute functional tests">
     <testmacro inputdir="${test.burn.src}"
                timeout="${test.burn.timeout}">
     </testmacro>
   </target>
 
-  <target name="long-test" depends="build-test" description="Execute functional tests">
+  <target name="long-test" depends="setup-java9, build-test" description="Execute functional tests">
     <testmacro inputdir="${test.long.src}"
                timeout="${test.long.timeout}">
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
@@ -1574,7 +1596,7 @@
         <formatter type="brief" usefile="false"/>
         <jvmarg value="-Dstorage-config=${test.conf}"/>
         <jvmarg value="-Djava.awt.headless=true"/>
-        <jvmarg value="-javaagent:${basedir}/lib/jamm-0.3.0.jar" />
+        <jvmarg value="-javaagent:${basedir}/lib/jamm-${jamm.version}.jar" />
         <jvmarg value="-ea"/>
         <jvmarg value="-Xss256k"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
@@ -1616,7 +1638,7 @@
         <formatter type="brief" usefile="false"/>
         <jvmarg value="-Dstorage-config=${test.conf}"/>
         <jvmarg value="-Djava.awt.headless=true"/>
-        <jvmarg value="-javaagent:${basedir}/lib/jamm-0.3.0.jar" />
+        <jvmarg value="-javaagent:${basedir}/lib/jamm-${jamm.version}.jar" />
         <jvmarg value="-ea"/>
         <jvmarg value="-Xss256k"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
@@ -1879,7 +1901,7 @@
     <echo message="Mem size : ${mem.size}"/>
   </target>
 
-  <target name="test" depends="build-test,get-cores,get-mem,stress-build" description="Parallel Test Runner">
+  <target name="test" depends="setup-java9,build-test,get-cores,get-mem,stress-build" description="Parallel Test Runner">
     <path id="all-test-classes-path">
       <fileset dir="${test.unit.src}" includes="**/${test.name}.java" />
       <!--fileset dir="${test.unit.src}" includes="org/apache/cassandra/cql3/*Test.java" /-->
@@ -1891,7 +1913,7 @@
   <!-- run a list of tests as provided in -Dtest.classlistfile (or default of 'testnames.txt')
   The class list file should be one test class per line, with the path starting after test/unit
   e.g. org/apache/cassandra/hints/HintMessageTest.java -->
-  <target name="testclasslist" depends="build-test" description="Parallel-run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
+  <target name="testclasslist" depends="setup-java9, build-test" description="Parallel-run tests given in file -Dtest.classlistfile (one-class-per-line, e.g. org/apache/cassandra/db/SomeTest.java)">
     <path id="all-test-classes-path">
       <fileset dir="${test.unit.src}" includesfile="${test.classlistfile}"/>
     </path>
@@ -1899,7 +1921,75 @@
     <testparallel testdelegate="testlist"/>
   </target>
 
-  <!-- run microbenchmarks suite -->
+  <!-- setup additional java runtime arguments -->
+  <target name="setup-java9">
+    <property name="java9-jvmargs" value="--add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-exports java.management/com.sun.jmx.remote.internal=ALL-UNNAMED --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.objects=ALL-UNNAMED --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime=ALL-UNNAMED --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime.options=ALL-UNNAMED"/>
+
+    <fail message="Java 8 is required to the build the project, the compiled code works against Java 8 and 9.">
+        <condition>
+            <not>
+                <equals arg1="${ant.java.version}" arg2="1.8" />
+            </not>
+        </condition>
+    </fail>
+
+
+    <!--
+    At the moment, compiling with Java 9 does not work.
+    Jigsaw's javac prevents a lot...
+
+
+
+    Some old comments for compilation w/ Java9
+
+    Unfortunately, we need the 'release 8' option of javac to compile the code base. Reason is that
+    Java 9 introduced new methods to java.nio.*Buffer.java that overrides methods in java.nio.Buffer
+    using covariants (e.g. override java.nio.Buffer.reset()Ljava.nio.Buffer with java.nio.ByteBuffer.reset()Ljava.nio.ByteBuffer),
+    which makes class files compiled with "pure" Java 9 incompatible on older Java versions.
+
+    Unfortunately, that 'release' javac option cannot be used in combination with other options to "import"
+    modules, which would be required to get access to these modules' classes.
+
+    So, as a workaround we unzip the Jigsaw modules into a folder in the build/ directory and
+    use that as a javac classpath reference. Not nice, but it seems to work.
+    -->
+    <!--
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.unsupported.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.base.jmod" overwrite="false">
+      <patternset>
+        <include name="**/sun/nio/ch/*.class"/>
+      </patternset>
+    </unzip>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.management.jmod" overwrite="false">
+      <patternset>
+        <include name="**/sun/management/**/*.class"/>
+        <include name="**/com/sun/jmx/remote/**/*.class"/>
+      </patternset>
+    </unzip>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.rmi.jmod" overwrite="false">
+      <patternset>
+        <include name="**/sun/rmi/**/*.class"/>
+      </patternset>
+    </unzip>
+    -->
+
+
+    <!--
+    TODO all these are required for eclipse-warnings target. But it then still fails to resolve java.lang.SecurityManager
+
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.unsupported.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.scripting.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.scripting.nashorn.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.base.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.management.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.management.rmi.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/jdk.management.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.desktop.jmod" overwrite="false"/>
+    <unzip dest="${build.j9-classes}" src="${java.home}/jmods/java.rmi.jmod" overwrite="false"/>
+    -->
+  </target>
+
+    <!-- run microbenchmarks suite -->
   <target name="microbench" depends="build-jmh">
       <java classname="org.openjdk.jmh.Main"
             fork="true"
@@ -2059,7 +2149,7 @@
             <arg value="-properties" />
             <arg value="${ecj.properties}" />
             <arg value="-cp" />
-            <arg value="${toString:cassandra.classpath}" />
+            <arg value="${build.j9-classes}/classes:${toString:cassandra.classpath}" />
             <arg value="${build.src.java}" />
         </java>
   </target>

@@ -309,7 +309,9 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         {
             try
             {
-                new ScannerList(scanners).close();
+                @SuppressWarnings("resource")
+                ScannerList scannerList = new ScannerList(scanners);
+                scannerList.close();
             }
             catch (Throwable t2)
             {

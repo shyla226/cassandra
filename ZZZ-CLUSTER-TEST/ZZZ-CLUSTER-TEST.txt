@@ -1,0 +1,72 @@
+cd ZZZ-CLUSTER-TEST
+
+# 3 i2.2xlarge C* nodes
+# 1 i2.8xlarge stress driver (i2.2xlarge is definitely too tiny)
+ctool launch --jvm-version=1.8_92 --instance-type=i2.2xlarge -p trusty --image RightImage_Ubuntu_14.04_x64_v14.2_HVM_EBS,rightscale,64 j9test 3 "ec2:us-west-1:3"
+ctool launch --jvm-version=1.8_92 --instance-type=i2.8xlarge -p trusty --image RightImage_Ubuntu_14.04_x64_v14.2_HVM_EBS,rightscale,64 j9test-driver 1 "ec2:us-west-1:1"
+
+ctool run j9test all "sudo apt install libjemalloc1"
+ctool run j9test-driver all "sudo apt install libjemalloc1"
+
+ctool run j9test all "wget http://www.java.net/download/java/jigsaw/archive/139/binaries/jigsaw-jdk-9-ea+139_linux-x64_bin.tar.gz"
+ctool run j9test all "tar xfz jigsaw-jdk-9-ea+139_linux-x64_bin.tar.gz"
+ctool run j9test-driver all "wget http://www.java.net/download/java/jigsaw/archive/139/binaries/jigsaw-jdk-9-ea+139_linux-x64_bin.tar.gz"
+ctool run j9test-driver all "tar xfz jigsaw-jdk-9-ea+139_linux-x64_bin.tar.gz"
+
+ctool scp j9test all ../build/apache-cassandra-4.0-SNAPSHOT-bin.tar.gz apache-cassandra-4.0-SNAPSHOT-bin-java9.tar.gz
+ctool run j9test all "tar xfz apache-cassandra-4.0-SNAPSHOT-bin-java9.tar.gz"
+ctool run j9test all "mkdir apache-cassandra-4.0-SNAPSHOT/logs"
+ctool scp j9test-driver all ../build/apache-cassandra-4.0-SNAPSHOT-bin.tar.gz apache-cassandra-4.0-SNAPSHOT-bin-java9.tar.gz
+ctool run j9test-driver all "tar xfz apache-cassandra-4.0-SNAPSHOT-bin-java9.tar.gz"
+ctool run j9test-driver all "mkdir apache-cassandra-4.0-SNAPSHOT/logs"
+### UPDATE SEED !!
+ctool scp j9test all cassandra.yaml apache-cassandra-4.0-SNAPSHOT/conf
+ctool scp j9test all cassandra-env.sh apache-cassandra-4.0-SNAPSHOT/conf
+
+##### non-java9 branch
+ctool run j9test all "mv apache-cassandra-4.0-SNAPSHOT apache-cassandra-4.0-SNAPSHOT-java9"
+ctool scp j9test all ../../master/build/apache-cassandra-4.0-SNAPSHOT-bin.tar.gz apache-cassandra-4.0-SNAPSHOT-bin-master.tar.gz
+ctool run j9test all "tar xfz apache-cassandra-4.0-SNAPSHOT-bin-master.tar.gz"
+ctool run j9test all "mkdir apache-cassandra-4.0-SNAPSHOT/logs"
+### UPDATE SEED !!
+ctool scp j9test all cassandra.yaml apache-cassandra-4.0-SNAPSHOT/conf
+ctool scp j9test all cassandra-env-master.sh apache-cassandra-4.0-SNAPSHOT/conf
+
+#ctool scp -r j9test 0 ZZZ-.bashrc .bashrc
+#ctool run j9test all 'echo "export JAVA_HOME=$HOME/jdk-9" >> .bashrc'
+#ctool run j9test all 'echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> .bashrc'
+#ctool run j9test all 'sudo bash -c "echo export JAVA_HOME=$HOME/jdk-9 >> /etc/profile"'
+#ctool run j9test all 'sudo bash -c "echo export PATH=\\\$JAVA_HOME/bin:\\\$PATH >> /etc/profile"'
+#ctool run j9test all "sudo update-alternatives --install /usr/bin/java java /home/automaton/jdk-9/bin/java 1"
+#ctool run j9test all "sudo update-alternatives --install /usr/bin/javac javac /home/automaton/jdk-9/bin/javac 1"
+#ctool run j9test all "sudo update-alternatives --set java /home/automaton/jdk-9/bin/java"
+#ctool run j9test all "sudo update-alternatives --set javac /home/automaton/jdk-9/bin/javac"
+ctool run j9test all 'echo export JAVA_HOME=$HOME/jdk-9 >> ./java9.sh'
+ctool run j9test all 'echo export PATH=\$JAVA_HOME/bin:\$PATH >> ./java9.sh'
+ctool run j9test-driver all 'echo export JAVA_HOME=$HOME/jdk-9 >> ./java9.sh'
+ctool run j9test-driver all 'echo export PATH=\$JAVA_HOME/bin:\$PATH >> ./java9.sh'
+
+ctool run j9test all "sudo mkfs.ext4 /dev/xvdba"
+ctool run j9test all "sudo mkdir /var/lib/cassandra"
+ctool run j9test all "sudo mount /dev/xvdba /var/lib/cassandra"
+ctool run j9test all "sudo chown automaton:automaton /var/lib/cassandra"
+
+ctool info j9test --private-ips
+
+
+#ctool run j9test 1 "apache-cassandra-4.0-SNAPSHOT/bin/cassandra"
+#sleep 15
+#ctool run j9test 2 "apache-cassandra-4.0-SNAPSHOT/bin/cassandra"
+#sleep 15
+#ctool run j9test 3 "apache-cassandra-4.0-SNAPSHOT/bin/cassandra"
+
+#on load driver
+
+### tools/bin/cassandra-stress user profile=https://gist.githubusercontent.com/belliottsmith/bc413585e6e2ec76bb7f/raw/adc079f546d0a90bc8e9534e79d0c88c02804fa4/trades-fwd-lcs-nolz4-rf3.yaml duration=300s ops\(insert=2,latest=1,point=1,range=1\) -rate threads=4 -graph file=test-run-1.html -node 172.31.12.3,172.31.4.206,172.31.13.6
+
+tools/bin/cassandra-stress user profile=https://raw.githubusercontent.com/mambocab/cstar_perf/belliottsmith-perf-jobs/regression_suites/trades.yaml ops\(insert=100,latest=100,range=1\) n=100M -rate threads=300 -pop seq=1..10K contents=SORTED read-lookback=uniform\(1..10K\) -insert visits=fixed\(10K\) revisit=uniform\(1..10K\) -node 172.31.12.3,172.31.4.206,172.31.13.6 -graph file=test-run-1.html
+
+# ctool run j9test all "apache-cassandra-4.0-SNAPSHOT/bin/nodetool clearsnapshot"
+
+ctool scp -r -R j9test-driver 0 . "test-run-*.html"
+

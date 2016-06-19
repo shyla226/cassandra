@@ -92,8 +92,9 @@
 
 # allows lowering thread priority without being root on linux - probably
 # not necessary on Windows but doesn't harm anything.
-# see http://tech.stolsvik.com/2010/01/linux-java-thread-priorities-workaround.html
--XX:ThreadPriorityPolicy=42
+# see http://tech.stolsvik.com/2010/01/linux-java-thread-priorities-workar
+# Java9 only allows 0 or 1
+#-XX:ThreadPriorityPolicy=42
 
 # Enable heap-dump if there's an OOM
 -XX:+HeapDumpOnOutOfMemoryError
@@ -224,15 +225,4 @@
 #-XX:ConcGCThreads=16
 
 ### GC logging options -- uncomment to enable
-
--XX:+PrintGCDetails
--XX:+PrintGCDateStamps
--XX:+PrintHeapAtGC
--XX:+PrintTenuringDistribution
--XX:+PrintGCApplicationStoppedTime
--XX:+PrintPromotionFailure
-#-XX:PrintFLSStatistics=1
-#-Xloggc:/var/log/cassandra/gc.log
--XX:+UseGCLogFileRotation
--XX:NumberOfGCLogFiles=10
--XX:GCLogFileSize=10M
+# see jvm8.options / jvm9.options

@@ -64,11 +64,45 @@ if [ -f "$CASSANDRA_HOME"/lib/jsr223/scala/scala-compiler.jar ] ; then
     export JVM_OPTS="$JVM_OPTS -Dscala.usejavacp=true"
 fi
 
+# Determine the sort of JVM we'll be running on.
+java_ver_output=`"${JAVA:-java}" -version 2>&1`
+jvmver=`echo "$java_ver_output" | grep '[openjdk|java] version' | awk -F'"' 'NR==1 {print $2}' | cut -d\- -f1`
+JVM_VERSION=${jvmver%_*}
+JVM_PATCH_VERSION=${jvmver#*_}
+
 # set JVM javaagent opts to avoid warnings/errors
 if [ "$JVM_VENDOR" != "OpenJDK" -o "$JVM_VERSION" \> "1.6.0" ] \
       || [ "$JVM_VERSION" = "1.6.0" -a "$JVM_PATCH_VERSION" -ge 23 ]
 then
-    JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.0.jar"
+    JAVA_AGENT="$JAVA_AGENT -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.2-SNAPSHOT.jar"
+fi
+
+if [ "$JVM_VERSION" \< "1.8" ] ; then
+    echo "Cassandra 3.0 and later require Java 8u40 or later."
+    exit 1;
+fi
+
+if [ "$JVM_VERSION" \< "1.8" ] && [ "$JVM_PATCH_VERSION" -lt 40 ] ; then
+    echo "Cassandra 3.0 and later require Java 8u40 or later."
+    exit 1;
+fi
+
+if [ "$JVM_VERSION" \> "1.8.9" ] ; then
+    # Java 9+
+    JVM_OPTS="$JVM_OPTS --add-exports java.base/jdk.internal.ref=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-opens java.base/java.io=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-opens java.base/java.nio=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-opens java.base/java.lang=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-opens java.base/java.util=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-opens java.base/java.util.concurrent=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-opens java.base/sun.nio.ch=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports java.management/com.sun.jmx.remote.internal=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.objects=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime=ALL-UNNAMED"
+    JVM_OPTS="$JVM_OPTS --add-exports jdk.scripting.nashorn/jdk.nashorn.internal.runtime.options=ALL-UNNAMED"
 fi
 
 # Added sigar-bin to the java.library.path CASSANDRA-7838

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3.functions;
 
+import java.lang.reflect.ReflectPermission;
 import java.security.AccessControlException;
 import java.security.AllPermission;
 import java.security.CodeSource;
@@ -70,6 +71,12 @@ public final class ThreadAwareSecurityManager extends SecurityManager
     private static final RuntimePermission CHECK_MEMBER_ACCESS_PERMISSION = new RuntimePermission("accessDeclaredMembers");
     private static final RuntimePermission MODIFY_THREAD_PERMISSION = new RuntimePermission("modifyThread");
     private static final RuntimePermission MODIFY_THREADGROUP_PERMISSION = new RuntimePermission("modifyThreadGroup");
+
+    // Nashorn / Java9
+    private static final RuntimePermission NASHORN_GLOBAL_PERMISSION = new RuntimePermission("nashorn.createGlobal");
+    private static final ReflectPermission SUPPRESS_ACCESS_CHECKS_PERMISSION = new ReflectPermission("suppressAccessChecks");
+    private static final RuntimePermission DYNALINK_LOOKUP_PERMISSION = new RuntimePermission("dynalink.getLookup");
+    private static final RuntimePermission GET_CLASSLOADER_PERMISSION = new RuntimePermission("getClassLoader");
 
     private static volatile boolean installed;
 
@@ -250,6 +257,16 @@ public final class ThreadAwareSecurityManager extends SecurityManager
         if (CHECK_MEMBER_ACCESS_PERMISSION.equals(perm))
             return;
 
+        // Nashorn / Java9 - TODO this is not the optimal thing (i.e. grant 4 new permissions for Nashorn/JavaScript)
+        if (NASHORN_GLOBAL_PERMISSION.equals(perm))
+            return;
+        if (SUPPRESS_ACCESS_CHECKS_PERMISSION.equals(perm))
+            return;
+        if (DYNALINK_LOOKUP_PERMISSION.equals(perm))
+            return;
+        if (GET_CLASSLOADER_PERMISSION.equals(perm))
+            return;
+
         super.checkPermission(perm);
     }
 
@@ -269,7 +286,5 @@ public final class ThreadAwareSecurityManager extends SecurityManager
             RuntimePermission perm = new RuntimePermission("accessClassInPackage." + pkg);
             throw new AccessControlException("access denied: " + perm, perm);
         }
-
-        super.checkPackageAccess(pkg);
     }
 }

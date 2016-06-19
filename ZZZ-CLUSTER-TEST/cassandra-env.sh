@@ -251,6 +251,7 @@ fi
 # To enable remote JMX connections, uncomment lines below
 # with authentication and/or ssl enabled. See https://wiki.apache.org/cassandra/JmxSecurity 
 #
+LOCAL_JMX=no
 if [ "x$LOCAL_JMX" = "x" ]; then
     LOCAL_JMX=yes
 fi
@@ -270,7 +271,7 @@ else
   JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.rmi.port=$JMX_PORT"
 
   # turn on JMX authentication. See below for further options
-  JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.authenticate=true"
+  #JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.authenticate=true"
 
   # jmx ssl options
   #JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.ssl=true"
@@ -312,14 +313,6 @@ JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.password.file=/etc/cassandra/
 # for SIGAR we have to set the java.library.path
 # to the location of the native libraries.
 JVM_OPTS="$JVM_OPTS -Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
-
-# APOLLO-342: we need to expose the available system memory so that the
-# MemoryOnlyStrategy can do proper fraction calculations.
-# See max_memory_to_lock_fraction setting in cassandra.yaml for details.
-JVM_OPTS="$JVM_OPTS -Dsystem_memory_in_mb=$system_memory_in_mb"
-
-# Disable Agrona bounds check for extra performance
-JVM_OPTS="$JVM_OPTS -Dagrona.disable.bounds.checks=TRUE"
 
 JVM_OPTS="$JVM_OPTS $MX4J_ADDRESS"
 JVM_OPTS="$JVM_OPTS $MX4J_PORT"

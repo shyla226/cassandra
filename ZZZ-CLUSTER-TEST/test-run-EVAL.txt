@@ -1,0 +1,8 @@
+Results against:
+
+jigsaw-jdk9 build 139 using java9 branch build (called test-run-j9-*.html)
+jdk8 build 92 using java9 branch build (called test-run-j8-*.html)
+jdk8 build 92 using master branch build (called test-run-master-*.html)
+
+results from all branches are exactly the same (except expected inaccuracies)
+
