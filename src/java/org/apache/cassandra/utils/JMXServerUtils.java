@@ -43,7 +43,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.sun.jmx.remote.internal.RMIExporter;
 import com.sun.jmx.remote.security.JMXPluggableAuthenticator;
 import org.apache.cassandra.auth.jmx.AuthenticationProxy;
 import sun.rmi.registry.RegistryImpl;
@@ -52,6 +51,7 @@ import sun.rmi.server.UnicastServerRef2;
 public class JMXServerUtils
 {
     private static final Logger logger = LoggerFactory.getLogger(JMXServerUtils.class);
+    private static final String EXPORTER_ATTRIBUTE = "com.sun.jmx.remote.rmi.exporter";
 
     private static java.rmi.registry.Registry registry;
 
@@ -88,7 +88,7 @@ public class JMXServerUtils
 
         // Make sure we use our custom exporter so a full GC doesn't get scheduled every
         // sun.rmi.dgc.server.gcInterval millis (default is 3600000ms/1 hour)
-        env.put(RMIExporter.EXPORTER_ATTRIBUTE, new Exporter());
+        env.put(EXPORTER_ATTRIBUTE, exporterImpl());
 
 
         int rmiPort = Integer.getInteger("com.sun.management.jmxremote.rmi.port", 0);
@@ -112,7 +112,6 @@ public class JMXServerUtils
 
     private static void configureRMIRegistry(int port, Map<String, Object> env) throws RemoteException
     {
-        Exporter exporter = (Exporter)env.get(RMIExporter.EXPORTER_ATTRIBUTE);
         // If ssl is enabled, make sure it's also in place for the RMI registry
         // by using the SSL socket factories already created and stashed in env
         if (Boolean.getBoolean("com.sun.management.jmxremote.ssl"))
@@ -120,11 +119,11 @@ public class JMXServerUtils
             registry = new Registry(port,
                                    (RMIClientSocketFactory)env.get(RMIConnectorServer.RMI_CLIENT_SOCKET_FACTORY_ATTRIBUTE),
                                    (RMIServerSocketFactory)env.get(RMIConnectorServer.RMI_SERVER_SOCKET_FACTORY_ATTRIBUTE),
-                                   exporter.connectorServer);
+                                   connectorServer);
         }
         else
         {
-            registry = new Registry(port, exporter.connectorServer);
+            registry = new Registry(port, connectorServer);
         }
     }
 
@@ -276,6 +275,54 @@ public class JMXServerUtils
         }
     }
 
+    private static Object exporterImpl()
+    {
+        // Interface is called com.sun.jmx.remote.internal.RMIExporter in Java8, but
+        // com.sun.jmx.remote.internal.rmi.RMIExporter in Java9 - i.e. the package name has
+        // changed.
+        Class rmiExporterInterface;
+        try
+        {
+            // Java 9
+            rmiExporterInterface = Class.forName("com.sun.jmx.remote.internal.rmi.RMIExporter");
+        }
+        catch (ClassNotFoundException e)
+        {
+            try
+            {
+                // Java 8
+                rmiExporterInterface = Class.forName("com.sun.jmx.remote.internal.RMIExporter");
+            }
+            catch (ClassNotFoundException e2)
+            {
+                throw new RuntimeException(e2);
+            }
+        }
+        ExporterImpl exporter = new ExporterImpl();
+        return Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(),
+                                      new Class[]{ rmiExporterInterface },
+                                      (proxy, method, args) ->
+                                      {
+                                          switch (method.getName())
+                                          {
+                                              case "exportObject":
+                                                  return exporter.exportObject((Remote) args[0],
+                                                                               ((Number) args[1]).intValue(),
+                                                                               (RMIClientSocketFactory) args[2],
+                                                                               (RMIServerSocketFactory) args[3]);
+                                              case "unexportObject":
+                                                  return exporter.unexportObject((Remote) args[0],
+                                                                                 (Boolean) args[1]);
+                                          }
+                                          return null;
+                                      });
+    }
+
+    // the first object to be exported by this instance is *always* the JMXConnectorServer
+    // instance created by createJMXServer. Keep a handle to it, as it needs to be supplied
+    // to our custom Registry too.
+    private static Remote connectorServer;
+
     /**
      * In the RMI subsystem, the ObjectTable instance holds references to remote
      * objects for distributed garbage collection purposes. When objects are
@@ -301,14 +348,9 @@ public class JMXServerUtils
      *  * sun.management.remote.ConnectorBootstrap to trace how the inbuilt management agent
      *    sets up the JMXConnectorServer
      */
-    private static class Exporter implements RMIExporter
+    private static class ExporterImpl
     {
-        // the first object to be exported by this instance is *always* the JMXConnectorServer
-        // instance created by createJMXServer. Keep a handle to it, as it needs to be supplied
-        // to our custom Registry too.
-        private Remote connectorServer;
-
-        public Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf)
+        Remote exportObject(Remote obj, int port, RMIClientSocketFactory csf, RMIServerSocketFactory ssf)
         throws RemoteException
         {
             Remote remote = new UnicastServerRef2(port, csf, ssf).exportObject(obj, null, true);
@@ -319,7 +361,7 @@ public class JMXServerUtils
             return remote;
         }
 
-        public boolean unexportObject(Remote obj, boolean force) throws NoSuchObjectException
+        boolean unexportObject(Remote obj, boolean force) throws NoSuchObjectException
         {
             return UnicastRemoteObject.unexportObject(obj, force);
         }

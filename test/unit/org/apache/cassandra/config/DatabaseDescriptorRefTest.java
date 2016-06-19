@@ -185,7 +185,15 @@ public class DatabaseDescriptorRefTest
 
                 URL url = delegate.getResource(name.replace('.', '/') + ".class");
                 if (url == null)
-                    throw new ClassNotFoundException(name);
+                {
+                    // For Java9: system class files are not readable via getResource(), so
+                    // try it this way
+                    cls = Class.forName(name, false, delegate);
+                    classMap.put(name, cls);
+                    return cls;
+                }
+
+                // Java8 way + all non-system class files
                 try (InputStream in = url.openConnection().getInputStream())
                 {
                     ByteArrayOutputStream os = new ByteArrayOutputStream();
