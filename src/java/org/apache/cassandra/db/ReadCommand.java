@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.util.*;
 
 import com.google.common.collect.Lists;
@@ -854,6 +855,24 @@ public abstract class ReadCommand implements ReadQuery
             {
                 ByteBuffer columnName = ByteBufferUtil.readWithShortLength(in);
                 ColumnDefinition column = metadata.getColumnDefinition(columnName);
+
+                if (column == null)
+                {
+                    String prettyName;
+
+                    try
+                    {
+                        prettyName = ByteBufferUtil.string(columnName);
+                    }
+                    catch (CharacterCodingException e)
+                    {
+                        prettyName = columnName.toString(); // oh well
+                    }
+
+                    throw new IOException(String.format("Column name %s is not present in %s.%s (known: %s)",
+                                                        prettyName, metadata.ksName, metadata.cfName, metadata.allColumns()));
+                }
+
                 Operator op = Operator.readFrom(in);
                 ByteBuffer indexValue = ByteBufferUtil.readWithShortLength(in);
                 rowFilter.add(column, op, indexValue);
