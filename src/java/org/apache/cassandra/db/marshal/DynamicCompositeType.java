@@ -94,7 +94,7 @@ public class DynamicCompositeType extends AbstractCompositeType
             int header = ByteBufferUtil.readShortLength(bb);
             if ((header & 0x8000) == 0)
             {
-                String name = ByteBufferUtil.string(ByteBufferUtil.readBytes(bb, header));
+                String name = ByteBufferUtil.string(ByteBufferUtil.readBytes(bb, ByteBufferUtil.readShortLength(bb)));
                 return TypeParser.parse(name);
             }
             else
