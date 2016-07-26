@@ -1,7 +1,10 @@
 2.1.16
  * cannot use cql since upgrading python to 2.7.11+ (CASSANDRA-11850)
  * Fix filtering on clustering columns when 2i is used (CASSANDRA-11907)
+ * Don't write shadowed range tombstone (CASSANDRA-12030)
+ * Reduce contention getting instances of CompositeType (CASSANDRA-10433)
  * Improve digest calculation in the presence of overlapping tombstones (CASSANDRA-11349)
+
 
 2.1.15
  * Account for partition deletions in tombstone histogram (CASSANDRA-12112)
