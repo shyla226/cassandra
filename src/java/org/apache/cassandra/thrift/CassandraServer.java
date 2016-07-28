@@ -93,7 +93,7 @@ public class CassandraServer implements Cassandra.Iface
             schedule(DatabaseDescriptor.getReadRpcTimeout());
             try
             {
-                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState, queryStartNanoTime);
+                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState, queryStartNanoTime).toBlocking().single();
             }
             finally
             {
@@ -2333,9 +2333,9 @@ public class CassandraServer implements Cassandra.Iface
             return ClientState.getCQLQueryHandler().process(queryString,
                                                             cState.getQueryState(),
                                                             QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel),
-                                                            Collections.<ByteBuffer>emptyList()),
+                                                                                    Collections.<ByteBuffer>emptyList()),
                                                             null,
-                                                            queryStartNanoTime).toThriftResult();
+                                                            queryStartNanoTime).toBlocking().single().toThriftResult();
         }
         catch (RequestExecutionException e)
         {
@@ -2408,7 +2408,7 @@ public class CassandraServer implements Cassandra.Iface
                                                                     cState.getQueryState(),
                                                                     QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel), bindVariables),
                                                                     null,
-                                                                    queryStartNanoTime).toThriftResult();
+                                                                    queryStartNanoTime).toBlocking().single().toThriftResult();
         }
         catch (RequestExecutionException e)
         {

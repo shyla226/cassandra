@@ -411,7 +411,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
                     QueryOptions options = QueryOptions.forInternalCalls(ConsistencyLevel.ONE, Lists.newArrayList(sessionIdBytes,
                                                                                                                   tminBytes,
                                                                                                                   tmaxBytes));
-                    ResultMessage.Rows rows = statement.execute(QueryState.forInternalCalls(), options, System.nanoTime());
+                    ResultMessage.Rows rows = statement.execute(QueryState.forInternalCalls(), options, System.nanoTime()).toBlocking().single();
                     UntypedResultSet result = UntypedResultSet.create(rows.result);
 
                     for (UntypedResultSet.Row r : result)

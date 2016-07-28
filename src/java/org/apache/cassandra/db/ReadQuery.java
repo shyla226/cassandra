@@ -17,12 +17,14 @@
  */
 package org.apache.cassandra.db;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.service.pager.QueryPager;
 
 /**
  * Generic abstraction for read queries.
@@ -40,9 +42,9 @@ public interface ReadQuery
             return ReadExecutionController.empty();
         }
 
-        public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+        public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
         {
-            return EmptyIterators.partition();
+            return Observable.just(EmptyIterators.partition());
         }
 
         public PartitionIterator executeInternal(ReadExecutionController controller)
@@ -99,7 +101,7 @@ public interface ReadQuery
      *
      * @return the result of the query.
      */
-    public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException;
+    public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries (that is, it basically executes the query locally).

@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.*;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -26,6 +27,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.reactivestreams.Subscription;
 
 public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterator>, UnfilteredRowIterator
 {
@@ -190,5 +192,28 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     public int compareTo(SSTableIdentityIterator o)
     {
         return key.compareTo(o.key);
+    }
+
+    public Observable<Unfiltered> asObservable()
+    {
+        return Observable.create(subscriber -> {
+            subscriber.onSubscribe(new Subscription()
+            {
+                public void request(long l)
+                {
+
+                }
+
+                public void cancel()
+                {
+
+                }
+            });
+
+            while(hasNext())
+                subscriber.onNext(next());
+
+            subscriber.onComplete();
+        });
     }
 }

@@ -123,7 +123,8 @@ public class PasswordAuthenticator implements IAuthenticator
                 authenticationStatement.execute(QueryState.forInternalCalls(),
                                                 QueryOptions.forInternalCalls(consistencyForRole(username),
                                                                               Lists.newArrayList(ByteBufferUtil.bytes(username))),
-                                                System.nanoTime());
+                                                System.nanoTime())
+                                       .toBlocking().single();
 
             // If either a non-existent role name was supplied, or no credentials
             // were found for that role we don't want to cache the result so we throw
@@ -192,7 +193,7 @@ public class PasswordAuthenticator implements IAuthenticator
         return new PlainTextSaslAuthenticator();
     }
 
-    private static SelectStatement prepare(String query)
+    private SelectStatement prepare(String query)
     {
         return (SelectStatement) QueryProcessor.getStatement(query, ClientState.forInternalCalls()).statement;
     }

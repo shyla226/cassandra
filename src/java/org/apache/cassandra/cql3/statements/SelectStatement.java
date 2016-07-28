@@ -18,16 +18,37 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
+import java.util.Optional;
+import java.util.SortedSet;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Observable;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CFName;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.VariableSpecifications;
+import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
@@ -228,7 +249,7 @@ public class SelectStatement implements CQLStatement
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
-    public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Observable<ResultMessage.Rows> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
@@ -241,13 +262,13 @@ public class SelectStatement implements CQLStatement
         int pageSize = options.getPageSize();
         ReadQuery query = getQuery(options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
-        if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
+        if (pageSize <= 0 || query.limits().count() <= pageSize)
             return execute(query, options, state, nowInSec, userLimit, queryStartNanoTime);
 
-        QueryPager pager = getPager(query, options);
-
-        return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
+        QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
+        return Observable.just(execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime));
     }
+
 
     public ReadQuery getQuery(QueryOptions options, int nowInSec) throws RequestValidationException
     {
@@ -266,16 +287,14 @@ public class SelectStatement implements CQLStatement
         return getSliceCommands(options, limit, nowInSec);
     }
 
-    private ResultMessage.Rows execute(ReadQuery query,
+    private Observable<ResultMessage.Rows> execute(ReadQuery query,
                                        QueryOptions options,
                                        QueryState state,
                                        int nowInSec,
                                        int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        try (PartitionIterator data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime))
-        {
-            return processResults(data, options, nowInSec, userLimit);
-        }
+        Observable<PartitionIterator> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime);
+        return processResults(data, options, nowInSec, userLimit);
     }
 
     // Simple wrapper class to avoid some code duplication
@@ -373,7 +392,7 @@ public class SelectStatement implements CQLStatement
         ResultMessage.Rows msg;
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
-            msg = processResults(page, options, nowInSec, userLimit);
+            msg = processResults(Observable.just(page), options, nowInSec, userLimit).toBlocking().single();
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
@@ -390,13 +409,12 @@ public class SelectStatement implements CQLStatement
         ClientWarn.instance.warn(msg);
     }
 
-    private ResultMessage.Rows processResults(PartitionIterator partitions,
+    private Observable<ResultMessage.Rows> processResults(Observable<PartitionIterator> partitions,
                                               QueryOptions options,
                                               int nowInSec,
                                               int userLimit) throws RequestValidationException
     {
-        ResultSet rset = process(partitions, options, nowInSec, userLimit);
-        return new ResultMessage.Rows(rset);
+        return process(partitions, options, nowInSec, userLimit).flatMap(resultSet -> Observable.just(new ResultMessage.Rows(resultSet)));
     }
 
     public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
@@ -417,7 +435,7 @@ public class SelectStatement implements CQLStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(data, options, nowInSec, userLimit);
+                    return processResults(Observable.just(data), options, nowInSec, userLimit).subscribeOn(Schedulers.io()).toBlocking().single();
                 }
             }
             else
@@ -441,7 +459,7 @@ public class SelectStatement implements CQLStatement
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
     {
-        return process(partitions, QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT));
+        return process(Observable.just(partitions), QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT)).toBlocking().single();
     }
 
     public String keyspace()
@@ -743,28 +761,31 @@ public class SelectStatement implements CQLStatement
         return filter;
     }
 
-    private ResultSet process(PartitionIterator partitions,
+    private Observable<ResultSet> process(final Observable<PartitionIterator> partitions,
                               QueryOptions options,
                               int nowInSec,
                               int userLimit) throws InvalidRequestException
     {
-        Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
+       //return Observable.defer(() -> {
 
-        while (partitions.hasNext())
-        {
-            try (RowIterator partition = partitions.next())
-            {
-                processPartition(partition, options, result, nowInSec);
-            }
-        }
+            final Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
 
-        ResultSet cqlRows = result.build();
+            return partitions.flatMap(AsObservable::asObservable)
+                             .map(rowiterator -> {
+                                 //FIXME: this should be made iterable
+                                 processPartition(rowiterator, options, result, nowInSec);
+                                 rowiterator.close();
+                                 return 1;
+                             })
+                             .toList()
+                             .map(rows -> {
+                                 ResultSet cqlRows = result.build();
+                                 orderResults(cqlRows);
+                                 cqlRows.trim(userLimit);
 
-        orderResults(cqlRows);
-
-        cqlRows.trim(userLimit);
-
-        return cqlRows;
+                                 return cqlRows;
+                             }).defaultIfEmpty(result.build());
+        //});
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)
@@ -1031,7 +1052,7 @@ public class SelectStatement implements CQLStatement
          * @param cfm the column family metadata
          * @param selection the selection
          * @param restrictions the restrictions
-         * @param isDistinct <code>true</code> if the query is a DISTINCT one. 
+         * @param isDistinct <code>true</code> if the query is a DISTINCT one.
          * @return the <code>AggregationSpecification</code>s used to make the aggregates
          */
         private AggregationSpecification getAggregationSpecification(CFMetaData cfm,

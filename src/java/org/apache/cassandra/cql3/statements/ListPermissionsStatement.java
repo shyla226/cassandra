@@ -17,9 +17,19 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.util.*;
 
-import org.apache.cassandra.auth.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+
+import io.reactivex.Observable;
+import org.apache.cassandra.auth.AuthKeyspace;
+import org.apache.cassandra.auth.IResource;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.PermissionDetails;
+import org.apache.cassandra.auth.Resources;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.*;
@@ -82,7 +92,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
     }
 
     // TODO: Create a new ResultMessage type (?). Rows will do for now.
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         List<PermissionDetails> details = new ArrayList<PermissionDetails>();
 
@@ -97,7 +107,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
         }
 
         Collections.sort(details);
-        return resultMessage(details);
+        return Observable.just(resultMessage(details));
     }
 
     private Set<PermissionDetails> list(ClientState state, IResource resource)

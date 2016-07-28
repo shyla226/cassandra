@@ -20,6 +20,7 @@ package org.apache.cassandra.service.pager;
 import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -28,6 +29,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.service.ClientState;
+import org.reactivestreams.Subscription;
 
 /**
  * {@code QueryPager} that takes care of fetching the pages for aggregation queries.
@@ -300,6 +302,29 @@ public final class AggregationQueryPager implements QueryPager
             lastPartitionKey = iterator.partitionKey().getKey();
             next = null;
             return iterator;
+        }
+
+        public Observable<RowIterator> asObservable()
+        {
+            return Observable.create(subscriber -> {
+                subscriber.onSubscribe(new Subscription()
+                {
+                    public void request(long l)
+                    {
+
+                    }
+
+                    public void cancel()
+                    {
+
+                    }
+                });
+
+                while(hasNext())
+                    subscriber.onNext(next());
+
+                subscriber.onComplete();
+            });
         }
 
         private class GroupByRowIterator implements RowIterator
