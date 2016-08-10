@@ -27,6 +27,7 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public class ByteType extends NumberType<Byte>
 {
@@ -40,6 +41,11 @@ public class ByteType extends NumberType<Byte>
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return o1.get(o1.position()) - o2.get(o2.position());
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        return ByteSource.signedFixedLengthNumber(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

@@ -355,7 +355,11 @@ public class FileHandle extends SharedCloseableImpl
                 long length = overrideLength > 0 ? overrideLength : compressed ? compressionMetadata.compressedFileLength : channelCopy.size();
 
                 RebuffererFactory rebuffererFactory;
-                if (mmapped)
+                if (length == 0)
+                {
+                    rebuffererFactory = new EmptyRebufferer(channelCopy);
+                }
+                else if (mmapped)
                 {
                     if (compressed)
                     {
@@ -408,8 +412,8 @@ public class FileHandle extends SharedCloseableImpl
 
         private RebuffererFactory maybeCached(ChunkReader reader)
         {
-            if (chunkCache != null && chunkCache.capacity() > 0)
-                return chunkCache.wrap(reader);
+            if (chunkCache != null)
+                return chunkCache.maybeWrap(reader);
             return reader;
         }
 
@@ -425,9 +429,9 @@ public class FileHandle extends SharedCloseableImpl
             }
 
             if (regions == null)
-                regions = MmappedRegions.map(channel, length);
+                regions = MmappedRegions.map(channel, length, bufferSize);
             else
-                regions.extend(length);
+                regions.extend(length, bufferSize);
         }
     }
 

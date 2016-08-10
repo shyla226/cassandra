@@ -30,6 +30,7 @@ import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.MurmurHash;
 import org.apache.cassandra.utils.ObjectSizes;
 
@@ -169,6 +170,11 @@ public class Murmur3Partitioner implements IPartitioner
         public int compareTo(Token o)
         {
             return Long.compare(token, ((LongToken) o).token);
+        }
+
+        public ByteSource asByteComparableSource()
+        {
+            return ByteSource.of(token);
         }
 
         @Override

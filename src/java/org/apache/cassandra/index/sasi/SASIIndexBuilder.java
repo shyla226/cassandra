@@ -27,7 +27,6 @@ import java.util.*;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -36,9 +35,9 @@ import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sasi.conf.ColumnIndex;
 import org.apache.cassandra.index.sasi.disk.PerSSTableIndexWriter;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -58,7 +57,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     {
         long totalIndexBytes = 0;
         for (SSTableReader sstable : sstables.keySet())
-            totalIndexBytes += getPrimaryIndexLength(sstable);
+            totalIndexBytes += getDataLength(sstable);
 
         this.cfs = cfs;
         this.sstables = sstables;
@@ -77,24 +76,23 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             {
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
 
-                long previousKeyPosition = 0;
-                try (KeyIterator keys = new KeyIterator(sstable.descriptor, cfs.metadata()))
+                long previousDataPosition = 0;
+                try (PartitionIndexIterator keys = sstable.allKeysIterator())
                 {
-                    while (keys.hasNext())
+                    for (; keys.key() != null; keys.advance())
                     {
                         if (isStopRequested())
                             throw new CompactionInterruptedException(getCompactionInfo());
 
-                        final DecoratedKey key = keys.next();
-                        final long keyPosition = keys.getKeyPosition();
+                        final DecoratedKey key = keys.key();
+                        final long dataPosition = keys.dataPosition();
 
-                        indexWriter.startPartition(key, keyPosition);
+                        indexWriter.startPartition(key, dataPosition);
 
                         try
                         {
-                            RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
-                            dataFile.seek(indexEntry.position);
-                            ByteBufferUtil.readWithShortLength(dataFile); // key
+                            dataFile.seek(dataPosition);
+                            ByteBufferUtil.skipShortLength(dataFile); // key
 
                             try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
                             {
@@ -111,11 +109,14 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                             throw new FSReadError(ex, sstable.getFilename());
                         }
 
-                        bytesProcessed += keyPosition - previousKeyPosition;
-                        previousKeyPosition = keyPosition;
+                        bytesProcessed += dataPosition - previousDataPosition;
+                        previousDataPosition = dataPosition;
                     }
 
                     completeSSTable(indexWriter, sstable, indexes.values());
+                } catch (IOException e1)
+                {
+                    throw new FSReadError(e1, sstable.getFilename());
                 }
             }
         }
@@ -130,9 +131,9 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                                   compactionId);
     }
 
-    private long getPrimaryIndexLength(SSTable sstable)
+    private long getDataLength(SSTable sstable)
     {
-        File primaryIndex = new File(sstable.getIndexFilename());
+        File primaryIndex = new File(sstable.getFilename());
         return primaryIndex.exists() ? primaryIndex.length() : 0;
     }
 

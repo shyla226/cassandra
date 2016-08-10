@@ -37,6 +37,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -375,6 +376,25 @@ public class ByteBufferUtil
     public static ByteBuffer readWithShortLength(DataInput in) throws IOException
     {
         return ByteBufferUtil.read(in, readShortLength(in));
+    }
+
+    /**
+     * Returns true if the buffer at the current position in the input matches given buffer.
+     * If true, the input is positioned at the end of the consumed buffer.
+     * If false, the position of the input is undefined
+     * @throws IOException
+     */
+    public static boolean equalsWithShortLength(FileDataInput in, ByteBuffer toMatch) throws IOException
+    {
+        int length = readShortLength(in);
+        if (length != toMatch.remaining())
+            return false;
+        int limit = toMatch.limit();
+        for (int i = toMatch.position(); i < limit; ++i)
+            if (toMatch.get(i) != in.readByte())
+                return false;
+
+        return true;
     }
 
     public static int serializedSizeWithShortLength(ByteBuffer buffer)

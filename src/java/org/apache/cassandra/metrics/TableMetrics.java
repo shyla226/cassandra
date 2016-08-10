@@ -620,7 +620,7 @@ public class TableMetrics
             {
                 long total = 0;
                 for (SSTableReader sst : cfs.getSSTables(SSTableSet.LIVE))
-                    total += sst.getIndexSummaryOffHeapSize();
+                    total += 0;
                 return total;
             }
         });

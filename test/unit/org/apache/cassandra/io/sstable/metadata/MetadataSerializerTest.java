@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SerializationHeader;
@@ -38,7 +39,6 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -61,9 +61,9 @@ public class MetadataSerializerTest
         Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata();
 
         MetadataSerializer serializer = new MetadataSerializer();
-        File statsFile = serialize(originalMetadata, serializer, BigFormat.latestVersion);
+        File statsFile = serialize(originalMetadata, serializer, SSTableFormat.current().getLatestVersion());
 
-        Descriptor desc = new Descriptor(statsFile.getParentFile(), "", "", 0, SSTableFormat.Type.BIG);
+        Descriptor desc = new Descriptor(statsFile.getParentFile(), "", "", 0, SSTableFormat.Type.TRIE_INDEX);
         try (RandomAccessReader in = RandomAccessReader.open(statsFile))
         {
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
@@ -132,10 +132,10 @@ public class MetadataSerializerTest
 
         MetadataSerializer serializer = new MetadataSerializer();
         // Write metadata in two minor formats.
-        File statsFileLb = serialize(originalMetadata, serializer, BigFormat.instance.getVersion(newV));
-        File statsFileLa = serialize(originalMetadata, serializer, BigFormat.instance.getVersion(oldV));
+        File statsFileLb = serialize(originalMetadata, serializer, SSTableFormat.Type.BIG.info.getVersion(newV));
+        File statsFileLa = serialize(originalMetadata, serializer, SSTableFormat.Type.BIG.info.getVersion(oldV));
         // Reading both as earlier version should yield identical results.
-        SSTableFormat.Type stype = SSTableFormat.Type.current();
+        SSTableFormat.Type stype = SSTableFormat.Type.BIG;
         Descriptor desc = new Descriptor(stype.info.getVersion(oldV), statsFileLb.getParentFile(), "", "", 0, stype);
         try (RandomAccessReader inLb = RandomAccessReader.open(statsFileLb);
              RandomAccessReader inLa = RandomAccessReader.open(statsFileLa))

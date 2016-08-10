@@ -34,6 +34,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 /**
  * This is essentially like a CompositeType, but it's not primarily meant for comparison, just
@@ -156,6 +157,15 @@ public class TupleType extends AbstractType<ByteBuffer>
         return 0;
     }
 
+    public ByteSource asByteComparableSource(ByteBuffer byteBuffer)
+    {
+        ByteBuffer[] bufs = split(byteBuffer);  // this may be shorter than types.size -- other srcs remain null in that case
+        ByteSource[] srcs = new ByteSource[types.size()];
+        for (int i = 0; i < bufs.length; ++i)
+             srcs[i] = types.get(i).asByteComparableSource(bufs[i]);
+        return ByteSource.of(srcs);
+    }
+
     @Override
     public void validate(ByteBuffer bytes) throws MarshalException
     {
@@ -219,7 +229,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         return components;
     }
 
-    public static ByteBuffer buildValue(ByteBuffer[] components)
+    public static ByteBuffer buildValue(ByteBuffer... components)
     {
         int totalLength = 0;
         for (ByteBuffer component : components)

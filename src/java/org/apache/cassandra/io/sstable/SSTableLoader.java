@@ -23,7 +23,9 @@ import java.net.InetAddress;
 import java.util.*;
 
 import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
 
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.db.Directories;
@@ -35,7 +37,6 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
-
 import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
@@ -76,7 +77,6 @@ public class SSTableLoader implements StreamEventHandler
         LifecycleTransaction.getFiles(directory.toPath(),
                                       (file, type) ->
                                       {
-                                          File dir = file.getParentFile();
                                           String name = file.getName();
 
                                           if (type != Directories.FileType.FINAL)
@@ -90,11 +90,7 @@ public class SSTableLoader implements StreamEventHandler
                                           if (p == null || !p.right.equals(Component.DATA))
                                               return false;
 
-                                          if (!new File(desc.filenameFor(Component.PRIMARY_INDEX)).exists())
-                                          {
-                                              outputHandler.output(String.format("Skipping file %s because index is missing", name));
-                                              return false;
-                                          }
+                                          Set<Component> components = mainComponentsPresent(desc);
 
                                           TableMetadataRef metadata = client.getTableMetadata(desc.cfname);
                                           if (metadata == null)
@@ -102,16 +98,6 @@ public class SSTableLoader implements StreamEventHandler
                                               outputHandler.output(String.format("Skipping file %s: table %s.%s doesn't exist", name, keyspace, desc.cfname));
                                               return false;
                                           }
-
-                                          Set<Component> components = new HashSet<>();
-                                          components.add(Component.DATA);
-                                          components.add(Component.PRIMARY_INDEX);
-                                          if (new File(desc.filenameFor(Component.SUMMARY)).exists())
-                                              components.add(Component.SUMMARY);
-                                          if (new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists())
-                                              components.add(Component.COMPRESSION_INFO);
-                                          if (new File(desc.filenameFor(Component.STATS)).exists())
-                                              components.add(Component.STATS);
 
                                           try
                                           {
@@ -134,9 +120,6 @@ public class SSTableLoader implements StreamEventHandler
                                                   StreamSession.SSTableStreamingSections details = new StreamSession.SSTableStreamingSections(ref, sstableSections, estimatedKeys, ActiveRepairService.UNREPAIRED_SSTABLE);
                                                   streamingDetails.put(endpoint, details);
                                               }
-
-                                              // to conserve heap space when bulk loading
-                                              sstable.releaseSummary();
                                           }
                                           catch (IOException e)
                                           {
@@ -147,6 +130,20 @@ public class SSTableLoader implements StreamEventHandler
                                       Directories.OnTxnErr.IGNORE);
 
         return sstables;
+    }
+
+    public static Set<Component> mainComponentsPresent(Descriptor desc)
+    {
+        Set<Component> lookFor = Sets.union(SSTableReader.requiredComponents(desc),
+                                            ImmutableSet.of(Component.COMPRESSION_INFO));
+
+        Set<Component> components = new HashSet<>();
+        for (Component component : lookFor)
+        {
+            if (new File(desc.filenameFor(component)).exists())
+                components.add(component);
+        }
+        return components;
     }
 
     public StreamResultFuture stream()

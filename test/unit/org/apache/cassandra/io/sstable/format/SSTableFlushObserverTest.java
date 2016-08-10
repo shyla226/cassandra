@@ -41,12 +41,9 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
 import com.google.common.collect.ArrayListMultimap;
@@ -91,16 +88,18 @@ public class SSTableFlushObserverTest
 
         SSTableFormat.Type sstableFormat = SSTableFormat.Type.current();
 
-        BigTableWriter writer = new BigTableWriter(new Descriptor(sstableFormat.info.getLatestVersion(),
-                                                                  directory,
-                                                                  KS_NAME, CF_NAME,
-                                                                  0,
-                                                                  sstableFormat),
-                                                   10L, 0L, null, TableMetadataRef.forOfflineTools(cfm),
-                                                   new MetadataCollector(cfm.comparator).sstableLevel(0),
-                                                   new SerializationHeader(true, cfm, cfm.regularAndStaticColumns(), EncodingStats.NO_STATS),
-                                                   Collections.singletonList(observer),
-                                                   transaction);
+        Descriptor desc = new Descriptor(sstableFormat.info.getLatestVersion(),
+                                         directory,
+                                         KS_NAME, CF_NAME,
+                                         0,
+                                         sstableFormat);
+        SSTableWriter writer = desc.getFormat().getWriterFactory().
+                open(desc,
+                     10L, 0L, null, TableMetadataRef.forOfflineTools(cfm),
+                     new MetadataCollector(cfm.comparator).sstableLevel(0),
+                     new SerializationHeader(true, cfm, cfm.regularAndStaticColumns(), EncodingStats.NO_STATS),
+                     Collections.singletonList(observer),
+                     transaction);
 
         SSTableReader reader = null;
         Multimap<ByteBuffer, Cell> expected = ArrayListMultimap.create();
@@ -145,14 +144,14 @@ public class SSTableFlushObserverTest
             ByteBuffer key = e.left;
             Long indexPosition = e.right;
 
-            try (FileDataInput index = reader.ifile.createReader(indexPosition))
+            try
             {
-                ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(index);
+                ByteBuffer indexKey = reader.keyAt(indexPosition).getKey();
                 Assert.assertEquals(0, UTF8Type.instance.compare(key, indexKey));
             }
             catch (IOException ex)
             {
-                throw new FSReadError(ex, reader.getIndexFilename());
+                throw new FSReadError(ex, reader.getFilename());
             }
 
             Assert.assertEquals(expected.get(key), observer.rows.get(e));

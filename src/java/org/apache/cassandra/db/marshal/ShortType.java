@@ -27,6 +27,7 @@ import org.apache.cassandra.serializers.ShortSerializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public class ShortType extends NumberType<Short>
 {
@@ -64,6 +65,11 @@ public class ShortType extends NumberType<Short>
         }
 
         return decompose(s);
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        return ByteSource.signedFixedLengthNumber(buf);
     }
 
     public Term fromJSONObject(Object parsed) throws MarshalException

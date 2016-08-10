@@ -35,9 +35,9 @@ public interface SSTableFlushObserver
      * but before any cells are processed (see {@link #nextUnfilteredCluster(Unfiltered)}).
      *
      * @param key The key being appended to SSTable.
-     * @param indexPosition The position of the key in the SSTable PRIMARY_INDEX file.
+     * @param keyPosition The position of the key in the SSTable PRIMARY_INDEX file.
      */
-    void startPartition(DecoratedKey key, long indexPosition);
+    void startPartition(DecoratedKey key, long keyPosition);
 
     /**
      * Called after the unfiltered cluster is written to the sstable.

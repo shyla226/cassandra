@@ -28,6 +28,7 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 
 /** for sorting columns representing row keys in the row ordering as determined by a partitioner.
@@ -92,6 +93,11 @@ public class PartitionerDefinedOrder extends AbstractType<ByteBuffer>
     {
         // o1 and o2 can be empty so we need to use PartitionPosition, not DecoratedKey
         return PartitionPosition.ForKey.get(o1, partitioner).compareTo(PartitionPosition.ForKey.get(o2, partitioner));
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        return PartitionPosition.ForKey.get(buf, partitioner).asByteComparableSource();
     }
 
     @Override

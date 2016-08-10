@@ -24,6 +24,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.KeyBound;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.MurmurHash;
 import org.apache.cassandra.utils.IFilter.FilterKey;
 
@@ -95,6 +96,11 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         DecoratedKey otherKey = (DecoratedKey) position;
         int cmp = partitioner.getToken(key).compareTo(otherKey.getToken());
         return cmp == 0 ? ByteBufferUtil.compareUnsigned(key, otherKey.getKey()) : cmp;
+    }
+
+    public ByteSource asByteComparableSource()
+    {
+        return ByteSource.of(getToken().asByteComparableSource(), ByteSource.of(getKey()));
     }
 
     public IPartitioner getPartitioner()

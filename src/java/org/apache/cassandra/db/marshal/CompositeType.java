@@ -31,6 +31,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 /*
  * The encoding of a CompositeType column name should be:
@@ -146,6 +147,31 @@ public class CompositeType extends AbstractCompositeType
     protected AbstractType<?> getAndAppendComparator(int i, ByteBuffer bb, StringBuilder sb)
     {
         return types.get(i);
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer byteBuffer)
+    {
+        if (byteBuffer == null || byteBuffer.remaining() == 0)
+            return null;
+
+        ByteSource[] srcs = new ByteSource[types.size() * 2 + 1];
+        ByteBuffer bb = byteBuffer.duplicate();
+
+        // statics go first
+        boolean isStatic = readStatic(bb);
+        srcs[0] = isStatic ? null : ByteSource.empty();
+
+        int i = 0;
+        while (bb.remaining() > 0)
+        {
+            srcs[i * 2 + 1] = types.get(i).asByteComparableSource(ByteBufferUtil.readBytesWithShortLength(bb));
+            srcs[i * 2 + 2] = ByteSource.oneByte(bb.get() & 0xFF ^ 0x80); // end-of-component also takes part in comparison as signed byte
+            ++i;
+        }
+        if (i * 2 + 1 < srcs.length)
+            srcs = Arrays.copyOfRange(srcs, 0, i * 2 + 1);
+
+        return ByteSource.of(srcs);
     }
 
     protected ParsedComparator parseComparator(int i, String part)

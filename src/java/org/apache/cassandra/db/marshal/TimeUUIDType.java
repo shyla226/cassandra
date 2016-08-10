@@ -25,6 +25,7 @@ import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TimeUUIDSerializer;
@@ -75,6 +76,22 @@ public class TimeUUIDType extends TemporalType<UUID>
         long lsb1 = signedBytesToNativeLong(b1.getLong(s1 + 8));
         long lsb2 = signedBytesToNativeLong(b2.getLong(s2 + 8));
         return Long.compare(lsb1, lsb2);
+    }
+
+    @Override
+    public ByteSource asByteComparableSource(ByteBuffer b)
+    {
+        if (!b.hasRemaining())
+            return null;
+
+        int s = b.position();
+        long msb = b.getLong(s);
+        assert ((msb >>> 12) & 0xf) == 1;
+        ByteBuffer swizzled = ByteBuffer.allocate(16);
+        swizzled.putLong(0, TimeUUIDType.reorderTimestampBytes(msb));
+        swizzled.putLong(8, b.getLong(8));
+
+        return ByteSource.fixedLength(swizzled);
     }
 
     // takes as input 8 signed bytes in native machine order

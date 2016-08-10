@@ -26,6 +26,7 @@ import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.UUIDSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.UUIDGen;
 
 public class LexicalUUIDType extends AbstractType<UUID>
@@ -48,6 +49,35 @@ public class LexicalUUIDType extends AbstractType<UUID>
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
 
         return UUIDGen.getUUID(o1).compareTo(UUIDGen.getUUID(o2));
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        if (buf == null || buf.remaining() == 0)
+            return null;
+
+        // we have to sign-flip the highest bytes of the two longs
+        final int bufstart = buf.position();
+        return new ByteSource.WithToString()
+        {
+            int bufpos = 0;
+
+            public int next()
+            {
+                if (bufpos + bufstart >= buf.limit())
+                    return END_OF_STREAM;
+                int v = buf.get(bufpos + bufstart) & 0xFF;
+                if (bufpos == 0 || bufpos == 8)
+                    v ^= 0x80;
+                ++bufpos;
+                return v;
+            }
+
+            public void reset()
+            {
+                bufpos = 0;
+            }
+        };
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

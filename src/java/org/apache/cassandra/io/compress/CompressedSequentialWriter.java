@@ -53,8 +53,6 @@ public class CompressedSequentialWriter extends SequentialWriter
     // holds a number of already written chunks
     private int chunkCount = 0;
 
-    private long uncompressedSize = 0, compressedSize = 0;
-
     private final MetadataCollector sstableMetadataCollector;
 
     private final ByteBuffer crcCheckBuffer = ByteBuffer.allocate(4);
@@ -148,15 +146,14 @@ public class CompressedSequentialWriter extends SequentialWriter
             throw new RuntimeException("Compression exception", e); // shouldn't happen
         }
 
+        int uncompressedLength = buffer.position();
         int compressedLength = compressed.position();
-        uncompressedSize += buffer.position();
         ByteBuffer toWrite = compressed;
         if (compressedLength > maxCompressedLength)
         {
             toWrite = buffer;
-            compressedLength = buffer.position();
+            compressedLength = uncompressedLength;
         }
-        compressedSize += compressedLength;
 
         try
         {
@@ -171,7 +168,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             // write corresponding checksum
             toWrite.rewind();
             crcMetadata.appendDirect(toWrite, true);
-            lastFlushOffset += compressedLength + 4;
+            lastFlushOffset += uncompressedLength;
         }
         catch (IOException e)
         {
@@ -189,7 +186,7 @@ public class CompressedSequentialWriter extends SequentialWriter
     public CompressionMetadata open(long overrideLength)
     {
         if (overrideLength <= 0)
-            overrideLength = uncompressedSize;
+            overrideLength = lastFlushOffset;
         return metadataWriter.open(overrideLength, chunkOffset);
     }
 
@@ -281,6 +278,7 @@ public class CompressedSequentialWriter extends SequentialWriter
 
         // truncate data and index file
         truncate(chunkOffset);
+        lastFlushOffset = bufferOffset;   // set this now to override truncate setting it.
         metadataWriter.resetAndTruncate(realMark.nextChunkIndex - 1);
     }
 
@@ -321,7 +319,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         {
             syncInternal();
             digestFile.ifPresent(crcMetadata::writeFullChecksum);
-            sstableMetadataCollector.addCompressionRatio(compressedSize, uncompressedSize);
+            sstableMetadataCollector.addCompressionRatio(chunkOffset, lastFlushOffset);
             metadataWriter.finalizeLength(current(), chunkCount).prepareToCommit();
         }
 

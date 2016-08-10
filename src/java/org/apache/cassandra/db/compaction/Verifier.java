@@ -17,14 +17,12 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import com.google.common.base.Throwables;
-
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata.FileDigestValidator;
@@ -40,25 +38,20 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOError;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.Predicate;
 
 public class Verifier implements Closeable
 {
-    private final ColumnFamilyStore cfs;
     private final SSTableReader sstable;
 
     private final CompactionController controller;
 
 
     private final RandomAccessReader dataFile;
-    private final RandomAccessReader indexFile;
     private final VerifyInfo verifyInfo;
-    private final RowIndexEntry.IndexSerializer rowIndexEntrySerializer;
 
     private int goodRows;
-    private int badRows;
 
     private final OutputHandler outputHandler;
     private FileDigestValidator validator;
@@ -70,17 +63,14 @@ public class Verifier implements Closeable
 
     public Verifier(ColumnFamilyStore cfs, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline)
     {
-        this.cfs = cfs;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
-        this.rowIndexEntrySerializer = sstable.descriptor.version.getSSTableFormat().getIndexSerializer(cfs.metadata(), sstable.descriptor.version, sstable.header);
 
         this.controller = new VerifyController(cfs);
 
         this.dataFile = isOffline
                         ? sstable.openDataReader()
                         : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
-        this.indexFile = RandomAccessReader.open(new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)));
         this.verifyInfo = new VerifyInfo(dataFile, sstable);
     }
 
@@ -90,7 +80,6 @@ public class Verifier implements Closeable
 
         outputHandler.output(String.format("Verifying %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length())));
         outputHandler.output(String.format("Checking computed hash of %s ", sstable));
-
 
         // Verify will use the Digest files, which works for both compressed and uncompressed sstables
         try
@@ -124,14 +113,12 @@ public class Verifier implements Closeable
         outputHandler.output("Extended Verify requested, proceeding to inspect values");
 
 
-        try
+        try (PartitionIndexIterator indexIterator = sstable.allKeysIterator())
         {
-            ByteBuffer nextIndexKey = ByteBufferUtil.readWithShortLength(indexFile);
-            {
-                long firstRowPositionFromIndex = rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
-                if (firstRowPositionFromIndex != 0)
-                    markAndThrow();
-            }
+            DecoratedKey nextIndexKey = indexIterator.key();
+            long firstRowPositionFromIndex = indexIterator.dataPosition();
+            if (firstRowPositionFromIndex != 0)
+                markAndThrow();
 
             DecoratedKey prevKey = null;
 
@@ -155,14 +142,13 @@ public class Verifier implements Closeable
                     // check for null key below
                 }
 
-                ByteBuffer currentIndexKey = nextIndexKey;
+                DecoratedKey currentIndexKey = nextIndexKey;
                 long nextRowPositionFromIndex = 0;
                 try
                 {
-                    nextIndexKey = indexFile.isEOF() ? null : ByteBufferUtil.readWithShortLength(indexFile);
-                    nextRowPositionFromIndex = indexFile.isEOF()
-                                             ? dataFile.length()
-                                             : rowIndexEntrySerializer.deserializePositionAndSkip(indexFile);
+                    indexIterator.advance();
+                    nextIndexKey = indexIterator.key();
+                    nextRowPositionFromIndex = nextIndexKey != null ? indexIterator.dataPosition() : dataFile.length();
                 }
                 catch (Throwable th)
                 {
@@ -172,45 +158,34 @@ public class Verifier implements Closeable
                 long dataStart = dataFile.getFilePointer();
                 long dataStartFromIndex = currentIndexKey == null
                                         ? -1
-                                        : rowStart + 2 + currentIndexKey.remaining();
+                                        : rowStart + 2 + currentIndexKey.getKey().remaining();
 
                 long dataSize = nextRowPositionFromIndex - dataStartFromIndex;
                 // avoid an NPE if key is null
                 String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.getKey());
                 outputHandler.debug(String.format("row %s is %s", keyName, FBUtilities.prettyPrintMemory(dataSize)));
 
-                assert currentIndexKey != null || indexFile.isEOF();
-
-                try
-                {
-                    if (key == null || dataSize > dataFile.length())
-                        markAndThrow();
-
-                    //mimic the scrub read path
-                    try (UnfilteredRowIterator iterator = SSTableIdentityIterator.create(sstable, dataFile, key))
-                    {
-                    }
-
-                    if ( (prevKey != null && prevKey.compareTo(key) > 0) || !key.getKey().equals(currentIndexKey) || dataStart != dataStartFromIndex )
-                        markAndThrow();
-                    
-                    goodRows++;
-                    prevKey = key;
-
-
-                    outputHandler.debug(String.format("Row %s at %s valid, moving to next row at %s ", goodRows, rowStart, nextRowPositionFromIndex));
-                    dataFile.seek(nextRowPositionFromIndex);
-                }
-                catch (Throwable th)
-                {
-                    badRows++;
+                if (key == null || dataSize > dataFile.length())
                     markAndThrow();
+
+                // mimic the scrub read path
+                try (UnfilteredRowIterator iterator = SSTableIdentityIterator.create(sstable, dataFile, key))
+                {
                 }
+
+                if ( (prevKey != null && prevKey.compareTo(key) > 0) || !key.equals(currentIndexKey) || dataStart != dataStartFromIndex )
+                    markAndThrow();
+
+                goodRows++;
+                prevKey = key;
+
+                outputHandler.debug(String.format("Row %s at %s valid, moving to next row at %s ", goodRows, rowStart, nextRowPositionFromIndex));
+                dataFile.seek(nextRowPositionFromIndex);
             }
         }
-        catch (Throwable t)
+        catch (Throwable th)
         {
-            throw Throwables.propagate(t);
+            markAndThrow();
         }
         finally
         {
@@ -223,7 +198,6 @@ public class Verifier implements Closeable
     public void close()
     {
         FileUtils.closeQuietly(dataFile);
-        FileUtils.closeQuietly(indexFile);
     }
 
     private void throwIfFatal(Throwable th)

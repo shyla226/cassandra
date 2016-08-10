@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 
@@ -33,12 +34,22 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static junit.framework.Assert.fail;
+import static org.junit.Assert.fail;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class SSTableWriterTest extends SSTableWriterTestBase
 {
+    SSTableReader openEarly(ColumnFamilyStore cfs, SSTableWriter writer, int min, int max)
+    {
+        AtomicReference<SSTableReader> reader = new AtomicReference<>();
+        writer.setMaxDataAge(1000).openEarly(rdr -> reader.set(rdr));
+        addData(cfs, writer, min, max);
+        assertNotNull(reader.get());
+        return reader.get();
+    }
+
     @Test
     public void testAbortTxnWithOpenEarlyShouldRemoveSSTable() throws InterruptedException
     {
@@ -50,25 +61,12 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
         try (SSTableWriter writer = getWriter(cfs, dir, txn))
         {
-            for (int i = 0; i < 10000; i++)
-            {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer.append(builder.build().unfilteredIterator());
-            }
+            addData(cfs, writer, 0, 10000);
 
-            SSTableReader s = writer.setMaxDataAge(1000).openEarly();
+            SSTableReader s = openEarly(cfs, writer, 10000, 20000);
             assert s != null;
             assertFileCounts(dir.list());
-            for (int i = 10000; i < 20000; i++)
-            {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer.append(builder.build().unfilteredIterator());
-            }
-            SSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
+            SSTableReader s2 = openEarly(cfs, writer, 20000, 30000);
             assertTrue(s.last.compareTo(s2.last) < 0);
             assertFileCounts(dir.list());
             s.selfRef().release();
@@ -90,6 +88,17 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             datafiles = assertFileCounts(dir.list());
             assertEquals(datafiles, 0);
             validateCFS(cfs);
+        }
+    }
+
+    void addData(ColumnFamilyStore cfs, SSTableWriter writer, int min, int max)
+    {
+        for (int i = min; i < max; i++)
+        {
+            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
+            for (int j = 0; j < 100; j++)
+                builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
+            writer.append(builder.build().unfilteredIterator());
         }
     }
 

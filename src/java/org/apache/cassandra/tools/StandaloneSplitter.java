@@ -85,20 +85,7 @@ public class StandaloneSplitter
                 else if (!cfName.equals(desc.cfname))
                     throw new IllegalArgumentException("All sstables must be part of the same table");
 
-                Set<Component> components = new HashSet<Component>(Arrays.asList(new Component[]{
-                    Component.DATA,
-                    Component.PRIMARY_INDEX,
-                    Component.FILTER,
-                    Component.COMPRESSION_INFO,
-                    Component.STATS
-                }));
-
-                Iterator<Component> iter = components.iterator();
-                while (iter.hasNext()) {
-                    Component component = iter.next();
-                    if (!(new File(desc.filenameFor(component)).exists()))
-                        iter.remove();
-                }
+                Set<Component> components = SSTableLoader.mainComponentsPresent(desc);
                 parsedFilenames.put(desc, components);
             }
 

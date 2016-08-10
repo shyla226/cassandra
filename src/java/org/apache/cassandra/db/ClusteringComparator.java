@@ -25,11 +25,9 @@ import java.util.Objects;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.serializers.MarshalException;
-
-import org.apache.cassandra.io.sstable.IndexInfo;
+import org.apache.cassandra.utils.ByteSource;
 
 /**
  * A comparator of clustering prefixes (or more generally of {@link Clusterable}}.
@@ -42,11 +40,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
 {
     private final List<AbstractType<?>> clusteringTypes;
 
-    private final Comparator<IndexInfo> indexComparator;
-    private final Comparator<IndexInfo> indexReverseComparator;
     private final Comparator<Clusterable> reverseComparator;
-
-    private final Comparator<Row> rowComparator = (r1, r2) -> compare(r1.clustering(), r2.clustering());
 
     public ClusteringComparator(AbstractType<?>... clusteringTypes)
     {
@@ -58,8 +52,6 @@ public class ClusteringComparator implements Comparator<Clusterable>
         // copy the list to ensure despatch is monomorphic
         this.clusteringTypes = ImmutableList.copyOf(clusteringTypes);
 
-        this.indexComparator = (o1, o2) -> ClusteringComparator.this.compare(o1.lastName, o2.lastName);
-        this.indexReverseComparator = (o1, o2) -> ClusteringComparator.this.compare(o1.firstName, o2.firstName);
         this.reverseComparator = (c1, c2) -> ClusteringComparator.this.compare(c2, c1);
         for (AbstractType<?> type : clusteringTypes)
             type.checkComparable(); // this should already be enforced by TableMetadata.Builder.addColumn, but we check again for other constructors
@@ -223,21 +215,69 @@ public class ClusteringComparator implements Comparator<Clusterable>
     }
 
     /**
-     * A comparator for rows.
-     *
-     * A {@code Row} is a {@code Clusterable} so {@code ClusteringComparator} can be used
-     * to compare rows directly, but when we know we deal with rows (and not {@code Clusterable} in
-     * general), this is a little faster because by knowing we compare {@code Clustering} objects,
-     * we know that 1) they all have the same size and 2) they all have the same kind.
+     * Converts the given clustering of prefix into a ByteSource which preserves this comparator's order when compared
+     * byte by byte.
      */
-    public Comparator<Row> rowComparator()
+    public ByteSource asByteComparableSource(ClusteringPrefix clustering)
     {
-        return rowComparator;
+        return new ClusteringSource(clustering);
     }
 
-    public Comparator<IndexInfo> indexComparator(boolean reversed)
+    /**
+     * A ByteSource for a clustering or prefix which preserves this comparator's order when compared byte by byte.
+     * 
+     * Adds a NEXT_COMPONENT byte before each component (allowing inclusive/exclusive bounds over incomplete prefixes
+     * of that length) and finishes with a suitable byte for the clustering kind. Also deals with null entries.
+     *
+     * Some examples:
+     *    "A", 0005, Clustering     -> 40 4100 40 0005 40
+     *    "B", 0006, InclusiveEnd   -> 40 4200 40 0006 60
+     *    "A", ExclusiveStart       -> 40 4100 60
+     *    "", null, Clustering      -> 40 00 3F 40
+     *    "", 0000, Clustering      -> 40 00 40 0000 40
+     *    BOTTOM                    -> 20
+     */
+    class ClusteringSource extends ByteSource.WithToString
     {
-        return reversed ? indexReverseComparator : indexComparator;
+        final ClusteringPrefix src;
+        ByteSource current = null;
+        int srcnum = -1;
+
+        ClusteringSource(ClusteringPrefix src)
+        {
+            this.src = src;
+        }
+
+        public int next()
+        {
+            if (current != null)
+            {
+                int b = current.next();
+                if (b > END_OF_STREAM)
+                    return b;
+                current = null;
+            }
+
+            int sz = src.size();
+            if (srcnum == sz)
+                return END_OF_STREAM;
+
+            ++srcnum;
+            if (srcnum == sz)
+                return src.kind().asByteComparableValue();
+
+            current = subtype(srcnum).asByteComparableSource(src.get(srcnum));
+            if (current == null)
+                return subtype(srcnum).isReversed() ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
+            current.reset();
+            return NEXT_COMPONENT;
+        }
+
+        public void reset()
+        {
+            srcnum = -1;
+            current = null;
+        }
     }
 
     public Comparator<Clusterable> reversed()

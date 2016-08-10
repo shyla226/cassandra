@@ -220,8 +220,9 @@ public class FileMessageHeader
         {
             TableId tableId = TableId.deserialize(in);
             int sequenceNumber = in.readInt();
-            Version sstableVersion = SSTableFormat.Type.current().info.getVersion(in.readUTF());
+            String versionString = in.readUTF();
             SSTableFormat.Type format = SSTableFormat.Type.validate(in.readUTF());
+            Version sstableVersion = format.info.getVersion(versionString);
 
             long estimatedKeys = in.readLong();
             int count = in.readInt();

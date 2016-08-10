@@ -175,7 +175,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 if (size() > 0)
                     logger.info("Completed loading ({} ms; {} keys) {} cache",
                             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start),
-                            CacheService.instance.keyCache.size(),
+                            size(),
                             cacheType);
                 es.shutdown();
             }

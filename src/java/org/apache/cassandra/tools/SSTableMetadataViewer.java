@@ -34,7 +34,6 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.metadata.*;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -210,16 +209,11 @@ public class SSTableMetadataViewer
 
     private static void printMinMaxToken(Descriptor descriptor, IPartitioner partitioner, AbstractType<?> keyType, PrintStream out) throws IOException
     {
-        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
-        if (!summariesFile.exists())
+        Pair<DecoratedKey, DecoratedKey> minMax = descriptor.getFormat().getReaderFactory().getKeyRange(descriptor, partitioner);
+        if (minMax == null)
             return;
 
-        try (DataInputStream iStream = new DataInputStream(new FileInputStream(summariesFile)))
-        {
-            Pair<DecoratedKey, DecoratedKey> firstLast = new IndexSummary.IndexSummarySerializer().deserializeFirstLastKey(iStream, partitioner);
-            out.printf("First token: %s (key=%s)%n", firstLast.left.getToken(), keyType.getString(firstLast.left.getKey()));
-            out.printf("Last token: %s (key=%s)%n", firstLast.right.getToken(), keyType.getString(firstLast.right.getKey()));
-        }
+        out.printf("First token: %s (key=%s)%n", minMax.left.getToken(), keyType.getString(minMax.left.getKey()));
+        out.printf("Last token: %s (key=%s)%n", minMax.right.getToken(), keyType.getString(minMax.right.getKey()));
     }
-
 }

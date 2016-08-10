@@ -52,9 +52,10 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexSSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -253,7 +254,7 @@ public class ScrubTest
         CompactionManager.instance.performScrub(cfs, false, true, 2);
 
         // check data is still there
-        assertOrderedAll(cfs, 4);
+        assertOrderedAll(cfs, SSTableFormat.Type.current() == SSTableFormat.Type.BIG ? 4 : 3);
     }
 
     @Test
@@ -302,7 +303,7 @@ public class ScrubTest
         assertOrderedAll(cfs, 10);
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
-            new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)).delete();
+            new File(sstable.descriptor.filenameFor(Component.PARTITION_INDEX)).delete();
 
         CompactionManager.instance.performScrub(cfs, false, true, 2);
 
@@ -310,7 +311,7 @@ public class ScrubTest
         assertOrderedAll(cfs, 10);
     }
 
-    @Test
+    // Not tested: can't write out-of-order SSTables
     public void testScrubOutOfOrder() throws Exception
     {
         // This test assumes ByteOrderPartitioner to create out-of-order SSTable
@@ -361,10 +362,9 @@ public class ScrubTest
             if (new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists())
                 components.add(Component.COMPRESSION_INFO);
             components.add(Component.DATA);
-            components.add(Component.PRIMARY_INDEX);
-            components.add(Component.FILTER);
+            components.add(Component.PARTITION_INDEX);
+            components.add(Component.ROW_INDEX);
             components.add(Component.STATS);
-            components.add(Component.SUMMARY);
             components.add(Component.TOC);
 
             SSTableReader sstable = SSTableReader.openNoValidation(desc, components, cfs);
@@ -656,7 +656,7 @@ public class ScrubTest
     /**
      * Test writer that allows to write out of order SSTable.
      */
-    private static class TestWriter extends BigTableWriter
+    private static class TestWriter extends TrieIndexSSTableWriter
     {
         TestWriter(Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, TableMetadataRef metadata,
                    MetadataCollector collector, SerializationHeader header, LifecycleTransaction txn)

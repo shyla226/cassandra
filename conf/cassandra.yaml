@@ -711,16 +711,12 @@ snapshot_before_compaction: false
 auto_snapshot: true
 
 # Granularity of the collation index of rows within a partition.
-# Increase if your rows are large, or if you have a very large
-# number of rows per partition.  The competing goals are these:
-#
-# - a smaller granularity means more index entries are generated
-#   and looking up rows withing the partition by collation column
-#   is faster
-# - but, Cassandra will keep the collation index in memory for hot
-#   rows (as part of the key cache), so a larger granularity means
-#   you can cache more hot rows
-column_index_size_in_kb: 64
+# Smaller granularity means better search times, especially if
+# the partition is in disk cache, but also higher size of the
+# row index and the associated memory cost for keeping that cached.
+# The performance of lower density nodes may benefit from decreasing
+# this number to 4, 2 or 1kb.
+column_index_size_in_kb: 16
 
 # Per sstable indexed key cache entries (the collation index in memory
 # mentioned above) exceeding this size will not be held on heap.

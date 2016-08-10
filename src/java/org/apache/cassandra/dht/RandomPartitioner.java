@@ -26,15 +26,11 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.CachedHashDecoratedKey;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.*;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.GuidGenerator;
-import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * This class generates a BigIntegerToken using MD5 hash.
@@ -125,11 +121,11 @@ public class RandomPartitioner implements IPartitioner
         return new BigIntegerToken(token);
     }
 
-    private boolean isValidToken(BigInteger token) {
+    private static boolean isValidToken(BigInteger token) {
         return token.compareTo(ZERO) >= 0 && token.compareTo(MAXIMUM) <= 0;
     }
 
-    private final Token.TokenFactory tokenFactory = new Token.TokenFactory()
+    private final static Token.TokenFactory tokenFactory = new Token.TokenFactory()
     {
         public ByteBuffer toByteArray(Token token)
         {
@@ -191,6 +187,11 @@ public class RandomPartitioner implements IPartitioner
         public BigIntegerToken(String token)
         {
             this(new BigInteger(token));
+        }
+
+        public ByteSource asByteComparableSource()
+        {
+            return IntegerType.instance.asByteComparableSource(tokenFactory.toByteArray(this));
         }
 
         @Override

@@ -150,7 +150,7 @@ public abstract class AbstractRow extends AbstractCollection<ColumnData> impleme
                 {
                     sb.append(cd.column().name).append('=');
                     ComplexColumnData complexData = (ComplexColumnData) cd;
-                    Function<Cell, String> transform = null;
+                    Function<Cell, String> transform;
                     if (cd.column().type.isCollection())
                     {
                         CollectionType ct = (CollectionType) cd.column().type;

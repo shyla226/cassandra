@@ -29,6 +29,7 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public abstract class Token implements RingPosition<Token>, Serializable
 {
@@ -74,6 +75,7 @@ public abstract class Token implements RingPosition<Token>, Serializable
     abstract public IPartitioner getPartitioner();
     abstract public long getHeapSize();
     abstract public Object getTokenValue();
+    abstract public ByteSource asByteComparableSource();
 
     /**
      * Returns a measure for the token space covered between this token and next.
@@ -173,6 +175,11 @@ public abstract class Token implements RingPosition<Token>, Serializable
                 return ((pos instanceof KeyBound) && ((KeyBound)pos).isMinimumBound) ? 0 : -1;
             else
                 return ((pos instanceof KeyBound) && !((KeyBound)pos).isMinimumBound) ? 0 : 1;
+        }
+
+        public ByteSource asByteComparableSource()
+        {
+            return ByteSource.withTerminator(isMinimumBound ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT, getToken().asByteComparableSource());
         }
 
         public IPartitioner getPartitioner()

@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public interface PartitionPosition extends RingPosition<PartitionPosition>
 {
@@ -53,6 +54,7 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
 
     public Kind kind();
     public boolean isMinimum();
+    public ByteSource asByteComparableSource();
 
     public static class RowPositionSerializer implements IPartitionerDependentSerializer<PartitionPosition, BoundsVersion>
     {

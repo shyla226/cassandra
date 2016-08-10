@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LogRecord.Type;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.merge;
@@ -419,7 +419,7 @@ final class LogFile implements AutoCloseable
 
     private String getFileName()
     {
-        return StringUtils.join(BigFormat.latestVersion,
+        return StringUtils.join(SSTableFormat.current().getLatestVersion(),
                                 LogFile.SEP,
                                 "txn",
                                 LogFile.SEP,

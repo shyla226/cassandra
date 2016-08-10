@@ -17,21 +17,31 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
-import java.util.Collection;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.Set;
-import java.util.UUID;
+import java.util.regex.Pattern;
 
+import com.google.common.collect.ImmutableSet;
+
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.EncodingVersion;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.*;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Legacy bigtable format
@@ -40,8 +50,9 @@ public class BigFormat implements SSTableFormat
 {
     public static final BigFormat instance = new BigFormat();
     public static final Version latestVersion = new BigVersion(BigVersion.current_version);
-    private static final SSTableReader.Factory readerFactory = new ReaderFactory();
-    private static final SSTableWriter.Factory writerFactory = new WriterFactory();
+    static final ReaderFactory readerFactory = new ReaderFactory();
+
+    private static final Pattern VALIDATION = Pattern.compile("[a-z]+");
 
     private BigFormat()
     {
@@ -61,9 +72,15 @@ public class BigFormat implements SSTableFormat
     }
 
     @Override
+    public boolean validateVersion(String ver)
+    {
+        return ver != null && VALIDATION.matcher(ver).matches();
+    }
+
+    @Override
     public SSTableWriter.Factory getWriterFactory()
     {
-        return writerFactory;
+        throw new UnsupportedOperationException("Cannot write SSTables in format BIG.");
     }
 
     @Override
@@ -72,35 +89,50 @@ public class BigFormat implements SSTableFormat
         return readerFactory;
     }
 
-    @Override
-    public RowIndexEntry.IndexSerializer getIndexSerializer(TableMetadata metadata, Version version, SerializationHeader header)
-    {
-        return new RowIndexEntry.Serializer(version, header);
-    }
-
-    static class WriterFactory extends SSTableWriter.Factory
-    {
-        @Override
-        public SSTableWriter open(Descriptor descriptor,
-                                  long keyCount,
-                                  long repairedAt,
-                                  UUID pendingRepair,
-                                  TableMetadataRef metadata,
-                                  MetadataCollector metadataCollector,
-                                  SerializationHeader header,
-                                  Collection<SSTableFlushObserver> observers,
-                                  LifecycleTransaction txn)
-        {
-            return new BigTableWriter(descriptor, keyCount, repairedAt, pendingRepair, metadata, metadataCollector, header, observers, txn);
-        }
-    }
+    // Data, primary index and row index (which may be 0-length) are required.
+    // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
+    static Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.SUMMARY, Component.STATS);
 
     static class ReaderFactory extends SSTableReader.Factory
     {
         @Override
-        public SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
+        public BigTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
         {
             return new BigTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header);
+        }
+
+        @Override
+        public PartitionIndexIterator keyIterator(Descriptor descriptor, TableMetadata metadata)
+        {
+            try (FileHandle.Builder iBuilder = SSTableReader.indexFileHandleBuilder(descriptor, Component.PRIMARY_INDEX);
+                 FileHandle iFile = iBuilder.complete())
+            {
+                return new PartitionIterator(iFile, metadata.partitioner, null, descriptor.version);
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public Pair<DecoratedKey, DecoratedKey> getKeyRange(Descriptor descriptor, IPartitioner partitioner)
+                throws IOException
+        {
+            File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
+            if (!summariesFile.exists())
+                return null;
+
+            try (DataInputStream iStream = new DataInputStream(new FileInputStream(summariesFile)))
+            {
+                return new IndexSummary.IndexSummarySerializer().deserializeFirstLastKey(iStream, partitioner);
+            }
+        }
+
+        @Override
+        public Set<Component> requiredComponents()
+        {
+            return REQUIRED_COMPONENTS;
         }
     }
 

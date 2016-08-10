@@ -17,11 +17,14 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
+import java.util.List;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.IMergeIterator;
@@ -32,82 +35,123 @@ import org.apache.cassandra.utils.MergeIterator;
  */
 public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
 {
-    private final ArrayList<KeyIterator> iters;
     private IMergeIterator<DecoratedKey,DecoratedKey> mi;
+    long bytesRead;
+    long bytesTotal;
 
     public ReducingKeyIterator(Collection<SSTableReader> sstables)
     {
-        iters = new ArrayList<>(sstables.size());
+        List<Iter> iters = new ArrayList<>(sstables.size());
         for (SSTableReader sstable : sstables)
-            iters.add(new KeyIterator(sstable.descriptor, sstable.metadata()));
+            iters.add(new Iter(sstable));
+
+        mi = MergeIterator.get(iters, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey,DecoratedKey>()
+        {
+            DecoratedKey reduced = null;
+
+            @Override
+            public boolean trivialReduceIsTrivial()
+            {
+                return true;
+            }
+
+            public void reduce(int idx, DecoratedKey current)
+            {
+                reduced = current;
+            }
+
+            protected DecoratedKey getReduced()
+            {
+                return reduced;
+            }
+        });
     }
 
-    private void maybeInit()
+    class Iter implements CloseableIterator<DecoratedKey>
     {
-        if (mi == null)
+        PartitionIndexIterator source;
+        SSTableReader sstable;
+        final long total;
+
+        public Iter(SSTableReader sstable)
         {
-            mi = MergeIterator.get(iters, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey,DecoratedKey>()
+            this.sstable = sstable;
+            bytesTotal += total = sstable.getDataChannel().size();
+        }
+
+        @Override
+        public void close()
+        {
+            if (source != null)
+                source.close();
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            if (source == null)
+                try
+                {
+                    source = sstable.allKeysIterator();
+                }
+                catch (IOException e)
+                {
+                    throw new FSReadError(e, sstable.getFilename());
+                }
+
+            return source.key() != null;
+        }
+
+        @Override
+        public DecoratedKey next()
+        {
+            if (!hasNext())
+                throw new AssertionError();
+
+            try
             {
-                DecoratedKey reduced = null;
+                DecoratedKey key = source.key();
+                long prevPos = source.dataPosition();
 
-                @Override
-                public boolean trivialReduceIsTrivial()
-                {
-                    return true;
-                }
+                source.advance();
 
-                public void reduce(int idx, DecoratedKey current)
-                {
-                    reduced = current;
-                }
+                long pos = source.key() != null
+                        ? source.dataPosition()
+                        : total;
 
-                protected DecoratedKey getReduced()
-                {
-                    return reduced;
-                }
-            });
+                bytesRead += pos - prevPos;
+
+                return key;
+            }
+            catch (IOException e)
+            {
+                throw new FSReadError(e, sstable.getFilename());
+            }
         }
     }
 
     public void close()
     {
-        if (mi != null)
-            mi.close();
+        mi.close();
     }
 
     public long getTotalBytes()
     {
-        maybeInit();
-
-        long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
-        {
-            m += ((KeyIterator) iter).getTotalBytes();
-        }
-        return m;
+        return bytesTotal;
     }
 
     public long getBytesRead()
     {
-        maybeInit();
-
-        long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
-        {
-            m += ((KeyIterator) iter).getBytesRead();
-        }
-        return m;
+        return bytesRead;
     }
 
     public boolean hasNext()
     {
-        maybeInit();
         return mi.hasNext();
     }
 
     public DecoratedKey next()
     {
-        maybeInit();
         return mi.next();
     }
 

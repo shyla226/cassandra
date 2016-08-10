@@ -17,23 +17,23 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.nio.charset.CharacterCodingException;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Map;
+import java.nio.charset.CharacterCodingException;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import org.apache.cassandra.cql3.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 /*
  * The encoding of a DynamicCompositeType column name should be:
@@ -151,6 +151,28 @@ public class DynamicCompositeType extends AbstractCompositeType
         }
         // Use the raw comparator (prior to ReversedType unwrapping)
         return rawComp;
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer byteBuffer)
+    {
+        List<ByteSource> srcs = new ArrayList<>();
+        ByteBuffer bb = byteBuffer.duplicate();
+
+        // statics go first
+        boolean isStatic = readIsStatic(bb);
+        srcs.add(isStatic ? null : ByteSource.empty());
+
+        while (bb.remaining() > 0)
+        {
+            AbstractType<?> comp = getComparator(bb);
+            // Extremely inefficient here. Can't even directly put class name as comparison can go the wrong way.
+            srcs.add(ByteSource.of(comp.getClass().getSimpleName()));
+            srcs.add(ByteSource.of(comp.getClass().getName()));
+            srcs.add(comp.asByteComparableSource(ByteBufferUtil.readBytesWithShortLength(bb)));
+            srcs.add(ByteSource.oneByte(bb.get())); // end-of-component also takes part in comparison
+        }
+
+        return ByteSource.of(srcs.toArray(new ByteSource[srcs.size()]));
     }
 
     protected AbstractType<?> getAndAppendComparator(int i, ByteBuffer bb, StringBuilder sb)

@@ -60,11 +60,13 @@ import org.apache.cassandra.index.sasi.memory.IndexMemtable;
 import org.apache.cassandra.index.sasi.plan.QueryController;
 import org.apache.cassandra.index.sasi.plan.QueryPlan;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
@@ -1591,6 +1593,11 @@ public class SASIIndexTest
             public int compareCustom(ByteBuffer a, ByteBuffer b)
             {
                 return UTF8Type.instance.compare(a, b);
+            }
+
+            public ByteSource asByteComparableSource(ByteBuffer b)
+            {
+                return UTF8Type.instance.asByteComparableSource(b);
             }
         };
 

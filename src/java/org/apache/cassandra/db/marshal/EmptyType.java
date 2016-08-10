@@ -26,6 +26,7 @@ import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.EmptySerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 /**
  * A type that only accept empty data.
@@ -40,6 +41,11 @@ public class EmptyType extends AbstractType<Void>
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return 0;
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer b)
+    {
+        return null;
     }
 
     public String getString(ByteBuffer bytes)

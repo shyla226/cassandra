@@ -48,9 +48,12 @@ import org.apache.cassandra.db.partitions.CachedBTreePartition;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -82,7 +85,7 @@ public class CacheService implements CacheServiceMBean
 
     public final static CacheService instance = new CacheService();
 
-    public final AutoSavingCache<KeyCacheKey, RowIndexEntry> keyCache;
+    public final AutoSavingCache<KeyCacheKey, BigRowIndexEntry> keyCache;
     public final AutoSavingCache<RowCacheKey, IRowCacheEntry> rowCache;
     public final AutoSavingCache<CounterCacheKey, ClockAndCount> counterCache;
 
@@ -107,7 +110,7 @@ public class CacheService implements CacheServiceMBean
     /**
      * @return auto saving cache object
      */
-    private AutoSavingCache<KeyCacheKey, RowIndexEntry> initKeyCache()
+    private AutoSavingCache<KeyCacheKey, BigRowIndexEntry> initKeyCache()
     {
         logger.info("Initializing key cache with capacity of {} MBs.", DatabaseDescriptor.getKeyCacheSizeInMB());
 
@@ -115,9 +118,9 @@ public class CacheService implements CacheServiceMBean
 
         // as values are constant size we can use singleton weigher
         // where 48 = 40 bytes (average size of the key) + 8 bytes (size of value)
-        ICache<KeyCacheKey, RowIndexEntry> kc;
+        ICache<KeyCacheKey, BigRowIndexEntry> kc;
         kc = CaffeineCache.create(keyCacheInMemoryCapacity);
-        AutoSavingCache<KeyCacheKey, RowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer());
+        AutoSavingCache<KeyCacheKey, BigRowIndexEntry> keyCache = new AutoSavingCache<>(kc, CacheType.KEY_CACHE, new KeyCacheSerializer());
 
         int keyCacheKeysToSave = DatabaseDescriptor.getKeyCacheKeysToSave();
 
@@ -423,11 +426,11 @@ public class CacheService implements CacheServiceMBean
         }
     }
 
-    public static class KeyCacheSerializer implements CacheSerializer<KeyCacheKey, RowIndexEntry>
+    public static class KeyCacheSerializer implements CacheSerializer<KeyCacheKey, BigRowIndexEntry>
     {
         public void serialize(KeyCacheKey key, DataOutputPlus out, ColumnFamilyStore cfs) throws IOException
         {
-            RowIndexEntry entry = CacheService.instance.keyCache.getInternal(key);
+            BigRowIndexEntry entry = CacheService.instance.keyCache.getInternal(key);
             if (entry == null)
                 return;
 
@@ -439,10 +442,10 @@ public class CacheService implements CacheServiceMBean
             out.writeBoolean(true);
 
             SerializationHeader header = new SerializationHeader(false, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS);
-            key.desc.getFormat().getIndexSerializer(cfs.metadata(), key.desc.version, header).serializeForCache(entry, out);
+            new BigRowIndexEntry.Serializer(key.desc.version, header).serializeForCache(entry, out);
         }
 
-        public Future<Pair<KeyCacheKey, RowIndexEntry>> deserialize(DataInputPlus input, ColumnFamilyStore cfs) throws IOException
+        public Future<Pair<KeyCacheKey, BigRowIndexEntry>> deserialize(DataInputPlus input, ColumnFamilyStore cfs) throws IOException
         {
             //Keyspace and CF name are deserialized by AutoSaving cache and used to fetch the CFS provided as a
             //parameter so they aren't deserialized here, even though they are serialized by this serializer
@@ -455,29 +458,27 @@ public class CacheService implements CacheServiceMBean
             ByteBuffer key = ByteBufferUtil.read(input, keyLength);
             int generation = input.readInt();
             input.readBoolean(); // backwards compatibility for "promoted indexes" boolean
-            SSTableReader reader;
+            BigTableReader reader;
             if (cfs == null || !cfs.isKeyCacheEnabled() || (reader = findDesc(generation, cfs.getSSTables(SSTableSet.CANONICAL))) == null)
             {
                 // The sstable doesn't exist anymore, so we can't be sure of the exact version and assume its the current version. The only case where we'll be
                 // wrong is during upgrade, in which case we fail at deserialization. This is not a huge deal however since 1) this is unlikely enough that
                 // this won't affect many users (if any) and only once, 2) this doesn't prevent the node from starting and 3) CASSANDRA-10219 shows that this
                 // part of the code has been broken for a while without anyone noticing (it is, btw, still broken until CASSANDRA-10219 is fixed).
-                RowIndexEntry.Serializer.skipForCache(input);
+                BigRowIndexEntry.Serializer.skipForCache(input);
                 return null;
             }
-            RowIndexEntry.IndexSerializer<?> indexSerializer = reader.descriptor.getFormat().getIndexSerializer(reader.metadata(),
-                                                                                                                reader.descriptor.version,
-                                                                                                                reader.header);
-            RowIndexEntry<?> entry = indexSerializer.deserializeForCache(input);
+            BigRowIndexEntry.IndexSerializer indexSerializer = reader.rowIndexEntrySerializer;
+            BigRowIndexEntry entry = indexSerializer.deserializeForCache(input);
             return Futures.immediateFuture(Pair.create(new KeyCacheKey(cfs.metadata(), reader.descriptor, key), entry));
         }
 
-        private SSTableReader findDesc(int generation, Iterable<SSTableReader> collection)
+        private BigTableReader findDesc(int generation, Iterable<SSTableReader> collection)
         {
             for (SSTableReader sstable : collection)
             {
-                if (sstable.descriptor.generation == generation)
-                    return sstable;
+                if (sstable.descriptor.formatType == SSTableFormat.Type.BIG && sstable.descriptor.generation == generation)
+                    return (BigTableReader) sstable;
             }
             return null;
         }

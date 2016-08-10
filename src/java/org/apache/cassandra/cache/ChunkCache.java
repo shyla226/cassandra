@@ -42,7 +42,7 @@ public class ChunkCache
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
 
-    private static boolean enabled = cacheSize > 0;
+    public static boolean enabled = cacheSize > 0;
     public static final ChunkCache instance = enabled ? new ChunkCache() : null;
 
     private final LoadingCache<Key, Buffer> cache;
@@ -175,12 +175,12 @@ public class ChunkCache
         return new CachingRebufferer(file);
     }
 
-    public static RebuffererFactory maybeWrap(ChunkReader file)
+    public RebuffererFactory maybeWrap(ChunkReader file)
     {
         if (!enabled)
             return file;
 
-        return instance.wrap(file);
+        return wrap(file);
     }
 
     public void invalidatePosition(FileHandle dfile, long position)

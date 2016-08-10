@@ -32,6 +32,7 @@ import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteSource;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -175,6 +176,28 @@ public class ListType<T> extends CollectionType<List<T>>
         }
 
         return size1 == size2 ? 0 : (size1 < size2 ? -1 : 1);
+    }
+
+    @Override
+    public ByteSource asByteComparableSource(ByteBuffer b)
+    {
+        return asByteSourceListOrSet(elements, b);
+    }
+
+    static ByteSource asByteSourceListOrSet(AbstractType<?> elementsComparator, ByteBuffer b)
+    {
+        if (!b.hasRemaining())
+            return null;
+
+        b = b.duplicate();
+        int size = CollectionSerializer.readCollectionSize(b, ProtocolVersion.V3);
+        ByteSource[] srcs = new ByteSource[size];
+        for (int i = 0; i < size; ++i)
+        {
+            ByteBuffer v = CollectionSerializer.readValue(b, ProtocolVersion.V3);
+            srcs[i] = elementsComparator.asByteComparableSource(v);
+        }
+        return ByteSource.withTerminator(0x00, srcs);
     }
 
     @Override

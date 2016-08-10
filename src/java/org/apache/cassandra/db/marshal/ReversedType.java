@@ -29,6 +29,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteSource;
 
 public class ReversedType<T> extends AbstractType<T>
 {
@@ -70,6 +71,32 @@ public class ReversedType<T> extends AbstractType<T>
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return baseType.compare(o2, o1);
+    }
+
+    /**
+     * Reversed type as byte comparable source only makes sense within a multi-component byte source.
+     * Otherwise null and prefix do not work correctly.
+     */
+    public ByteSource asByteComparableSource(ByteBuffer b)
+    {
+        ByteSource src = baseType.asByteComparableSource(b);
+        if (src == null)
+            return null;
+        return new ByteSource.WithToString()
+        {
+            public void reset()
+            {
+                src.reset();
+            }
+
+            public int next()
+            {
+                int v = src.next();
+                if (v == END_OF_STREAM)
+                    return v;
+                return v ^ 0xFF;
+            }
+        };
     }
 
     @Override

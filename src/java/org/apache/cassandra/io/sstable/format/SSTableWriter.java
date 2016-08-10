@@ -19,13 +19,14 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -34,6 +35,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -58,7 +60,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     protected long maxDataAge = -1;
     protected final long keyCount;
     protected final MetadataCollector metadataCollector;
-    protected final RowIndexEntry.IndexSerializer rowIndexEntrySerializer;
     protected final SerializationHeader header;
     protected final TransactionalProxy txnProxy = txnProxy();
     protected final Collection<SSTableFlushObserver> observers;
@@ -88,7 +89,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         this.pendingRepair = pendingRepair;
         this.metadataCollector = metadataCollector;
         this.header = header;
-        this.rowIndexEntrySerializer = descriptor.version.getSSTableFormat().getIndexSerializer(metadata.get(), descriptor.version, header);
         this.observers = observers == null ? Collections.emptySet() : observers;
     }
 
@@ -148,9 +148,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     private static Set<Component> components(TableMetadata metadata)
     {
         Set<Component> components = new HashSet<Component>(Arrays.asList(Component.DATA,
-                Component.PRIMARY_INDEX,
+                Component.PARTITION_INDEX,
+                Component.ROW_INDEX,
                 Component.STATS,
-                Component.SUMMARY,
                 Component.TOC,
                 Component.DIGEST));
 
@@ -235,9 +235,15 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     }
 
     /**
-     * Open the resultant SSTableReader before it has been fully written
+     * Open the resultant SSTableReader before it has been fully written.
+     *
+     * The passed consumer will be called when the necessary data has been flushed to disk/cache. This may never happen
+     * (e.g. if the table was finished before the flushes materialized, or if this call returns false e.g. if a table
+     * was already prepared but hasn't reached readiness yet).
+     *
+     * Uses callback instead of future because preparation and callback happen on the same thread.
      */
-    public abstract SSTableReader openEarly();
+    public abstract boolean openEarly(Consumer<SSTableReader> callWhenReady);
 
     /**
      * Open the resultant SSTableReader once it has been fully written, but before the
@@ -319,16 +325,13 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public static void rename(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
     {
-        for (Component component : Sets.difference(components, Sets.newHashSet(Component.DATA, Component.SUMMARY)))
+        for (Component component : Sets.difference(components, ImmutableSet.of(Component.DATA)))
         {
             FileUtils.renameWithConfirm(tmpdesc.filenameFor(component), newdesc.filenameFor(component));
         }
 
         // do -Data last because -Data present should mean the sstable was completely renamed before crash
         FileUtils.renameWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
-
-        // rename it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.renameWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
     }
 
 

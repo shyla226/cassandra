@@ -25,11 +25,13 @@ import java.nio.ByteBuffer;
 import java.util.Comparator;
 import java.util.List;
 
+import org.apache.cassandra.io.sstable.format.big.BigRowIndexEntry;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
+import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.io.sstable.IndexInfo;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.utils.IteratorWithLowerBound;
@@ -171,24 +173,28 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
         // in memory for not heap backed IndexInfo objects (so, these are on disk).
         // CASSANDRA-11369 is there to fix this afterwards.
 
+        if (!(sstable instanceof BigTableReader))
+            return null;
+
         // Creating the iterator ensures that rowIndexEntry is loaded if available (partitions bigger than
         // DatabaseDescriptor.column_index_size_in_kb)
         if (!canUseMetadataLowerBound())
             maybeInit();
 
-        RowIndexEntry rowIndexEntry = sstable.getCachedPosition(partitionKey(), false);
+        BigTableReader bigtable = (BigTableReader) sstable;
+        BigRowIndexEntry rowIndexEntry = bigtable.getCachedPosition(partitionKey(), false);
         if (rowIndexEntry == null || !rowIndexEntry.indexOnHeap())
             return null;
 
-        try (RowIndexEntry.IndexInfoRetriever onHeapRetriever = rowIndexEntry.openWithIndex(null))
+        try (BigRowIndexEntry.IndexInfoRetriever onHeapRetriever = rowIndexEntry.openWithIndex(null))
         {
-            IndexInfo column = onHeapRetriever.columnsIndex(filter.isReversed() ? rowIndexEntry.columnsIndexCount() - 1 : 0);
+            IndexInfo column = onHeapRetriever.columnsIndex(filter.isReversed() ? rowIndexEntry.rowIndexCount() - 1 : 0);
             ClusteringPrefix lowerBoundPrefix = filter.isReversed() ? column.lastName : column.firstName;
             assert lowerBoundPrefix.getRawValues().length <= metadata().comparator.size() :
             String.format("Unexpected number of clustering values %d, expected %d or fewer for %s",
                           lowerBoundPrefix.getRawValues().length,
                           metadata().comparator.size(),
-                          sstable.getFilename());
+                          bigtable.getFilename());
             return ClusteringBound.inclusiveOpen(filter.isReversed(), lowerBoundPrefix.getRawValues());
         }
         catch (IOException e)

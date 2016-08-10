@@ -1706,8 +1706,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             List<String> files = new ArrayList<>();
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
-                // check if the key actually exists in this sstable, without updating cache and stats
-                if (sstr.getPosition(dk, SSTableReader.Operator.EQ, false) != null)
+                // check if the key actually exists in this sstable
+                if (sstr.contains(dk))
                     files.add(sstr.getFilename());
             }
             return files;

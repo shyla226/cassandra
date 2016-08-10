@@ -23,6 +23,7 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.serializers.BooleanSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -54,6 +55,16 @@ public class BooleanType extends AbstractType<Boolean>
         if (b1 == 0)
             return b2 == 0 ? 0 : -1;
         return b2 == 0 ? 1 : 0;
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        if (!buf.hasRemaining())
+            return null;
+        byte b = buf.get(buf.position());
+        if (b != 0)
+            b = 1;
+        return ByteSource.oneByte(b);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

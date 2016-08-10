@@ -45,9 +45,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Type;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamPlan;
@@ -72,7 +72,7 @@ public class LegacySSTableTest
      * See {@link #testGenerateSstables()} to generate sstables.
      * Take care on commit as you need to add the sstable files using {@code git add -f}
      */
-    public static final String[] legacyVersions = {"na", "mc", "mb", "ma"};
+    public static final String[] legacyVersions = {"aa", "na", "mc", "mb", "ma"};
 
     // 1200 chars
     static final String longString = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789" +
@@ -122,12 +122,23 @@ public class LegacySSTableTest
      */
     protected Descriptor getDescriptor(String legacyVersion, String table)
     {
-        return new Descriptor(SSTableFormat.Type.BIG.info.getVersion(legacyVersion),
+        Type formatType = getFormatType(legacyVersion);
+        return new Descriptor(formatType.info.getVersion(legacyVersion),
                               getTableDir(legacyVersion, table),
                               "legacy_tables",
                               table,
                               1,
-                              SSTableFormat.Type.BIG);
+                              formatType);
+    }
+
+    private static Type getFormatType(String legacyVersion)
+    {
+        return legacyVersion.compareTo("m") <= 0 ? Type.TRIE_INDEX : Type.BIG;
+    }
+
+    private static boolean usesKeyCache(String legacyVersion)
+    {
+        return getFormatType(legacyVersion) == Type.BIG;
     }
 
     @Test
@@ -237,6 +248,9 @@ public class LegacySSTableTest
 
     private static void verifyCache(String legacyVersion, long startCount) throws InterruptedException, java.util.concurrent.ExecutionException
     {
+        if (!usesKeyCache(legacyVersion))
+            return;
+
         //For https://issues.apache.org/jira/browse/CASSANDRA-10778
         //Validate whether the key cache successfully saves in the presence of old keys as
         //well as loads the correct number of keys
@@ -386,7 +400,7 @@ public class LegacySSTableTest
     /**
      * Generates sstables for 8 CQL tables (see {@link #createTables(String)}) in <i>current</i>
      * sstable format (version) into {@code test/data/legacy-sstables/VERSION}, where
-     * {@code VERSION} matches {@link Version#getVersion() BigFormat.latestVersion.getVersion()}.
+     * {@code VERSION} matches {@link Version#getVersion() SSTableFormat.current().getLatestVersion().getVersion()}.
      * <p>
      * Run this test alone (e.g. from your IDE) when a new version is introduced or format changed
      * during development. I.e. remove the {@code @Ignore} annotation temporarily.
@@ -410,20 +424,20 @@ public class LegacySSTableTest
             {
                 String valPk = Integer.toString(pk);
                 QueryProcessor.executeInternal(String.format("INSERT INTO legacy_tables.legacy_%s_simple%s (pk, val) VALUES ('%s', '%s')",
-                                                             BigFormat.latestVersion, getCompactNameSuffix(compact), valPk, "foo bar baz"));
+                                                             SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact), valPk, "foo bar baz"));
 
                 QueryProcessor.executeInternal(String.format("UPDATE legacy_tables.legacy_%s_simple_counter%s SET val = val + 1 WHERE pk = '%s'",
-                                                             BigFormat.latestVersion, getCompactNameSuffix(compact), valPk));
+                                                             SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact), valPk));
 
                 for (int ck = 0; ck < 50; ck++)
                 {
                     String valCk = Integer.toString(ck);
 
                     QueryProcessor.executeInternal(String.format("INSERT INTO legacy_tables.legacy_%s_clust%s (pk, ck, val) VALUES ('%s', '%s', '%s')",
-                                                                 BigFormat.latestVersion, getCompactNameSuffix(compact), valPk, valCk + longString, randomString));
+                                                                 SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact), valPk, valCk + longString, randomString));
 
                     QueryProcessor.executeInternal(String.format("UPDATE legacy_tables.legacy_%s_clust_counter%s SET val = val + 1 WHERE pk = '%s' AND ck='%s'",
-                                                                 BigFormat.latestVersion, getCompactNameSuffix(compact), valPk, valCk + longString));
+                                                                 SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact), valPk, valCk + longString));
 
                 }
             }
@@ -431,14 +445,14 @@ public class LegacySSTableTest
 
         StorageService.instance.forceKeyspaceFlush("legacy_tables");
 
-        File ksDir = new File(LEGACY_SSTABLE_ROOT, String.format("%s/legacy_tables", BigFormat.latestVersion));
+        File ksDir = new File(LEGACY_SSTABLE_ROOT, String.format("%s/legacy_tables", SSTableFormat.current().getLatestVersion()));
         ksDir.mkdirs();
         for (int compact = 0; compact <= 1; compact++)
         {
-            copySstablesFromTestData(String.format("legacy_%s_simple%s", BigFormat.latestVersion, getCompactNameSuffix(compact)), ksDir);
-            copySstablesFromTestData(String.format("legacy_%s_simple_counter%s", BigFormat.latestVersion, getCompactNameSuffix(compact)), ksDir);
-            copySstablesFromTestData(String.format("legacy_%s_clust%s", BigFormat.latestVersion, getCompactNameSuffix(compact)), ksDir);
-            copySstablesFromTestData(String.format("legacy_%s_clust_counter%s", BigFormat.latestVersion, getCompactNameSuffix(compact)), ksDir);
+            copySstablesFromTestData(String.format("legacy_%s_simple%s", SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact)), ksDir);
+            copySstablesFromTestData(String.format("legacy_%s_simple_counter%s", SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact)), ksDir);
+            copySstablesFromTestData(String.format("legacy_%s_clust%s", SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact)), ksDir);
+            copySstablesFromTestData(String.format("legacy_%s_clust_counter%s", SSTableFormat.current().getLatestVersion(), getCompactNameSuffix(compact)), ksDir);
         }
     }
 
