@@ -44,6 +44,7 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
+import ch.qos.logback.core.hook.DelayingShutdownHook;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.AuthMigrationListener;
 import org.apache.cassandra.batchlog.BatchRemoveVerbHandler;
@@ -133,6 +134,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Thread drainOnShutdown = null;
     private volatile boolean inShutdownHook = false;
+    private final List<Runnable> runBeforeShutdown = new ArrayList<>();
+    private final List<Runnable> runAfterShutdown = new ArrayList<>();
 
     public static final StorageService instance = new StorageService();
 
@@ -270,6 +273,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.BATCH_STORE, new BatchStoreVerbHandler());
         MessagingService.instance().registerVerbHandlers(MessagingService.Verb.BATCH_REMOVE, new BatchRemoveVerbHandler());
+        // Cleanup logback
+        runAfterShutdown(new DelayingShutdownHook());
     }
 
     public void registerDaemon(CassandraDaemon daemon)
@@ -579,7 +584,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             @Override
             public void runMayThrow() throws InterruptedException
             {
-                inShutdownHook = true;
+                synchronized (StorageService.this)
+                {
+                    inShutdownHook = true;
+                    runShutdownHooks(runBeforeShutdown);
+                }
+
                 ExecutorService viewMutationStage = StageManager.getStage(Stage.VIEW_MUTATION);
                 ExecutorService counterMutationStage = StageManager.getStage(Stage.COUNTER_MUTATION);
                 ExecutorService mutationStage = StageManager.getStage(Stage.MUTATION);
@@ -636,6 +646,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 ScheduledExecutors.nonPeriodicTasks.shutdown();
                 if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
                     logger.warn("Miscellaneous task executor still busy after one minute; proceeding with shutdown");
+
+                synchronized (StorageService.this)
+                {
+                    runShutdownHooks(runAfterShutdown);
+                }
             }
         }, "StorageServiceShutdownHook");
         Runtime.getRuntime().addShutdownHook(drainOnShutdown);
@@ -3947,6 +3962,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public synchronized void drain() throws IOException, InterruptedException, ExecutionException
     {
         inShutdownHook = true;
+        runShutdownHooks(runBeforeShutdown);
 
         BatchlogManager.instance.shutdown();
 
@@ -4037,7 +4053,74 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
             logger.warn("Miscellaneous task executor still busy after one minute; proceeding with shutdown");
 
+        runShutdownHooks(runAfterShutdown);
         setMode(Mode.DRAINED, true);
+    }
+
+    public void runShutdownHooks(List<Runnable> hooks)
+    {
+        for (Runnable hook : hooks)
+        {
+            try
+            {
+                hook.run();
+            }
+            catch (Exception e)
+            {
+                logger.warn("Attempting to continue after shutdown hook exception", e);
+            }
+        }
+    }
+
+    /**
+     * Add a runnable which will be called before C* enters its primary shutdown code.  This is useful for other
+     * applications running in the same JVM which may want to shut down first rather than time out attempting to use
+     * C* calls which will no longer work.
+     * @param hook: the code to run
+     * @return true on success, false if C* is already shutting down, in which case the runnable has NOT been called
+     * and it is the caller's responsibility to decide what to do.
+     */
+    public synchronized boolean runBeforeShutdown(Runnable hook)
+    {
+        if (!inShutdownHook)
+        {
+            runBeforeShutdown.add(hook);
+        }
+
+        return !inShutdownHook;
+    }
+
+    /**
+     * Remove a shutdown hook that was added with runBeforeShutdown
+     */
+    public synchronized boolean removePreShutdownHook(Runnable hook)
+    {
+        return runBeforeShutdown.remove(hook);
+    }
+
+    /**
+     * Add a runnable which will be called after C* enters its primary shutdown code.  This is useful for other
+     * applications running in the same JVM that C* needs to work (e.g. the logger code) and should shut down later.
+     * @param hook: the code to run
+     * @return true on success, false if C* is already shutting down, in which case the runnable has NOT been called
+     * and it is the caller's responsibility to decide what to do.
+     */
+    public synchronized boolean runAfterShutdown(Runnable hook)
+    {
+        if (!inShutdownHook)
+        {
+            runAfterShutdown.add(hook);
+        }
+
+        return !inShutdownHook;
+    }
+
+    /**
+     * Remove a shutdown hook that was added with runAfterShutdown
+     */
+    public synchronized boolean removePostShutdownHook(Runnable hook)
+    {
+        return runAfterShutdown.remove(hook);
     }
 
     // Never ever do this at home. Used by tests.
