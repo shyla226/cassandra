@@ -147,6 +147,9 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     {
         return new UnfilteredPartitionIterators.MergeListener()
         {
+            //We don't know if CUSTOM indexes require this so we always send trivial merges
+            boolean callOnTrivialMerge = controller.cfs.indexManager.listIndexes().stream().anyMatch(index -> index.getIndexMetadata().isCustom());
+
             public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
             {
                 int merged = 0;
@@ -216,6 +219,11 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
             public void close()
             {
+            }
+
+            public boolean callOnTrivialMerge()
+            {
+                return callOnTrivialMerge;
             }
         };
     }

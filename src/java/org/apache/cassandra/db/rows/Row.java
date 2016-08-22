@@ -596,14 +596,15 @@ public interface Row extends Unfiltered, Collection<ColumnData>
         private int rowsToMerge;
         private int lastRowSet = -1;
 
-        private final List<ColumnData> dataBuffer = new ArrayList<>();
+        private final List<ColumnData> dataBuffer;
         private final ColumnDataReducer columnDataReducer;
 
-        public Merger(int size, int nowInSec, boolean hasComplex)
+        public Merger(int numRows, int nowInSec, int numColumns, boolean hasComplex)
         {
-            this.rows = new Row[size];
-            this.columnDataIterators = new ArrayList<>(size);
-            this.columnDataReducer = new ColumnDataReducer(size, nowInSec, hasComplex);
+            this.rows = new Row[numRows];
+            this.columnDataIterators = new ArrayList<>(numRows);
+            this.columnDataReducer = new ColumnDataReducer(numRows, nowInSec, hasComplex);
+            this.dataBuffer = new ArrayList<>(numColumns);
         }
 
         public void clear()

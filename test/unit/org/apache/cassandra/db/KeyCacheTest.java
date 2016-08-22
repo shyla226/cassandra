@@ -115,7 +115,7 @@ public class KeyCacheTest
              iter.hasNext();)
         {
             KeyCacheKey k = iter.next();
-            if (k.desc.ksname.equals(KEYSPACE1) && k.desc.cfname.equals(cf))
+            if (k.desc().ksname.equals(KEYSPACE1) && k.desc().cfname.equals(cf))
             {
                 RowIndexEntry rie = CacheService.instance.keyCache.get(k);
                 savedMap.put(k, rie);
@@ -170,9 +170,9 @@ public class KeyCacheTest
 
     private static SSTableReader readerForKey(KeyCacheKey k)
     {
-        return ColumnFamilyStore.getIfExists(k.desc.ksname, k.desc.cfname).getLiveSSTables()
+        return ColumnFamilyStore.getIfExists(k.desc().ksname, k.desc().cfname).getLiveSSTables()
                                 .stream()
-                                .filter(sstreader -> sstreader.descriptor.generation == k.desc.generation)
+                                .filter(sstreader -> sstreader.descriptor.generation == k.desc().generation)
                                 .findFirst().get();
     }
 
@@ -323,7 +323,7 @@ public class KeyCacheTest
              iter.hasNext();)
         {
             KeyCacheKey k = iter.next();
-            if (k.desc.ksname.equals(keyspace) && k.desc.cfname.equals(columnFamily))
+            if (k.desc().ksname.equals(keyspace) && k.desc().cfname.equals(columnFamily))
                 size++;
         }
         assertEquals(expected, size);

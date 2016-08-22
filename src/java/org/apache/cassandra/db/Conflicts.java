@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.utils.FastByteOperations;
 
 public abstract class Conflicts
 {
@@ -42,7 +43,7 @@ public abstract class Conflicts
         if (leftLive != rightLive)
             return leftLive ? Resolution.RIGHT_WINS : Resolution.LEFT_WINS;
 
-        int c = leftValue.compareTo(rightValue);
+        int c = FastByteOperations.compareUnsigned(leftValue, rightValue);
         if (c < 0)
             return Resolution.RIGHT_WINS;
         else if (c > 0)

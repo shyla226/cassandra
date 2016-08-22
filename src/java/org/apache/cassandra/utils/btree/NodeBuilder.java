@@ -405,11 +405,16 @@ final class NodeBuilder
             indexOffsets[keyLength] = size;
             a[a.length - 1] = indexOffsets;
         }
-        if (isExtra)
-            updateFunction.allocated(ObjectSizes.sizeOfArray(a));
-        else if (a.length != copyFrom.length)
-            updateFunction.allocated(ObjectSizes.sizeOfArray(a) -
-                                     (copyFrom.length == 0 ? 0 : ObjectSizes.sizeOfArray(copyFrom)));
+
+        if (updateFunction != UpdateFunction.noOp())
+        {
+            if (isExtra)
+                updateFunction.allocated(ObjectSizes.sizeOfArray(a));
+            else if (a.length != copyFrom.length)
+                updateFunction.allocated(ObjectSizes.sizeOfArray(a) -
+                                         (copyFrom.length == 0 ? 0 : ObjectSizes.sizeOfArray(copyFrom)));
+        }
+
         return a;
     }
 

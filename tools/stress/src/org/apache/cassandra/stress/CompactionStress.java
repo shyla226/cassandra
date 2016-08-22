@@ -207,8 +207,9 @@ public abstract class CompactionStress implements Runnable
         {
             //Setup
             SystemKeyspace.finishStartup(); //needed for early-open
-            CompactionManager.instance.setMaximumCompactorThreads(threads);
+
             CompactionManager.instance.setCoreCompactorThreads(threads);
+            CompactionManager.instance.setMaximumCompactorThreads(threads);
             CompactionManager.instance.setRate(0);
 
             StressProfile stressProfile = getStressProfile();

@@ -228,6 +228,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     // not final since we need to be able to change level on a file.
     protected volatile StatsMetadata sstableMetadata;
 
+    protected final EncodingStats stats;
+
     public final SerializationHeader header;
 
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
@@ -648,6 +650,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         super(desc, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
         this.sstableMetadata = sstableMetadata;
+        this.stats = new EncodingStats(sstableMetadata.minTimestamp, sstableMetadata.minLocalDeletionTime, sstableMetadata.minTTL);
         this.header = header;
         this.maxDataAge = maxDataAge;
         this.openReason = openReason;
@@ -1499,7 +1502,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return getCachedPosition(new KeyCacheKey(metadata.ksAndCFName, descriptor, key.getKey()), updateStats);
     }
 
-    protected RowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    public RowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
     {
         if (keyCache != null && keyCache.getCapacity() > 0 && metadata.params.caching.cacheKeys())
         {
@@ -2038,9 +2041,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public EncodingStats stats()
     {
-        // We could return sstable.header.stats(), but this may not be as accurate than the actual sstable stats (see
-        // SerializationHeader.make() for details) so we use the latter instead.
-        return new EncodingStats(getMinTimestamp(), getMinLocalDeletionTime(), getMinTTL());
+       return stats;
     }
 
     public Ref<SSTableReader> tryRef()

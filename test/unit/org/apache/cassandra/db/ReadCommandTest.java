@@ -294,6 +294,11 @@ public class ReadCommandTest
             {
 
             }
+
+            public boolean callOnTrivialMerge()
+            {
+                return false;
+            }
         }))
         {
 

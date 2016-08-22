@@ -1725,7 +1725,7 @@ public class CompactionManager implements CompactionManagerMBean
     {
         protected CompactionExecutor(int minThreads, int maxThreads, String name, BlockingQueue<Runnable> queue)
         {
-            super(minThreads, maxThreads, 60, TimeUnit.SECONDS, queue, new NamedThreadFactory(name, Thread.MIN_PRIORITY), "internal");
+            super(minThreads, maxThreads, 60, TimeUnit.SECONDS, queue, new NamedThreadFactory(name), "internal");
         }
 
         private CompactionExecutor(int threadCount, String name)

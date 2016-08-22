@@ -51,6 +51,7 @@ public class ColumnIndex
     private DataOutputBuffer reusableBuffer;
 
     public int columnIndexCount;
+    private int columnIndexCacheSize;
     private int[] indexOffsets;
 
     private final SerializationHeader header;
@@ -82,10 +83,12 @@ public class ColumnIndex
         this.version = version.correspondingMessagingVersion();
         this.observers = observers;
         this.idxSerializer = indexInfoSerializer;
+        this.columnIndexCacheSize = DatabaseDescriptor.getColumnIndexCacheSize();
     }
 
     public void reset()
     {
+        this.columnIndexCacheSize = DatabaseDescriptor.getColumnIndexCacheSize();
         this.initialPosition = writer.position();
         this.headerLength = -1;
         this.startPosition = -1;
@@ -139,7 +142,7 @@ public class ColumnIndex
 
     public List<IndexInfo> indexSamples()
     {
-        if (indexSamplesSerializedSize + columnIndexCount * TypeSizes.sizeof(0) <= DatabaseDescriptor.getColumnIndexCacheSize())
+        if (indexSamplesSerializedSize + columnIndexCount * TypeSizes.sizeof(0) <= columnIndexCacheSize)
         {
             return indexSamples;
         }

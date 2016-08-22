@@ -456,19 +456,19 @@ public class CacheService implements CacheServiceMBean
         {
             //Don't serialize old format entries since we didn't bother to implement serialization of both for simplicity
             //https://issues.apache.org/jira/browse/CASSANDRA-10778
-            if (!key.desc.version.storeRows()) return;
+            if (!key.desc().version.storeRows()) return;
 
             RowIndexEntry entry = CacheService.instance.keyCache.getInternal(key);
             if (entry == null)
                 return;
 
             out.write(cfs.metadata.ksAndCFBytes);
-            ByteBufferUtil.writeWithLength(key.key, out);
-            out.writeInt(key.desc.generation);
+            ByteBufferUtil.writeWithLength(key.key(), out);
+            out.writeInt(key.desc().generation);
             out.writeBoolean(true);
 
             SerializationHeader header = new SerializationHeader(false, cfs.metadata, cfs.metadata.partitionColumns(), EncodingStats.NO_STATS);
-            key.desc.getFormat().getIndexSerializer(cfs.metadata, key.desc.version, header).serializeForCache(entry, out);
+            key.desc().getFormat().getIndexSerializer(cfs.metadata, key.desc().version, header).serializeForCache(entry, out);
         }
 
         public Future<Pair<KeyCacheKey, RowIndexEntry>> deserialize(DataInputPlus input, ColumnFamilyStore cfs) throws IOException
