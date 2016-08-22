@@ -509,7 +509,10 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         }
         else
         {
-            logger.error("[Stream #{}] Streaming error occurred", planId(), e);
+            logger.error("[Stream #{}] Streaming error occurred on session with peer {}{}", planId(),
+                                                                                        peer.getHostAddress(),
+                                                                                        peer.equals(connecting) ? "" : " through " + connecting.getHostAddress(),
+                                                                                        e);
         }
         // send session failure message
         if (handler.isOutgoingConnected())
