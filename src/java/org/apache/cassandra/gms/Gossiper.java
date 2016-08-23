@@ -20,6 +20,7 @@ package org.apache.cassandra.gms;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.*;
@@ -128,14 +129,35 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private class GossipTask implements Runnable
     {
+        long clock;
+
+        public void reset()
+        {
+            clock = System.nanoTime();
+        }
+
+        public void check()
+        {
+            long now = System.nanoTime();
+
+            if (now - clock > Duration.ofMillis(10).getNano())
+            {
+                logger.warn("Delay of " + (now - clock) +"ns > 10ms", new Exception());
+            }
+
+            clock = now;
+        }
+
         public void run()
         {
             try
             {
                 //wait on messaging service to start listening
+                reset();
                 MessagingService.instance().waitUntilListening();
-
+                check();
                 taskLock.lock();
+                check();
 
                 /* Update the local heartbeat counter. */
                 endpointStateMap.get(FBUtilities.getBroadcastAddress()).getHeartBeatState().updateHeartBeat();
@@ -143,7 +165,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     logger.trace("My heartbeat is now {}", endpointStateMap.get(FBUtilities.getBroadcastAddress()).getHeartBeatState().getHeartBeatVersion());
                 final List<GossipDigest> gDigests = new ArrayList<GossipDigest>();
                 Gossiper.instance.makeRandomGossipDigest(gDigests);
-
+                check();
                 if (gDigests.size() > 0)
                 {
                     GossipDigestSyn digestSynMessage = new GossipDigestSyn(DatabaseDescriptor.getClusterName(),
@@ -157,6 +179,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
                     /* Gossip to some unreachable member with some probability to check if he is back up */
                     maybeGossipToUnreachableMember(message);
+                    check();
 
                     /* Gossip to a seed if we did not do so above, or we have seen less nodes
                        than there are seeds.  This prevents partitions where each group of nodes
@@ -176,8 +199,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                        See CASSANDRA-150 for more exposition. */
                     if (!gossipedToSeed || liveEndpoints.size() < seeds.size())
                         maybeGossipToSeed(message);
-
+                    check();
                     doStatusCheck();
+                    check();
                 }
             }
             catch (Exception e)
