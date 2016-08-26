@@ -24,6 +24,8 @@ import java.util.NoSuchElementException;
 import com.google.common.collect.PeekingIterator;
 
 import io.reactivex.Observable;
+import io.reactivex.ObservableEmitter;
+import io.reactivex.ObservableOnSubscribe;
 import org.apache.cassandra.db.AsObservable;
 import org.reactivestreams.Subscription;
 
@@ -44,24 +46,11 @@ public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterato
 
     public Observable<V> asObservable()
     {
-        return Observable.create(subscriber -> {
-            subscriber.onSubscribe(new Subscription()
-            {
-                public void request(long l)
-                {
+        return Observable.create(observableEmitter -> {
+            while (hasNext())
+                observableEmitter.onNext(next());
 
-                }
-
-                public void cancel()
-                {
-
-                }
-            });
-
-            while(hasNext())
-                subscriber.onNext(next());
-
-            subscriber.onComplete();
+            observableEmitter.onComplete();
         });
     }
 

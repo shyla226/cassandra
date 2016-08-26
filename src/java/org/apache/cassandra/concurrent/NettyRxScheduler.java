@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -29,11 +30,8 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.Disposables;
-import io.reactivex.internal.disposables.ArrayCompositeResource;
-import io.reactivex.internal.disposables.CompositeResource;
+import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.internal.disposables.EmptyDisposable;
-import io.reactivex.internal.disposables.ListCompositeResource;
-import io.reactivex.internal.disposables.SetCompositeResource;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -95,20 +93,14 @@ public class NettyRxScheduler extends Scheduler
     {
         private final EventExecutorGroup nettyEventLoop;
 
-        private final ListCompositeResource<Disposable> serial;
-        private final SetCompositeResource<Disposable> timed;
-        private final ArrayCompositeResource<Disposable> both;
+        private final CompositeDisposable tasks;
 
         volatile boolean disposed;
 
         Worker(EventExecutorGroup nettyEventLoop)
         {
             this.nettyEventLoop = nettyEventLoop;
-            this.serial = new ListCompositeResource<>(Disposables.consumeAndDispose());
-            this.timed = new SetCompositeResource<>(Disposables.consumeAndDispose());
-            this.both = new ArrayCompositeResource<>(2, Disposables.consumeAndDispose());
-            this.both.lazySet(0, serial);
-            this.both.lazySet(1, timed);
+            this.tasks = new CompositeDisposable();
         }
 
         @Override
@@ -117,8 +109,14 @@ public class NettyRxScheduler extends Scheduler
             if (!disposed)
             {
                 disposed = true;
-                both.dispose();
+                tasks.dispose();
             }
+        }
+
+        @Override
+        public boolean isDisposed()
+        {
+            return disposed;
         }
 
         @Override
@@ -129,7 +127,7 @@ public class NettyRxScheduler extends Scheduler
                 return EmptyDisposable.INSTANCE;
             }
 
-            return scheduleActual(action, 0, null, serial);
+            return scheduleActual(action, 0, null, tasks);
         }
 
         @Override
@@ -140,10 +138,10 @@ public class NettyRxScheduler extends Scheduler
                 return EmptyDisposable.INSTANCE;
             }
 
-            return scheduleActual(action, delayTime, unit, timed);
+            return scheduleActual(action, delayTime, unit, tasks);
         }
 
-        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, CompositeResource<Disposable> parent)
+        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, CompositeDisposable parent)
         {
             Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
 
@@ -162,11 +160,11 @@ public class NettyRxScheduler extends Scheduler
             {
                 if (delayTime <= 0)
                 {
-                    f = nettyEventLoop.submit(sr);
+                    f = nettyEventLoop.submit((Callable)sr);
                 }
                 else
                 {
-                    f = nettyEventLoop.schedule(sr, delayTime, unit);
+                    f = nettyEventLoop.schedule((Callable)sr, delayTime, unit);
                 }
                 sr.setFuture(f);
             }

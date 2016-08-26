@@ -29,7 +29,6 @@ import java.util.concurrent.locks.LockSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.openhft.affinity.AffinitySupport;
 import net.openhft.affinity.CpuLayout;
 import net.openhft.affinity.impl.VanillaCpuLayout;
 import org.apache.cassandra.utils.FBUtilities;

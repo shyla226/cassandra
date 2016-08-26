@@ -1588,7 +1588,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime).toBlocking().single(), command);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime).blockingSingle(), command);
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
@@ -1596,7 +1596,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         // When using serial CL, the ClientState should be provided
         assert !consistencyLevel.isSerialConsistency();
-        return read(group, consistencyLevel, null, queryStartNanoTime).toBlocking().single();
+        return read(group, consistencyLevel, null, queryStartNanoTime).blockingSingle();
     }
 
     /**
@@ -1658,7 +1658,7 @@ public class StorageProxy implements StorageProxyMBean
                 throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
             }
 
-            result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime).toBlocking().single();
+            result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime).blockingSingle();
         }
         catch (UnavailableException e)
         {
@@ -1804,18 +1804,6 @@ public class StorageProxy implements StorageProxyMBean
                         try
                         {
                             partitionIterator[0] = executor.handler.get();
-                            subscriber.onSubscribe(new Subscription()
-                            {
-                                public void request(long l)
-                                {
-
-                                }
-
-                                public void cancel()
-                                {
-
-                                }
-                            });
                             subscriber.onNext(partitionIterator[0]);
                             subscriber.onComplete();
                         }

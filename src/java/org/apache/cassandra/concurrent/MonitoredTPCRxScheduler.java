@@ -27,13 +27,9 @@ import java.util.concurrent.TimeoutException;
 
 import io.netty.util.HashedWheelTimer;
 import io.reactivex.Scheduler;
+import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.disposables.Disposables;
-import io.reactivex.internal.disposables.ArrayCompositeResource;
-import io.reactivex.internal.disposables.CompositeResource;
 import io.reactivex.internal.disposables.EmptyDisposable;
-import io.reactivex.internal.disposables.ListCompositeResource;
-import io.reactivex.internal.disposables.SetCompositeResource;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
 
@@ -83,20 +79,14 @@ public class MonitoredTPCRxScheduler
     {
         private final MonitoredTPCExecutorService.SingleCoreExecutor cpu;
 
-        private final ListCompositeResource<Disposable> serial;
-        private final SetCompositeResource<Disposable> timed;
-        private final ArrayCompositeResource<Disposable> both;
+        private final CompositeDisposable tasks;
 
         volatile boolean disposed;
 
         Worker(MonitoredTPCExecutorService.SingleCoreExecutor cpu)
         {
             this.cpu = cpu;
-            this.serial = new ListCompositeResource<>(Disposables.consumeAndDispose());
-            this.timed = new SetCompositeResource<>(Disposables.consumeAndDispose());
-            this.both = new ArrayCompositeResource<>(2, Disposables.consumeAndDispose());
-            this.both.lazySet(0, serial);
-            this.both.lazySet(1, timed);
+            this.tasks = new CompositeDisposable();
         }
 
         @Override
@@ -105,8 +95,13 @@ public class MonitoredTPCRxScheduler
             if (!disposed)
             {
                 disposed = true;
-                both.dispose();
+                tasks.dispose();
             }
+        }
+
+        public boolean isDisposed()
+        {
+            return disposed;
         }
 
         @Override
@@ -117,7 +112,7 @@ public class MonitoredTPCRxScheduler
                 return EmptyDisposable.INSTANCE;
             }
 
-            return scheduleActual(action, 0, null, serial);
+            return scheduleActual(action, 0, null, tasks);
         }
 
         @Override
@@ -128,10 +123,10 @@ public class MonitoredTPCRxScheduler
                 return EmptyDisposable.INSTANCE;
             }
 
-            return scheduleActual(action, delayTime, unit, timed);
+            return scheduleActual(action, delayTime, unit, tasks);
         }
 
-        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, CompositeResource<Disposable> parent)
+        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, CompositeDisposable parent)
         {
             Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
 

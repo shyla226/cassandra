@@ -62,25 +62,11 @@ public final class FilteredPartitions extends BasePartitions<RowIterator, BasePa
 
     public Observable<RowIterator> asObservable()
     {
-        return Observable.create(subscriber -> {
+        return Observable.create(observableEmitter -> {
+            while (hasNext())
+                observableEmitter.onNext(next());
 
-            subscriber.onSubscribe(new Subscription()
-            {
-                public void request(long l)
-                {
-
-                }
-
-                public void cancel()
-                {
-
-                }
-            });
-
-            while(hasNext())
-                subscriber.onNext(next());
-
-            subscriber.onComplete();
+            observableEmitter.onComplete();
             close();
         });
     }

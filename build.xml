@@ -451,6 +451,7 @@
           <dependency groupId="net.mintern" artifactId="primitive" version="1.0" />
           <dependency groupId="com.github.rholder" artifactId="snowball-stemmer" version="1.3.0.581.1" />
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
+          <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava" version="2.0.0-RC1" />
 	  <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.2.6" />
         </dependencyManagement>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -617,7 +618,8 @@
         <dependency groupId="org.fusesource" artifactId="sigar"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
-	<dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
+	    <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
+        <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava" />
       </artifact:pom>
       <artifact:pom id="thrift-pom"
                     artifactId="cassandra-thrift"
@@ -822,7 +824,7 @@
         <copy todir="${build.classes.main}">
             <fileset dir="${build.src.resources}" />
         </copy>
-	<!--<copy todir="${basedir}/conf" file="${build.classes.main}/META-INF/hotspot_compiler"/>-->
+	    <copy todir="${basedir}/conf" file="${build.classes.main}/META-INF/hotspot_compiler"/>
     </target>
 
     <!-- Stress build file -->

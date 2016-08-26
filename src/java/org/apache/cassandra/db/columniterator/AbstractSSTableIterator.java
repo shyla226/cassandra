@@ -314,24 +314,11 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
     public Observable<Unfiltered> asObservable()
     {
-        return Observable.create(subscriber -> {
-            subscriber.onSubscribe(new Subscription()
-            {
-                public void request(long l)
-                {
-
-                }
-
-                public void cancel()
-                {
-
-                }
-            });
-
+        return Observable.create(observableEmitter -> {
             while (hasNext())
-                subscriber.onNext(next());
+                observableEmitter.onNext(next());
 
-            subscriber.onComplete();
+            observableEmitter.onComplete();
         });
     }
 

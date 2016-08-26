@@ -406,7 +406,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
         }
 
-        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime).toBlocking().single())
+        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime).blockingSingle())
         {
             return asMaterializedMap(iter);
         }

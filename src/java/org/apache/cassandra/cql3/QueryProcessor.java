@@ -332,7 +332,7 @@ public class QueryProcessor implements QueryHandler
         {
             ParsedStatement.Prepared prepared = prepareInternal(query);
             ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime())
-                                                     .toBlocking().single();
+                                                     .blockingSingle();
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else

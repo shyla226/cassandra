@@ -392,7 +392,7 @@ public class SelectStatement implements CQLStatement
         ResultMessage.Rows msg;
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
-            msg = processResults(Observable.just(page), options, nowInSec, userLimit).toBlocking().single();
+            msg = processResults(Observable.just(page), options, nowInSec, userLimit).blockingSingle();
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
@@ -435,7 +435,7 @@ public class SelectStatement implements CQLStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(Observable.just(data), options, nowInSec, userLimit).subscribeOn(Schedulers.io()).toBlocking().single();
+                    return processResults(Observable.just(data), options, nowInSec, userLimit).subscribeOn(Schedulers.io()).blockingSingle();
                 }
             }
             else
@@ -459,7 +459,7 @@ public class SelectStatement implements CQLStatement
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
     {
-        return process(Observable.just(partitions), QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT)).toBlocking().single();
+        return process(Observable.just(partitions), QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT)).blockingSingle();
     }
 
     public String keyspace()

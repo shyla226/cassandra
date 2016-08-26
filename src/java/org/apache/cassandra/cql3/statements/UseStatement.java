@@ -64,6 +64,6 @@ public class UseStatement extends ParsedStatement implements CQLStatement
     {
         // In production, internal queries are exclusively on the system keyspace and 'use' is thus useless
         // but for some unit tests we need to set the keyspace (e.g. for tests with DROP INDEX)
-        return execute(state, options, System.nanoTime()).toBlocking().single();
+        return execute(state, options, System.nanoTime()).blockingSingle();
     }
 }

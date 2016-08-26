@@ -30,6 +30,7 @@ import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.Scheduler;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
@@ -215,10 +216,11 @@ public class EventLoopBench {
         await(c, cdl);
     }
 
-    public class LatchedObserver<T> extends Observer<T>
+    public class LatchedObserver<T> implements Observer<T>
     {
         public CountDownLatch latch = new CountDownLatch(1);
         private final Blackhole bh;
+        private Disposable disposable;
 
         public LatchedObserver(Blackhole bh) {
             this.bh = bh;
@@ -227,11 +229,17 @@ public class EventLoopBench {
         @Override
         public void onComplete() {
             latch.countDown();
+            disposable.dispose();
         }
 
         @Override
         public void onError(Throwable e) {
             latch.countDown();
+        }
+
+        public void onSubscribe(Disposable disposable)
+        {
+            this.disposable = disposable;
         }
 
         @Override
