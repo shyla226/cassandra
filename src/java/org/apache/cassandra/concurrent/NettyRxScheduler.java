@@ -19,6 +19,7 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -34,9 +35,20 @@ import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.service.NativeTransportService;
 
 
 /**
+ * RxScheduler which wraps the Netty event loop scheduler.
+ *
+ * This is initialized on startup:
+ * @see NativeTransportService#initializeTPC()
+ *
+ * Each netty loop run managed on a single thread which may be pinned to a particular
+ * CPU.  Cassandra can route tasks relative to a particular partition to a single loop
+ * thereby avoiding any multi-threaded access, removing the need to concurrent datastructures
+ * and locks.
  *
  */
 public class NettyRxScheduler extends Scheduler
@@ -48,6 +60,8 @@ public class NettyRxScheduler extends Scheduler
             return new NettyRxScheduler(GlobalEventExecutor.INSTANCE);
         }
     };
+
+    final static CopyOnWriteArrayList<NettyRxScheduler> perCoreSchedulers = new CopyOnWriteArrayList<>();
 
     final EventExecutorGroup eventLoop;
 
@@ -64,6 +78,7 @@ public class NettyRxScheduler extends Scheduler
             assert loop.inEventLoop();
             scheduler = new NettyRxScheduler(loop);
             localNettyEventLoop.set(scheduler);
+            perCoreSchedulers.add(scheduler);
         }
 
         return scheduler;
@@ -73,6 +88,17 @@ public class NettyRxScheduler extends Scheduler
     {
         assert eventLoop != null;
         this.eventLoop = eventLoop;
+    }
+
+
+    public NettyRxScheduler getForCore(int core)
+    {
+        return perCoreSchedulers.get(core % perCoreSchedulers.size());
+    }
+
+    public NettyRxScheduler getForKey(DecoratedKey key)
+    {
+        return perCoreSchedulers.get( (int)(((Long)key.getToken().getTokenValue()) % perCoreSchedulers.size() ) );
     }
 
     public NettyRxScheduler asGroup()

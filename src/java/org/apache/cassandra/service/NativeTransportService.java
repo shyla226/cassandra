@@ -36,9 +36,11 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import net.openhft.affinity.AffinitySupport;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Handles native transport server lifecycle and associated resources. Lazily initialized.
@@ -53,6 +55,7 @@ public class NativeTransportService
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
 
     private boolean initialized = false;
+    private boolean tpcInitialized = false;
     private EventLoopGroup workerGroup;
 
     /**
@@ -121,14 +124,14 @@ public class NativeTransportService
         initialized = true;
     }
 
-    /**
-     * Starts native transport servers.
-     */
-    public void start()
+    private void initializeTPC()
     {
-        initialize();
+        if (tpcInitialized)
+            return;
 
-        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "2"));
+        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
+
+        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
 
         for (int i = 0; i < nettyThreads; i++)
         {
@@ -158,6 +161,18 @@ public class NativeTransportService
         {
             ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
         }
+
+        tpcInitialized = true;
+    }
+
+
+    /**
+     * Starts native transport servers.
+     */
+    public void start()
+    {
+        initialize();
+        initializeTPC();
 
         servers.forEach(Server::start);
     }
