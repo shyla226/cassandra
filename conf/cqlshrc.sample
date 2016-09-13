@@ -220,6 +220,17 @@ port = 9042
 ;; the main process at a time
 ; chunksize =  1000
 
+;; whether to use prepared statements when importing, by default True.
+; preparedstatements = False
+
+;; the time to live in seconds, by default data will not expire
+; ttl = 3600
+
+;; Set this to false in order to leave missing csv fields unchanged.
+;; By default it is true, which means that Nulls are inserted by creating tombstones.
+; insertnullformissingvalues = False
+
+
 
 
 ;; The options for COPY can also be specified per-table.  The following

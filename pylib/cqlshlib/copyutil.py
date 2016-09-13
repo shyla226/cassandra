@@ -48,7 +48,7 @@ from cassandra.cluster import Cluster, DefaultConnection
 from cassandra.cqltypes import ReversedType, UserType
 from cassandra.metadata import protect_name, protect_names, protect_value
 from cassandra.policies import RetryPolicy, WhiteListRoundRobinPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
-from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory
+from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory, UNSET_VALUE
 from cassandra.util import Date, Time
 
 from cql3handling import CqlRuleSet
@@ -360,6 +360,8 @@ class CopyTask(object):
         copy_options['maxoutputsize'] = int(opts.pop('maxoutputsize', '-1'))
         copy_options['preparedstatements'] = bool(opts.pop('preparedstatements', 'true').lower() == 'true')
         copy_options['ttl'] = int(opts.pop('ttl', -1))
+        copy_options['insertnullformissingvalues'] = bool(opts.pop('insertnullformissingvalues', 'true')
+                                                          .lower() == 'true')
 
         # Hidden properties, they do not appear in the documentation but can be set in config files
         # or on the cmd line but w/o completion
@@ -1793,6 +1795,7 @@ class ImportConversion(object):
         self.date_time_format = parent.date_time_format.timestamp_format
         self.debug = parent.debug
         self.encoding = parent.encoding
+        self.insert_null_for_missing_values = parent.insert_null_for_missing_values
 
         self.table_meta = table_meta
         self.primary_key_indexes = [self.columns.index(col.name) for col in self.table_meta.primary_key]
@@ -2052,13 +2055,19 @@ class ImportConversion(object):
 
     def get_null_val(self):
         """
-        Return the null value that is inserted for fields that are missing from csv files.
+        Return the value that is inserted for fields that are missing from csv files.
         For counters we should return zero so that the counter value won't be incremented.
-        For everything else we return nulls, this means None if we use prepared statements
-        or "NULL" otherwise. Note that for counters we never use prepared statements, so we
-        only check is_counter when use_prepared_statements is false.
+        For everything else we return UNSET or None for prepared statements and NULL for
+        non-prepared statements. UNSET values will not change any value already existing in
+        Cassandra but they won't generate a tombstone either. By default we use None, which
+        will generate a tombstone, users can change this behavior via INSERTNULLFORMISSINGVALUES.
+        Note that for counters we never use prepared statements, so we only check is_counter
+        when use_prepared_statements is false.
         """
-        return None if self.use_prepared_statements else ("0" if self.is_counter else "NULL")
+        if self.use_prepared_statements:  # no counters when use_prepared_statements is true
+            return None if self.insert_null_for_missing_values else UNSET_VALUE
+
+        return "0" if self.is_counter else "NULL"
 
     def convert_row(self, row):
         """
@@ -2251,6 +2260,7 @@ class ImportProcess(ChildProcess):
         self.max_inflight_messages = options.copy['maxinflightmessages']
         self.max_backoff_attempts = options.copy['maxbackoffattempts']
         self.request_timeout = options.copy['requesttimeout']
+        self.insert_null_for_missing_values = options.copy['insertnullformissingvalues']
 
         self.dialect_options = options.dialect
         self._session = None
