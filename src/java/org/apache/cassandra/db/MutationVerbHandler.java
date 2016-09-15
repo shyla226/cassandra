@@ -57,23 +57,27 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             replyTo = InetAddress.getByAddress(from);
         }
 
-        try
+        if (message.version < MessagingService.VERSION_30 && LegacyBatchlogMigrator.isLegacyBatchlogMutation(message.payload))
         {
-            if (message.version < MessagingService.VERSION_30 && LegacyBatchlogMigrator.isLegacyBatchlogMutation(message.payload))
+            try
             {
                 LegacyBatchlogMigrator.handleLegacyMutation(message.payload);
                 reply(id, replyTo);
+                return;
             }
-            else
-                message.payload.applyFuture().thenAccept(o -> reply(id, replyTo)).exceptionally(wto -> {
-                    failed();
-                    return null;
-                });
+            catch (WriteTimeoutException wto)
+            {
+                failed();
+            }
         }
-        catch (WriteTimeoutException wto)
-        {
-            failed();
-        }
+
+        message.payload.applyAsync().subscribe(
+                // onNext
+                v -> reply(id, replyTo),
+
+                // onError
+                exc -> failed()
+        );
     }
 
     /**

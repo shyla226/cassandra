@@ -98,7 +98,7 @@ public class CommitLogSegmentManagerTest
         Thread dummyThread = new Thread( () ->
         {
             for (int i = 0; i < 20; i++)
-                CommitLog.instance.add(m);
+                CommitLog.instance.add(m).blockingLast();
         });
         dummyThread.start();
 

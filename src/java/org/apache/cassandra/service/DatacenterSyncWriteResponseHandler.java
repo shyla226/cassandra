@@ -85,7 +85,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         }
 
         // all the quorum conditions are met
-        signal();
+        signalComplete();
     }
 
     protected int ackCount()

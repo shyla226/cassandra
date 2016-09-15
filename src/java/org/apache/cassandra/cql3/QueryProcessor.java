@@ -219,7 +219,7 @@ public class QueryProcessor implements QueryHandler
         statement.validate(clientState);
 
         return statement.execute(queryState, options, queryStartNanoTime)
-                        .filter(result ->  result != null)
+                        .filter(result -> result != null)
                         .cast(ResultMessage.class)  //Deal with generics madness
                         .defaultIfEmpty(new ResultMessage.Void());
     }

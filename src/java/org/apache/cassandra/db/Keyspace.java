@@ -420,19 +420,19 @@ public class Keyspace
         }
     }
 
-    public CompletableFuture<?> apply(Mutation mutation, boolean writeCommitLog)
+    public io.reactivex.Observable<CommitLogPosition> apply(Mutation mutation, boolean writeCommitLog)
     {
-        return apply(mutation, writeCommitLog, true, false, null);
+        return apply(mutation, writeCommitLog, true, false);
     }
 
-    public CompletableFuture<?> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    public io.reactivex.Observable<CommitLogPosition> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
-        return apply(mutation, writeCommitLog, updateIndexes, false, null);
+        return apply(mutation, writeCommitLog, updateIndexes, false);
     }
 
-    public CompletableFuture<?> applyFromCommitLog(Mutation mutation)
+    public io.reactivex.Observable<CommitLogPosition> applyFromCommitLog(Mutation mutation)
     {
-        return apply(mutation, false, true, true, null);
+        return apply(mutation, false, true, true);
     }
 
     /**
@@ -444,19 +444,23 @@ public class Keyspace
      * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
      * @param isClReplay     true if caller is the commitlog replayer
      */
-    public CompletableFuture<?> apply(final Mutation mutation,
-                                      final boolean writeCommitLog,
-                                      boolean updateIndexes,
-                                      boolean isClReplay,
-                                      CompletableFuture<?> future)
+    public io.reactivex.Observable<CommitLogPosition> apply(final Mutation mutation,
+                                                            final boolean writeCommitLog,
+                                                            boolean updateIndexes,
+                                                            boolean isClReplay)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
-            throw new RuntimeException("Testing write failures");
+            return io.reactivex.Observable.error(new RuntimeException("Testing write failures"));
 
-        Lock[] locks = null;
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
-        final CompletableFuture<?> mark = future == null ? new CompletableFuture<>() : future;
 
+        // TODO support MVs
+        assert !requiresViewUpdate;
+
+        // Lock[] locks = null;
+        // final CompletableFuture<?> mark = future == null ? new CompletableFuture<>() : future;
+
+        /*
         if (requiresViewUpdate)
         {
             mutation.viewLockAcquireStart.compareAndSet(0L, System.currentTimeMillis());
@@ -511,17 +515,25 @@ public class Keyspace
                     columnFamilyStores.get(cfid).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
             }
         }
-        int nowInSec = FBUtilities.nowInSeconds();
-        try (OpOrder.Group opGroup = writeOrder.start())
-        {
-            // write the mutation to the commitlog and memtables
-            CommitLogPosition commitLogPosition = null;
-            if (writeCommitLog)
-            {
-                Tracing.trace("Appending to commitlog");
-                commitLogPosition = CommitLog.instance.add(mutation);
-            }
+        */
 
+        int nowInSec = FBUtilities.nowInSeconds();
+        OpOrder.Group opGroup = writeOrder.start();
+
+        // write the mutation to the commitlog
+        io.reactivex.Observable<CommitLogPosition> commitLogPositionObservable;
+        if (writeCommitLog)
+        {
+            Tracing.trace("Appending to commitlog");
+            commitLogPositionObservable = CommitLog.instance.add(mutation);
+        }
+        else
+        {
+            // TODO just() should be able to take a single null argument, not sure why RxJava 2 complains about it
+            commitLogPositionObservable = io.reactivex.Observable.just(CommitLogPosition.NONE);
+        }
+
+        return commitLogPositionObservable.map(commitLogPosition -> {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
@@ -530,8 +542,9 @@ public class Keyspace
                     logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().cfId, upd.metadata().ksName, upd.metadata().cfName);
                     continue;
                 }
-                AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
 
+                /*
+                AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
                 if (requiresViewUpdate)
                 {
                     try
@@ -547,26 +560,23 @@ public class Keyspace
                         throw t;
                     }
                 }
+                */
 
                 Tracing.trace("Adding to {} memtable", upd.metadata().cfName);
                 UpdateTransaction indexTransaction = updateIndexes
                                                      ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
                                                      : UpdateTransaction.NO_OP;
-                cfs.apply(upd, indexTransaction, opGroup, commitLogPosition);
+                cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
+
+                /*
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());
+                */
             }
-            mark.complete(null);
-            return mark;
-        }
-        finally
-        {
-            if (locks != null)
-            {
-                for (Lock lock : locks)
-                    lock.unlock();
-            }
-        }
+            return commitLogPosition;
+        }).doAfterTerminate(() -> {
+            opGroup.close();
+        });
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

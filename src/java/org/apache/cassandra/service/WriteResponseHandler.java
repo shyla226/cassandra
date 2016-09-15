@@ -67,7 +67,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     public void response(MessageIn<T> m)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
-            signal();
+            signalComplete();
     }
 
     protected int ackCount()

@@ -20,12 +20,20 @@ package org.apache.cassandra.db.commitlog;
 import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.zip.CRC32;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.reactivex.Observable;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -240,7 +248,7 @@ public class CommitLog implements CommitLogMBean
      * @param mutation the Mutation to add to the log
      * @throws WriteTimeoutException
      */
-    public CommitLogPosition add(Mutation mutation) throws WriteTimeoutException
+    public Observable<CommitLogPosition> add(Mutation mutation) throws WriteTimeoutException
     {
         assert mutation != null;
 
@@ -252,11 +260,13 @@ public class CommitLog implements CommitLogMBean
             int totalSize = size + ENTRY_OVERHEAD_SIZE;
             if (totalSize > MAX_MUTATION_SIZE)
             {
-                throw new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
-                                                                 FBUtilities.prettyPrintMemory(totalSize),
-                                                                 FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE)));
+                return Observable.error(
+                    new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
+                                                               FBUtilities.prettyPrintMemory(totalSize),
+                                                               FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
             }
 
+            // TODO convert allocation to Rx/Observable
             Allocation alloc = segmentManager.allocate(mutation, totalSize);
 
             CRC32 checksum = new CRC32();
@@ -275,19 +285,18 @@ public class CommitLog implements CommitLogMBean
             }
             catch (IOException e)
             {
-                throw new FSWriteError(e, alloc.getSegment().getPath());
+                return Observable.error(new FSWriteError(e, alloc.getSegment().getPath()));
             }
             finally
             {
                 alloc.markWritten();
             }
 
-            executor.finishWriteFor(alloc);
-            return alloc.getCommitLogPosition();
+            return executor.finishWriteFor(alloc).map(syncTimestamp -> alloc.getCommitLogPosition());
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, segmentManager.allocatingFrom().getPath());
+            return Observable.error(new FSWriteError(e, segmentManager.allocatingFrom().getPath()));
         }
     }
 

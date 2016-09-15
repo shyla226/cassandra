@@ -608,26 +608,30 @@ public abstract class Message
             QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion(), request.getStreamId());
             logger.trace("Received: {}, v={}", request, connection.getVersion());
 
-            request.execute(qstate, queryStartNanoTime)
-                   .subscribe(response -> {
-                                  response.setStreamId(request.getStreamId());
+            request.execute(qstate, queryStartNanoTime).subscribe(
+                    // onNext
+                    response -> {
+                        response.setStreamId(request.getStreamId());
 
-                                  response.setWarnings(ClientWarn.instance.getWarnings());
-                                  response.attach(connection);
-                                  connection.applyStateTransition(request.type, response.type);
+                        response.setWarnings(ClientWarn.instance.getWarnings());
+                        response.attach(connection);
+                        connection.applyStateTransition(request.type, response.type);
 
-                                  logger.trace("Responding: {}, v={}", response, connection.getVersion());
-                                  flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                              },
-                              t -> {
-                                  JVMStabilityInspector.inspectThrowable(t);
-                                  UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
-                                  Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
-                                  flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                              },
-                              () -> {
-                                  ClientWarn.instance.resetWarnings();
-                              });
+                        logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                    },
+
+                    // onError
+                    t -> {
+                        JVMStabilityInspector.inspectThrowable(t);
+                        UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
+                        Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
+                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                    },
+
+                    // onComplete
+                    ClientWarn.instance::resetWarnings
+            );
         }
 
         /** Aggregates writes from this event loop to be flushed at once

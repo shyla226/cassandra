@@ -455,7 +455,7 @@ public class CommitLogStressTest
                     dataSize += sz;
                 }
 
-                clsp = commitLog.add(new Mutation(builder.build()));
+                clsp = commitLog.add(new Mutation(builder.build())).blockingFirst();
                 counter.incrementAndGet();
             }
         }

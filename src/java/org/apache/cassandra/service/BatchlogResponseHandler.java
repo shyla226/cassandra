@@ -21,11 +21,11 @@ package org.apache.cassandra.service;
 import java.net.InetAddress;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessagingService;
 
 public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
 {
@@ -70,9 +70,9 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         wrapped.assureSufficientLiveNodes();
     }
 
-    public void get() throws WriteTimeoutException, WriteFailureException
+    public Observable<Integer> get() throws WriteTimeoutException, WriteFailureException
     {
-        wrapped.get();
+        return wrapped.get();
     }
 
     protected int totalBlockFor()
@@ -92,7 +92,7 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
 
     protected void signal()
     {
-        wrapped.signal();
+        wrapped.signalComplete();
     }
 
     public static class BatchlogCleanup

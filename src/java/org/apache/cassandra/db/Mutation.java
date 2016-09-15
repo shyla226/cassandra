@@ -20,12 +20,9 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -209,27 +206,20 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    private CompletableFuture<?> applyFuture(boolean durableWrites)
+    private io.reactivex.Observable<CommitLogPosition> applyAsync(boolean durableWrites)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
         return ks.apply(this, durableWrites);
     }
 
-    public CompletableFuture<?> applyFuture()
+    public io.reactivex.Observable<CommitLogPosition> applyAsync()
     {
-        return applyFuture(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
+        return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
     }
 
     public void apply(boolean durableWrites)
     {
-        try
-        {
-            Uninterruptibles.getUninterruptibly(applyFuture(durableWrites));
-        }
-        catch (ExecutionException e)
-        {
-            throw Throwables.propagate(e.getCause());
-        }
+        applyAsync(durableWrites).blockingLast();
     }
 
     /*

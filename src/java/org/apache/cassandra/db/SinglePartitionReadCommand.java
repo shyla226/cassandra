@@ -846,7 +846,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                 final Mutation mutation = new Mutation(PartitionUpdate.fromIterator(iter, columnFilter()));
                 StageManager.getStage(Stage.MUTATION).execute(() -> {
                     // skipping commitlog and index updates is fine since we're just de-fragmenting existing data
-                    Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false);
+                    // TODO make this async
+                    Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false).blockingNext();
                 });
             }
         }

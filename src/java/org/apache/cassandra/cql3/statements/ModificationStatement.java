@@ -438,10 +438,10 @@ public abstract class ModificationStatement implements CQLStatement
 
         return hasConditions()
              ? Observable.just(executeWithCondition(queryState, options, queryStartNanoTime))
-             : Observable.just(executeWithoutCondition(queryState, options, queryStartNanoTime));
+             : executeWithoutCondition(queryState, options, queryStartNanoTime);
     }
 
-    private ResultMessage executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    private Observable<ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -452,9 +452,10 @@ public abstract class ModificationStatement implements CQLStatement
 
         Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState), queryStartNanoTime);
         if (!mutations.isEmpty())
-            StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
+            return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime)
+                    .map(v -> new ResultMessage.Void());
 
-        return new ResultMessage.Void();
+        return Observable.just(new ResultMessage.Void());
     }
 
     public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)

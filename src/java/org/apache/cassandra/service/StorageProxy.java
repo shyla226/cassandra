@@ -125,7 +125,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.UUIDSerializer;
-import org.reactivestreams.Subscription;
 
 
 public class StorageProxy implements StorageProxyMBean
@@ -646,91 +645,101 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     /**
-     * Use this method to have these Mutations applied
-     * across all replicas. This method will take care
-     * of the possibility of a replica being down and hint
-     * the data across to some other replica.
+     * Use this method to have these Mutations applied across all replicas. This method will take care of the
+     * possibility of a replica being down and hint the data across to some other replica.
      *
      * @param mutations the mutations to be applied across the replicas
      * @param consistency_level the consistency level for the operation
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
+     * @return an Observable that emits a single (null) item when all mutations have completed
      */
-    public static void mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
+    public static Observable<Integer> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
         long startTime = System.nanoTime();
-        List<AbstractWriteResponseHandler<IMutation>> responseHandlers = new ArrayList<>(mutations.size());
 
-        try
-        {
-            for (IMutation mutation : mutations)
-            {
-                if (mutation instanceof CounterMutation)
-                {
-                    responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime));
-                }
-                else
-                {
-                    WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-                    responseHandlers.add(performWrite(mutation, consistency_level, localDataCenter, standardWritePerformer, null, wt, queryStartNanoTime));
-                }
-            }
+        Observable<Integer> observable = null;
 
-            // wait for writes.  throws TimeoutException if necessary
-            for (AbstractWriteResponseHandler<IMutation> responseHandler : responseHandlers)
-            {
-                responseHandler.get();
-            }
-        }
-        catch (WriteTimeoutException|WriteFailureException ex)
+        for (IMutation mutation : mutations)
         {
-            if (consistency_level == ConsistencyLevel.ANY)
+            logger.warn("#### executing mutation: {}", mutation);
+            Observable<Integer> singleMutationObservable;
+            if (mutation instanceof CounterMutation)
             {
-                hintMutations(mutations);
+                singleMutationObservable = mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime).get();
             }
             else
             {
-                if (ex instanceof WriteFailureException)
-                {
-                    writeMetrics.failures.mark();
-                    writeMetricsMap.get(consistency_level).failures.mark();
-                    WriteFailureException fe = (WriteFailureException)ex;
-                    Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                  fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
-                }
-                else
-                {
-                    writeMetrics.timeouts.mark();
-                    writeMetricsMap.get(consistency_level).timeouts.mark();
-                    WriteTimeoutException te = (WriteTimeoutException)ex;
-                    Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
-                }
-                throw ex;
+                WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
+                singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, standardWritePerformer, null, wt, queryStartNanoTime).get();
             }
+
+            observable = observable == null
+                         ? singleMutationObservable
+                         : observable.mergeWith(singleMutationObservable);
         }
-        catch (UnavailableException e)
-        {
-            writeMetrics.unavailables.mark();
-            writeMetricsMap.get(consistency_level).unavailables.mark();
-            Tracing.trace("Unavailable");
-            throw e;
-        }
-        catch (OverloadedException e)
-        {
-            writeMetrics.unavailables.mark();
-            writeMetricsMap.get(consistency_level).unavailables.mark();
-            Tracing.trace("Overloaded");
-            throw e;
-        }
-        finally
-        {
-            long latency = System.nanoTime() - startTime;
-            writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistency_level).addNano(latency);
-        }
+        assert observable != null;
+
+
+        // we only want to emit a single item when all mutations have completed
+        return observable
+                .map(v -> {
+                    logger.warn("#### emitting single mutation");
+                    return v;
+                })
+                .last()
+                .map(v -> {
+                    logger.warn("#### emitting final mutation");
+                    return v;
+                })
+                .doAfterTerminate(() -> {
+                    long latency = System.nanoTime() - startTime;
+                    writeMetrics.addNano(latency);
+                    writeMetricsMap.get(consistency_level).addNano(latency);
+                })
+                .doOnError(exc -> {
+                    if (exc instanceof WriteTimeoutException || exc instanceof WriteFailureException)
+                    {
+                        if (consistency_level == ConsistencyLevel.ANY)
+                        {
+                            // TODO Rx-ify?
+                            hintMutations(mutations);
+                        }
+                        else
+                        {
+                            if (exc instanceof WriteFailureException)
+                            {
+                                writeMetrics.failures.mark();
+                                writeMetricsMap.get(consistency_level).failures.mark();
+                                WriteFailureException fe = (WriteFailureException)exc;
+                                Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
+                                              fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
+                            }
+                            else
+                            {
+                                writeMetrics.timeouts.mark();
+                                writeMetricsMap.get(consistency_level).timeouts.mark();
+                                WriteTimeoutException te = (WriteTimeoutException)exc;
+                                Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
+                            }
+                        }
+                    }
+                    else if (exc instanceof UnavailableException)
+                    {
+                        writeMetrics.unavailables.mark();
+                        writeMetricsMap.get(consistency_level).unavailables.mark();
+                        Tracing.trace("Unavailable");
+                    }
+                    else if (exc instanceof OverloadedException)
+                    {
+                        writeMetrics.unavailables.mark();
+                        writeMetricsMap.get(consistency_level).unavailables.mark();
+                        Tracing.trace("Overloaded");
+                    }
+                });
     }
 
     /**
@@ -891,10 +900,10 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("unchecked")
-    public static void mutateWithTriggers(Collection<? extends IMutation> mutations,
-                                          ConsistencyLevel consistencyLevel,
-                                          boolean mutateAtomically,
-                                          long queryStartNanoTime)
+    public static Observable<Integer> mutateWithTriggers(Collection<? extends IMutation> mutations,
+                                                      ConsistencyLevel consistencyLevel,
+                                                      boolean mutateAtomically,
+                                                      long queryStartNanoTime)
     throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
     {
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
@@ -904,13 +913,23 @@ public class StorageProxy implements StorageProxyMBean
                               .updatesAffectView(mutations, true);
 
         if (augmented != null)
+        {
+            // TODO Rx-ify
             mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime);
+            return Observable.just(0);
+        }
         else
         {
             if (mutateAtomically || updatesView)
+            {
+                // TODO Rx-ify
                 mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime);
+                return Observable.just(0);
+            }
             else
-                mutate(mutations, consistencyLevel, queryStartNanoTime);
+            {
+                return mutate(mutations, consistencyLevel, queryStartNanoTime);
+            }
         }
     }
 
@@ -925,6 +944,7 @@ public class StorageProxy implements StorageProxyMBean
      * @param requireQuorumForRemove at least a quorum of nodes will see update before deleting batchlog
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
+    // TODO Rx-ify
     public static void mutateAtomically(Collection<Mutation> mutations,
                                         ConsistencyLevel consistency_level,
                                         boolean requireQuorumForRemove,
@@ -1337,7 +1357,22 @@ public class StorageProxy implements StorageProxyMBean
             submitHint(mutation, endpointsToHint, responseHandler);
 
         if (insertLocal)
-            performLocally(stage, Optional.of(mutation), mutation::apply, responseHandler);
+        {
+            mutation.applyAsync().subscribe(
+                    // onNext (unused)
+                    v -> {},
+
+                    // onError
+                    exc -> {
+                        if (!(exc instanceof WriteTimeoutException))
+                            logger.error("Failed to apply mutation locally : {}", exc);
+                        responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                    },
+
+                    // onComplete
+                    () -> responseHandler.response(null)
+            );
+        }
 
         if (dcGroups != null)
         {

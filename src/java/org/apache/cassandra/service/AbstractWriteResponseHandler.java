@@ -22,9 +22,16 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
+import io.reactivex.Observable;
+import io.reactivex.ObservableEmitter;
+import io.reactivex.ObservableOnSubscribe;
+import io.reactivex.Observer;
+import io.reactivex.subjects.BehaviorSubject;
+import io.reactivex.subjects.PublishSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,13 +42,11 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackWithFailure<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger( AbstractWriteResponseHandler.class );
 
-    private final SimpleCondition condition = new SimpleCondition();
     protected final Keyspace keyspace;
     protected final Collection<InetAddress> naturalEndpoints;
     public final ConsistencyLevel consistencyLevel;
@@ -54,9 +59,12 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
 
+    final PublishSubject<Integer> publishSubject = PublishSubject.create();
+    final Observable<Integer> observable;
+
     /**
      * @param callback A callback to be called when the write is successful.
-     * @param queryStartNanoTime
+     * @param queryStartNanoTime the time at which the query started
      */
     protected AbstractWriteResponseHandler(Keyspace keyspace,
                                            Collection<InetAddress> naturalEndpoints,
@@ -70,13 +78,21 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.pendingEndpoints = pendingEndpoints;
         this.consistencyLevel = consistencyLevel;
         this.naturalEndpoints = naturalEndpoints;
+        // TODO find usages of callback, convert to Rx style
         this.callback = callback;
         this.writeType = writeType;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.queryStartNanoTime = queryStartNanoTime;
+        observable = makeObservable();
     }
 
-    public void get() throws WriteTimeoutException, WriteFailureException
+
+    public Observable<Integer> get()
+    {
+        return observable;
+    }
+
+    private Observable<Integer> makeObservable()
     {
         long requestTimeout = writeType == WriteType.COUNTER
                             ? DatabaseDescriptor.getCounterWriteRpcTimeout()
@@ -84,32 +100,31 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         long timeout = TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
 
-        boolean success;
-        try
-        {
-            success = condition.await(timeout, TimeUnit.NANOSECONDS);
-        }
-        catch (InterruptedException ex)
-        {
-            throw new AssertionError(ex);
-        }
+        return publishSubject
+            .map(v -> {
+                // TODO this never gets called
+                logger.warn("#### got emitted value: {}", v);
+                return v;
+            })
+            // .timeout(timeout, TimeUnit.NANOSECONDS)
+            .onErrorResumeNext(exc -> {
+                logger.warn("#### AbstractWriteResponseHandler.get() error");
+                if (exc instanceof TimeoutException)
+                {
+                    int blockedFor = totalBlockFor();
+                    int acks = ackCount();
+                    // It's pretty unlikely, but we can race between exiting await above and here, so
+                    // that we could now have enough acks. In that case, we "lie" on the acks count to
+                    // avoid sending confusing info to the user (see CASSANDRA-6491).
+                    if (acks >= blockedFor)
+                        acks = blockedFor - 1;
 
-        if (!success)
-        {
-            int blockedFor = totalBlockFor();
-            int acks = ackCount();
-            // It's pretty unlikely, but we can race between exiting await above and here, so
-            // that we could now have enough acks. In that case, we "lie" on the acks count to
-            // avoid sending confusing info to the user (see CASSANDRA-6491).
-            if (acks >= blockedFor)
-                acks = blockedFor - 1;
-            throw new WriteTimeoutException(writeType, consistencyLevel, acks, blockedFor);
-        }
+                    return Observable.error(new WriteTimeoutException(writeType, consistencyLevel, ackCount(), totalBlockFor()));
+                }
 
-        if (totalBlockFor() + failures > totalEndpoints())
-        {
-            throw new WriteFailureException(consistencyLevel, ackCount(), totalBlockFor(), writeType, failureReasonByEndpoint);
-        }
+                return Observable.error(exc);
+            });
+            // .doOnTerminate(() -> logger.warn("#### AbstractWriteResponseHandler.get() complete"));
     }
 
     /** 
@@ -151,11 +166,14 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         consistencyLevel.assureSufficientLiveNodes(keyspace, Iterables.filter(Iterables.concat(naturalEndpoints, pendingEndpoints), isAlive));
     }
 
-    protected void signal()
+    protected void signalComplete()
     {
-        condition.signalAll();
-        if (callback != null)
-            callback.run();
+        // emit a value of 0, because we can't emit null
+        logger.warn("#### emitting value for AbstractWriteResponseHandler");
+        publishSubject.subscribe(v -> logger.warn("#### got subscribed value: {}", v));
+        publishSubject.onNext(0);
+        logger.warn("#### onComplete() for AbstractWriteResponseHandler");
+        publishSubject.onComplete();
     }
 
     @Override
@@ -170,6 +188,10 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         failureReasonByEndpoint.put(from, failureReason);
 
         if (totalBlockFor() + n > totalEndpoints())
-            signal();
+        {
+            logger.warn("#### onError() for AbstractWriteResponseHandler");
+            publishSubject.onError(
+                    new WriteFailureException(consistencyLevel, ackCount(), totalBlockFor(), writeType, failureReasonByEndpoint));
+        }
     }
 }

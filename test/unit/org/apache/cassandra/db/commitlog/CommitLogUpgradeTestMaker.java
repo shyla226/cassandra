@@ -248,7 +248,7 @@ public class CommitLogUpgradeTestMaker
                     dataSize += sz;
                 }
 
-                clsp = commitLog.add((Mutation)builder.makeMutation());
+                clsp = commitLog.add((Mutation)builder.makeMutation()).blockingFirst();
                 counter.incrementAndGet();
             }
         }

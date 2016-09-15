@@ -331,7 +331,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
                 try
                 {
-                    handler.get();
+                    handler.get().blockingFirst();
                 }
                 catch (WriteTimeoutException|WriteFailureException e)
                 {
