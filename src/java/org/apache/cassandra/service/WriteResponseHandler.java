@@ -46,22 +46,16 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
                                 Collection<InetAddress> pendingEndpoints,
                                 ConsistencyLevel consistencyLevel,
                                 Keyspace keyspace,
-                                Runnable callback,
                                 WriteType writeType,
                                 long queryStartNanoTime)
     {
-        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, queryStartNanoTime);
+        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, writeType, queryStartNanoTime);
         responses = totalBlockFor();
-    }
-
-    public WriteResponseHandler(InetAddress endpoint, WriteType writeType, Runnable callback, long queryStartNanoTime)
-    {
-        this(Arrays.asList(endpoint), Collections.<InetAddress>emptyList(), ConsistencyLevel.ONE, null, callback, writeType, queryStartNanoTime);
     }
 
     public WriteResponseHandler(InetAddress endpoint, WriteType writeType, long queryStartNanoTime)
     {
-        this(endpoint, writeType, null, queryStartNanoTime);
+        this(Arrays.asList(endpoint), Collections.<InetAddress>emptyList(), ConsistencyLevel.ONE, null, writeType, queryStartNanoTime);
     }
 
     public void response(MessageIn<T> m)

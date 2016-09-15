@@ -144,7 +144,6 @@ public final class LegacyBatchlogMigrator
                                                                                      Collections.<InetAddress>emptyList(),
                                                                                      ConsistencyLevel.ANY,
                                                                                      Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
-                                                                                     null,
                                                                                      WriteType.SIMPLE,
                                                                                      queryStartNanoTime);
         Mutation mutation = getRemoveMutation(uuid);

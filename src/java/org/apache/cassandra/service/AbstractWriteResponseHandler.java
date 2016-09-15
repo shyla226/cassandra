@@ -27,11 +27,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
 import io.reactivex.Observable;
-import io.reactivex.ObservableEmitter;
-import io.reactivex.ObservableOnSubscribe;
-import io.reactivex.Observer;
 import io.reactivex.subjects.BehaviorSubject;
-import io.reactivex.subjects.PublishSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +46,6 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final Keyspace keyspace;
     protected final Collection<InetAddress> naturalEndpoints;
     public final ConsistencyLevel consistencyLevel;
-    protected final Runnable callback;
     protected final Collection<InetAddress> pendingEndpoints;
     protected final WriteType writeType;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
@@ -59,18 +54,16 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
 
-    final PublishSubject<Integer> publishSubject = PublishSubject.create();
+    final BehaviorSubject<Integer> publishSubject = BehaviorSubject.create();
     final Observable<Integer> observable;
 
     /**
-     * @param callback A callback to be called when the write is successful.
      * @param queryStartNanoTime the time at which the query started
      */
     protected AbstractWriteResponseHandler(Keyspace keyspace,
                                            Collection<InetAddress> naturalEndpoints,
                                            Collection<InetAddress> pendingEndpoints,
                                            ConsistencyLevel consistencyLevel,
-                                           Runnable callback,
                                            WriteType writeType,
                                            long queryStartNanoTime)
     {
@@ -78,8 +71,6 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.pendingEndpoints = pendingEndpoints;
         this.consistencyLevel = consistencyLevel;
         this.naturalEndpoints = naturalEndpoints;
-        // TODO find usages of callback, convert to Rx style
-        this.callback = callback;
         this.writeType = writeType;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.queryStartNanoTime = queryStartNanoTime;
@@ -101,14 +92,9 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         long timeout = TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
 
         return publishSubject
-            .map(v -> {
-                // TODO this never gets called
-                logger.warn("#### got emitted value: {}", v);
-                return v;
-            })
-            // .timeout(timeout, TimeUnit.NANOSECONDS)
+            .timeout(timeout, TimeUnit.NANOSECONDS)
+            .first()
             .onErrorResumeNext(exc -> {
-                logger.warn("#### AbstractWriteResponseHandler.get() error");
                 if (exc instanceof TimeoutException)
                 {
                     int blockedFor = totalBlockFor();
@@ -124,7 +110,6 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
                 return Observable.error(exc);
             });
-            // .doOnTerminate(() -> logger.warn("#### AbstractWriteResponseHandler.get() complete"));
     }
 
     /** 
@@ -169,11 +154,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected void signalComplete()
     {
         // emit a value of 0, because we can't emit null
-        logger.warn("#### emitting value for AbstractWriteResponseHandler");
-        publishSubject.subscribe(v -> logger.warn("#### got subscribed value: {}", v));
         publishSubject.onNext(0);
-        logger.warn("#### onComplete() for AbstractWriteResponseHandler");
-        publishSubject.onComplete();
     }
 
     @Override
@@ -189,7 +170,6 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         if (totalBlockFor() + n > totalEndpoints())
         {
-            logger.warn("#### onError() for AbstractWriteResponseHandler");
             publishSubject.onError(
                     new WriteFailureException(consistencyLevel, ackCount(), totalBlockFor(), writeType, failureReasonByEndpoint));
         }

@@ -45,12 +45,11 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
                                               Collection<InetAddress> pendingEndpoints,
                                               ConsistencyLevel consistencyLevel,
                                               Keyspace keyspace,
-                                              Runnable callback,
                                               WriteType writeType,
                                               long queryStartNanoTime)
     {
         // Response is been managed by the map so make it 1 for the superclass.
-        super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, queryStartNanoTime);
+        super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, writeType, queryStartNanoTime);
         assert consistencyLevel == ConsistencyLevel.EACH_QUORUM;
 
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
