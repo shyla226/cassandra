@@ -131,15 +131,13 @@ public class NativeTransportService
 
         int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
 
-        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
-
         for (int i = 0; i < nettyThreads; i++)
         {
             final int cpuId = i;
             EventLoop loop = workerGroup.next();
 
             loop.schedule(() -> {
-                NettyRxScheduler.instance(loop);
+                NettyRxScheduler.instance(loop, cpuId);
 
                 if (affinity)
                 {
