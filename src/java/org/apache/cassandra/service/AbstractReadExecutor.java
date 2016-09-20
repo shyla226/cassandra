@@ -30,6 +30,7 @@ import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
@@ -113,16 +114,16 @@ public abstract class AbstractReadExecutor
         {
             logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
 
-            //if (command instanceof SinglePartitionReadCommand)
-            //{
-            //    Long token = (Long)((SinglePartitionReadCommand) command).partitionKey().getToken().getTokenValue();
-
-            //    MonitoredTPCRxScheduler.forCpu(token.intValue() & 0xFF).createWorker().schedule(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
-            //}
-            //else
-            //{
-                NettyRxScheduler.instance().createWorker().schedule(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
-            //}
+            if (command instanceof SinglePartitionReadCommand)
+            {
+                SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
+                NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey())
+                    .scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+            }
+            else
+            {
+                NettyRxScheduler.instance().scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+            }
         }
     }
 

@@ -4890,7 +4890,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info(String.format("Updated hinted_handoff_throttle_in_kb to %d", throttleInKB));
     }
 
-    public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
+    public static List<Range<Token>> getLocalRanges(ColumnFamilyStore cfs)
     {
         if (!cfs.getPartitioner().splitter().isPresent())
             return null;
@@ -4912,7 +4912,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (lr == null || lr.isEmpty())
             return null;
-        List<Range<Token>> localRanges = Range.sort(lr);
+
+        return Range.sort(lr);
+    }
+
+    public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
+    {
+        List<Range<Token>> localRanges = getLocalRanges(cfs);
+        if (localRanges == null)
+            return null;
 
         return getDiskBoundaries(localRanges, cfs.getPartitioner(), directories);
     }
@@ -4946,5 +4954,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             diskBoundaries.add(boundaries.get(i).maxKeyBound());
         diskBoundaries.add(partitioner.getMaximumToken().maxKeyBound());
         return diskBoundaries;
+    }
+
+
+    public static List<PartitionPosition> getCpuBoundries(List<Range<Token>> localRanges, IPartitioner partitioner, int numCpu)
+    {
+        assert partitioner.splitter().isPresent();
+        Splitter splitter = partitioner.splitter().get();
+        List<Token> boundaries = splitter.splitOwnedRanges(numCpu, localRanges, DatabaseDescriptor.getNumTokens() > 1);
+        List<PartitionPosition> cpuBoundries = new ArrayList<>();
+        cpuBoundries.add(partitioner.getMinimumToken().minKeyBound());
+        for (int i = 0; i < boundaries.size() - 1; i++)
+            cpuBoundries.add(boundaries.get(i).maxKeyBound());
+        cpuBoundries.add(partitioner.getMaximumToken().maxKeyBound());
+        return cpuBoundries;
     }
 }
