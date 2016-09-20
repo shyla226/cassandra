@@ -574,9 +574,7 @@ public class Keyspace
                 */
             }
             return commitLogPosition;
-        }).doAfterTerminate(() -> {
-            opGroup.close();
-        });
+        }).doAfterTerminate(opGroup::close);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()
