@@ -420,17 +420,17 @@ public class Keyspace
         }
     }
 
-    public io.reactivex.Observable<CommitLogPosition> apply(Mutation mutation, boolean writeCommitLog)
+    public io.reactivex.Observable<Integer> apply(Mutation mutation, boolean writeCommitLog)
     {
         return apply(mutation, writeCommitLog, true, false);
     }
 
-    public io.reactivex.Observable<CommitLogPosition> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    public io.reactivex.Observable<Integer> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
         return apply(mutation, writeCommitLog, updateIndexes, false);
     }
 
-    public io.reactivex.Observable<CommitLogPosition> applyFromCommitLog(Mutation mutation)
+    public io.reactivex.Observable<Integer> applyFromCommitLog(Mutation mutation)
     {
         return apply(mutation, false, true, true);
     }
@@ -444,7 +444,7 @@ public class Keyspace
      * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
      * @param isClReplay     true if caller is the commitlog replayer
      */
-    public io.reactivex.Observable<CommitLogPosition> apply(final Mutation mutation,
+    public io.reactivex.Observable<Integer> apply(final Mutation mutation,
                                                             final boolean writeCommitLog,
                                                             boolean updateIndexes,
                                                             boolean isClReplay)
@@ -533,7 +533,8 @@ public class Keyspace
             commitLogPositionObservable = io.reactivex.Observable.just(CommitLogPosition.NONE);
         }
 
-        return commitLogPositionObservable.map(commitLogPosition -> {
+        return io.reactivex.Observable.concat(commitLogPositionObservable.map(commitLogPosition -> {
+            List<io.reactivex.Observable<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
@@ -566,15 +567,16 @@ public class Keyspace
                 UpdateTransaction indexTransaction = updateIndexes
                                                      ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
                                                      : UpdateTransaction.NO_OP;
-                cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
+                io.reactivex.Observable<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
+                memtablePutObservables.add(memtableObservable);
 
                 /*
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());
                 */
             }
-            return commitLogPosition;
-        }).doAfterTerminate(opGroup::close);
+            return io.reactivex.Observable.merge(memtablePutObservables).last();
+        })).doAfterTerminate(opGroup::close);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

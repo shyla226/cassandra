@@ -41,9 +41,11 @@ import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
@@ -120,6 +122,16 @@ public class NettyRxScheduler extends Scheduler
 
     public static NettyRxScheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)
     {
+        // force all system table operations to go through a single core
+        if (SchemaConstants.SYSTEM_KEYSPACE_NAMES.contains(cfs.keyspace.getName()))
+        {
+            if (perCoreSchedulers[0] != null)
+                return perCoreSchedulers[0];
+
+            // during initial startup we have no schedulers, and should run tasks directly
+            return null;
+        }
+
         List<PartitionPosition> keyspaceRanges = getRangeList(cfs);
 
         PartitionPosition rangeStart = keyspaceRanges.get(0);

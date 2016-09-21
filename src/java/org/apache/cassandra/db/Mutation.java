@@ -206,13 +206,13 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    private io.reactivex.Observable<CommitLogPosition> applyAsync(boolean durableWrites)
+    private io.reactivex.Observable<Integer> applyAsync(boolean durableWrites)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
         return ks.apply(this, durableWrites);
     }
 
-    public io.reactivex.Observable<CommitLogPosition> applyAsync()
+    public io.reactivex.Observable<Integer> applyAsync()
     {
         return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
     }

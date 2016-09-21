@@ -19,7 +19,6 @@ package org.apache.cassandra.db.partitions;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
-import java.util.TreeMap;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -30,6 +29,7 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
+import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.HeapAllocator;
@@ -50,18 +50,15 @@ public class AtomicBTreePartition extends AbstractBTreePartition
             null));
 
     private final MemtableAllocator allocator;
-    private final TreeMap<Clustering, Row> rows;
-    private PartitionColumns columns = PartitionColumns.NONE;
-    private DeletionInfo deletionInfo = DeletionInfo.LIVE;
-    private Row staticRow = Rows.EMPTY_STATIC_ROW;
-    private EncodingStats stats = EncodingStats.NO_STATS;
+
+    private volatile Holder ref;
 
     public AtomicBTreePartition(CFMetaData metadata, DecoratedKey partitionKey, MemtableAllocator allocator)
     {
         // involved in potential bug? partition columns may be a subset if we alter columns while it's in memtable
         super(metadata, partitionKey);
         this.allocator = allocator;
-        rows = new TreeMap<>(metadata.comparator);
+        this.ref = EMPTY;
     }
 
     protected boolean canHaveShadowedData()
@@ -82,39 +79,31 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         {
             indexer.start();
 
-
             if (!update.deletionInfo().getPartitionDeletion().isLive())
                 indexer.onPartitionDeletion(update.deletionInfo().getPartitionDeletion());
 
             if (update.deletionInfo().hasRanges())
                 update.deletionInfo().rangeIterator(false).forEachRemaining(indexer::onRangeTombstone);
 
-            if (update.deletionInfo().mayModify(this.deletionInfo))
+            DeletionInfo newDeletionInfo = ref.deletionInfo;
+            if (update.deletionInfo().mayModify(ref.deletionInfo))
             {
                 DeletionInfo inputDeletionInfoCopy = update.deletionInfo().copy(HeapAllocator.instance);
-                DeletionInfo newDeletionInfo = deletionInfo.mutableCopy().add(inputDeletionInfoCopy);
-                updater.allocated(newDeletionInfo.unsharedHeapSize() - deletionInfo.unsharedHeapSize());
-                deletionInfo = newDeletionInfo;
+                newDeletionInfo = ref.deletionInfo.mutableCopy().add(inputDeletionInfoCopy);
+                updater.allocated(newDeletionInfo.unsharedHeapSize() - ref.deletionInfo.unsharedHeapSize());
             }
 
-            columns = update.columns().mergeTo(this.columns);
+            PartitionColumns newColumns = update.columns().mergeTo(ref.columns);
             Row newStatic = update.staticRow();
-            staticRow = newStatic.isEmpty()
-                        ? this.staticRow
-                        : (this.staticRow.isEmpty() ? updater.apply(newStatic) : updater.apply(staticRow, newStatic));
-            for (Row row : update)
-            {
-                // TODO if we stick with a TreeMap, we should customize it to avoid doing a separate lookup and then insert per row
-                Row existing = rows.get(row.clustering());
-                if (existing == null)
-                    rows.put(row.clustering(), updater.apply(row));
-                else
-                    rows.put(row.clustering(), updater.apply(existing, row));
-            }
+            newStatic = newStatic.isEmpty()
+                      ? ref.staticRow
+                      : (ref.staticRow.isEmpty() ? updater.apply(newStatic) : updater.apply(ref.staticRow, newStatic));
 
-            // TODO should account for TreeMap usage of on-heap memory somehow through updater.allocated()?
+            Object[] tree = BTree.update(ref.tree, update.metadata().comparator, update, update.rowCount(), updater);
+            EncodingStats newStats = ref.stats.mergeWith(update.stats());
 
-            stats = stats.mergeWith(update.stats());
+            this.ref = new Holder(newColumns, tree, newDeletionInfo, newStatic, newStats);
+
             updater.finish();
             return new long[]{updater.dataSize, updater.colUpdateTimeDelta};
         }
@@ -184,10 +173,9 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         return allocator.ensureOnHeap().applyToPartition(super.iterator());
     }
 
-    // TODO remove this at the Interface level
     public Holder holder()
     {
-        return null;
+        return ref;
     }
 
     // the function we provide to the btree utilities to perform any column replacements

@@ -36,6 +36,7 @@ import com.google.common.base.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1309,8 +1310,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public void apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public io.reactivex.Observable<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    {
+        final BehaviorSubject<Integer> publisher = BehaviorSubject.create();
+        NettyRxScheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
+        if (scheduler != null)
+        {
+            scheduler.scheduleDirect(() -> {
+                applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
+            });
+        }
+        else
+        {
+            // we're still starting up, run this synchronously on the current thread
+            applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
+        }
 
+        return publisher.first();
+    }
+
+    private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         long start = System.nanoTime();
         try
@@ -1322,14 +1341,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
             StorageHook.instance.reportWrite(metadata.cfId, update);
             metric.writeLatency.addNano(System.nanoTime() - start);
-            if(timeDelta < Long.MAX_VALUE)
+            if (timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(timeDelta);
+            publisher.onNext(0);
         }
         catch (RuntimeException e)
         {
-            throw new RuntimeException(e.getMessage()
-                                       + " for ks: "
-                                       + keyspace.getName() + ", table: " + name, e);
+            RuntimeException exc = new RuntimeException(e.getMessage()
+                    + " for ks: "
+                    + keyspace.getName() + ", table: " + name, e);
+            publisher.onError(exc);
         }
     }
 

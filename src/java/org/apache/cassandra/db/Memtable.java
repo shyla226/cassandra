@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -267,21 +268,13 @@ public class Memtable implements Comparable<Memtable>
         {
             final DecoratedKey cloneKey = allocator.clone(update.partitionKey(), opGroup);
             AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
-            // We'll add the columns later. This avoids wasting works if we get beaten in the putIfAbsent
-            previous = partitions.putIfAbsent(cloneKey, empty);
-            if (previous == null)
-            {
-                previous = empty;
-                // allocate the row overhead after the fact; this saves over allocating and having to free after, but
-                // means we can overshoot our declared limit.
-                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
-                allocator.onHeap().allocate(overhead, opGroup);
-                initialSize = 8;
-            }
-            else
-            {
-                allocator.reclaimer().reclaimImmediately(cloneKey);
-            }
+            int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+            allocator.onHeap().allocate(overhead, opGroup);
+            initialSize = 8;
+
+            // We'll add the columns later.
+            partitions.put(cloneKey, empty);
+            previous = empty;
         }
 
         long[] pair = previous.addAllWithSizeDelta(update, opGroup, indexer);
@@ -388,7 +381,7 @@ public class Memtable implements Comparable<Memtable>
         return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), isForThrift, minLocalDeletionTime, columnFilter, dataRange);
     }
 
-    private Collection<PartitionPosition> getKeySubrange(PartitionPosition from, PartitionPosition to)
+    private Collection<PartitionPosition> getSortedKeySubrange(PartitionPosition from, PartitionPosition to)
     {
         ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
         for (PartitionPosition key : partitions.keySet())
@@ -399,6 +392,13 @@ public class Memtable implements Comparable<Memtable>
         }
         Collections.sort(keysInRange);
         return keysInRange;
+    }
+
+    private Collection<PartitionPosition> getSortedKeys()
+    {
+        ArrayList<PartitionPosition> sortedKeys = new ArrayList<>(partitions.keySet());
+        Collections.sort(sortedKeys);
+        return sortedKeys;
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -434,12 +434,12 @@ public class Memtable implements Comparable<Memtable>
 
         FlushRunnable(PartitionPosition from, PartitionPosition to, Directories.DataDirectory flushLocation, LifecycleTransaction txn)
         {
-            this(getKeySubrange(from, to), flushLocation, from, to, txn);
+            this(getSortedKeySubrange(from, to), flushLocation, from, to, txn);
         }
 
         FlushRunnable(LifecycleTransaction txn)
         {
-            this(partitions.keySet(), null, null, null, txn);
+            this(getSortedKeys(), null, null, null, txn);
         }
 
         FlushRunnable(Collection<PartitionPosition> keysToFlush, Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
