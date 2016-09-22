@@ -3,6 +3,7 @@ DSE 5.1.0
  * Make Permissions extensible (APOLLO-26)
  * Make IResource more easily extensible (APOLLO-26)
  * Add method to IAuthenticator to login by user as well as by role (APOLLO-70)
+ * Add private protocol version (APOLLO-2)
 Merged from 3.X:
 3.10
  * Fix crossNode value when receiving messages (CASSANDRA-12791)

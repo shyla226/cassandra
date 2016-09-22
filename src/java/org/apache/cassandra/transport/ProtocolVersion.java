@@ -16,6 +16,13 @@
  * limitations under the License.
  */
 
+/**
+ * Copyright DataStax, Inc.
+ *
+ * Modified by DataStax, Inc.
+ */
+
+
 package org.apache.cassandra.transport;
 
 import java.util.ArrayList;
@@ -28,6 +35,9 @@ import org.apache.commons.lang3.ArrayUtils;
 
 /**
  * The native (CQL binary) protocol version.
+ *
+ * DSE versions have the 7th most significant bit of the version number set to 1,
+ * so DSE version 1 starts at 0x41 or d65.
  *
  * Some versions may be in beta, which means that the client must
  * specify the beta flag in the frame for the version to be considered valid.
@@ -43,9 +53,10 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     V2(2, "v2", false), // no longer supported
     V3(3, "v3", false),
     V4(4, "v4", false),
-    V5(5, "v5-beta", true);
+    V5(5, "v5-beta", true),
+    DSE_V1(65, "dse-v1", false);
 
-    /** The version number */
+    /** The version number, for OS version this is a number from 1 to 64, for DSE versions from 65 to 127 */
     private final int num;
 
     /** A description of the version, beta versions should have the word "-beta" */
@@ -61,20 +72,30 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
         this.beta = beta;
     }
 
-    /** The supported versions stored as an array, these should be private and are required for fast decoding*/
-    private final static ProtocolVersion[] SUPPORTED_VERSIONS = new ProtocolVersion[] { V3, V4, V5 };
-    final static ProtocolVersion MIN_SUPPORTED_VERSION = SUPPORTED_VERSIONS[0];
-    final static ProtocolVersion MAX_SUPPORTED_VERSION = SUPPORTED_VERSIONS[SUPPORTED_VERSIONS.length - 1];
+    /** Some utility constants for decoding DSE versions */
+    private static final byte DSE_VERSION_BIT = 0x40; // 0100 0000
+    private static final byte DSE_VERSION_MASK = 0x4f; // 0011 1111
 
-    /** All supported versions, published as an enumset */
-    public final static EnumSet<ProtocolVersion> SUPPORTED = EnumSet.copyOf(Arrays.asList((ProtocolVersion[]) ArrayUtils.addAll(SUPPORTED_VERSIONS)));
+    /** The supported OS versions */
+    final static ProtocolVersion[] OS_VERSIONS = new ProtocolVersion[] { V3, V4, V5 };
+    final static ProtocolVersion MIN_OS_VERSION = OS_VERSIONS[0];
+    final static ProtocolVersion MAX_OS_VERSION = OS_VERSIONS[OS_VERSIONS.length - 1];
+
+    /** The supported DSE versions */
+    final static ProtocolVersion[] DSE_VERSIONS = new ProtocolVersion[] { DSE_V1 };
+    final static ProtocolVersion MIN_DSE_VERSION = DSE_VERSIONS[0];
+    final static ProtocolVersion MAX_DSE_VERSION = DSE_VERSIONS[DSE_VERSIONS.length - 1];
+
+    /** All supported versions */
+    public final static EnumSet<ProtocolVersion> SUPPORTED = EnumSet.copyOf(Arrays.asList((ProtocolVersion[])
+                                                                                          ArrayUtils.addAll(OS_VERSIONS, DSE_VERSIONS)));
 
     /** Old unsupported versions, this is OK as long as we never add newer unsupported versions */
     public final static EnumSet<ProtocolVersion> UNSUPPORTED = EnumSet.complementOf(SUPPORTED);
 
     /** The preferred versions */
-    public final static ProtocolVersion CURRENT = V4;
-    public final static Optional<ProtocolVersion> BETA = Optional.of(V5);
+    public final static ProtocolVersion CURRENT = DSE_V1;
+    public final static Optional<ProtocolVersion> BETA = Optional.empty();
 
     public static List<String> supportedVersions()
     {
@@ -86,9 +107,19 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
 
     public static ProtocolVersion decode(int versionNum)
     {
-        ProtocolVersion ret = versionNum >= MIN_SUPPORTED_VERSION.num && versionNum <= MAX_SUPPORTED_VERSION.num
-                              ? SUPPORTED_VERSIONS[versionNum - MIN_SUPPORTED_VERSION.num]
-                              : null;
+        ProtocolVersion ret = null;
+        boolean isDse = isDse(versionNum);
+        if (isDse)
+        { // DSE version
+            int dseVersionNum = versionNum & DSE_VERSION_MASK;
+            if (dseVersionNum >= MIN_DSE_VERSION.num && dseVersionNum <= MAX_DSE_VERSION.num)
+                ret = DSE_VERSIONS[dseVersionNum - MIN_DSE_VERSION.num];
+        }
+        else
+        { // OS version
+            if (versionNum >= MIN_OS_VERSION.num && versionNum <= MAX_OS_VERSION.num)
+                ret = OS_VERSIONS[versionNum - MIN_OS_VERSION.num];
+        }
 
         if (ret == null)
         {
@@ -101,11 +132,22 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
                     throw new ProtocolException(ProtocolVersion.invalidVersionMessage(versionNum), version);
             }
 
-            // If the version is invalid reply with the highest version that we support
-            throw new ProtocolException(invalidVersionMessage(versionNum), MAX_SUPPORTED_VERSION);
+            // If the version is invalid reply with the highest version of the same kind that we support
+            throw new ProtocolException(invalidVersionMessage(versionNum),
+                                        isDse ? MAX_DSE_VERSION : MAX_OS_VERSION);
         }
 
         return ret;
+    }
+
+    public boolean isDse()
+    {
+        return isDse(num);
+    }
+
+    private static boolean isDse(int num)
+    {
+        return (num & DSE_VERSION_BIT) == DSE_VERSION_BIT;
     }
 
     public boolean isBeta()
@@ -133,21 +175,21 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
 
     public final boolean isGreaterThan(ProtocolVersion other)
     {
-        return num > other.num;
+        return ordinal() > other.ordinal();
     }
 
     public final boolean isGreaterOrEqualTo(ProtocolVersion other)
     {
-        return num >= other.num;
+        return ordinal() >= other.ordinal();
     }
 
     public final boolean isSmallerThan(ProtocolVersion other)
     {
-        return num < other.num;
+        return ordinal() < other.ordinal();
     }
 
     public final boolean isSmallerOrEqualTo(ProtocolVersion other)
     {
-        return num <= other.num;
+        return ordinal() <= other.ordinal();
     }
 }
