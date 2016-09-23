@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -36,16 +35,13 @@ import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.disposables.Disposables;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
-import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
@@ -123,7 +119,7 @@ public class NettyRxScheduler extends Scheduler
     public static NettyRxScheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)
     {
         // force all system table operations to go through a single core
-        if (SchemaConstants.SYSTEM_KEYSPACE_NAMES.contains(cfs.keyspace.getName()))
+        if (cfs.hasSpecialHandlingForTPC)
         {
             if (perCoreSchedulers[0] != null)
                 return perCoreSchedulers[0];
@@ -147,7 +143,7 @@ public class NettyRxScheduler extends Scheduler
         throw new IllegalStateException(String.format("Unable to map %s to cpu for %s.%s", key, cfs.keyspace.getName(), cfs.getTableName()));
     }
 
-    private static List<PartitionPosition> getRangeList(ColumnFamilyStore cfs)
+    public static List<PartitionPosition> getRangeList(ColumnFamilyStore cfs)
     {
         List<PartitionPosition> ranges = keyspaceToRangeMapping.get(cfs.keyspace.getName());
 

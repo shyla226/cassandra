@@ -991,6 +991,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 // start participating in the ring.
                 SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
                 setTokens(bootstrapTokens);
+
                 // remove the existing info about the replaced node.
                 if (!current.isEmpty())
                 {

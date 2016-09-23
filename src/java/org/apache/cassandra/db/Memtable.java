@@ -123,10 +123,11 @@ public class Memtable implements Comparable<Memtable>
     // We index the memtable by PartitionPosition only for the purpose of being able
     // to select key range using Token.KeyBound. However put() ensures that we
     // actually only store DecoratedKey.
-    // TODO initial hashmap size?
-    private final HashMap<PartitionPosition, AtomicBTreePartition> partitions = new HashMap<>(1024);
+    private final List<HashMap<PartitionPosition, AtomicBTreePartition>> partitions;
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
+    private final List<PartitionPosition> rangeList;
+    private final boolean hasSplits;
 
     // The smallest timestamp for all partitions stored in this memtable
     private long minTimestamp = Long.MAX_VALUE;
@@ -148,6 +149,9 @@ public class Memtable implements Comparable<Memtable>
         this.initialComparator = cfs.metadata.comparator;
         this.cfs.scheduleFlush();
         this.columnsCollector = new ColumnsCollector(cfs.metadata.partitionColumns());
+        this.hasSplits = !cfs.hasSpecialHandlingForTPC;
+        this.rangeList = generateRangeList(cfs);
+        this.partitions = generatePartitionMaps();
     }
 
     // ONLY to be used for testing, to create a mock Memtable
@@ -158,6 +162,47 @@ public class Memtable implements Comparable<Memtable>
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.partitionColumns());
+        this.hasSplits = false;
+        this.rangeList = generateRangeList(null);
+        this.partitions = generatePartitionMaps();
+    }
+
+    private List<PartitionPosition> generateRangeList(ColumnFamilyStore cfs)
+    {
+        if (!hasSplits)
+            return null;
+
+        return NettyRxScheduler.getRangeList(cfs);
+    }
+
+    private List<HashMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
+    {
+        if (!hasSplits)
+            return Collections.singletonList(new HashMap<>(256));
+
+        int capacity = rangeList.size();
+        ArrayList<HashMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
+        for (int i = 0; i < capacity; i++)
+            partitionMapContainer.add(new HashMap<>(1024));
+        return partitionMapContainer;
+    }
+
+    private HashMap<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(PartitionPosition key)
+    {
+        if (!hasSplits)
+            return partitions.get(0);
+
+        PartitionPosition rangeStart = rangeList.get(0);
+        for (int i = 1; i < rangeList.size(); i++)
+        {
+            PartitionPosition next = rangeList.get(i);
+            if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
+                return partitions.get(i - 1);
+
+            rangeStart = next;
+        }
+
+        throw new IllegalStateException(String.format("Unable to map %s to Memtable map for %s.%s", key, cfs.keyspace.getName(), cfs.getTableName()));
     }
 
     public MemtableAllocator getAllocator()
@@ -236,7 +281,12 @@ public class Memtable implements Comparable<Memtable>
 
     public boolean isClean()
     {
-        return partitions.isEmpty();
+        for (HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
+        {
+            if (!memtableSubrange.isEmpty())
+                return false;
+        }
+        return true;
     }
 
     public boolean mayContainDataBefore(CommitLogPosition position)
@@ -261,19 +311,21 @@ public class Memtable implements Comparable<Memtable>
      */
     long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
-        AtomicBTreePartition previous = partitions.get(update.partitionKey());
+        DecoratedKey key = update.partitionKey();
+        HashMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
+        AtomicBTreePartition previous = partitionMap.get(key);
 
         long initialSize = 0;
         if (previous == null)
         {
-            final DecoratedKey cloneKey = allocator.clone(update.partitionKey(), opGroup);
+            final DecoratedKey cloneKey = allocator.clone(key, opGroup);
             AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
             int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
             allocator.onHeap().allocate(overhead, opGroup);
             initialSize = 8;
 
             // We'll add the columns later.
-            partitions.put(cloneKey, empty);
+            partitionMap.put(cloneKey, empty);
             previous = empty;
         }
 
@@ -354,25 +406,31 @@ public class Memtable implements Comparable<Memtable>
         boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
-        // TODO combine sort and filtering into single step to handle small subrange reads efficiently
+        // TODO combine sort and filtering into single step to handle small subrange reads efficiently?
+
         ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
-        if (!findMinLocalDeletionTime)
+        for (int i = 1; i < partitions.size(); i++)
         {
-            for (PartitionPosition key : partitions.keySet())
-            {
-                if (key.compareTo(keyRange.left) >= startComparison && key.compareTo(keyRange.right) <= endComparison)
-                    keysInRange.add(key);
-            }
-        }
-        else
-        {
-            for (Map.Entry<PartitionPosition, AtomicBTreePartition> entry : partitions.entrySet())
+            PartitionPosition memtableRangeStart = rangeList.get(i - 1);
+            PartitionPosition memtableRangeEnd = rangeList.get(i);
+            // TODO double check inclusivity of both memtable and requested range
+            //  check if the requested range intersects with this memtable subrange at all
+            if (keyRange.left.compareTo(memtableRangeEnd) >= 0 || keyRange.right.compareTo(memtableRangeStart) < 0)
+                continue;
+
+            // optimize for the common case where the request includes the entire memtable subrange, or at least one end of it
+            boolean skipStartCheck = keyRange.left.compareTo(memtableRangeStart) <= 0;
+            boolean skipEndCheck = keyRange.right.compareTo(memtableRangeEnd) >= 0;
+
+            HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
+            for (Map.Entry<PartitionPosition, AtomicBTreePartition> entry : memtableSubrange.entrySet())
             {
                 PartitionPosition key = entry.getKey();
-                if (key.compareTo(keyRange.left) >= startComparison && key.compareTo(keyRange.right) <= endComparison)
+                if ((skipStartCheck || key.compareTo(keyRange.left) >= startComparison) && (skipEndCheck || key.compareTo(keyRange.right) <= endComparison))
                 {
                     keysInRange.add(key);
-                    minLocalDeletionTime = Math.min(minLocalDeletionTime, entry.getValue().stats().minLocalDeletionTime);
+                    if (findMinLocalDeletionTime)
+                        minLocalDeletionTime = Math.min(minLocalDeletionTime, entry.getValue().stats().minLocalDeletionTime);
                 }
             }
         }
@@ -381,29 +439,93 @@ public class Memtable implements Comparable<Memtable>
         return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), isForThrift, minLocalDeletionTime, columnFilter, dataRange);
     }
 
-    private Collection<PartitionPosition> getSortedKeySubrange(PartitionPosition from, PartitionPosition to)
+    private List<PartitionPosition> getSortedKeySubrange(PartitionPosition from, PartitionPosition to)
     {
-        ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
-        for (PartitionPosition key : partitions.keySet())
+        ArrayList<PartitionPosition> keysInRange;
+
+        if (!hasSplits)
         {
-            // inclusive on the start, exclusive on the end
-            if (key.compareTo(from) >= 0 && key.compareTo(to) < 0)
-                keysInRange.add(key);
+            HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(0);
+            keysInRange = new ArrayList<>(memtableSubrange.size());
+
+            // TODO optimize for min/max range, where applicable?
+            for (PartitionPosition key : memtableSubrange.keySet())
+            {
+                if (key.compareTo(from) >= 0 && key.compareTo(to) < 0)
+                    keysInRange.add(key);
+            }
+            return keysInRange;
+        }
+
+        // if we're flushing the whole memtable, we can do something more efficient
+        if (from.getToken().equals(cfs.getPartitioner().getMinimumToken()) && to.getToken().equals(cfs.getPartitioner().getMaximumToken()))
+        {
+            int capacity = 0;
+            for (HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
+                capacity += memtableSubrange.size();
+
+            keysInRange = new ArrayList<>(capacity);
+            for (HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
+                keysInRange.addAll(memtableSubrange.keySet());
+        }
+        else
+        {
+            // estimate required capacity
+            keysInRange = new ArrayList<>(partitions.size() * partitions.get(0).size());
+
+            for (int i = 1; i < partitions.size(); i++)
+            {
+                PartitionPosition memtableRangeStart = rangeList.get(i - 1);
+                PartitionPosition memtableRangeEnd = rangeList.get(i);
+                // TODO double check inclusivity of both memtable and requested range
+                //  check if the requested range intersects with this memtable subrange at all
+                if (from.compareTo(memtableRangeEnd) >= 0 || to.compareTo(memtableRangeStart) < 0)
+                    continue;
+
+                // optimize for the common case where the request includes the entire memtable subrange, or at least one end of it
+                boolean skipStartCheck = from.compareTo(memtableRangeStart) <= 0;
+                boolean skipEndCheck = to.compareTo(memtableRangeEnd) >= 0;
+
+                HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
+                if (skipStartCheck && skipEndCheck)
+                {
+                    keysInRange.addAll(memtableSubrange.keySet());
+                }
+                {
+                    for (PartitionPosition key : memtableSubrange.keySet())
+                    {
+                        if ((skipStartCheck || key.compareTo(from) >= 0) && (skipEndCheck || key.compareTo(to) < 0))
+                            keysInRange.add(key);
+                    }
+                }
+            }
         }
         Collections.sort(keysInRange);
         return keysInRange;
     }
 
-    private Collection<PartitionPosition> getSortedKeys()
+    private List<PartitionPosition> getSortedKeys()
     {
-        ArrayList<PartitionPosition> sortedKeys = new ArrayList<>(partitions.keySet());
-        Collections.sort(sortedKeys);
-        return sortedKeys;
+        int capacity = 0;
+        for (HashMap<PartitionPosition, AtomicBTreePartition> partitionMap : partitions)
+            capacity += partitionMap.size();
+
+        int i = 0;
+        PartitionPosition[] sortedKeys = new PartitionPosition[capacity];
+        for (HashMap<PartitionPosition, AtomicBTreePartition> partitionMap : partitions)
+        {
+            PartitionPosition[] subrangeKeys = new PartitionPosition[partitionMap.size()];
+            partitionMap.keySet().toArray(subrangeKeys);
+            Arrays.sort(subrangeKeys);
+            System.arraycopy(subrangeKeys, 0, sortedKeys, i, subrangeKeys.length);
+            i += subrangeKeys.length;
+        }
+        return Arrays.asList(sortedKeys);
     }
 
     public Partition getPartition(DecoratedKey key)
     {
-        return partitions.get(key);
+        return getPartitionMapFor(key).get(key);
     }
 
     public long getMinTimestamp()
@@ -423,7 +545,7 @@ public class Memtable implements Comparable<Memtable>
     class FlushRunnable implements Callable<SSTableMultiWriter>
     {
         private final long estimatedSize;
-        private final Collection<PartitionPosition> keysToFlush;
+        private final List<PartitionPosition> keysToFlush;
 
         private final boolean isBatchLogTable;
         private final SSTableMultiWriter writer;
@@ -442,7 +564,7 @@ public class Memtable implements Comparable<Memtable>
             this(getSortedKeys(), null, null, null, txn);
         }
 
-        FlushRunnable(Collection<PartitionPosition> keysToFlush, Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
+        FlushRunnable(List<PartitionPosition> keysToFlush, Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
         {
             this.keysToFlush = keysToFlush;
             this.from = from;
@@ -481,7 +603,8 @@ public class Memtable implements Comparable<Memtable>
             //  since the memtable is being used for queries in the "pending flush" category)
             for (PartitionPosition key : keysToFlush)
             {
-                AtomicBTreePartition partition = partitions.get(key);
+                // TODO optimize this by tracking which memtable subrange we're currently on to avoid repeated lookups
+                AtomicBTreePartition partition = getPartitionMapFor(key).get(key);
 
                 // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
                 // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
@@ -600,7 +723,7 @@ public class Memtable implements Comparable<Memtable>
             DecoratedKey key = (DecoratedKey)position;
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return filter.getUnfilteredRowIterator(columnFilter, partitions.get(position));
+            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(position).get(position));
         }
     }
 
