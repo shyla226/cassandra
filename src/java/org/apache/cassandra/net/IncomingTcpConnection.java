@@ -35,6 +35,7 @@ import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.tracing.TraceState;
 import org.xerial.snappy.SnappyInputStream;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.UnknownColumnFamilyException;
@@ -148,11 +149,11 @@ public class IncomingTcpConnection extends Thread implements Closeable
         from = CompactEndpointSerializationHelper.deserialize(in);
         // record the (true) version of the endpoint
         MessagingService.instance().setVersion(from, maxVersion);
-        logger.trace("Set version for {} to {} (will use {})", from, maxVersion, MessagingService.instance().getVersion(from));
+        logger.info("Set version for {} to {} (will use {})", from, maxVersion, MessagingService.instance().getVersion(from));
 
         if (compressed)
         {
-            logger.trace("Upgrading incoming connection to be compressed");
+            logger.info("Upgrading incoming connection to be compressed");
             if (version < MessagingService.VERSION_21)
             {
                 in = new DataInputStreamPlus(new SnappyInputStream(socket.getInputStream()));

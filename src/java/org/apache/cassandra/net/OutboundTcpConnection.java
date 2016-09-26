@@ -265,8 +265,15 @@ public class OutboundTcpConnection extends Thread
     private boolean shouldCompressConnection()
     {
         // assumes version >= 1.2
-        return DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.all
+        boolean compress =  DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.all
                || (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc && !isLocalDC(poolReference.endPoint()));
+
+        if (compress)
+            logger.info("WILL COMPRESS from {} to {} (local dc = {}, remote dc = {}, rule = {})", FBUtilities.getBroadcastAddress(), poolReference.endPoint(),
+                        DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress()), DatabaseDescriptor.getEndpointSnitch().getDatacenter(poolReference.endPoint()),
+                        DatabaseDescriptor.internodeCompression());
+
+        return compress;
     }
 
     private void writeConnected(QueuedMessage qm, boolean flush)
