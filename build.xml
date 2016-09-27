@@ -2027,8 +2027,9 @@
     <copy todir=".idea">
         <fileset dir="ide/idea"/>
     </copy>
+    <replace file=".idea/workspace.xml" token="trunk" value="${eclipse.project.name}"/>
     <copy tofile="${eclipse.project.name}.iml" file="ide/idea-iml-file.xml"/>
-    <echo file=".idea/.name">Apache Cassandra ${eclipse.project.name}</echo>
+    <echo file=".idea/.name">Apollo ${eclipse.project.name}</echo>
     <echo file=".idea/modules.xml"><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ProjectModuleManager">
