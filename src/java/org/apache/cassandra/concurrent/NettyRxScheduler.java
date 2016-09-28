@@ -70,6 +70,8 @@ public class NettyRxScheduler extends Scheduler
         }
     };
 
+    static final ImmediateRxScheduler immediateScheduler = new ImmediateRxScheduler();
+
     final static Map<String, List<PartitionPosition>> keyspaceToRangeMapping = new HashMap<>();
 
     //Each array entry maps to a cpuId. We assume there will be < 1024 CPUs
@@ -77,6 +79,7 @@ public class NettyRxScheduler extends Scheduler
 
     final EventExecutorGroup eventLoop;
     public final int cpuId;
+    public final long cpuThreadId;
 
     public static NettyRxScheduler instance()
     {
@@ -105,17 +108,18 @@ public class NettyRxScheduler extends Scheduler
         assert cpuId >= 0;
         this.eventLoop = eventLoop;
         this.cpuId = cpuId;
+        this.cpuThreadId = Thread.currentThread().getId();
     }
 
-    public static NettyRxScheduler getForCore(int core)
+    public static Scheduler getForCore(int core)
     {
         NettyRxScheduler scheduler = perCoreSchedulers[core];
         assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
 
-        return scheduler;
+        return Thread.currentThread().getId() == scheduler.cpuThreadId ? immediateScheduler : scheduler;
     }
 
-    public static NettyRxScheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)
+    public static Scheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)
     {
         // force all system table operations to go through a single core
         if (cfs.hasSpecialHandlingForTPC)

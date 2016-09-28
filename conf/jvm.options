@@ -141,6 +141,7 @@
 # uncomment to have Cassandra JVM log internal method compilation (developers only)
 -XX:+UnlockDiagnosticVMOptions
 -XX:+DebugNonSafepoints
+-XX:+PreserveFramePointer
 #-XX:+LogCompilation
 
 #################
