@@ -58,6 +58,22 @@ public class NativeTransportService
     private boolean tpcInitialized = false;
     private EventLoopGroup workerGroup;
 
+    private final InetAddress nativeAddr;
+    private final int nativePort;
+
+    @VisibleForTesting
+    public NativeTransportService(InetAddress nativeAddr, int nativePort)
+    {
+        this.nativeAddr = nativeAddr;
+        this.nativePort = nativePort;
+    }
+
+    public NativeTransportService()
+    {
+        this.nativeAddr = DatabaseDescriptor.getRpcAddress();
+        this.nativePort = DatabaseDescriptor.getNativeTransportPort();
+    }
+
     /**
      * Creates netty thread pools and event loops.
      */
@@ -79,9 +95,7 @@ public class NativeTransportService
             logger.info("Netty using Java NIO event loop");
         }
 
-        int nativePort = DatabaseDescriptor.getNativeTransportPort();
         int nativePortSSL = DatabaseDescriptor.getNativeTransportPortSSL();
-        InetAddress nativeAddr = DatabaseDescriptor.getRpcAddress();
 
         org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
                                                                 .withEventLoopGroup(workerGroup)
@@ -97,10 +111,10 @@ public class NativeTransportService
             {
                 // user asked for dedicated ssl port for supporting both non-ssl and ssl connections
                 servers = Collections.unmodifiableList(
-                                                      Arrays.asList(
-                                                                   builder.withSSL(false).withPort(nativePort).build(),
-                                                                   builder.withSSL(true).withPort(nativePortSSL).build()
-                                                      )
+                Arrays.asList(
+                builder.withSSL(false).withPort(nativePort).build(),
+                builder.withSSL(true).withPort(nativePortSSL).build()
+                )
                 );
             }
             else
@@ -109,6 +123,7 @@ public class NativeTransportService
                 servers = Collections.singleton(builder.withSSL(true).withPort(nativePort).build());
             }
         }
+
 
         // register metrics
         ClientMetrics.instance.addCounter("connectedNativeClients", () ->

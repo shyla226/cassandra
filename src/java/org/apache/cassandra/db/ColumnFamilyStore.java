@@ -36,6 +36,8 @@ import com.google.common.base.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+
+import io.reactivex.Scheduler;
 import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1318,7 +1320,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public io.reactivex.Observable<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         final BehaviorSubject<Integer> publisher = BehaviorSubject.create();
-        NettyRxScheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
+        Scheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
         if (scheduler != null)
         {
             scheduler.scheduleDirect(() -> {

@@ -70,7 +70,7 @@ abstract class AbstractQueryPager implements QueryPager
         pageSize = Math.min(pageSize, remaining);
         Pager pager = new Pager(limits.forPaging(pageSize), command.nowInSec());
 
-        return Transformation.apply(nextPageReadCommand(pageSize).execute(consistency, clientState, queryStartNanoTime).subscribeOn(Schedulers.io()).blockingSingle(), pager);
+        return Transformation.apply(nextPageReadCommand(pageSize).execute(consistency, clientState, queryStartNanoTime).blockingSingle(), pager);
     }
 
     public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)

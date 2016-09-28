@@ -26,6 +26,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -149,7 +150,7 @@ public abstract class AbstractReadExecutor
      * wait for an answer.  Blocks until success or timeout, so it is caller's
      * responsibility to call maybeTryAdditionalReplicas first.
      */
-    public PartitionIterator get() throws ReadFailureException, ReadTimeoutException, DigestMismatchException
+    public Observable<PartitionIterator> get()
     {
         return handler.get();
     }
@@ -289,8 +290,13 @@ public abstract class AbstractReadExecutor
             if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
                 return;
 
-            if (!handler.await(cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS))
-            {
+            Observable<PartitionIterator> observable = get();
+
+            NettyRxScheduler.instance().scheduleDirect(() -> {
+
+                if (handler.hasValue())
+                    return;
+
                 // Could be waiting on the data, or on enough digests.
                 ReadCommand retryCommand = command;
                 if (handler.resolver.isDataPresent())
@@ -305,7 +311,8 @@ public abstract class AbstractReadExecutor
                 speculated = true;
 
                 cfs.metric.speculativeRetries.inc();
-            }
+
+            }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
         }
 
         public Collection<InetAddress> getContactedReplicas()

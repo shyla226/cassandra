@@ -435,7 +435,7 @@ public class SelectStatement implements CQLStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(Observable.just(data), options, nowInSec, userLimit).subscribeOn(Schedulers.io()).blockingSingle();
+                    return processResults(Observable.just(data), options, nowInSec, userLimit).blockingSingle();
                 }
             }
             else

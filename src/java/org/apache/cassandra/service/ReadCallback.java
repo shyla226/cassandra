@@ -23,13 +23,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Observable;
 import io.reactivex.Scheduler;
+import io.reactivex.subjects.BehaviorSubject;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -43,6 +46,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
@@ -59,7 +63,6 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     protected static final Logger logger = LoggerFactory.getLogger( ReadCallback.class );
 
     public final ResponseResolver resolver;
-    private final SimpleCondition condition = new SimpleCondition();
     private final long queryStartNanoTime;
     final int blockfor;
     final List<InetAddress> endpoints;
@@ -74,6 +77,9 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
 
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
+
+    final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
+    final Observable<PartitionIterator> observable;
 
     /**
      * Constructor when response count has to be calculated and blocked for.
@@ -99,6 +105,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         this.queryStartNanoTime = queryStartNanoTime;
         this.endpoints = endpoints;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
+        this.observable = makeObservable();
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
@@ -106,57 +113,40 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
             logger.trace(String.format("Blockfor is %s; setting up requests to %s", blockfor, StringUtils.join(this.endpoints, ",")));
     }
 
-    public void onSignaledAction(Scheduler scheduler, Runnable signaledAction)
+
+    private Observable<PartitionIterator> makeObservable()
     {
-        condition.setSignalAction(scheduler, signaledAction);
+        return publishSubject
+               .timeout(command.getTimeout(), TimeUnit.MILLISECONDS)
+               .first()
+               .onErrorResumeNext(exc -> {
+
+                   if (Tracing.isTracing())
+                   {
+                       String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                       Tracing.trace("{}; received {} of {} responses{}", new Object[]{ ( exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
+                   }
+                   else if (logger.isDebugEnabled())
+                   {
+                       String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                       logger.debug("{}; received {} of {} responses{}", new Object[]{ ( exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
+                   }
+
+                   if (exc instanceof TimeoutException)
+                       return Observable.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
+
+                   return Observable.error(exc);
+               });
     }
 
-    public boolean await(long timePastStart, TimeUnit unit)
+    public Observable<PartitionIterator> get()
     {
-        long time = unit.toNanos(timePastStart) - (System.nanoTime() - queryStartNanoTime);
-        try
-        {
-            return condition.await(time, TimeUnit.NANOSECONDS);
-        }
-        catch (InterruptedException ex)
-        {
-            throw new AssertionError(ex);
-        }
+        return observable;
     }
 
-    public void awaitResults() throws ReadFailureException, ReadTimeoutException
+    public boolean hasValue()
     {
-        boolean signaled = await(command.getTimeout(), TimeUnit.MILLISECONDS);
-        boolean failed = blockfor + failures > endpoints.size();
-        if (signaled && !failed)
-            return;
-
-        if (Tracing.isTracing())
-        {
-            String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            Tracing.trace("{}; received {} of {} responses{}", new Object[]{ (failed ? "Failed" : "Timed out"), received, blockfor, gotData });
-        }
-        else if (logger.isDebugEnabled())
-        {
-            String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            logger.debug("{}; received {} of {} responses{}", new Object[]{ (failed ? "Failed" : "Timed out"), received, blockfor, gotData });
-        }
-
-        // Same as for writes, see AbstractWriteResponseHandler
-        throw failed
-            ? new ReadFailureException(consistencyLevel, received, blockfor, resolver.isDataPresent(), failureReasonByEndpoint)
-            : new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent());
-    }
-
-    public PartitionIterator get() throws ReadFailureException, ReadTimeoutException, DigestMismatchException
-    {
-        if (!condition.isSignaled())
-            awaitResults();
-
-        PartitionIterator result = blockfor == 1 ? resolver.getData() : resolver.resolve();
-        if (logger.isTraceEnabled())
-            logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanoTime));
-        return result;
+        return publishSubject.hasValue();
     }
 
     public int blockFor()
@@ -170,9 +160,26 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         int n = waitingFor(message.from)
               ? recievedUpdater.incrementAndGet(this)
               : received;
+
         if (n >= blockfor && resolver.isDataPresent())
         {
-            condition.signalAll();
+            PartitionIterator result;
+
+            try
+            {
+                result = blockfor == 1 ? resolver.getData() : resolver.resolve();
+            }
+            catch (DigestMismatchException e)
+            {
+                publishSubject.onError(e);
+                return;
+            }
+
+            publishSubject.onNext(result);
+
+            if (logger.isTraceEnabled())
+                logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanoTime));
+
             // kick off a background digest comparison if this is a result that (may have) arrived after
             // the original resolve that get() kicks off as soon as the condition is signaled
             if (blockfor < endpoints.size() && n == endpoints.size())
@@ -277,6 +284,6 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         failureReasonByEndpoint.put(from, failureReason);
 
         if (blockfor + n > endpoints.size())
-            condition.signalAll();
+            publishSubject.onError(new ReadFailureException(consistencyLevel, received, blockfor, resolver.isDataPresent(), failureReasonByEndpoint));
     }
 }

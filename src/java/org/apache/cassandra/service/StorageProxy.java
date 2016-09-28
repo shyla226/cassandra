@@ -1778,7 +1778,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         return Observable.fromIterable(commands)
                          .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime))
-                         .flatMap(reader -> reader.getPartitionIterator(NettyRxScheduler.instance()))
+                         .flatMap(SinglePartitionReadLifecycle::getPartitionIterator)
                          .toList()
                          .map(PartitionIterators::concat);
     }
@@ -1816,57 +1816,23 @@ public class StorageProxy implements StorageProxyMBean
             executor.maybeTryAdditionalReplicas();
         }
 
-        Observable<PartitionIterator> getPartitionIterator(Scheduler scheduler)
+        Observable<PartitionIterator> getPartitionIterator()
         {
-            final PartitionIterator[] partitionIterator = new PartitionIterator[1];
+            Observable<PartitionIterator> obs = executor.handler.get().onErrorResumeNext(e -> {
+                if (e instanceof DigestMismatchException)
+                    return retryOnDigestMismatch();
 
+                return Observable.error(e);
+            });
 
-                //Create observable based on callback
-                Observable<PartitionIterator> obs = Observable.create(subscriber -> {
-                    executor.handler.onSignaledAction(scheduler, () -> {
-                        try
-                        {
-                            partitionIterator[0] = executor.handler.get();
-                            subscriber.onNext(partitionIterator[0]);
-                            subscriber.onComplete();
-                        }
-                        catch (DigestMismatchException e)
-                        {
-                            retryOnDigestMismatch(scheduler, () -> {
-                                try
-                                {
-                                    partitionIterator[0] = repairHandler.get();
-                                    subscriber.onNext(partitionIterator[0]);
-                                }
-                                catch (DigestMismatchException e1)
-                                {
-                                    subscriber.onError(new RuntimeException("Encountered a digest mismatch during a read repair", e1));
-                                }
-                                finally
-                                {
-                                    subscriber.onComplete();
-                                }
-                            });
-                        }
-                        finally
-                        {
-                            if (partitionIterator[0] != null)
-                                partitionIterator[0].close();
-                        }
-                    });
+            doInitialQueries();
 
-                });
+            maybeTryAdditionalReplicas();
 
-                doInitialQueries();
-
-                //FIXME: Needs to become async
-                //maybeTryAdditionalReplicas();
-
-
-                return obs;
+            return obs;
         }
 
-        void retryOnDigestMismatch(Scheduler scheduler, Runnable onRepairAction) throws ReadFailureException, ReadTimeoutException
+        Observable<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
         {
 
             ReadRepairMetrics.repairedBlocking.mark();
@@ -1882,8 +1848,6 @@ public class StorageProxy implements StorageProxyMBean
                                              executor.handler.endpoints,
                                              queryStartNanoTime);
 
-            if (onRepairAction != null)
-                repairHandler.onSignaledAction(scheduler, onRepairAction);
 
             for (InetAddress endpoint : executor.getContactedReplicas())
             {
@@ -1891,49 +1855,15 @@ public class StorageProxy implements StorageProxyMBean
                 Tracing.trace("Enqueuing full data read to {}", endpoint);
                 MessagingService.instance().sendRRWithFailure(message, endpoint, repairHandler);
             }
+
+            return repairHandler.get().onErrorResumeNext(e -> {
+                if (e instanceof DigestMismatchException)
+                    return Observable.error(new RuntimeException("Digest mismatch hit on readRepair", e));
+
+                return Observable.error(e);
+            });
         }
 
-        void awaitResultsAndRetryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
-        {
-            try
-            {
-                result = executor.get();
-            }
-            catch (DigestMismatchException ex)
-            {
-                Tracing.trace("Digest mismatch: {}", ex);
-
-                retryOnDigestMismatch(null, null);
-            }
-        }
-
-        void maybeAwaitFullDataRead() throws ReadTimeoutException
-        {
-            // There wasn't a digest mismatch, we're good
-            if (repairHandler == null)
-                return;
-
-            // Otherwise, get the result from the full-data read and check that it's not a short read
-            try
-            {
-                result = repairHandler.get();
-            }
-            catch (DigestMismatchException e)
-            {
-                throw new AssertionError(e); // full data requested from each node here, no digests should be sent
-            }
-            catch (ReadTimeoutException e)
-            {
-                if (Tracing.isTracing())
-                    Tracing.trace("Timed out waiting on digest mismatch repair requests");
-                else
-                    logger.trace("Timed out waiting on digest mismatch repair requests");
-                // the caught exception here will have CL.ALL from the repair command,
-                // not whatever CL the initial command was at (CASSANDRA-7947)
-                int blockFor = consistency.blockFor(Keyspace.open(command.metadata().ksName));
-                throw new ReadTimeoutException(consistency, blockFor-1, blockFor, true);
-            }
-        }
 
         PartitionIterator getResult()
         {
@@ -2158,14 +2088,7 @@ public class StorageProxy implements StorageProxyMBean
             if (result != null)
                 return;
 
-            try
-            {
-                result = handler.get();
-            }
-            catch (DigestMismatchException e)
-            {
-                throw new AssertionError(e); // no digests in range slices yet
-            }
+            result = handler.get().blockingSingle();
         }
 
         protected RowIterator computeNext()

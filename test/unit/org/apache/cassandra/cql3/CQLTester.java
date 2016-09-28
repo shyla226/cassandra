@@ -59,6 +59,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.Event;
@@ -84,7 +85,8 @@ public abstract class CQLTester
     private static final AtomicInteger seqNumber = new AtomicInteger();
     protected static final ByteBuffer TOO_BIG = ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT + 1024);
 
-    private static org.apache.cassandra.transport.Server server;
+    private static NativeTransportService server;
+
     protected static final int nativePort;
     protected static final InetAddress nativeAddr;
     private static final Map<Integer, Cluster> clusters = new HashMap<>();
@@ -345,8 +347,9 @@ public abstract class CQLTester
         StorageService.instance.initServer();
         SchemaLoader.startGossiper();
 
-        server = new Server.Builder().withHost(nativeAddr).withPort(nativePort).build();
+        server = new NativeTransportService(nativeAddr, nativePort);
         server.start();
+
 
         for (int version : PROTOCOL_VERSIONS)
         {
@@ -358,6 +361,7 @@ public abstract class CQLTester
                                      .withClusterName("Test Cluster")
                                      .withPort(nativePort)
                                      .withProtocolVersion(ProtocolVersion.fromInt(version))
+                                     .withoutMetrics()
                                      .build();
             clusters.put(version, cluster);
             sessions.put(version, cluster.connect());

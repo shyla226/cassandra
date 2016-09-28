@@ -50,6 +50,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -188,6 +189,7 @@ public class CassandraDaemon
 
         ThreadAwareSecurityManager.install();
 
+        RxJavaPlugins.initComputationScheduler(NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters())));
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 

@@ -515,7 +515,8 @@ public class DataResolver extends ResponseResolver
                     MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(MessagingService.current_version), source, handler);
 
                 // We don't call handler.get() because we want to preserve tombstones since we're still in the middle of merging node results.
-                handler.awaitResults();
+                //FIXME: Need to rewrite this for the special tombstone case.
+                // handler.awaitResults();
                 assert resolver.responses.size() == 1;
                 return UnfilteredPartitionIterators.getOnlyElement(resolver.responses.get(0).payload.makeIterator(command), retryCommand);
             }
