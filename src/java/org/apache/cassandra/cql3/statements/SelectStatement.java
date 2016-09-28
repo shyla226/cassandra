@@ -414,7 +414,7 @@ public class SelectStatement implements CQLStatement
                                               int nowInSec,
                                               int userLimit) throws RequestValidationException
     {
-        return process(partitions, options, nowInSec, userLimit).flatMap(resultSet -> Observable.just(new ResultMessage.Rows(resultSet)));
+        return process(partitions, options, nowInSec, userLimit).map(ResultMessage.Rows::new);
     }
 
     public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
@@ -766,26 +766,20 @@ public class SelectStatement implements CQLStatement
                               int nowInSec,
                               int userLimit) throws InvalidRequestException
     {
-       //return Observable.defer(() -> {
+        final Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
 
-            final Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
-
-            return partitions.flatMap(AsObservable::asObservable)
-                             .map(rowiterator -> {
-                                 //FIXME: this should be made iterable
-                                 processPartition(rowiterator, options, result, nowInSec);
-                                 rowiterator.close();
-                                 return 1;
-                             })
-                             .toList()
-                             .map(rows -> {
-                                 ResultSet cqlRows = result.build();
-                                 orderResults(cqlRows);
-                                 cqlRows.trim(userLimit);
-
-                                 return cqlRows;
-                             }).defaultIfEmpty(result.build());
-        //});
+        return partitions.map(partitionIterator -> {
+            partitionIterator.forEachRemaining(rowIterator -> {
+                processPartition(rowIterator, options, result, nowInSec);
+                rowIterator.close();
+            });
+            return 1;
+        }).last().map(v -> {
+            ResultSet cqlRows = result.build();
+            orderResults(cqlRows);
+            cqlRows.trim(userLimit);
+            return cqlRows;
+        }).defaultIfEmpty(result.build());
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)
