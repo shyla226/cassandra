@@ -100,8 +100,6 @@ public class NettyRxScheduler extends Scheduler
         return scheduler;
     }
 
-    private static initialize
-
     private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
     {
         assert eventLoop != null;
