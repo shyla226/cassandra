@@ -189,7 +189,7 @@ public class CassandraDaemon
 
         ThreadAwareSecurityManager.install();
 
-        RxJavaPlugins.initComputationScheduler(NettyRxScheduler.instance());
+        RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters())));
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 
