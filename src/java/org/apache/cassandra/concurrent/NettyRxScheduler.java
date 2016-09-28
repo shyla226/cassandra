@@ -74,7 +74,6 @@ public class NettyRxScheduler extends Scheduler
 
     //Each array entry maps to a cpuId. We assume there will be < 1024 CPUs
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[1024];
-    private static int numActiveCpus = 0;
 
     final EventExecutorGroup eventLoop;
     public final int cpuId;
@@ -93,12 +92,12 @@ public class NettyRxScheduler extends Scheduler
             scheduler = new NettyRxScheduler(loop, cpuId);
             localNettyEventLoop.set(scheduler);
             perCoreSchedulers[cpuId] = scheduler;
-
-            numActiveCpus++;
         }
 
         return scheduler;
     }
+
+    private static initialize
 
     private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
     {
@@ -151,7 +150,7 @@ public class NettyRxScheduler extends Scheduler
             return ranges;
 
         List<Range<Token>> localRanges = StorageService.getLocalRanges(cfs);
-        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, cfs.getPartitioner(), numActiveCpus);
+        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, cfs.getPartitioner(), NativeTransportService.NUM_NETTY_THREADS);
 
         if (instance().cpuId == 0)
         {

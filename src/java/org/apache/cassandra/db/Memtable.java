@@ -461,7 +461,6 @@ public class Memtable implements Comparable<Memtable>
         ArrayList<Integer> subrangeKeyCounts = new ArrayList<>(partitions.size());
 
         // if we're flushing the whole memtable, we can do something more efficient
-        // TODO make sure this check actually works with min/max tokens
         if (from.getToken().equals(cfs.getPartitioner().getMinimumToken()) && to.getToken().equals(cfs.getPartitioner().getMaximumToken()))
         {
             int capacity = 0;
@@ -485,7 +484,10 @@ public class Memtable implements Comparable<Memtable>
             {
                 PartitionPosition memtableRangeStart = rangeList.get(i - 1);
                 PartitionPosition memtableRangeEnd = rangeList.get(i);
+
                 // TODO double check inclusivity of both memtable and requested range
+                // old range was inclusive on start, exclusive on end
+
                 //  check if the requested range intersects with this memtable subrange at all
                 if (from.compareTo(memtableRangeEnd) >= 0 || to.compareTo(memtableRangeStart) < 0)
                     continue;
