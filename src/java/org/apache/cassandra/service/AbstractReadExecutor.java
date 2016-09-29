@@ -23,18 +23,19 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.monitoring.ConstructionTime;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.ReadRepairDecision;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
@@ -114,16 +115,48 @@ public abstract class AbstractReadExecutor
         if (hasLocalEndpoint)
         {
             logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
+            executeLocalRead();
+        }
+    }
 
-            if (command instanceof SinglePartitionReadCommand)
+    private void executeLocalRead()
+    {
+        long start = System.nanoTime();
+        long constructionTime = System.currentTimeMillis();
+        try
+        {
+            command.setMonitoringTime(new ConstructionTime(constructionTime), MessagingService.Verb.READ.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
+
+            ReadResponse response;
+            try (ReadExecutionController executionController = command.executionController();
+                 UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
             {
-                SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
-                NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey())
-                    .scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+                response = command.createResponse(iterator);
+            }
+
+            if (command.complete())
+            {
+                handler.response(response);
             }
             else
             {
-                NettyRxScheduler.instance().scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+                MessagingService.instance().incrementDroppedMessages(MessagingService.Verb.READ, System.currentTimeMillis() - constructionTime);
+                handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+            }
+
+            MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+        }
+        catch (Throwable t)
+        {
+            if (t instanceof TombstoneOverwhelmingException)
+            {
+                handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
+                logger.error(t.getMessage());
+            }
+            else
+            {
+                handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                throw t;
             }
         }
     }
@@ -289,8 +322,6 @@ public abstract class AbstractReadExecutor
             // no latency information, or we're overloaded
             if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
                 return;
-
-            Observable<PartitionIterator> observable = get();
 
             NettyRxScheduler.instance().scheduleDirect(() -> {
 
