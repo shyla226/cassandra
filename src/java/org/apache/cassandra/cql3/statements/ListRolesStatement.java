@@ -109,7 +109,7 @@ public class ListRolesStatement extends AuthorizationStatement
     private Observable<ResultMessage> resultMessage(Set<RoleResource> roles)
     {
         if (roles.isEmpty())
-            return Observable.empty();
+            return Observable.just(new ResultMessage.Void());
 
         List<RoleResource> sorted = Lists.newArrayList(roles);
         Collections.sort(sorted);

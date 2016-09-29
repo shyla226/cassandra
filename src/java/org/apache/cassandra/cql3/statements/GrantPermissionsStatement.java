@@ -39,6 +39,6 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
     public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee);
-        return Observable.empty();
+        return Observable.just(new ResultMessage.Void());
     }
 }

@@ -76,7 +76,7 @@ public class CreateRoleStatement extends AuthenticationStatement
 
         DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
         grantPermissionsToCreator(state);
-        return Observable.empty();
+        return Observable.just(new ResultMessage.Void());
     }
 
     /**

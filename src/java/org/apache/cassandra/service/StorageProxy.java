@@ -1724,14 +1724,12 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             Observable<PartitionIterator> resultObs = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
+            if (group.commands.size() <= 1)
+                return resultObs;
+
             // If we have more than one command, then despite each read command honoring the limit, the total result
             // might not honor it and so we should enforce it
-            return resultObs.map(result -> {
-                if (group.commands.size() > 1)
-                    result = group.limits().filter(result, group.nowInSec());
-
-                return result;
-            });
+            return resultObs.map(result -> group.limits().filter(result, group.nowInSec()));
         }
         catch (UnavailableException e)
         {
@@ -1776,6 +1774,9 @@ public class StorageProxy implements StorageProxyMBean
     private static Observable<PartitionIterator> fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
+        if (commands.size() == 1)
+            return new SinglePartitionReadLifecycle(commands.get(0), consistencyLevel, queryStartNanoTime).getPartitionIterator();
+
         return Observable.fromIterable(commands)
                          .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime))
                          .flatMap(SinglePartitionReadLifecycle::getPartitionIterator)

@@ -262,11 +262,12 @@ public class SelectStatement implements CQLStatement
         int pageSize = options.getPageSize();
         ReadQuery query = getQuery(options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
-        if (pageSize <= 0 || query.limits().count() <= pageSize)
-            return execute(query, options, state, nowInSec, userLimit, queryStartNanoTime);
+        // TODO paging support
+        // if (pageSize <= 0 || query.limits().count() <= pageSize)
+        return execute(query, options, state, nowInSec, userLimit, queryStartNanoTime);
 
-        QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
-        return Observable.just(execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime));
+        // QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
+        // return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
     }
 
 

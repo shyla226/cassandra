@@ -92,6 +92,6 @@ public class AlterRoleStatement extends AuthenticationStatement
     {
         if (!opts.isEmpty())
             DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-        return Observable.empty();
+        return Observable.just(new ResultMessage.Void());
     }
 }

@@ -35,6 +35,6 @@ public class RevokeRoleStatement extends RoleManagementStatement
     public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         DatabaseDescriptor.getRoleManager().revokeRole(state.getUser(), role, grantee);
-        return Observable.empty();
+        return Observable.just(new ResultMessage.Void());
     }
 }

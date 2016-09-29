@@ -71,12 +71,12 @@ public class DropRoleStatement extends AuthenticationStatement
     {
         // not rejected in validate()
         if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return Observable.empty();
+            return Observable.just(new ResultMessage.Void());
 
         // clean up grants and permissions of/on the dropped role.
         DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
         DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
         DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
-        return Observable.empty();
+        return Observable.just(new ResultMessage.Void());
     }
 }

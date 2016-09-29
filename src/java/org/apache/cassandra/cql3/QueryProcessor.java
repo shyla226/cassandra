@@ -218,10 +218,7 @@ public class QueryProcessor implements QueryHandler
         statement.checkAccess(clientState);
         statement.validate(clientState);
 
-        return statement.execute(queryState, options, queryStartNanoTime)
-                        .filter(result -> result != null)
-                        .cast(ResultMessage.class)  //Deal with generics madness
-                        .defaultIfEmpty(new ResultMessage.Void());
+        return statement.execute(queryState, options, queryStartNanoTime);
     }
 
     public static Observable<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)

@@ -71,7 +71,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
     public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
         Event.SchemaChange ce = announceMigration(false);
-        return ce == null ? Observable.empty() : Observable.just(new ResultMessage.SchemaChange(ce));
+        return ce == null ? Observable.just(new ResultMessage.Void()) : Observable.just(new ResultMessage.SchemaChange(ce));
     }
 
     public Event.SchemaChange announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException

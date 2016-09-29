@@ -80,7 +80,7 @@ public class TruncateStatement extends CFStatement implements CQLStatement
             throw new TruncateException(e);
         }
 
-        return Observable.empty();
+        return Observable.just(new ResultMessage.Void());
     }
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options)
