@@ -106,7 +106,9 @@ public abstract class ModificationStatement implements CQLStatement
 
     private final PartitionColumns conditionColumns;
 
-    private final PartitionColumns requiresRead;
+    private final PartitionColumns requiredReadColumns;
+
+    private final boolean requiresRead;
 
     public ModificationStatement(StatementType type,
                                  int boundTerms,
@@ -135,6 +137,7 @@ public abstract class ModificationStatement implements CQLStatement
         if (columns != null)
             conditionColumnsBuilder.addAll(columns);
 
+        boolean requiresRead = false;
         PartitionColumns.Builder updatedColumnsBuilder = PartitionColumns.builder();
         PartitionColumns.Builder requiresReadBuilder = PartitionColumns.builder();
         for (Operation operation : operations)
@@ -146,8 +149,10 @@ public abstract class ModificationStatement implements CQLStatement
             {
                 conditionColumnsBuilder.add(operation.column);
                 requiresReadBuilder.add(operation.column);
+                requiresRead = true;
             }
         }
+        this.requiresRead = requiresRead;
 
         PartitionColumns modifiedColumns = updatedColumnsBuilder.build();
         // Compact tables have not row marker. So if we don't actually update any particular column,
@@ -159,7 +164,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         this.updatedColumns = modifiedColumns;
         this.conditionColumns = conditionColumnsBuilder.build();
-        this.requiresRead = requiresReadBuilder.build();
+        this.requiredReadColumns = requiresReadBuilder.build();
     }
 
     public Iterable<Function> getFunctions()
@@ -357,12 +362,7 @@ public abstract class ModificationStatement implements CQLStatement
 
     public boolean requiresRead()
     {
-        // Lists SET operation incurs a read.
-        for (Operation op : allOperations())
-            if (op.requiresRead())
-                return true;
-
-        return false;
+        return requiresRead;
     }
 
     private Map<DecoratedKey, Partition> readRequiredLists(Collection<ByteBuffer> partitionKeys,
@@ -372,7 +372,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                            ConsistencyLevel cl,
                                                            long queryStartNanoTime)
     {
-        if (!requiresRead())
+        if (!requiresRead)
             return null;
 
         try
@@ -389,7 +389,7 @@ public abstract class ModificationStatement implements CQLStatement
         for (ByteBuffer key : partitionKeys)
             commands.add(SinglePartitionReadCommand.create(cfm,
                                                            nowInSec,
-                                                           ColumnFilter.selection(this.requiresRead),
+                                                           ColumnFilter.selection(this.requiredReadColumns),
                                                            RowFilter.NONE,
                                                            limits,
                                                            cfm.decorateKey(key),
