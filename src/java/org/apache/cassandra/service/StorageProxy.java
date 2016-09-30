@@ -50,6 +50,7 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -653,7 +654,7 @@ public class StorageProxy implements StorageProxyMBean
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      * @return an Observable that emits a single (null) item when all mutations have completed
      */
-    public static Observable<Integer> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
+    public static Observable<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
@@ -661,11 +662,11 @@ public class StorageProxy implements StorageProxyMBean
 
         long startTime = System.nanoTime();
 
-        Observable<Integer> observable = null;
+        Observable<ResultMessage.Void> observable = null;
 
         for (IMutation mutation : mutations)
         {
-            Observable<Integer> singleMutationObservable;
+            Observable<ResultMessage.Void> singleMutationObservable;
             if (mutation instanceof CounterMutation)
             {
                 singleMutationObservable = mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime).get();
@@ -890,7 +891,7 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("unchecked")
-    public static Observable<Integer> mutateWithTriggers(Collection<? extends IMutation> mutations,
+    public static Observable<ResultMessage.Void> mutateWithTriggers(Collection<? extends IMutation> mutations,
                                                       ConsistencyLevel consistencyLevel,
                                                       boolean mutateAtomically,
                                                       long queryStartNanoTime)
@@ -906,7 +907,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             // TODO Rx-ify
             mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime);
-            return Observable.just(0);
+            return Observable.just(new ResultMessage.Void());
         }
         else
         {
@@ -914,7 +915,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 // TODO Rx-ify
                 mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime);
-                return Observable.just(0);
+                return Observable.just(new ResultMessage.Void());
             }
             else
             {
