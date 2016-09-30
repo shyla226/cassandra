@@ -32,6 +32,7 @@ import io.reactivex.Observer;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.MonitoredExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -85,6 +86,26 @@ public class EventLoopBench {
 
 
     @State(Scope.Thread)
+    public static class NewMonitoredState {
+        @Param({"1000000"})
+        public int count;
+
+        MonitoredExecutorService exec = new MonitoredExecutorService("test", 1, 1 << 20);
+
+        @Setup
+        public void setup() {
+
+            Integer[] arr = new Integer[count];
+            Arrays.fill(arr, 777);
+        }
+
+        @TearDown
+        public void teardown() {
+            exec.shutdown();
+        }
+    }
+
+    @State(Scope.Thread)
     public static class ExecutorState {
 
         @Param({"1000000"})
@@ -92,7 +113,6 @@ public class EventLoopBench {
 
         private ExecutorService exec1;
         private DefaultEventExecutorGroup loop1;
-        private DefaultEventExecutorGroup loop2;
 
         Observable<Integer> rx1;
         Observable<Integer> rx2;
@@ -106,20 +126,17 @@ public class EventLoopBench {
             Arrays.fill(arr, 777);
 
             loop1 = new DefaultEventExecutorGroup(1);
-            loop2 = new DefaultEventExecutorGroup(2);
 
             Scheduler s1 = Schedulers.from(loop1);
-            Scheduler s2 = Schedulers.from(loop2);
 
             rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(s1).observeOn(s2);
+            rx2 = Observable.fromArray(arr).subscribeOn(s1).observeOn(s1);
         }
 
         @TearDown
         public void teardown() {
             exec1.shutdown();
             loop1.shutdown();
-            loop2.shutdown();
         }
     }
 
@@ -131,7 +148,7 @@ public class EventLoopBench {
         }
     }
 
-    //@Benchmark
+    @Benchmark
     public void executor(ExecutorState state, Blackhole bh) throws Exception {
 
         CountDownLatch cdl = new CountDownLatch(1);
@@ -206,6 +223,26 @@ public class EventLoopBench {
         for (int i = 0; i < c; i++) {
             int j = i;
             fj.submit(() -> {
+                if (j == c - 1)
+                {
+                    cdl.countDown();
+                }
+            });
+        }
+
+        await(c, cdl);
+    }
+
+    @Benchmark
+    public void newmonitored(NewMonitoredState state, Blackhole bh) throws Exception {
+
+        CountDownLatch cdl = new CountDownLatch(1);
+
+
+        int c = state.count;
+        for (int i = 0; i < c; i++) {
+            int j = i;
+            state.exec.submit(() -> {
                 if (j == c - 1)
                 {
                     cdl.countDown();

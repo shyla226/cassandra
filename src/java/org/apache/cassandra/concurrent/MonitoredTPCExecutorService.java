@@ -33,7 +33,9 @@ import net.openhft.affinity.CpuLayout;
 import net.openhft.affinity.impl.VanillaCpuLayout;
 import org.apache.cassandra.utils.FBUtilities;
 import org.jctools.queues.MessagePassingQueue;
+import org.jctools.queues.MpscArrayQueue;
 import org.jctools.queues.MpscChunkedArrayQueue;
+import org.jctools.queues.SpscArrayQueue;
 
 /**
  * Created by jake on 3/22/16.
@@ -65,7 +67,7 @@ public class MonitoredTPCExecutorService
             throw new IOError(e);
         }
 
-        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "2"));
+        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "7"));
         int totalCPUs = Runtime.getRuntime().availableProcessors();
         int allocatedCPUs = FBUtilities.getAvailableProcessors();
 
@@ -97,9 +99,10 @@ public class MonitoredTPCExecutorService
             while (true)
             {
                 for (int i = 0; i < length; i++)
+                {
+                    LockSupport.parkNanos(1);
                     runningCores[i].checkQueue();
-
-                LockSupport.parkNanos(1);
+                }
             }
         });
 
@@ -132,7 +135,9 @@ public class MonitoredTPCExecutorService
 
     public class SingleCoreExecutor implements Runnable
     {
-        private final int maxExtraSpins = 1 << 20;
+        private static final int maxExtraSpins = 1024 * 10;
+        private static final int yieldExtraSpins = 1024 * 8;
+        private static final int parkExtraSpins = 1024 * 9;
 
         private final int threadOffset;
         private final int cpuId;
@@ -147,7 +152,7 @@ public class MonitoredTPCExecutorService
             this.cpuId = cpuId;
             this.coreId = coreId;
             this.socketId = socketId;
-            this.runQueue = new MpscChunkedArrayQueue<>(1 << 20);
+            this.runQueue = new SpscArrayQueue<>(1 << 20);
             this.state = CoreState.WORKING;
         }
 
@@ -218,6 +223,7 @@ public class MonitoredTPCExecutorService
             {
                 logger.info("Assigning {} to cpu {} on core {} on socket {}", Thread.currentThread().getName(), cpuId, coreId, socketId);
                 //AffinitySupport.setAffinity(1L << cpuId);
+                MessagePassingQueue<FutureTask<?>> runQueue = this.runQueue;
 
                 while (true)
                 {
@@ -226,10 +232,18 @@ public class MonitoredTPCExecutorService
                     {
                         int spins = 0;
                         int processed = 0;
-                        do
+                        while(true)
                         {
                             processed = runQueue.drain(FutureTask::run);
-                        } while (processed > 0 || ++spins < maxExtraSpins);
+                            if(processed > 0 || ++spins < yieldExtraSpins)
+                                continue;
+                            else if (spins < parkExtraSpins)
+                                Thread.yield();
+                            else if (spins < maxExtraSpins)
+                                LockSupport.parkNanos(1);
+                            else
+                                break;
+                        }
                     }
 
                     //Nothing todo; park
