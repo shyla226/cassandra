@@ -430,7 +430,7 @@ public abstract class ModificationStatement implements CQLStatement
         return !conditions.isEmpty();
     }
 
-    public Observable<ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Observable<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         if (options.getConsistency() == null)
@@ -441,7 +441,7 @@ public abstract class ModificationStatement implements CQLStatement
              : executeWithoutCondition(queryState, options, queryStartNanoTime);
     }
 
-    private Observable<ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    private Observable<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -452,8 +452,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState), queryStartNanoTime);
         if (!mutations.isEmpty())
-            return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime)
-                    .map(v -> new ResultMessage.Void());
+            return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
 
         return Observable.just(new ResultMessage.Void());
     }

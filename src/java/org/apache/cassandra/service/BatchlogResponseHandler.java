@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
 {
@@ -70,7 +71,7 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         wrapped.assureSufficientLiveNodes();
     }
 
-    public Observable<Integer> get() throws WriteTimeoutException, WriteFailureException
+    public Observable<ResultMessage.Void> get() throws WriteTimeoutException, WriteFailureException
     {
         return wrapped.get();
     }

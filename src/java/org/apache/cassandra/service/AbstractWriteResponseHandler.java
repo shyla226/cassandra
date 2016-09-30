@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import com.google.common.collect.Iterables;
 import io.reactivex.Observable;
 import io.reactivex.subjects.BehaviorSubject;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,8 +55,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
 
-    final BehaviorSubject<Integer> publishSubject = BehaviorSubject.create();
-    final Observable<Integer> observable;
+    final BehaviorSubject<ResultMessage.Void> publishSubject = BehaviorSubject.create();
+    final Observable<ResultMessage.Void> observable;
 
     /**
      * @param queryStartNanoTime the time at which the query started
@@ -78,12 +79,12 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     }
 
 
-    public Observable<Integer> get()
+    public Observable<ResultMessage.Void> get()
     {
         return observable;
     }
 
-    private Observable<Integer> makeObservable()
+    private Observable<ResultMessage.Void> makeObservable()
     {
         long requestTimeout = writeType == WriteType.COUNTER
                             ? DatabaseDescriptor.getCounterWriteRpcTimeout()
@@ -153,8 +154,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
     protected void signalComplete()
     {
-        // emit a value of 0, because we can't emit null
-        publishSubject.onNext(0);
+        publishSubject.onNext(new ResultMessage.Void());
     }
 
     @Override
