@@ -575,7 +575,12 @@ public class Keyspace
                     baseComplete.set(System.currentTimeMillis());
                 */
             }
-            return io.reactivex.Single.merge(memtablePutObservables).last(0);
+
+            // avoid the expensive merge call if there's only 1 observable
+            if (memtablePutObservables.size() == 1)
+                return memtablePutObservables.get(0);
+            else
+                return io.reactivex.Observable.merge(memtablePutObservables).last();
         })).doAfterTerminate(opGroup::close);
     }
 
