@@ -35,7 +35,10 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
 import org.jctools.queues.MpscChunkedArrayQueue;
+import org.jctools.queues.MpscLinkedQueue8;
 import org.jctools.queues.SpscArrayQueue;
+import org.jctools.queues.SpscLinkedQueue;
+import sun.misc.Contended;
 
 /**
  * Created by jake on 3/22/16.
@@ -53,6 +56,8 @@ public class MonitoredTPCExecutorService
 
     private final CpuLayout layout;
     private final Thread monitorThread;
+
+    @Contended
     private final SingleCoreExecutor runningCores[];
     private final Thread runningThreads[];
 
@@ -67,7 +72,7 @@ public class MonitoredTPCExecutorService
             throw new IOError(e);
         }
 
-        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "7"));
+        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "6"));
         int totalCPUs = Runtime.getRuntime().availableProcessors();
         int allocatedCPUs = FBUtilities.getAvailableProcessors();
 
@@ -83,7 +88,7 @@ public class MonitoredTPCExecutorService
         {
             int cpuId = start + i;
 
-            runningCores[i] = new SingleCoreExecutor(i, cpuId, layout.coreId(cpuId), layout.socketId(cpuId));
+            runningCores[i] = new SingleCoreExecutor(i, runningCores.length, cpuId, layout.coreId(cpuId), layout.socketId(cpuId));
 
             Thread owner = new Thread(runningCores[i]);
             runningThreads[i] = owner;
@@ -99,10 +104,9 @@ public class MonitoredTPCExecutorService
             while (true)
             {
                 for (int i = 0; i < length; i++)
-                {
-                    LockSupport.parkNanos(1);
-                    runningCores[i].checkQueue();
-                }
+                    runningCores[i].checkQueues();
+
+                LockSupport.parkNanos(1);
             }
         });
 
@@ -143,16 +147,28 @@ public class MonitoredTPCExecutorService
         private final int cpuId;
         private final int coreId;
         private final int socketId;
-        private volatile CoreState state;
-        private final MessagePassingQueue<FutureTask<?>> runQueue;
+        private long threadId;
 
-        private SingleCoreExecutor(int threadOffset, int cpuId, int coreId, int socketId)
+        @Contended
+        private volatile CoreState state;
+
+        private final MessagePassingQueue<FutureTask<?>> externalQueue;
+
+        @Contended
+        private final MessagePassingQueue<FutureTask<?>>[] incomingQueues;
+
+        private SingleCoreExecutor(int threadOffset, int totalCores, int cpuId, int coreId, int socketId)
         {
             this.threadOffset = threadOffset;
             this.cpuId = cpuId;
             this.coreId = coreId;
             this.socketId = socketId;
-            this.runQueue = new SpscArrayQueue<>(1 << 20);
+            this.externalQueue = new MpscArrayQueue<>(1 << 20);
+
+            this.incomingQueues = new MessagePassingQueue[totalCores];
+            for (int i = 0; i < incomingQueues.length; i++)
+                incomingQueues[i] = new SpscArrayQueue<>(1 << 20);
+
             this.state = CoreState.WORKING;
         }
 
@@ -170,15 +186,39 @@ public class MonitoredTPCExecutorService
             LockSupport.unpark(runningThreads[threadOffset]);
         }
 
-        private void checkQueue()
+        private void checkQueues()
         {
-            if (state == CoreState.PARKED && !runQueue.isEmpty())
+            if (state == CoreState.PARKED && !isEmpty())
                 unpark();
         }
 
         public FutureTask<?> addTask(FutureTask<?> futureTask)
         {
-            if (!runQueue.offer(futureTask))
+            long threadId = Thread.currentThread().getId();
+
+            MessagePassingQueue<FutureTask<?>> queue = null;
+
+            if (threadId == this.threadId)
+            {
+                queue = incomingQueues[threadOffset];
+            }
+            else
+            {
+
+                for (int i = 0; i < runningCores.length; i++)
+                {
+                    if (runningCores[i].threadId == threadId)
+                    {
+                        queue = incomingQueues[runningCores[i].threadOffset];
+                        break;
+                    }
+                }
+            }
+
+            if (queue == null)
+                queue = externalQueue;
+
+            if (!queue.relaxedOffer(futureTask))
                 throw new RuntimeException("Backpressure");
 
             return futureTask;
@@ -221,9 +261,9 @@ public class MonitoredTPCExecutorService
         {
             try
             {
+                threadId = Thread.currentThread().getId();
                 logger.info("Assigning {} to cpu {} on core {} on socket {}", Thread.currentThread().getName(), cpuId, coreId, socketId);
                 //AffinitySupport.setAffinity(1L << cpuId);
-                MessagePassingQueue<FutureTask<?>> runQueue = this.runQueue;
 
                 while (true)
                 {
@@ -231,11 +271,9 @@ public class MonitoredTPCExecutorService
                     if (state == CoreState.WORKING)
                     {
                         int spins = 0;
-                        int processed = 0;
-                        while(true)
+                        while (true)
                         {
-                            processed = runQueue.drain(FutureTask::run);
-                            if(processed > 0 || ++spins < yieldExtraSpins)
+                            if (drain() > 0 || ++spins < yieldExtraSpins)
                                 continue;
                             else if (spins < parkExtraSpins)
                                 Thread.yield();
@@ -255,6 +293,34 @@ public class MonitoredTPCExecutorService
                 //AffinitySupport.setAffinity(AffinityLock.BASE_AFFINITY);
                 logger.info("Shutting down event loop");
             }
+        }
+
+        int drain()
+        {
+            int processed = 0;
+
+            for (int i = 0; i < incomingQueues.length; i++)
+            {
+                processed += incomingQueues[i].drain(FutureTask::run, 8);
+            }
+
+            FutureTask<?> task = externalQueue.relaxedPoll();
+            if (task != null)
+            {
+                task.run();
+                ++processed;
+            }
+
+            return processed;
+        }
+
+        boolean isEmpty()
+        {
+            for (int i = 0; i < incomingQueues.length; i++)
+                if (!incomingQueues[i].isEmpty())
+                    return false;
+
+            return externalQueue.relaxedPeek() == null;
         }
     }
 }

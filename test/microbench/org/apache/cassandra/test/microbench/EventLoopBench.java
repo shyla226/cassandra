@@ -26,6 +26,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
+import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
@@ -62,7 +63,7 @@ import org.openjdk.jmh.infra.Blackhole;
 public class EventLoopBench {
     @State(Scope.Thread)
     public static class MonitoredState {
-        @Param({"1000000"})
+        @Param({"1", "100", "1000", "10000","1000000"})
         public int count;
 
         Observable<Integer> rxMonitored;
@@ -75,8 +76,8 @@ public class EventLoopBench {
 
             MonitoredTPCRxScheduler scheduler = new MonitoredTPCRxScheduler();
 
-            rxMonitored = Observable.fromArray(arr).subscribeOn(scheduler.any())
-                                    .observeOn(scheduler.any());
+            rxMonitored = Observable.fromArray(arr).subscribeOn(scheduler.forCpu(0))
+                                    .observeOn(scheduler.forCpu(1));
         }
         @TearDown
         public void teardown() {
@@ -90,7 +91,7 @@ public class EventLoopBench {
         @Param({"1000000"})
         public int count;
 
-        MonitoredExecutorService exec = new MonitoredExecutorService("test", 1, 1 << 20);
+        MonitoredExecutorService exec = new MonitoredExecutorService("test", 2, 1 << 20);
 
         @Setup
         public void setup() {
@@ -108,11 +109,11 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"1000000"})
+        @Param({"1", "100", "1000", "10000","1000000"})
         public int count;
 
         private ExecutorService exec1;
-        private DefaultEventExecutorGroup loop1;
+        private EpollEventLoopGroup loop1;
 
         Observable<Integer> rx1;
         Observable<Integer> rx2;
@@ -125,12 +126,13 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loop1 = new DefaultEventExecutorGroup(1);
+            loop1 = new EpollEventLoopGroup(2);
 
-            Scheduler s1 = Schedulers.from(loop1);
+            Scheduler s1 = Schedulers.from(loop1.next());
+            Scheduler s2 = Schedulers.from(loop1.next());
 
             rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(s1).observeOn(s1);
+            rx2 = Observable.fromArray(arr).subscribeOn(s1).observeOn(s2);
         }
 
         @TearDown
@@ -148,7 +150,7 @@ public class EventLoopBench {
         }
     }
 
-    @Benchmark
+    //@Benchmark
     public void executor(ExecutorState state, Blackhole bh) throws Exception {
 
         CountDownLatch cdl = new CountDownLatch(1);
@@ -166,7 +168,7 @@ public class EventLoopBench {
         await(c, cdl);
     }
 
-    @Benchmark
+    //@Benchmark
     public void rxDefault(ExecutorState state, Blackhole bh) throws Exception {
         LatchedObserver<Integer> o = new LatchedObserver<>(bh);
         state.rx1.subscribe(o);
@@ -192,7 +194,7 @@ public class EventLoopBench {
     }
 
 
-    @Benchmark
+    //@Benchmark
     public void monitored(MonitoredState state, Blackhole bh) throws Exception {
 
         CountDownLatch cdl = new CountDownLatch(1);
@@ -212,7 +214,7 @@ public class EventLoopBench {
     }
 
 
-    @Benchmark
+    //@Benchmark
     public void forkjoin(ExecutorState state, Blackhole bh) throws Exception {
 
         CountDownLatch cdl = new CountDownLatch(1);
@@ -233,7 +235,7 @@ public class EventLoopBench {
         await(c, cdl);
     }
 
-    @Benchmark
+    //@Benchmark
     public void newmonitored(NewMonitoredState state, Blackhole bh) throws Exception {
 
         CountDownLatch cdl = new CountDownLatch(1);

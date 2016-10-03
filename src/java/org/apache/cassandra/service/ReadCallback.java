@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Observable;
 import io.reactivex.Scheduler;
 import io.reactivex.subjects.BehaviorSubject;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -105,7 +106,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         this.queryStartNanoTime = queryStartNanoTime;
         this.endpoints = endpoints;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
-        this.observable = makeObservable();
+        this.observable = makeObservable().observeOn(NettyRxScheduler.instance());
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
