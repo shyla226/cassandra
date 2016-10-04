@@ -455,6 +455,7 @@ public class Memtable implements Comparable<Memtable>
                 if (key.compareTo(from) >= 0 && key.compareTo(to) < 0)
                     keysInRange.add(key);
             }
+            Collections.sort(keysInRange);
             return Pair.create(Collections.singletonList(memtableSubrange.size()), keysInRange);
         }
 
