@@ -49,6 +49,7 @@ public class MonitoredTPCRxScheduler
 
     public static Scheduler forCpu(int coreId)
     {
+        System.err.println("NEW");
         return new MonitoredTPCRxScheduler.SingleCoreScheduler(coreId);
     }
 
@@ -63,14 +64,16 @@ public class MonitoredTPCRxScheduler
     private static class SingleCoreScheduler extends Scheduler
     {
         private final int coreId;
+        private final MonitoredTPCExecutorService.SingleCoreExecutor executor;
         public SingleCoreScheduler(int coreId)
         {
             this.coreId = coreId;
+            executor = MonitoredTPCExecutorService.instance().one(coreId);
         }
 
         public Worker createWorker()
         {
-            return new MonitoredTPCRxScheduler.Worker(MonitoredTPCExecutorService.instance().one(coreId));
+            return new MonitoredTPCRxScheduler.Worker(executor);
         }
     }
 
@@ -153,34 +156,7 @@ public class MonitoredTPCRxScheduler
                     timer.newTimeout(t -> f.run(), delayTime, unit);
                 }
 
-                sr.setFuture(new Future<Object>()
-                {
-                    public boolean cancel(boolean mayInterruptIfRunning)
-                    {
-                        sr.dispose();
-                        return false;
-                    }
-
-                    public boolean isCancelled()
-                    {
-                        return false;
-                    }
-
-                    public boolean isDone()
-                    {
-                        return false;
-                    }
-
-                    public Object get() throws InterruptedException, ExecutionException
-                    {
-                        return null;
-                    }
-
-                    public Object get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException
-                    {
-                        return null;
-                    }
-                });
+                sr.setFuture(f);
             }
             catch (RejectedExecutionException ex)
             {

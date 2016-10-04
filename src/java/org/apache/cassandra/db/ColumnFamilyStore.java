@@ -1317,7 +1317,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public io.reactivex.Observable<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public io.reactivex.Single<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         final BehaviorSubject<Integer> publisher = BehaviorSubject.create();
         Scheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
@@ -1333,7 +1333,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
         }
 
-        return publisher.first();
+        return publisher.first(0);
     }
 
     private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)

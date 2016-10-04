@@ -118,6 +118,9 @@ public abstract class AbstractReadExecutor
             if (command instanceof SinglePartitionReadCommand)
             {
                 SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
+
+
+
                 NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey())
                     .scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
             }
@@ -289,8 +292,6 @@ public abstract class AbstractReadExecutor
             // no latency information, or we're overloaded
             if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
                 return;
-
-            Observable<PartitionIterator> observable = get();
 
             NettyRxScheduler.instance().scheduleDirect(() -> {
 

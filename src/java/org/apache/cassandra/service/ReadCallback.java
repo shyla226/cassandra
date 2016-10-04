@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Observable;
 import io.reactivex.Scheduler;
 import io.reactivex.subjects.BehaviorSubject;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -118,7 +119,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     {
         return publishSubject
                .timeout(command.getTimeout(), TimeUnit.MILLISECONDS)
-               .first()
+               .firstElement().toObservable()
                .onErrorResumeNext(exc -> {
 
                    if (Tracing.isTracing())

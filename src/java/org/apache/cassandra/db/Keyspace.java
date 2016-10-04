@@ -533,8 +533,8 @@ public class Keyspace
             commitLogPositionObservable = io.reactivex.Observable.just(CommitLogPosition.NONE);
         }
 
-        return io.reactivex.Observable.concat(commitLogPositionObservable.map(commitLogPosition -> {
-            List<io.reactivex.Observable<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
+        return io.reactivex.Single.concat(commitLogPositionObservable.map(commitLogPosition -> {
+            List<io.reactivex.Single<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
@@ -567,7 +567,7 @@ public class Keyspace
                 UpdateTransaction indexTransaction = updateIndexes
                                                      ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
                                                      : UpdateTransaction.NO_OP;
-                io.reactivex.Observable<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
+                io.reactivex.Single<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
                 memtablePutObservables.add(memtableObservable);
 
                 /*
@@ -580,7 +580,7 @@ public class Keyspace
             if (memtablePutObservables.size() == 1)
                 return memtablePutObservables.get(0);
             else
-                return io.reactivex.Observable.merge(memtablePutObservables).last();
+                return io.reactivex.Single.merge(memtablePutObservables).last(0);
         })).doAfterTerminate(opGroup::close);
     }
 

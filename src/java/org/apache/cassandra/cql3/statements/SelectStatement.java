@@ -775,12 +775,12 @@ public class SelectStatement implements CQLStatement
                 rowIterator.close();
             });
             return 1;
-        }).last().map(v -> {
+        }).last(0).map(v -> {
             ResultSet cqlRows = result.build();
             orderResults(cqlRows);
             cqlRows.trim(userLimit);
             return cqlRows;
-        }).defaultIfEmpty(result.build());
+        }).toObservable().defaultIfEmpty(result.build());
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)

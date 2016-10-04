@@ -685,7 +685,7 @@ public class StorageProxy implements StorageProxyMBean
 
         // we only want to emit a single item when all mutations have completed
         return observable
-                .last()
+                .last(new ResultMessage.Void()).toObservable()
                 .doAfterTerminate(() -> {
                     long latency = System.nanoTime() - startTime;
                     writeMetrics.addNano(latency);
@@ -1782,7 +1782,7 @@ public class StorageProxy implements StorageProxyMBean
                          .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime))
                          .flatMap(SinglePartitionReadLifecycle::getPartitionIterator)
                          .toList()
-                         .map(PartitionIterators::concat);
+                         .map(PartitionIterators::concat).toObservable();
     }
 
     private static class SinglePartitionReadLifecycle

@@ -607,9 +607,11 @@ public abstract class Message
                 ClientWarn.instance.captureWarnings();
 
             QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion(), request.getStreamId());
-            logger.trace("Received: {}, v={}", request, connection.getVersion());
+            logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
-            request.execute(qstate, queryStartNanoTime).subscribe(
+            request.execute(qstate, queryStartNanoTime)
+                   .observeOn(NettyRxScheduler.instance())
+                   .subscribe(
                     // onNext
                     response -> {
                         response.setStreamId(request.getStreamId());
@@ -618,7 +620,7 @@ public abstract class Message
                         response.attach(connection);
                         connection.applyStateTransition(request.type, response.type);
 
-                        logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                        logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
                     },
 
