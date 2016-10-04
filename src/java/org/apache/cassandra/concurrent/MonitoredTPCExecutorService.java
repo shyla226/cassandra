@@ -21,14 +21,18 @@ package org.apache.cassandra.concurrent;
 import java.io.IOError;
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
+import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.openhft.affinity.AffinityLock;
+import net.openhft.affinity.AffinitySupport;
 import net.openhft.affinity.CpuLayout;
 import net.openhft.affinity.impl.VanillaCpuLayout;
 import org.apache.cassandra.utils.FBUtilities;
@@ -41,9 +45,8 @@ import org.jctools.queues.SpscLinkedQueue;
 import sun.misc.Contended;
 
 /**
- * Created by jake on 3/22/16.
  */
-public class MonitoredTPCExecutorService
+public class MonitoredTPCExecutorService implements Executor
 {
     private static final Logger logger = LoggerFactory.getLogger(MonitoredTPCExecutorService.class);
 
@@ -60,6 +63,7 @@ public class MonitoredTPCExecutorService
     @Contended
     private final SingleCoreExecutor runningCores[];
     private final Thread runningThreads[];
+    private long next;
 
     private MonitoredTPCExecutorService()
     {
@@ -72,7 +76,7 @@ public class MonitoredTPCExecutorService
             throw new IOError(e);
         }
 
-        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "6"));
+        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "0"));
         int totalCPUs = Runtime.getRuntime().availableProcessors();
         int allocatedCPUs = FBUtilities.getAvailableProcessors();
 
@@ -132,26 +136,37 @@ public class MonitoredTPCExecutorService
         return runningCores[i % runningCores.length];
     }
 
+    public SingleCoreExecutor next()
+    {
+        return runningCores[Ints.checkedCast(++next % runningCores.length)];
+    }
+
+    public void execute(Runnable command)
+    {
+        any().execute(command);
+    }
+
     private enum CoreState
     {
         PARKED, WORKING
     }
 
-    public class SingleCoreExecutor implements Runnable
+    public class SingleCoreExecutor implements Runnable, Executor
     {
-        private static final int maxExtraSpins = 1024 * 10;
-        private static final int yieldExtraSpins = 1024 * 8;
-        private static final int parkExtraSpins = 1024 * 9;
-
         private final int threadOffset;
         private final int cpuId;
         private final int coreId;
         private final int socketId;
         private long threadId;
 
+        private static final int maxExtraSpins = 1024 * 10;
+        private static final int yieldExtraSpins = 1024 * 8;
+        private static final int parkExtraSpins = 1024 * 9;
+
         @Contended
         private volatile CoreState state;
 
+        @Contended
         private final MessagePassingQueue<FutureTask<?>> externalQueue;
 
         @Contended
@@ -164,7 +179,6 @@ public class MonitoredTPCExecutorService
             this.coreId = coreId;
             this.socketId = socketId;
             this.externalQueue = new MpscArrayQueue<>(1 << 20);
-
             this.incomingQueues = new MessagePassingQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
                 incomingQueues[i] = new SpscArrayQueue<>(1 << 20);
@@ -189,7 +203,10 @@ public class MonitoredTPCExecutorService
         private void checkQueues()
         {
             if (state == CoreState.PARKED && !isEmpty())
+            {
                 unpark();
+                LockSupport.parkNanos(1);
+            }
         }
 
         public FutureTask<?> addTask(FutureTask<?> futureTask)
@@ -218,7 +235,7 @@ public class MonitoredTPCExecutorService
             if (queue == null)
                 queue = externalQueue;
 
-            if (!queue.relaxedOffer(futureTask))
+            if (!queue.offer(futureTask))
                 throw new RuntimeException("Backpressure");
 
             return futureTask;
@@ -232,7 +249,6 @@ public class MonitoredTPCExecutorService
 
         public void shutdown()
         {
-            //runQueue.getRefProcessorThread().stop();
             runningThreads[threadOffset].stop();
         }
 
@@ -300,16 +316,9 @@ public class MonitoredTPCExecutorService
             int processed = 0;
 
             for (int i = 0; i < incomingQueues.length; i++)
-            {
                 processed += incomingQueues[i].drain(FutureTask::run, 8);
-            }
 
-            FutureTask<?> task = externalQueue.relaxedPoll();
-            if (task != null)
-            {
-                task.run();
-                ++processed;
-            }
+            processed += externalQueue.drain(FutureTask::run, 8);
 
             return processed;
         }
@@ -320,7 +329,12 @@ public class MonitoredTPCExecutorService
                 if (!incomingQueues[i].isEmpty())
                     return false;
 
-            return externalQueue.relaxedPeek() == null;
+            return externalQueue.isEmpty();
+        }
+
+        public void execute(Runnable command)
+        {
+            addTask(new FutureTask<>(command, null));
         }
     }
 }

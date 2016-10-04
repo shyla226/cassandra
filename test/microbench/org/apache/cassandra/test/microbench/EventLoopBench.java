@@ -26,8 +26,12 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
+import io.netty.channel.EventLoop;
 import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.local.LocalEventLoopGroup;
 import io.netty.util.concurrent.DefaultEventExecutorGroup;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.MultithreadEventExecutorGroup;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.Scheduler;
@@ -36,6 +40,8 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.MonitoredExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.transport.Event;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -63,7 +69,7 @@ import org.openjdk.jmh.infra.Blackhole;
 public class EventLoopBench {
     @State(Scope.Thread)
     public static class MonitoredState {
-        @Param({"1", "100", "1000", "10000","1000000"})
+        @Param({"1", "10", "100", "1000", "10000", "1000000"})
         public int count;
 
         Observable<Integer> rxMonitored;
@@ -74,10 +80,8 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            MonitoredTPCRxScheduler scheduler = new MonitoredTPCRxScheduler();
-
-            rxMonitored = Observable.fromArray(arr).subscribeOn(scheduler.forCpu(0))
-                                    .observeOn(scheduler.forCpu(1));
+            rxMonitored = Observable.fromArray(arr).subscribeOn(MonitoredTPCRxScheduler.forCpu(0))
+                                    .observeOn(MonitoredTPCRxScheduler.forCpu(1));
         }
         @TearDown
         public void teardown() {
@@ -85,35 +89,13 @@ public class EventLoopBench {
         }
     }
 
-
-    @State(Scope.Thread)
-    public static class NewMonitoredState {
-        @Param({"1000000"})
-        public int count;
-
-        MonitoredExecutorService exec = new MonitoredExecutorService("test", 2, 1 << 20);
-
-        @Setup
-        public void setup() {
-
-            Integer[] arr = new Integer[count];
-            Arrays.fill(arr, 777);
-        }
-
-        @TearDown
-        public void teardown() {
-            exec.shutdown();
-        }
-    }
-
     @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"1", "100", "1000", "10000","1000000"})
+        @Param({"1", "10", "100", "1000", "10000", "1000000"})
         public int count;
 
-        private ExecutorService exec1;
-        private EpollEventLoopGroup loop1;
+        private MultithreadEventExecutorGroup loops;
 
         Observable<Integer> rx1;
         Observable<Integer> rx2;
@@ -121,24 +103,27 @@ public class EventLoopBench {
 
         @Setup
         public void setup() {
-            exec1 = Executors.newSingleThreadExecutor();
-
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loop1 = new EpollEventLoopGroup(2);
+            loops = new EpollEventLoopGroup(8);
+            EventExecutor loop1 = loops.next();
+            loop1.submit(() -> {
+                NettyRxScheduler.instance(loop1, 0);
+            });
 
-            Scheduler s1 = Schedulers.from(loop1.next());
-            Scheduler s2 = Schedulers.from(loop1.next());
+            EventExecutor loop2 = loops.next();
+            loop2.submit(() -> {
+                NettyRxScheduler.instance(loop2, 1);
+            });
 
             rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(s1).observeOn(s2);
+            rx2 = Observable.fromArray(arr).subscribeOn(NettyRxScheduler.getForCore(0)).observeOn(NettyRxScheduler.getForCore(1));
         }
 
         @TearDown
         public void teardown() {
-            exec1.shutdown();
-            loop1.shutdown();
+            loops.shutdown();
         }
     }
 
@@ -148,24 +133,6 @@ public class EventLoopBench {
         } else {
             latch.await();
         }
-    }
-
-    //@Benchmark
-    public void executor(ExecutorState state, Blackhole bh) throws Exception {
-
-        CountDownLatch cdl = new CountDownLatch(1);
-
-        int c = state.count;
-        for (int i = 0; i < c; i++) {
-            int j = i;
-            state.exec1.submit(() -> {
-                if (j == c - 1) {
-                    cdl.countDown();
-                }
-            });
-        }
-
-        await(c, cdl);
     }
 
     //@Benchmark
@@ -194,66 +161,6 @@ public class EventLoopBench {
     }
 
 
-    //@Benchmark
-    public void monitored(MonitoredState state, Blackhole bh) throws Exception {
-
-        CountDownLatch cdl = new CountDownLatch(1);
-
-        MonitoredTPCExecutorService.SingleCoreExecutor e = MonitoredTPCExecutorService.instance().one(1);
-
-        int c = state.count;
-        for (int i = 0; i < c; i++) {
-            int j = i;
-            e.addTask(new FutureTask<>(()-> {
-                if (j == c - 1)
-                    cdl.countDown();
-            }, null));
-        }
-
-        await(c, cdl);
-    }
-
-
-    //@Benchmark
-    public void forkjoin(ExecutorState state, Blackhole bh) throws Exception {
-
-        CountDownLatch cdl = new CountDownLatch(1);
-
-        ForkJoinPool fj = ForkJoinPool.commonPool();
-
-        int c = state.count;
-        for (int i = 0; i < c; i++) {
-            int j = i;
-            fj.submit(() -> {
-                if (j == c - 1)
-                {
-                    cdl.countDown();
-                }
-            });
-        }
-
-        await(c, cdl);
-    }
-
-    //@Benchmark
-    public void newmonitored(NewMonitoredState state, Blackhole bh) throws Exception {
-
-        CountDownLatch cdl = new CountDownLatch(1);
-
-
-        int c = state.count;
-        for (int i = 0; i < c; i++) {
-            int j = i;
-            state.exec.submit(() -> {
-                if (j == c - 1)
-                {
-                    cdl.countDown();
-                }
-            });
-        }
-
-        await(c, cdl);
-    }
 
     public class LatchedObserver<T> implements Observer<T>
     {

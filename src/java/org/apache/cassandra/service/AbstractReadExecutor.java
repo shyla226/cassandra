@@ -122,7 +122,11 @@ public abstract class AbstractReadExecutor
 
 
                 NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey())
-                    .scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+                    .scheduleDirect(() -> {
+                        logger.info("Running Read request ON {}", Thread.currentThread());
+                        new StorageProxy.LocalReadRunnable(command, handler).runMayThrow();
+
+                    });
             }
             else
             {

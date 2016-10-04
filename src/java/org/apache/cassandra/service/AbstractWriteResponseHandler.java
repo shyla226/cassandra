@@ -93,7 +93,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         return publishSubject
             .timeout(timeout, TimeUnit.NANOSECONDS)
-            .first()
+            .first(0).toObservable()
             .onErrorResumeNext(exc -> {
                 if (exc instanceof TimeoutException)
                 {

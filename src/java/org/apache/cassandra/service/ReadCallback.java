@@ -106,7 +106,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         this.queryStartNanoTime = queryStartNanoTime;
         this.endpoints = endpoints;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
-        this.observable = makeObservable().observeOn(NettyRxScheduler.instance());
+        this.observable = makeObservable();
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
@@ -119,7 +119,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     {
         return publishSubject
                .timeout(command.getTimeout(), TimeUnit.MILLISECONDS)
-               .first()
+               .firstElement().toObservable()
                .onErrorResumeNext(exc -> {
 
                    if (Tracing.isTracing())
