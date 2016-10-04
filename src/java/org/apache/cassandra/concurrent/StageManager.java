@@ -44,11 +44,11 @@ public class StageManager
 
     static
     {
-        stages.put(Stage.MUTATION, multiThreadedLowSignalStage(Stage.MUTATION, getConcurrentWriters()));
-        stages.put(Stage.COUNTER_MUTATION, multiThreadedLowSignalStage(Stage.COUNTER_MUTATION, getConcurrentCounterWriters()));
-        stages.put(Stage.VIEW_MUTATION, multiThreadedLowSignalStage(Stage.VIEW_MUTATION, getConcurrentViewWriters()));
-        stages.put(Stage.READ, multiThreadedLowSignalStage(Stage.READ, getConcurrentReaders()));
-        stages.put(Stage.REQUEST_RESPONSE, multiThreadedLowSignalStage(Stage.REQUEST_RESPONSE, FBUtilities.getAvailableProcessors()));
+        stages.put(Stage.MUTATION, multiThreadedStage(Stage.MUTATION, getConcurrentWriters()));
+        stages.put(Stage.COUNTER_MUTATION, multiThreadedStage(Stage.COUNTER_MUTATION, getConcurrentCounterWriters()));
+        stages.put(Stage.VIEW_MUTATION, multiThreadedStage(Stage.VIEW_MUTATION, getConcurrentViewWriters()));
+        stages.put(Stage.READ, multiThreadedStage(Stage.READ, getConcurrentReaders()));
+        stages.put(Stage.REQUEST_RESPONSE, multiThreadedStage(Stage.REQUEST_RESPONSE, FBUtilities.getAvailableProcessors()));
         stages.put(Stage.INTERNAL_RESPONSE, multiThreadedStage(Stage.INTERNAL_RESPONSE, FBUtilities.getAvailableProcessors()));
         // the rest are all single-threaded
         stages.put(Stage.GOSSIP, new JMXEnabledThreadPoolExecutor(Stage.GOSSIP));
@@ -85,11 +85,6 @@ public class StageManager
                                                 new LinkedBlockingQueue<Runnable>(),
                                                 new NamedThreadFactory(stage.getJmxName()),
                                                 stage.getJmxType());
-    }
-
-    private static LocalAwareExecutorService multiThreadedLowSignalStage(Stage stage, int numThreads)
-    {
-        return SharedExecutorPool.SHARED.newExecutor(numThreads, Integer.MAX_VALUE, stage.getJmxType(), stage.getJmxName());
     }
 
     /**

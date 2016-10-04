@@ -19,7 +19,9 @@
 package org.apache.cassandra.cql3;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -28,12 +30,8 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import junit.framework.Assert;
 
-import org.apache.cassandra.concurrent.SEPExecutor;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
@@ -72,11 +70,10 @@ public class ViewFilteringTest extends CQLTester
     private void updateView(String query, Object... params) throws Throwable
     {
         executeNet(protocolVersion, query, params);
-        while (!(((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getPendingTasks() == 0
-            && ((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getActiveCount() == 0))
-        {
-            Thread.sleep(1);
-        }
+
+        //Fixme check view metrics
+        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
+
     }
 
     private void dropView(String name) throws Throwable

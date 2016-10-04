@@ -20,28 +20,18 @@ package org.apache.cassandra.test.microbench;
 
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
-import io.netty.channel.EventLoop;
 import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.channel.local.LocalEventLoopGroup;
-import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.MultithreadEventExecutorGroup;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
-import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.MonitoredExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.transport.Event;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
