@@ -80,7 +80,7 @@ public abstract class ResultMessage extends Message.Response
             }
         }
 
-        private Kind(int id, Message.Codec<ResultMessage> subcodec)
+        Kind(int id, Message.Codec<ResultMessage> subcodec)
         {
             this.id = id;
             this.subcodec = subcodec;
@@ -107,11 +107,25 @@ public abstract class ResultMessage extends Message.Response
 
     public static class Void extends ResultMessage
     {
+        /**
+         * Set this to true if the result should not be sent to the client (continuous paging).
+         * The proper way to fix this would be to change all execute() return types to return an
+         * Optional Response, but we want to do this in a separate ticket, at a time convenient for
+         * DSE, since it would be impacted too.
+         */
+        public final boolean sendToClient;
+
         // Even though we have no specific information here, don't make a
         // singleton since as each message it has in fact a streamid and connection.
         public Void()
         {
+            this(true);
+        }
+
+        public Void(boolean sendToClient)
+        {
             super(Kind.VOID);
+            this.sendToClient = sendToClient;
         }
 
         public static final Message.Codec<ResultMessage> subcodec = new Message.Codec<ResultMessage>()
@@ -319,8 +333,8 @@ public abstract class ResultMessage extends Message.Response
 
         public CqlPreparedResult toThriftPreparedResult()
         {
-            List<String> namesString = new ArrayList<String>(metadata.names.size());
-            List<String> typesString = new ArrayList<String>(metadata.names.size());
+            List<String> namesString = new ArrayList<>(metadata.names.size());
+            List<String> typesString = new ArrayList<>(metadata.names.size());
             for (ColumnSpecification name : metadata.names)
             {
                 namesString.add(name.toString());
@@ -332,7 +346,7 @@ public abstract class ResultMessage extends Message.Response
         @Override
         public String toString()
         {
-            return "RESULT PREPARED " + statementId + " " + metadata + " (resultMetadata=" + resultMetadata + ")";
+            return "RESULT PREPARED " + statementId + ' ' + metadata + " (resultMetadata=" + resultMetadata + ')';
         }
     }
 

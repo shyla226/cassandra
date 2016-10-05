@@ -20,6 +20,9 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -42,6 +45,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 public abstract class DataLimits
 {
+    private static final Logger logger = LoggerFactory.getLogger(DataLimits.class);
+
     public static final Serializer serializer = new Serializer();
 
     public static final int NO_LIMIT = Integer.MAX_VALUE;
@@ -421,9 +426,8 @@ public abstract class DataLimits
 
         public float estimateTotalResults(ColumnFamilyStore cfs)
         {
-            // TODO: we should start storing stats on the number of rows (instead of the number of cells, which
-            // is what getMeanColumns returns)
-            float rowsPerPartition = ((float) cfs.getMeanColumns()) / cfs.metadata.partitionColumns().regulars.size();
+            // TODO: we should start storing stats on the number of rows (instead of the number of cells)
+            float rowsPerPartition = ((float) cfs.getMeanCells()) / cfs.metadata.partitionColumns().regulars.size();
             return rowsPerPartition * (cfs.estimateKeys());
         }
 
@@ -675,6 +679,8 @@ public abstract class DataLimits
         @Override
         public DataLimits forPaging(int pageSize)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} forPaging({})", hashCode(), pageSize);
             return new CQLGroupByLimits(pageSize,
                                         groupPerPartitionLimit,
                                         rowLimit,
@@ -685,6 +691,14 @@ public abstract class DataLimits
         @Override
         public DataLimits forPaging(int pageSize, ByteBuffer lastReturnedKey, int lastReturnedKeyRemaining)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} forPaging({}, {}, {}) vs state {}/{}",
+                             hashCode(),
+                             pageSize,
+                             lastReturnedKey == null ? "null" : ByteBufferUtil.bytesToHex(lastReturnedKey),
+                             lastReturnedKeyRemaining,
+                             state.partitionKey() == null ? "null" : ByteBufferUtil.bytesToHex(state.partitionKey()),
+                             state.clustering() == null ? "null" : state.clustering().toBinaryString());
             return new CQLGroupByPagingLimits(pageSize,
                                               groupPerPartitionLimit,
                                               rowLimit,
@@ -814,6 +828,9 @@ public abstract class DataLimits
             @Override
             public void applyToPartition(DecoratedKey partitionKey, Row staticRow)
             {
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - GroupByAwareCounter.applyToPartition {}", hashCode(),
+                                 ByteBufferUtil.bytesToHex(partitionKey.getKey()));
                 if (partitionKey.getKey().equals(state.partitionKey()))
                 {
                     // The only case were we could have state.partitionKey() equals to the partition key
@@ -860,6 +877,12 @@ public abstract class DataLimits
             @Override
             protected Row applyToStatic(Row row)
             {
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - GroupByAwareCounter.applyToStatic {}/{}",
+                                 hashCode(),
+                                 ByteBufferUtil.bytesToHex(currentPartitionKey.getKey()),
+                                 row == null ? "null" : row.clustering().toBinaryString());
+
                 // It's possible that we're "done" if the partition we just started bumped the number of groups (in
                 // applyToPartition() above), in which case Transformation will still call this method. In that case, we
                 // want to ignore the static row, it should (and will) be returned with the next page/group if needs be.
@@ -874,6 +897,12 @@ public abstract class DataLimits
             @Override
             public Row applyToRow(Row row)
             {
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - GroupByAwareCounter.applyToRow {}/{}",
+                                 hashCode(),
+                                 ByteBufferUtil.bytesToHex(currentPartitionKey.getKey()),
+                                 row.clustering().toBinaryString());
+
                 // We want to check if the row belongs to a new group even if it has been deleted. The goal being
                 // to minimize the chances of having to go through the same data twice if we detect on the next
                 // non deleted row that we have reached the limit.
@@ -1069,6 +1098,10 @@ public abstract class DataLimits
             @Override
             public void applyToPartition(DecoratedKey partitionKey, Row staticRow)
             {
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - CQLGroupByPagingLimits.applyToPartition {}",
+                                 hashCode(), ByteBufferUtil.bytesToHex(partitionKey.getKey()));
+
                 if (partitionKey.getKey().equals(lastReturnedKey))
                 {
                     currentPartitionKey = partitionKey;
@@ -1183,9 +1216,8 @@ public abstract class DataLimits
 
         public float estimateTotalResults(ColumnFamilyStore cfs)
         {
-            // remember that getMeansColumns returns a number of cells: we should clean nomenclature
-            float cellsPerPartition = ((float) cfs.getMeanColumns()) / cfs.metadata.partitionColumns().regulars.size();
-            return cellsPerPartition * cfs.estimateKeys();
+            float rowsPerPartition = ((float) cfs.getMeanCells()) / cfs.metadata.partitionColumns().regulars.size();
+            return rowsPerPartition * cfs.estimateKeys();
         }
 
         protected class ThriftCounter extends Counter

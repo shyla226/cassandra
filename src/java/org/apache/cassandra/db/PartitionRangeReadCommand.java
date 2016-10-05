@@ -28,6 +28,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
@@ -70,7 +71,22 @@ public class PartitionRangeReadCommand extends ReadCommand
                                      DataRange dataRange,
                                      Optional<IndexMetadata> index)
     {
-        super(Kind.PARTITION_RANGE, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits);
+        this(isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, null);
+    }
+
+    public PartitionRangeReadCommand(boolean isDigest,
+                                      int digestVersion,
+                                      boolean isForThrift,
+                                      CFMetaData metadata,
+                                      int nowInSec,
+                                      ColumnFilter columnFilter,
+                                      RowFilter rowFilter,
+                                      DataLimits limits,
+                                      DataRange dataRange,
+                                      Optional<IndexMetadata> index,
+                                      Monitorable optionalMonitor)
+    {
+        super(Kind.PARTITION_RANGE, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, optionalMonitor);
         this.dataRange = dataRange;
         this.index = index;
     }
@@ -83,7 +99,19 @@ public class PartitionRangeReadCommand extends ReadCommand
                                      DataRange dataRange,
                                      Optional<IndexMetadata> index)
     {
-        this(false, 0, false, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index);
+        this(false, 0, false, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, null);
+    }
+
+    public PartitionRangeReadCommand(CFMetaData metadata,
+                                     int nowInSec,
+                                     ColumnFilter columnFilter,
+                                     RowFilter rowFilter,
+                                     DataLimits limits,
+                                     DataRange dataRange,
+                                     Optional<IndexMetadata> index,
+                                     Monitorable optionalMonitor)
+    {
+        this(false, 0, false, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, optionalMonitor);
     }
 
     /**
@@ -157,6 +185,11 @@ public class PartitionRangeReadCommand extends ReadCommand
         return new PartitionRangeReadCommand(metadata(), nowInSec(), columnFilter(), rowFilter(), newLimits, dataRange(), index);
     }
 
+    public PartitionRangeReadCommand withUpdatedParams(DataLimits newLimits, DataRange dataRange, Optional<IndexMetadata> index)
+    {
+        return new PartitionRangeReadCommand(metadata(), nowInSec(), columnFilter(), rowFilter(), newLimits, dataRange, index, optionalMonitor);
+    }
+
     public long getTimeout()
     {
         return DatabaseDescriptor.getRangeRpcTimeout();
@@ -180,9 +213,9 @@ public class PartitionRangeReadCommand extends ReadCommand
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+    public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
     {
-        return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime);
+        return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime, forContinuousPaging);
     }
 
     public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
@@ -297,6 +330,11 @@ public class PartitionRangeReadCommand extends ReadCommand
             sb.append(dataRange.toCQLString(metadata()));
     }
 
+    public PartitionIterator withLimitsAndPostReconciliation(PartitionIterator iterator)
+    {
+        return limits().filter(postReconciliationProcessing(iterator), nowInSec());
+    }
+
     /**
      * Allow to post-process the result of the query after it has been reconciled on the coordinator
      * but before it is passed to the CQL layer to return the ResultSet.
@@ -308,6 +346,11 @@ public class PartitionRangeReadCommand extends ReadCommand
         ColumnFamilyStore cfs = Keyspace.open(metadata().ksName).getColumnFamilyStore(metadata().cfName);
         Index index = getIndex(cfs);
         return index == null ? result : index.postProcessorFor(this).apply(result, this);
+    }
+
+    public boolean queriesOnlyLocalData()
+    {
+        return StorageProxy.isLocalRange(metadata().ksName, dataRange.keyRange());
     }
 
     @Override

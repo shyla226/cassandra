@@ -2402,7 +2402,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     // End JMX get/set.
 
+    /**
+     * This method is here for compatibility reasons, use getMeanCells() instead.
+     *
+     * @return - the mean number of cells in a partition.
+     */
+    @Deprecated
     public int getMeanColumns()
+    {
+        return getMeanCells();
+    }
+
+    /**
+     * @return - the mean number of cells in a partition.
+     */
+    public int getMeanCells()
     {
         long sum = 0;
         long count = 0;

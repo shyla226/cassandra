@@ -40,7 +40,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.mindrot.jbcrypt.BCrypt;
@@ -518,11 +517,8 @@ public class CassandraRoleManager implements IRoleManager
     private Role getRoleFromTable(String name, SelectStatement statement, Function<UntypedResultSet.Row, Role> function)
     throws RequestExecutionException, RequestValidationException
     {
-        ResultMessage.Rows rows =
-            statement.execute(QueryState.forInternalCalls(),
-                              QueryOptions.forInternalCalls(consistencyForRole(name),
-                                                            Collections.singletonList(ByteBufferUtil.bytes(name))),
-                              System.nanoTime());
+        ResultMessage.Rows rows = statement.executeInternal(QueryOptions.forInternalCalls(consistencyForRole(name),
+                                                                                          Collections.singletonList(ByteBufferUtil.bytes(name))));
         if (rows.result.isEmpty())
             return NULL_ROLE;
 

@@ -354,6 +354,10 @@ public class Config
 
     public volatile boolean back_pressure_enabled = false;
     public volatile ParameterizedClass back_pressure_strategy;
+	
+	/** The configuration for continuous paging */
+    public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
+
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

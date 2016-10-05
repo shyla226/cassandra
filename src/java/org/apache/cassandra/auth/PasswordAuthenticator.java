@@ -41,7 +41,6 @@ import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.mindrot.jbcrypt.BCrypt;
@@ -115,11 +114,8 @@ public class PasswordAuthenticator implements IAuthenticator
         {
             SelectStatement authenticationStatement = authenticationStatement();
 
-            ResultMessage.Rows rows =
-                authenticationStatement.execute(QueryState.forInternalCalls(),
-                                                QueryOptions.forInternalCalls(consistencyForRole(username),
-                                                                              Lists.newArrayList(ByteBufferUtil.bytes(username))),
-                                                System.nanoTime());
+            ResultMessage.Rows rows = authenticationStatement.executeInternal(QueryOptions.forInternalCalls(consistencyForRole(username),
+                                                                                                            Lists.newArrayList(ByteBufferUtil.bytes(username))));
 
             // If either a non-existent role name was supplied, or no credentials
             // were found for that role we don't want to cache the result so we throw

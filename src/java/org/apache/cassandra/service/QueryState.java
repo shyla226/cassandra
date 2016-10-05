@@ -25,6 +25,8 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.Connection;
+import org.apache.cassandra.transport.Message;
 
 /**
  * Represents the state related to a given query.
@@ -32,11 +34,22 @@ import org.apache.cassandra.tracing.Tracing;
 public class QueryState
 {
     private final ClientState clientState;
+    private final int streamId;
     private volatile UUID preparedTracingSession;
 
     public QueryState(ClientState clientState)
     {
+        this(clientState, 0);
+    }
+    public QueryState(ClientState clientState, Message.Request request)
+    {
+        this(clientState, request.getStreamId());
+    }
+
+    public QueryState(ClientState clientState, int streamId)
+    {
         this.clientState = clientState;
+        this.streamId = streamId;
     }
 
     /**
@@ -101,5 +114,20 @@ public class QueryState
         return clientState.isInternal
              ? null
              : clientState.getRemoteAddress().getAddress();
+    }
+
+	public int getStreamId()
+    {
+        return streamId;
+    }
+
+    public Connection getConnection()
+    {
+        return clientState.connection;
+    }
+
+    public UUID getPreparedTracingSession()
+    {
+        return preparedTracingSession;
     }
 }

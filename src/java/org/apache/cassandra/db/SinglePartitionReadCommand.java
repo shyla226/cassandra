@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
 import org.apache.cassandra.cache.IRowCacheEntry;
@@ -37,6 +38,7 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
@@ -58,7 +60,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
-
 
 /**
  * A read command that selects a (part of a) single partition.
@@ -83,7 +84,22 @@ public class SinglePartitionReadCommand extends ReadCommand
                                       DecoratedKey partitionKey,
                                       ClusteringIndexFilter clusteringIndexFilter)
     {
-        super(Kind.SINGLE_PARTITION, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits);
+        this(isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter, null);
+    }
+
+    public SinglePartitionReadCommand(boolean isDigest,
+                                      int digestVersion,
+                                      boolean isForThrift,
+                                      CFMetaData metadata,
+                                      int nowInSec,
+                                      ColumnFilter columnFilter,
+                                      RowFilter rowFilter,
+                                      DataLimits limits,
+                                      DecoratedKey partitionKey,
+                                      ClusteringIndexFilter clusteringIndexFilter,
+                                      Monitorable optionalMonitor)
+    {
+        super(Kind.SINGLE_PARTITION, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, optionalMonitor);
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
@@ -316,21 +332,25 @@ public class SinglePartitionReadCommand extends ReadCommand
      * will only query row that comes after this (in query order). This can be {@code null} if this
      * is the first page.
      * @param limits the limits to use for the page to query.
+     * @param inclusive - whether or not we want to include the lastReturned in the newly returned page of results.
      *
      * @return the newly create command.
      */
-    public SinglePartitionReadCommand forPaging(Clustering lastReturned, DataLimits limits)
+    public SinglePartitionReadCommand forPaging(Clustering lastReturned, DataLimits limits, boolean inclusive)
     {
         // We shouldn't have set digest yet when reaching that point
         assert !isDigestQuery();
-        return create(isForThrift(),
-                      metadata(),
-                      nowInSec(),
-                      columnFilter(),
-                      rowFilter(),
-                      limits,
-                      partitionKey(),
-                      lastReturned == null ? clusteringIndexFilter() : clusteringIndexFilter.forPaging(metadata().comparator, lastReturned, false));
+        return new SinglePartitionReadCommand(false,
+                                              0,
+                                              isForThrift(),
+                                              metadata(),
+                                              nowInSec(),
+                                              columnFilter(),
+                                              rowFilter(),
+                                              limits,
+                                              partitionKey(),
+                                              lastReturned == null ? clusteringIndexFilter() : clusteringIndexFilter.forPaging(metadata().comparator, lastReturned, inclusive),
+                                              optionalMonitor);
     }
 
     public SinglePartitionReadCommand withUpdatedLimit(DataLimits newLimits)
@@ -347,9 +367,9 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               clusteringIndexFilter);
     }
 
-    public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+    public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
     {
-        return StorageProxy.read(Group.one(this), consistency, clientState, queryStartNanoTime);
+        return StorageProxy.read(Group.one(this), consistency, clientState, queryStartNanoTime, forContinuousPaging);
     }
 
     public SinglePartitionPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
@@ -924,6 +944,11 @@ public class SinglePartitionReadCommand extends ReadCommand
         return true;
     }
 
+    public boolean queriesOnlyLocalData()
+    {
+        return StorageProxy.isLocalToken(metadata().ksName, partitionKey.getToken());
+    }
+
     @Override
     public String toString()
     {
@@ -979,6 +1004,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         public final List<SinglePartitionReadCommand> commands;
         private final DataLimits limits;
         private final int nowInSec;
+        private Monitorable optionalMonitor;
 
         public Group(List<SinglePartitionReadCommand> commands, DataLimits limits)
         {
@@ -986,6 +1012,8 @@ public class SinglePartitionReadCommand extends ReadCommand
             this.commands = commands;
             this.limits = limits;
             this.nowInSec = commands.get(0).nowInSec();
+            this.optionalMonitor = null;
+
             for (int i = 1; i < commands.size(); i++)
                 assert commands.get(i).nowInSec() == nowInSec;
         }
@@ -995,9 +1023,9 @@ public class SinglePartitionReadCommand extends ReadCommand
             return new Group(Collections.singletonList(command), command.limits());
         }
 
-        public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+        public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
         {
-            return StorageProxy.read(this, consistency, clientState, queryStartNanoTime);
+            return StorageProxy.read(this, consistency, clientState, queryStartNanoTime, forContinuousPaging);
         }
 
         public int nowInSec()
@@ -1063,6 +1091,11 @@ public class SinglePartitionReadCommand extends ReadCommand
             return new MultiPartitionPager(this, pagingState, protocolVersion);
         }
 
+        public Group withUpdatedLimit(DataLimits newLimits)
+        {
+            return new Group(commands, newLimits);
+        }
+
         public boolean selectsKey(DecoratedKey key)
         {
             return Iterables.any(commands, c -> c.selectsKey(key));
@@ -1073,10 +1106,52 @@ public class SinglePartitionReadCommand extends ReadCommand
             return Iterables.any(commands, c -> c.selectsClustering(key, clustering));
         }
 
+        public boolean queriesOnlyLocalData()
+        {
+            for (SinglePartitionReadCommand cmd : commands)
+            {
+                if (!cmd.queriesOnlyLocalData())
+                    return false;
+            }
+
+            return true;
+        }
+
         @Override
         public String toString()
         {
             return commands.toString();
+        }
+
+        public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode)
+        {
+            String name = StringUtils.join(commands.stream()
+                                                   .map(SinglePartitionReadCommand::toCQLString)
+                                                   .collect(Collectors.toList()).iterator(),
+                                           '\n');
+            optionalMonitor = Monitorable.forNormalQuery(name, constructionTime, timeout, slowQueryTimeout, isCrossNode);
+        }
+
+        public void monitorLocal(long startTime)
+        {
+            String name = StringUtils.join(commands.stream()
+                                                   .map(SinglePartitionReadCommand::toCQLString)
+                                                   .collect(Collectors.toList()).iterator(),
+                                           '\n');
+            optionalMonitor = Monitorable.forLocalQuery(name, startTime, DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
+        }
+
+        public boolean complete()
+        {
+            if (optionalMonitor == null)
+                return true;
+
+            return optionalMonitor.complete();
+        }
+
+        public boolean isForThrift()
+        {
+            return commands.isEmpty() ? false : commands.get(0).isForThrift();
         }
     }
 

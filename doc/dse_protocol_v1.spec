@@ -36,6 +36,7 @@ Table of Contents
       4.2.6. EVENT
       4.2.7. AUTH_CHALLENGE
       4.2.8. AUTH_SUCCESS
+      4.2.9. CANCEL
   5. Compression
   6. Data Type Serialization Formats
   7. User Defined Type Serialization
@@ -190,6 +191,7 @@ Table of Contents
     0x0E    AUTH_CHALLENGE
     0x0F    AUTH_RESPONSE
     0x10    AUTH_SUCCESS
+    0xFF    CANCEL
 
   Messages are described in Section 4.
 
@@ -319,7 +321,8 @@ Table of Contents
     <query><query_parameters>
   where <query> is a [long string] representing the query and
   <query_parameters> must be
-    <consistency><flags>[<n>[name_1]<value_1>...[name_n]<value_n>][<result_page_size>][<paging_state>][<serial_consistency>][<timestamp>]
+    <consistency><flags>[<n>[name_1]<value_1>...[name_n]<value_n>][<result_page_size>][<paging_state>]
+    [<serial_consistency>][<timestamp>][continuous_paging_options]
   where:
     - <consistency> is the [consistency] level for the operation.
     - <flags> is a [int] whose bits define the options for this query and
@@ -335,7 +338,8 @@ Table of Contents
               to the query (if any) will have the NO_METADATA flag (see
               Section 4.2.5.2).
         0x00000004: Page_size. If set, <result_page_size> is an [int]
-              controlling the desired page size of the result (in CQL3 rows).
+              controlling the desired page size of the result in CQL3 rows or
+              in bytes, if Page_size_bytes is set.
               See the section on paging (Section 8) for more details.
         0x00000008: With_paging_state. If set, <paging_state> should be present.
               <paging_state> is a [bytes] value that should have been returned
@@ -362,7 +366,21 @@ Table of Contents
               since the names for the expected values was returned during preparation,
               a client can always provide values in the right order without any names
               and using this flag, while supported, is almost surely inefficient.
-        0x80000000: reserved for optimized paging
+        0x40000000: Page_size_bytes. If set, <result_page_size> is expressed in bytes. The server
+              will try to return a number of CQL rows whose total size is as close as possible
+              to the requested page size, without splitting any CQL row however. This functionality
+              is currently only supported with continuous paging, setting this flag without
+              setting the continuous paging flag, will result in an error.
+        0x80000000: With continuous paging. If set, <continuous_paging_options> should be present.
+              This structure contains the following:
+              - <max_num_pages>, an [int] indicating the maximum number of pages that the server will send
+                to the client in total, set this to zero to indicate no limit.
+              - <pages_per_second>, an [int] indicating the maximum number of pages per second, set this
+                to zero to indicate no limit.
+              When continuous paging is enabled, the query results will be pushed to the client asynchronously and
+              according to the paging options in the request message, without the client having to request each
+              single page. Each response message will have the same stream id as the initial request.
+              Continuous paging can be interrupted by the client at any time via a CANCEL request, see section 4.2.9.
 
   Note that the consistency is ignored by some queries (USE, CREATE, ALTER,
   TRUNCATE, ...).
@@ -556,7 +574,7 @@ Table of Contents
     <metadata><rows_count><rows_content>
   where:
     - <metadata> is composed of:
-        <flags><columns_count>[<paging_state>][<global_table_spec>?<col_spec_1>...<col_spec_n>]
+        <flags><columns_count>[<paging_state>][<continuous_page_no>][<global_table_spec>?<col_spec_1>...<col_spec_n>]
       where:
         - <flags> is an [int]. The bits of <flags> provides information on the
           formatting of the remaining information. A flag is set if the bit
@@ -573,11 +591,23 @@ Table of Contents
                        this query (See Section 8 for more details).
             0x00000004 No_metadata: if set, the <metadata> is only composed of
                        these <flags>, the <column_count> and optionally the
-                       <paging_state> (depending on the Has_more_pages flag) but
-                       no other information (so no <global_table_spec> nor <col_spec_i>).
+                       <paging_state> and <continuous_page_no> (depending on the
+                       corresponding flags) but no other information (so no
+                       <global_table_spec> nor <col_spec_i>).
                        This will only ever be the case if this was requested
                        during the query (see QUERY and RESULT messages).
-            0x80000000 reserved for optimized paging
+            0x40000000 continuous paging: if set, this page is part of a continuous
+                       paging session, as requested by the client. <continuous_page_no>
+                       will be present, this is an [int] that identifies the sequential
+                       number of this page in the session, and the last_continuous_page
+                       flag below will be set for the final page.
+            0x80000000 Last_continuous_page: indicates that this is the last continuous page
+                       that will be sent in the continuous paging session. This flag can only
+                       be set when the continuous paging flag is also set. Note that this may not
+                       necessarily be the last page of the query results, for this it is
+                       necessary to look at Has_more_pages (this could happen if the client only
+                       requested the first N pages in the continuous paging session, or if
+                       it sent a CANCEL message).
         - <columns_count> is an [int] representing the number of columns selected
           by the query that produced this result. It defines the number of <col_spec_i>
           elements in and the number of elements for each row in <rows_content>.
@@ -807,6 +837,18 @@ Table of Contents
   process. What that token contains and whether it can be null depends on the
   actual authenticator used.
 
+4.2.9. CANCEL
+
+  Request to cancel an asynchronous operation. The body of the message is:
+  - an [int] identifying the operation type:
+      - 0x00000001 for "continuous paging", see section 4.1.4
+  - an [int] equal to the stream id of the initial request message.
+
+  The server will reply with a RESULT of type ROWS (section 4.2.5.2),
+  containing a single row with a single boolean value, which is set to:
+  - true if the operation was cancelled,
+  - false if the operation was not found.
+  If an operation is found but cannot be cancelled, an error is returned instead.
 
 5. Compression
 
@@ -1181,10 +1223,17 @@ Table of Contents
               this host. The rest of the ERROR message body will be [short
               bytes] representing the unknown ID.
 
+    0x8000    Client_write_failure: an error occured when sending asynchronous results to
+              the client, for example if the client is unable to keep up with the rate during
+              a continuous paging session.
+
 10. Chages from version 5
 
   * Second most signficant bit in the frame version byte is set to one to indicate
     a dse protocol message (section 2.1)
 
-  * Reserved flags for optimized paging in QUERY options (section 4.1.4) and ROWS response
-    metadata (section 4.2.5.2)
+  * Continuous paging:
+    * Added options to QUERY message (section 4.1.4)
+    * Added response parameters to ROWS response (section 4.2.5.2)
+
+  * Added CANCEL message (section 4.2.9)

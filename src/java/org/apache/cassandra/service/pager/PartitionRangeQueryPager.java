@@ -31,10 +31,10 @@ import org.apache.cassandra.transport.ProtocolVersion;
 /**
  * Pages a PartitionRangeReadCommand.
  *
- * Note: this only work for CQL3 queries for now (because thrift queries expect
+ * Note: this only works for CQL3 queries for now (because thrift queries expect
  * a different limit on the rows than on the columns, which complicates it).
  */
-public class PartitionRangeQueryPager extends AbstractQueryPager
+public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeReadCommand>
 {
     private volatile DecoratedKey lastReturnedKey;
     private volatile PagingState.RowMark lastReturnedRow;
@@ -47,11 +47,11 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
         {
             lastReturnedKey = command.metadata().decorateKey(state.partitionKey);
             lastReturnedRow = state.rowMark;
-            restoreState(lastReturnedKey, state.remaining, state.remainingInPartition);
+            restoreState(lastReturnedKey, state.remaining, state.remainingInPartition, state.inclusive);
         }
     }
 
-    public PartitionRangeQueryPager(ReadCommand command,
+    private PartitionRangeQueryPager(PartitionRangeReadCommand command,
                                     ProtocolVersion protocolVersion,
                                     DecoratedKey lastReturnedKey,
                                     PagingState.RowMark lastReturnedRow,
@@ -61,7 +61,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
         super(command, protocolVersion);
         this.lastReturnedKey = lastReturnedKey;
         this.lastReturnedRow = lastReturnedRow;
-        restoreState(lastReturnedKey, remaining, remainingInPartition);
+        restoreState(lastReturnedKey, remaining, remainingInPartition, false);
     }
 
     public PartitionRangeQueryPager withUpdatedLimit(DataLimits newLimits)
@@ -74,18 +74,28 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
                                             remainingInPartition());
     }
 
-    public PagingState state()
+    protected PagingState makePagingState(DecoratedKey lastKey, Row lastRow, boolean inclusive)
     {
-        return lastReturnedKey == null
-             ? null
-             : new PagingState(lastReturnedKey.getKey(), lastReturnedRow, maxRemaining(), remainingInPartition());
+        return makePagingState(getLastReturnedKey(lastKey, lastRow), getLastReturnedRow(lastRow), inclusive);
+    }
+
+    protected PagingState makePagingState(boolean inclusive)
+    {
+        return makePagingState(lastReturnedKey, lastReturnedRow, inclusive);
+    }
+
+    private PagingState makePagingState(DecoratedKey lastKey, PagingState.RowMark lastRow, boolean inclusive)
+    {
+        return lastKey == null
+               ? null
+               : new PagingState(lastKey.getKey(), lastRow, maxRemaining(), remainingInPartition(), inclusive);
     }
 
     protected ReadCommand nextPageReadCommand(int pageSize)
     throws RequestExecutionException
     {
         DataLimits limits;
-        DataRange fullRange = ((PartitionRangeReadCommand)command).dataRange();
+        DataRange fullRange = command.dataRange();
         DataRange pageRange;
         if (lastReturnedKey == null)
         {
@@ -99,7 +109,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
             AbstractBounds<PartitionPosition> bounds = makeKeyBounds(lastReturnedKey, includeLastKey);
             if (includeLastKey)
             {
-                pageRange = fullRange.forPaging(bounds, command.metadata().comparator, lastReturnedRow.clustering(command.metadata()), false);
+                pageRange = fullRange.forPaging(bounds, command.metadata().comparator, lastReturnedRow.clustering(command.metadata()), inclusive);
                 limits = command.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
             }
             else
@@ -111,17 +121,29 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
 
         Index index = command.getIndex(Keyspace.openAndGetStore(command.metadata()));
         Optional<IndexMetadata> indexMetadata = index != null ? Optional.of(index.getIndexMetadata()) : Optional.empty();
-        return new PartitionRangeReadCommand(command.metadata(), command.nowInSec(), command.columnFilter(), command.rowFilter(), limits, pageRange, indexMetadata);
+        return command.withUpdatedParams(limits, pageRange, indexMetadata);
     }
 
     protected void recordLast(DecoratedKey key, Row last)
     {
+        lastReturnedKey = getLastReturnedKey(key, last);
+        lastReturnedRow = getLastReturnedRow(last);
+    }
+
+    private DecoratedKey getLastReturnedKey(DecoratedKey key, Row last)
+    {
         if (last != null)
-        {
-            lastReturnedKey = key;
-            if (last.clustering() != Clustering.STATIC_CLUSTERING)
-                lastReturnedRow = PagingState.RowMark.create(command.metadata(), last, protocolVersion);
-        }
+            return key;
+
+        return lastReturnedKey; // no change
+    }
+
+    private PagingState.RowMark getLastReturnedRow(Row last)
+    {
+        if (last != null && last.clustering() != Clustering.STATIC_CLUSTERING)
+            return PagingState.RowMark.create(command.metadata(), last, protocolVersion);
+
+        return lastReturnedRow; //no change
     }
 
     protected boolean isPreviouslyReturnedPartition(DecoratedKey key)
@@ -132,18 +154,18 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
 
     private AbstractBounds<PartitionPosition> makeKeyBounds(PartitionPosition lastReturnedKey, boolean includeLastKey)
     {
-        AbstractBounds<PartitionPosition> bounds = ((PartitionRangeReadCommand)command).dataRange().keyRange();
+        AbstractBounds<PartitionPosition> bounds = command.dataRange().keyRange();
         if (bounds instanceof Range || bounds instanceof Bounds)
         {
             return includeLastKey
-                 ? new Bounds<PartitionPosition>(lastReturnedKey, bounds.right)
-                 : new Range<PartitionPosition>(lastReturnedKey, bounds.right);
+                 ? new Bounds<>(lastReturnedKey, bounds.right)
+                 : new Range<>(lastReturnedKey, bounds.right);
         }
         else
         {
             return includeLastKey
-                 ? new IncludingExcludingBounds<PartitionPosition>(lastReturnedKey, bounds.right)
-                 : new ExcludingBounds<PartitionPosition>(lastReturnedKey, bounds.right);
+                 ? new IncludingExcludingBounds<>(lastReturnedKey, bounds.right)
+                 : new ExcludingBounds<>(lastReturnedKey, bounds.right);
         }
     }
 }

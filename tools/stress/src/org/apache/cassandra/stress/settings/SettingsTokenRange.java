@@ -31,25 +31,28 @@ public class SettingsTokenRange implements Serializable
 {
     public final boolean wrap;
     public final int splitFactor;
-    private final TokenRangeOptions options;
+    public final boolean saveData;
+    public final String dataFileName;
 
     private SettingsTokenRange(TokenRangeOptions options)
     {
-        this.options = options;
-        this.wrap = options.wrap.setByUser();
         this.splitFactor = Ints.checkedCast(OptionDistribution.parseLong(options.splitFactor.value()));
+        this.wrap = !options.noWrap.setByUser();
+        this.saveData = options.saveData.setByUser();
+        this.dataFileName = options.saveData.value();
     }
 
     private static final class TokenRangeOptions extends GroupedOptions
     {
-        final OptionSimple wrap = new OptionSimple("wrap", "", null, "Re-use token ranges in order to terminate stress iterations", false);
+        final OptionSimple noWrap = new OptionSimple("no-wrap", "", null, "do not wrap token ranges, this nay cause the test to finish early", false);
         final OptionSimple splitFactor = new OptionSimple("split-factor=", "[0-9]+[bmk]?", "1", "Split every token range by this factor", false);
+        final OptionSimple saveData = new OptionSimple("savedata=", ".+", "stress-data.txt", "Save data to a file", false);
 
 
         @Override
         public List<? extends Option> options()
         {
-            return ImmutableList.<Option>builder().add(wrap, splitFactor).build();
+            return ImmutableList.<Option>builder().add(noWrap, splitFactor, saveData).build();
         }
     }
 

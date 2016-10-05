@@ -219,6 +219,23 @@ public class JavaDriverClient
         return result;
     }
 
+    public RowIterator execute(Statement statement, ContinuousPagingOptions pagingOptions)
+    {
+        RowIterator it = null;
+        try
+        {
+            it = getSession().execute(statement, pagingOptions);
+        }
+        finally
+        {
+            if (statementPrinter != null)
+            {
+                statementPrinter.print(Thread.currentThread().getId(), statement);
+            }
+        }
+        return it;
+    }
+
     public ResultSet execute(String query, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
         SimpleStatement stmt = new SimpleStatement(query);

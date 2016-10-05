@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
+import java.util.Arrays;
+
 import org.junit.Test;
 
 import com.datastax.driver.core.SimpleStatement;
@@ -46,6 +48,9 @@ public class SelectGroupByTest extends CQLTester
             // Makes sure that we have some tombstones
             execute("DELETE FROM %s WHERE a = 1 AND b = 3 AND c = 2 AND d = 12");
             execute("DELETE FROM %s WHERE a = 3");
+
+            Object[][] rows = getRows(execute("SELECT a, b, e, count(b), max(e) FROM %s GROUP BY a"));
+            System.out.println(Arrays.toString(rows));
 
             // Range queries
             assertRows(execute("SELECT a, b, e, count(b), max(e) FROM %s GROUP BY a"),

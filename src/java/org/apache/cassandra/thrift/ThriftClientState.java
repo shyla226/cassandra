@@ -36,7 +36,7 @@ public class ThriftClientState extends ClientState
 
     public ThriftClientState(InetSocketAddress remoteAddress)
     {
-        super(remoteAddress);
+        super(remoteAddress, null);
         this.queryState = new QueryState(this);
     }
 

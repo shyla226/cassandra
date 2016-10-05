@@ -69,7 +69,7 @@ public final class LegacyHintsMigrator
     {
         int size = 128;
 
-        int meanCellCount = legacyHintsTable.getMeanColumns();
+        int meanCellCount = legacyHintsTable.getMeanCells();
         double meanPartitionSize = legacyHintsTable.getMeanPartitionSize();
 
         if (meanCellCount != 0 && meanPartitionSize != 0)

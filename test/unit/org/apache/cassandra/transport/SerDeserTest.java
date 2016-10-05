@@ -331,10 +331,9 @@ public class SerDeserTest
         assertNotNull(decodedOptions);
         assertEquals(options.getConsistency(), decodedOptions.getConsistency());
         assertEquals(options.getSerialConsistency(), decodedOptions.getSerialConsistency());
-        assertEquals(options.getPageSize(), decodedOptions.getPageSize());
+        assertEquals(options.getPagingOptions(), decodedOptions.getPagingOptions());
         assertEquals(options.getProtocolVersion(), decodedOptions.getProtocolVersion());
         assertEquals(options.getValues(), decodedOptions.getValues());
-        assertEquals(options.getPagingState(), decodedOptions.getPagingState());
         assertEquals(options.skipMetadata(), decodedOptions.skipMetadata());
     }
 }

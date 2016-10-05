@@ -29,6 +29,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.AbstractAllocator;
 
 import static org.apache.cassandra.db.AbstractBufferClusteringPrefix.EMPTY_VALUES_ARRAY;
@@ -72,6 +73,18 @@ public interface Clustering extends ClusteringPrefix
         {
             ColumnDefinition c = metadata.clusteringColumns().get(i);
             sb.append(i == 0 ? "" : ", ").append(c.type.getString(get(i)));
+        }
+        return sb.toString();
+    }
+
+    public default String toBinaryString()
+    {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < size(); i++)
+        {
+            ByteBuffer bb = get(i);
+            sb.append(bb == null ? "null" : ByteBufferUtil.bytesToHex(bb));
+            sb.append(", ");
         }
         return sb.toString();
     }

@@ -382,7 +382,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
         }
 
-        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime))
+        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime, false))
         {
             return asMaterializedMap(iter);
         }
@@ -550,7 +550,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         }
 
-        Selection.ResultSetBuilder builder = selection.resultSetBuilder(options, false);
+        ResultSet.Builder builder = ResultSet.makeBuilder(options, false, selection);
         SelectStatement.forSelection(cfm, selection).processPartition(partition,
                                                                       options,
                                                                       builder,

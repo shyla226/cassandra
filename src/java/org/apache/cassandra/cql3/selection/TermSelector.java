@@ -70,7 +70,7 @@ public class TermSelector extends Selector
         this.type = type;
     }
 
-    public void addInput(ProtocolVersion protocolVersion, Selection.ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
     {
     }
 
