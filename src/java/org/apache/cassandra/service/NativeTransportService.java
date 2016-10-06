@@ -21,9 +21,11 @@ import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +36,7 @@ import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 
 import net.openhft.affinity.AffinitySupport;
+import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -54,7 +57,7 @@ public class NativeTransportService
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
 
-    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
+    public static final int NUM_NETTY_THREADS = 16; //Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
@@ -88,7 +91,7 @@ public class NativeTransportService
 
         if (useEpoll())
         {
-            workerGroup = new EpollEventLoopGroup();
+            workerGroup = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
             logger.info("Netty using native Epoll event loop");
         }
         else
@@ -146,6 +149,8 @@ public class NativeTransportService
         if (tpcInitialized)
             return;
 
+        CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
+
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
@@ -162,13 +167,17 @@ public class NativeTransportService
                 {
                     logger.info("Allocated netty thread to {}", Thread.currentThread().getName());
                 }
+
+                ready.countDown();
             }, 0, TimeUnit.SECONDS);
         }
+
+        Uninterruptibles.awaitUninterruptibly(ready);
 
         logger.info("Netting ioWork ration to {}", pIO);
         if (useEpoll())
         {
-            ((EpollEventLoopGroup)workerGroup).setIoRatio(pIO);
+            //((EpollEventLoopGroup)workerGroup).setIoRatio(pIO);
         }
         else
         {

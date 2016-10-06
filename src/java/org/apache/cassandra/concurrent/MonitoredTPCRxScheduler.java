@@ -49,7 +49,6 @@ public class MonitoredTPCRxScheduler
 
     public static Scheduler forCpu(int coreId)
     {
-        System.err.println("NEW");
         return new MonitoredTPCRxScheduler.SingleCoreScheduler(coreId);
     }
 

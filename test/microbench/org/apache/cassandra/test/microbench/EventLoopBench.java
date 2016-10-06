@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.MultithreadEventExecutorGroup;
@@ -29,6 +30,7 @@ import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
 import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
@@ -45,6 +47,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
+import org.openjdk.jmh.runner.RunnerException;
 
 
 /**
@@ -54,7 +57,12 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 5)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Fork(value = 1)
+@Fork(value = 1
+, jvmArgsAppend = {//"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
+                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
+                    "-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
+                    "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
+})
 @State(Scope.Thread)
 public class EventLoopBench {
     @State(Scope.Thread)
@@ -70,8 +78,9 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            rxMonitored = Observable.fromArray(arr).subscribeOn(MonitoredTPCRxScheduler.forCpu(0))
-                                    .observeOn(MonitoredTPCRxScheduler.forCpu(1));
+            rxMonitored = Observable.fromArray(arr)
+                                    .observeOn(MonitoredTPCRxScheduler.forCpu(1))
+                                    .subscribeOn(MonitoredTPCRxScheduler.forCpu(0));
         }
         @TearDown
         public void teardown() {
@@ -92,22 +101,31 @@ public class EventLoopBench {
 
 
         @Setup
-        public void setup() {
+        public void setup() throws InterruptedException
+        {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loops = new EpollEventLoopGroup(8);
+            loops = new MonitoredEpollEventLoopGroup(2);
+            if (!Epoll.isAvailable())
+                throw new RuntimeException("Epoll Not available");
+
             EventExecutor loop1 = loops.next();
+            CountDownLatch latch = new CountDownLatch(2);
             loop1.submit(() -> {
                 NettyRxScheduler.instance(loop1, 0);
+                latch.countDown();
             });
 
             EventExecutor loop2 = loops.next();
             loop2.submit(() -> {
                 NettyRxScheduler.instance(loop2, 1);
+                latch.countDown();
             });
 
-            rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
+            latch.await();
+
+            //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
             rx2 = Observable.fromArray(arr).subscribeOn(NettyRxScheduler.getForCore(0)).observeOn(NettyRxScheduler.getForCore(1));
         }
 
@@ -137,16 +155,16 @@ public class EventLoopBench {
     @Benchmark
     public void rxNetty(ExecutorState state, Blackhole bh) throws Exception {
         LatchedObserver<Integer> o = new LatchedObserver<>(bh);
+
         state.rx2.subscribe(o);
 
         await(state.count, o.latch);
     }
 
-    @Benchmark
+    //@Benchmark
     public void rxMonitored(MonitoredState state, Blackhole bh) throws Exception {
         LatchedObserver<Integer> o = new LatchedObserver<>(bh);
         state.rxMonitored.subscribe(o);
-
         await(state.count, o.latch);
     }
 

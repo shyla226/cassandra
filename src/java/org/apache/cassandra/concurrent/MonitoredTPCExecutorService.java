@@ -233,7 +233,14 @@ public class MonitoredTPCExecutorService implements Executor
             }
 
             if (queue == null)
+            {
                 queue = externalQueue;
+                //System.err.println("GLOBAL " + Thread.currentThread());
+            }
+            else
+            {
+                //System.err.println("LOCAL " + Thread.currentThread());
+            }
 
             if (!queue.offer(futureTask))
                 throw new RuntimeException("Backpressure");
