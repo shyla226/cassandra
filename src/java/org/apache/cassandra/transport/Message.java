@@ -610,7 +610,7 @@ public abstract class Message
             logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
             request.execute(qstate, queryStartNanoTime)
-                   //.observeOn(NettyRxScheduler.instance())
+                   .observeOn(NettyRxScheduler.instance())
                    .subscribe (
                     // onNext
                     response -> {

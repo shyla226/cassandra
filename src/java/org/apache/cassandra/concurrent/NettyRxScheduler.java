@@ -114,7 +114,7 @@ public class NettyRxScheduler extends Scheduler
         NettyRxScheduler scheduler = perCoreSchedulers[core];
         assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
 
-        return Thread.currentThread().getId() == scheduler.cpuThreadId ? immediateScheduler : scheduler;
+        return scheduler;
     }
 
     public static Scheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)

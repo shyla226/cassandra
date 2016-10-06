@@ -57,7 +57,7 @@ public class NativeTransportService
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
 
-    public static final int NUM_NETTY_THREADS = 15; //Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
+    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
@@ -91,7 +91,7 @@ public class NativeTransportService
 
         if (useEpoll())
         {
-            workerGroup = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
+            workerGroup = new EpollEventLoopGroup(NUM_NETTY_THREADS);
             logger.info("Netty using native Epoll event loop");
         }
         else
