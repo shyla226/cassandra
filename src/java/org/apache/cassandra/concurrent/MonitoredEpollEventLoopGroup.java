@@ -41,6 +41,7 @@ import io.netty.util.concurrent.RejectedExecutionHandlers;
 
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
 import org.jctools.queues.SpscArrayQueue;
@@ -171,9 +172,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     {
         private final int threadOffset;
 
-        private static final int maxExtraSpins = 1024 * 10;
-        private static final int yieldExtraSpins = 1024 * 8;
-        private static final int parkExtraSpins = 1024 * 9;
+        private static final int busyExtraSpins =  1024 * 16;
+        private static final int yieldExtraSpins = 1024 * 16;
+        private static final int parkExtraSpins = 8192; // 1024 is ~50ms
 
         @Contended
         private volatile CoreState state;
@@ -197,7 +198,6 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 incomingQueues[i] = new SpscArrayQueue<>(1 << 20);
 
             this.state = CoreState.WORKING;
-
         }
 
         public void run()
@@ -213,17 +213,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                         while (true)
                         {
                             int drained = drain();
-                            if (drained > 0 || ++spins < yieldExtraSpins)
-                            {
-                                if (drained > 0)
-                                    spins = 0;
-
+                            if (drained > 0 || ++spins < busyExtraSpins)
                                 continue;
-                            }
-                            else if (spins < parkExtraSpins)
+                            else if (spins < busyExtraSpins + yieldExtraSpins)
+                            {
                                 Thread.yield();
-                            else if (spins < maxExtraSpins)
+                            }
+                            else if (spins < busyExtraSpins + yieldExtraSpins + parkExtraSpins)
                                 LockSupport.parkNanos(1);
+                            else
+                                break;
                         }
                     }
 
@@ -289,11 +288,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         int drain()
         {
-            int processed = drainTasks();
-            return drainEpoll(processed);
+            int processed = drainEpoll();
+            return drainTasks() + processed;
         }
 
-        int drainEpoll(int processedTasks)
+        int drainEpoll()
         {
             try
             {
@@ -319,7 +318,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                     this.events.increase();
                 }
 
-                return Math.max(t + processedTasks, processedTasks);
+                return Math.max(t, 0);
             }
             catch (Exception e)
             {
@@ -333,6 +332,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             }
         }
 
+        @Inline
         int drainTasks()
         {
             fetchFromDelayedQueue();
@@ -347,6 +347,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             return processed;
         }
 
+        @Inline
         boolean isEmpty()
         {
             for (int i = 0; i < incomingQueues.length; i++)
@@ -361,16 +362,22 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             try
             {
                 if (empty)
-                    return this.selectNowSupplier.get() <= 0;
+                {
+                    int v = this.selectNowSupplier.get();
+                    if (v == -1)
+                        logger.warn("Hit epoll -1");
+                    return v <= -1;
+                }
             }
             catch (Exception e)
             {
                 logger.error("Error selecting socket ", e);
             }
 
-            return true;
+            return empty;
         }
 
+        @Inline
         boolean fetchFromDelayedQueue()
         {
             long nanoTime = AbstractScheduledEventExecutor.nanoTime();

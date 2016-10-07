@@ -89,9 +89,58 @@ public class EventLoopBench {
     }
 
     @State(Scope.Thread)
+    public static class NettyExecutorState {
+
+        @Param({"1", "1000000"})
+        public int count;
+
+        private MultithreadEventExecutorGroup loops;
+
+        Observable<Integer> rx1;
+        Observable<Integer> rx2;
+
+
+        @Setup
+        public void setup() throws InterruptedException
+        {
+            Integer[] arr = new Integer[count];
+            Arrays.fill(arr, 777);
+
+            loops = new EpollEventLoopGroup(2);
+            if (!Epoll.isAvailable())
+                throw new RuntimeException("Epoll Not available");
+
+            ((EpollEventLoopGroup)loops).setIoRatio(1);
+
+            EventExecutor loop1 = loops.next();
+            CountDownLatch latch = new CountDownLatch(2);
+            loop1.submit(() -> {
+                NettyRxScheduler.instance(loop1, 0);
+                latch.countDown();
+            });
+
+            EventExecutor loop2 = loops.next();
+            loop2.submit(() -> {
+                NettyRxScheduler.instance(loop2, 1);
+                latch.countDown();
+            });
+
+            latch.await();
+
+            //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
+            rx2 = Observable.fromArray(arr).subscribeOn(NettyRxScheduler.getForCore(0)).observeOn(NettyRxScheduler.getForCore(1));
+        }
+
+        @TearDown
+        public void teardown() {
+            loops.shutdown();
+        }
+    }
+
+    @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"1", "10", "100", "1000", "10000", "1000000"})
+        @Param({"1", "1000000"})
         public int count;
 
         private MultithreadEventExecutorGroup loops;
@@ -153,7 +202,16 @@ public class EventLoopBench {
 
 
     @Benchmark
-    public void rxNetty(ExecutorState state, Blackhole bh) throws Exception {
+    public void rxNettyNew(ExecutorState state, Blackhole bh) throws Exception {
+        LatchedObserver<Integer> o = new LatchedObserver<>(bh);
+
+        state.rx2.subscribe(o);
+
+        await(state.count, o.latch);
+    }
+
+    @Benchmark
+    public void rxNettyOld(NettyExecutorState state, Blackhole bh) throws Exception {
         LatchedObserver<Integer> o = new LatchedObserver<>(bh);
 
         state.rx2.subscribe(o);

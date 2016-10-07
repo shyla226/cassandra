@@ -159,9 +159,10 @@ public class MonitoredTPCExecutorService implements Executor
         private final int socketId;
         private long threadId;
 
-        private static final int maxExtraSpins = 1024 * 10;
         private static final int yieldExtraSpins = 1024 * 8;
         private static final int parkExtraSpins = 1024 * 9;
+        private static final int maxExtraSpins = 1024 * 10;
+
 
         @Contended
         private volatile CoreState state;
