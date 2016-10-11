@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Observable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +59,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
+    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
     {
         CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), columnFamily()).copy();
         Triggers triggers = cfm.getTriggers();
@@ -68,12 +69,12 @@ public class DropTriggerStatement extends SchemaAlteringStatement
             if (ifExists)
                 return null;
             else
-                throw new InvalidRequestException(String.format("Trigger %s was not found", triggerName));
+                return error(String.format("Trigger %s was not found", triggerName));
         }
 
         logger.info("Dropping trigger with name {}", triggerName);
         cfm.triggers(triggers.without(triggerName));
-        MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+        return MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly)
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 }

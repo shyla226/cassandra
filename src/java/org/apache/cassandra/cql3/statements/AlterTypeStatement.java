@@ -83,21 +83,29 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         return name.getKeyspace();
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         if (ksm == null)
-            throw new InvalidRequestException(String.format("Cannot alter type in unknown keyspace %s", name.getKeyspace()));
+            return error(String.format("Cannot alter type in unknown keyspace %s", name.getKeyspace()));
 
-        UserType toUpdate =
-            ksm.types.get(name.getUserTypeName())
-                     .orElseThrow(() -> new InvalidRequestException(String.format("No user type named %s exists.", name)));
+        UserType toUpdate = ksm.types.getNullable(name.getUserTypeName());
+        if (toUpdate == null)
+            return error(String.format("No user type named %s exists.", name));
 
-        UserType updated = makeUpdatedType(toUpdate, ksm);
+        UserType updated;
+        try
+        {
+            updated = makeUpdatedType(toUpdate, ksm);
+        }
+        catch (InvalidRequestException exc)
+        {
+            return io.reactivex.Observable.error(exc);
+        }
 
         // Now, we need to announce the type update to basically change it for new tables using this type,
         // but we also need to find all existing user types and CF using it and change them.
-        MigrationManager.announceTypeUpdate(updated, isLocalOnly);
+        io.reactivex.Observable<Integer> observable = MigrationManager.announceTypeUpdate(updated, isLocalOnly);
 
         for (CFMetaData cfm : ksm.tables)
         {
@@ -106,7 +114,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             for (ColumnDefinition def : copy.allColumns())
                 modified |= updateDefinition(copy, def, toUpdate.keyspace, toUpdate.name, updated);
             if (modified)
-                MigrationManager.announceColumnFamilyUpdate(copy, isLocalOnly);
+                observable = observable.mergeWith(MigrationManager.announceColumnFamilyUpdate(copy, isLocalOnly));
         }
 
         for (ViewDefinition view : ksm.views)
@@ -116,7 +124,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             for (ColumnDefinition def : copy.metadata.allColumns())
                 modified |= updateDefinition(copy.metadata, def, toUpdate.keyspace, toUpdate.name, updated);
             if (modified)
-                MigrationManager.announceViewUpdate(copy, isLocalOnly);
+                observable = observable.mergeWith(MigrationManager.announceViewUpdate(copy, isLocalOnly));
         }
 
         // Other user types potentially using the updated type
@@ -127,14 +135,16 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             if (ut.keyspace.equals(toUpdate.keyspace) && ut.name.equals(toUpdate.name))
             {
                 if (!ut.keyspace.equals(updated.keyspace) || !ut.name.equals(updated.name))
-                    MigrationManager.announceTypeDrop(ut);
+                    observable = observable.mergeWith(MigrationManager.announceTypeDrop(ut));
                 continue;
             }
             AbstractType<?> upd = updateWith(ut, toUpdate.keyspace, toUpdate.name, updated);
             if (upd != null)
-                MigrationManager.announceTypeUpdate((UserType) upd, isLocalOnly);
+                observable = observable.mergeWith(MigrationManager.announceTypeUpdate((UserType) upd, isLocalOnly));
         }
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName());
+
+        return observable.last(0).toObservable()
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
     }
 
     private boolean updateDefinition(CFMetaData cfm, ColumnDefinition def, String keyspace, ByteBuffer toReplace, UserType updated)
@@ -323,7 +333,10 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             }
 
             UserType updated = new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes, toUpdate.isMultiCell());
-            CreateTypeStatement.checkForDuplicateNames(updated);
+            String duplicate = CreateTypeStatement.haveDuplicateName(updated);
+            if (duplicate != null)
+                throw new InvalidRequestException(String.format("Duplicate field name %s in type %s", duplicate, updated.name));
+
             return updated;
         }
 

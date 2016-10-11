@@ -152,7 +152,8 @@ public class BatchlogManager implements BatchlogManagerMBean
     public int countAllBatches()
     {
         String query = String.format("SELECT count(*) FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES);
-        UntypedResultSet results = executeInternal(query);
+        // TODO make async
+        UntypedResultSet results = executeInternal(query).blockingFirst();
         if (results == null || results.isEmpty())
             return 0;
 

@@ -583,26 +583,36 @@ public abstract class ModificationStatement implements CQLStatement
         return builder.build();
     }
 
-    public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Observable<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         return hasConditions()
                ? executeInternalWithCondition(queryState, options)
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
-    public ResultMessage executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    public Observable<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
+        Observable<Integer> mutationObservables = null;
         for (IMutation mutation : getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime))
-            mutation.apply();
-        return null;
+        {
+            Observable<Integer> singleMutationObservable = mutation.applyAsync();
+            mutationObservables = mutationObservables == null
+                                  ? singleMutationObservable
+                                  : mutationObservables.mergeWith(singleMutationObservable);
+        }
+        if (mutationObservables == null)
+            return Observable.just(new ResultMessage.Void());
+
+        return mutationObservables.last(0).map(v -> new ResultMessage.Void()).toObservable();
     }
 
-    public ResultMessage executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Observable<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         CQL3CasRequest request = makeCasRequest(state, options);
         try (RowIterator result = casInternal(request, state))
         {
-            return new ResultMessage.Rows(buildCasResultSet(result, options));
+            // TODO rx-ify
+            return Observable.just(new ResultMessage.Rows(buildCasResultSet(result, options)));
         }
     }
 

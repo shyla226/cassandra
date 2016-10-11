@@ -56,7 +56,7 @@ public class CompactionAwareWriterTest extends CQLTester
     @AfterClass
     public static void tearDownClass()
     {
-        QueryProcessor.executeInternal("DROP KEYSPACE IF EXISTS " + KEYSPACE);
+        QueryProcessor.executeInternal("DROP KEYSPACE IF EXISTS " + KEYSPACE).blockingFirst();
     }
 
     private ColumnFamilyStore getColumnFamilyStore()

@@ -82,7 +82,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         }
     }
 
-    public static void checkForDuplicateNames(UserType type) throws InvalidRequestException
+    public static String haveDuplicateName(UserType type) throws InvalidRequestException
     {
         for (int i = 0; i < type.size() - 1; i++)
         {
@@ -90,9 +90,10 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             for (int j = i+1; j < type.size(); j++)
             {
                 if (fieldName.equals(type.fieldName(j)))
-                    throw new InvalidRequestException(String.format("Duplicate field name %s in type %s", fieldName, type.name));
+                    return fieldName.toString();
             }
         }
+        return null;
     }
 
     public void addToRawBuilder(Types.RawBuilder builder) throws InvalidRequestException
@@ -117,7 +118,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         return new UserType(name.getKeyspace(), name.getUserTypeName(), columnNames, types, true);
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         assert ksm != null; // should haven't validate otherwise
@@ -127,8 +128,11 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             return null;
 
         UserType type = createType();
-        checkForDuplicateNames(type);
-        MigrationManager.announceNewType(type, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName());
+        String duplicate = haveDuplicateName(type);
+        if (duplicate != null)
+            return error(String.format("Duplicate field name %s in type %s", duplicate, type.name));
+
+        return MigrationManager.announceNewType(type, isLocalOnly)
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
     }
 }

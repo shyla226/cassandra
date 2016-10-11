@@ -87,7 +87,7 @@ public class LegacySchemaMigratorTest
         {
             String query = format("SELECT * FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, table.cfName);
             //noinspection ConstantConditions
-            assertTrue(executeOnceInternal(query).isEmpty());
+            assertTrue(executeOnceInternal(query).blockingFirst().isEmpty());
         }
 
         // make sure that we've read *exactly* the same set of keyspaces/tables/types/functions

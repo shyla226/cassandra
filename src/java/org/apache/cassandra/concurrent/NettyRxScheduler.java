@@ -21,6 +21,7 @@ package org.apache.cassandra.concurrent;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
@@ -46,6 +47,8 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -62,6 +65,8 @@ import org.apache.cassandra.service.StorageService;
  */
 public class NettyRxScheduler extends Scheduler
 {
+    private static final Logger logger = LoggerFactory.getLogger(NettyRxScheduler.class);
+
     public final static FastThreadLocal<NettyRxScheduler> localNettyEventLoop = new FastThreadLocal<NettyRxScheduler>()
     {
         protected NettyRxScheduler initialValue()
@@ -80,6 +85,7 @@ public class NettyRxScheduler extends Scheduler
     final EventExecutorGroup eventLoop;
     public final int cpuId;
     public final long cpuThreadId;
+    public final String cpuThreadName;
 
     public static NettyRxScheduler instance()
     {
@@ -107,6 +113,7 @@ public class NettyRxScheduler extends Scheduler
         this.eventLoop = eventLoop;
         this.cpuId = cpuId;
         this.cpuThreadId = Thread.currentThread().getId();
+        this.cpuThreadName = Thread.currentThread().getName();
     }
 
     public static Scheduler getForCore(int core)
@@ -122,10 +129,16 @@ public class NettyRxScheduler extends Scheduler
         // force all system table operations to go through a single core
         if (cfs.hasSpecialHandlingForTPC)
         {
+            // TODO not guaranteed to avoid deadlock
+            // int index = new Random().nextInt(perCoreSchedulers.length);
             if (perCoreSchedulers[0] != null)
+            {
+                logger.warn("#### returning 0 scheduler");
                 return perCoreSchedulers[0];
+            }
 
             // during initial startup we have no schedulers, and should run tasks directly
+            logger.warn("#### returning null from getForKey");
             return null;
         }
 
@@ -136,7 +149,23 @@ public class NettyRxScheduler extends Scheduler
         {
             PartitionPosition next = keyspaceRanges.get(i);
             if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
-                return getForCore(i - 1);
+            {
+                NettyRxScheduler matchingScheduler = (NettyRxScheduler) getForCore(i - 1);
+                if (matchingScheduler == localNettyEventLoop.get())
+                {
+                    logger.warn("#### already on correct scheduler ({}, {}) for {}", matchingScheduler.cpuThreadName, matchingScheduler.cpuThreadId, key);
+                    return null;
+                }
+                else
+                {
+                    logger.warn("#### on wrong scheduler ({}, threadId={}, cpuID={}) for {}, currently on ({}, {}, {}); ranges are {}",
+                            matchingScheduler.cpuThreadName, matchingScheduler.cpuThreadId, matchingScheduler.cpuId,
+                            key,
+                            Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
+                            keyspaceRanges);
+                    return matchingScheduler;
+                }
+            }
 
             rangeStart = next;
         }
@@ -146,6 +175,11 @@ public class NettyRxScheduler extends Scheduler
 
     public static List<PartitionPosition> getRangeList(ColumnFamilyStore cfs)
     {
+        return getRangeList(cfs, true);
+    }
+
+    public static List<PartitionPosition> getRangeList(ColumnFamilyStore cfs, boolean persist)
+    {
         List<PartitionPosition> ranges = keyspaceToRangeMapping.get(cfs.keyspace.getName());
 
         if (ranges != null)
@@ -154,20 +188,23 @@ public class NettyRxScheduler extends Scheduler
         List<Range<Token>> localRanges = StorageService.getLocalRanges(cfs);
         List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, cfs.getPartitioner(), NativeTransportService.NUM_NETTY_THREADS);
 
-        if (instance().cpuId == 0)
+        if (persist)
         {
-            keyspaceToRangeMapping.put(cfs.keyspace.getName(), splits);
-        }
-        else
-        {
-            CountDownLatch ready = new CountDownLatch(1);
-
-            getForCore(0).scheduleDirect(() -> {
+            if (instance().cpuId == 0)
+            {
                 keyspaceToRangeMapping.put(cfs.keyspace.getName(), splits);
-                ready.countDown();
-            });
+            }
+            else
+            {
+                CountDownLatch ready = new CountDownLatch(1);
 
-            Uninterruptibles.awaitUninterruptibly(ready);
+                getForCore(0).scheduleDirect(() -> {
+                    keyspaceToRangeMapping.put(cfs.keyspace.getName(), splits);
+                    ready.countDown();
+                });
+
+                Uninterruptibles.awaitUninterruptibly(ready);
+            }
         }
 
         return splits;

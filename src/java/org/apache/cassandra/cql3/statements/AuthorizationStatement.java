@@ -51,10 +51,10 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
 
     public abstract Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException;
 
-    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    public Observable<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         // executeInternal is for local query only, thus altering permission doesn't make sense and is not supported
-        throw new UnsupportedOperationException();
+        return Observable.error(new UnsupportedOperationException());
     }
 
     public static IResource maybeCorrectResource(IResource resource, ClientState state) throws InvalidRequestException

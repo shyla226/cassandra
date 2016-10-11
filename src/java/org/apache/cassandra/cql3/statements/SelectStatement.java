@@ -418,12 +418,12 @@ public class SelectStatement implements CQLStatement
         return process(partitions, options, nowInSec, userLimit).map(ResultMessage.Rows::new);
     }
 
-    public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
+    public Observable<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
         return executeInternal(state, options, FBUtilities.nowInSeconds(), System.nanoTime());
     }
 
-    public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Observable<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
@@ -436,14 +436,15 @@ public class SelectStatement implements CQLStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(Observable.just(data), options, nowInSec, userLimit).blockingSingle();
+                    return processResults(Observable.just(data), options, nowInSec, userLimit);
                 }
             }
             else
             {
                 QueryPager pager = getPager(query, options);
 
-                return execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
+                // TODO rx-ify
+                return Observable.just(execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime));
             }
         }
     }

@@ -44,7 +44,7 @@ public class PstmtPersistenceTest extends CQLTester
         // need this for pstmt execution/validation tests
         requireNetwork();
 
-        int rows = QueryProcessor.executeOnceInternal("SELECT * FROM " + SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.PREPARED_STATEMENTS).size();
+        int rows = QueryProcessor.executeOnceInternal("SELECT * FROM " + SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.PREPARED_STATEMENTS).blockingFirst().size();
         Assert.assertEquals(0, rows);
 
         execute("CREATE KEYSPACE IF NOT EXISTS foo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
@@ -72,7 +72,7 @@ public class PstmtPersistenceTest extends CQLTester
 
         String queryAll = "SELECT * FROM " + SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.PREPARED_STATEMENTS;
 
-        rows = QueryProcessor.executeOnceInternal(queryAll).size();
+        rows = QueryProcessor.executeOnceInternal(queryAll).blockingFirst().size();
         Assert.assertEquals(5, rows);
 
         QueryHandler handler = ClientState.getCQLQueryHandler();
@@ -89,7 +89,7 @@ public class PstmtPersistenceTest extends CQLTester
         validatePstmts(stmtIds, handler);
 
         // validate that the prepared statements are in the system table
-        for (UntypedResultSet.Row row : QueryProcessor.executeOnceInternal(queryAll))
+        for (UntypedResultSet.Row row : QueryProcessor.executeOnceInternal(queryAll).blockingFirst())
         {
             MD5Digest digest = MD5Digest.wrap(ByteBufferUtil.getArray(row.getBytes("prepared_id")));
             ParsedStatement.Prepared prepared = QueryProcessor.instance.getPrepared(digest);
@@ -99,13 +99,13 @@ public class PstmtPersistenceTest extends CQLTester
         // add anther prepared statement and sync it to table
         QueryProcessor.prepare("SELECT * FROM bar WHERE key = ?", clientState, false);
         Assert.assertEquals(6, QueryProcessor.preparedStatementsCount());
-        rows = QueryProcessor.executeOnceInternal(queryAll).size();
+        rows = QueryProcessor.executeOnceInternal(queryAll).blockingFirst().size();
         Assert.assertEquals(6, rows);
 
         // drop a keyspace (prepared statements are removed - syncPreparedStatements() remove should the rows, too)
         execute("DROP KEYSPACE foo");
         Assert.assertEquals(3, QueryProcessor.preparedStatementsCount());
-        rows = QueryProcessor.executeOnceInternal(queryAll).size();
+        rows = QueryProcessor.executeOnceInternal(queryAll).blockingFirst().size();
         Assert.assertEquals(3, rows);
 
     }

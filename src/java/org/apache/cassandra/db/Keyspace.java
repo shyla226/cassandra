@@ -23,9 +23,11 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -457,6 +459,9 @@ public class Keyspace
         // TODO support MVs
         assert !requiresViewUpdate;
 
+        // TODO just for debugging
+        String cfsString = mutation.getPartitionUpdates().stream().map(upd -> columnFamilyStores.get(upd.metadata().cfId)).map(Object::toString).collect(Collectors.joining(", ", "[", "]"));
+
         // Lock[] locks = null;
         // final CompletableFuture<?> mark = future == null ? new CompletableFuture<>() : future;
 
@@ -519,24 +524,42 @@ public class Keyspace
 
         int nowInSec = FBUtilities.nowInSeconds();
         OpOrder.Group opGroup = writeOrder.start();
+        logger.warn("#### opening oporder ({}) for {}", opGroup, cfsString);
+
+        if (this.getName().equals("system"))
+        {
+            try
+            {
+                throw new RuntimeException();
+            }
+            catch (RuntimeException exc)
+            {
+                logger.warn("#### write path for {}:", cfsString, exc);
+            }
+        }
 
         // write the mutation to the commitlog
         io.reactivex.Observable<CommitLogPosition> commitLogPositionObservable;
         if (writeCommitLog)
         {
             Tracing.trace("Appending to commitlog");
+            logger.warn("#### appending to commitlog");
             commitLogPositionObservable = CommitLog.instance.add(mutation);
         }
         else
         {
             // TODO just() should be able to take a single null argument, not sure why RxJava 2 complains about it
+            logger.warn("#### no commitlog position");
             commitLogPositionObservable = io.reactivex.Observable.just(CommitLogPosition.NONE);
         }
 
-        return io.reactivex.Single.concat(commitLogPositionObservable.map(commitLogPosition -> {
-            List<io.reactivex.Single<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
+        // io.reactivex.Observable.concat
+        return commitLogPositionObservable.flatMap(commitLogPosition -> {
+            logger.warn("#### got commitlog position for {}", cfsString);
+            List<io.reactivex.Observable<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
+                logger.warn("#### processing partition update for {}", cfsString);
                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
                 if (cfs == null)
                 {
@@ -564,10 +587,12 @@ public class Keyspace
                 */
 
                 Tracing.trace("Adding to {} memtable", upd.metadata().cfName);
+                logger.warn("#### adding {} to memtable: {}", upd);
                 UpdateTransaction indexTransaction = updateIndexes
                                                      ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
                                                      : UpdateTransaction.NO_OP;
-                io.reactivex.Single<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
+                io.reactivex.Observable<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition).toObservable();
+                memtableObservable.forEach(v -> logger.warn("#### memtableObservable completed"));
                 memtablePutObservables.add(memtableObservable);
 
                 /*
@@ -578,10 +603,19 @@ public class Keyspace
 
             // avoid the expensive merge call if there's only 1 observable
             if (memtablePutObservables.size() == 1)
-                return memtablePutObservables.get(0);
+            {
+                logger.warn("#### handling single-partition mutation optimally for {}", cfsString);
+                return memtablePutObservables.get(0).last(0).toObservable();
+            }
             else
-                return io.reactivex.Observable.merge(memtablePutObservables).last();
-        })).doAfterTerminate(opGroup::close);
+            {
+                logger.warn("#### handling multi-partition mutation with merge for {}", cfsString);
+                return io.reactivex.Observable.merge(memtablePutObservables).last(0).toObservable();
+            }
+        }).first(0).doOnEvent((i, throwable) -> {
+            logger.warn("#### closing write opGroup ({}) for mutation on {}", opGroup, cfsString);
+            opGroup.close();
+        }).toObservable();
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

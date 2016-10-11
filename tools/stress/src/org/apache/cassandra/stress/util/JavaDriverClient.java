@@ -107,6 +107,7 @@ public class JavaDriverClient
             stmt = stmts.get(query);
             if (stmt != null)
                 return stmt;
+            System.err.println("#### preparing query: " + query);
             stmt = getSession().prepare(query);
             stmts.put(query, stmt);
         }
@@ -178,6 +179,7 @@ public class JavaDriverClient
 
     public ResultSet execute(String query, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
+        System.err.println("#### executing simple query: " + query);
         SimpleStatement stmt = new SimpleStatement(query);
         stmt.setConsistencyLevel(from(consistency));
         return getSession().execute(stmt);
@@ -185,7 +187,7 @@ public class JavaDriverClient
 
     public ResultSet executePrepared(PreparedStatement stmt, List<Object> queryParams, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
-
+        System.err.println("#### executing preparing query");
         stmt.setConsistencyLevel(from(consistency));
         BoundStatement bstmt = stmt.bind((Object[]) queryParams.toArray(new Object[queryParams.size()]));
         return getSession().execute(bstmt);

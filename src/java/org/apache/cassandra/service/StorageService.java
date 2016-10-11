@@ -38,6 +38,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+import io.reactivex.Observable;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -212,6 +213,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
         Collection<Token> localTokens = getLocalTokens();
         setGossipTokens(localTokens);
+        SystemKeyspace.updateTokenBoundaries();
         setMode(Mode.NORMAL, false);
     }
 
@@ -980,9 +982,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
 
+        // TODO chain all this together
         // if we don't have system_traces keyspace at this point, then create it manually
-        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata());
-        maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata());
+        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata()).subscribe();
+        maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata()).subscribe();
 
         if (!isSurveyMode)
         {
@@ -999,7 +1002,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         Gossiper.instance.replacedEndpoint(existing);
                 }
                 assert tokenMetadata.sortedTokens().size() > 0;
-                doAuthSetup();
+                doAuthSetup().subscribe();
             }
             else
             {
@@ -1043,19 +1046,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.info("Leaving write survey mode and joining ring at operator request");
             assert tokenMetadata.sortedTokens().size() > 0;
 
-            doAuthSetup();
+            doAuthSetup().subscribe();
         }
     }
 
-    private void doAuthSetup()
+    private Observable<Integer> doAuthSetup()
     {
-        maybeAddOrUpdateKeyspace(AuthKeyspace.metadata());
-
-        DatabaseDescriptor.getRoleManager().setup();
-        DatabaseDescriptor.getAuthenticator().setup();
-        DatabaseDescriptor.getAuthorizer().setup();
-        MigrationManager.instance.register(new AuthMigrationListener());
-        authSetupComplete = true;
+        return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
+                .doAfterTerminate(() -> {
+                    DatabaseDescriptor.getRoleManager().setup();
+                    DatabaseDescriptor.getAuthenticator().setup();
+                    DatabaseDescriptor.getAuthorizer().setup();
+                    MigrationManager.instance.register(new AuthMigrationListener());
+                    authSetupComplete = true;
+                });
     }
 
     public boolean isAuthSetupComplete()
@@ -1063,15 +1067,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return authSetupComplete;
     }
 
-    private void maybeAddKeyspace(KeyspaceMetadata ksm)
+    private Observable<Integer> maybeAddKeyspace(KeyspaceMetadata ksm)
     {
         try
         {
-            MigrationManager.announceNewKeyspace(ksm, 0, false);
+            return MigrationManager.announceNewKeyspace(ksm, 0, false);
         }
         catch (AlreadyExistsException e)
         {
             logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
+            return Observable.just(0);
         }
     }
 
@@ -1079,7 +1084,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Ensure the schema of a pseudo-system keyspace (a distributed system keyspace: traces, auth and the so-called distributedKeyspace),
      * is up to date with what we expected (creating it if it doesn't exist and updating tables that may have been upgraded).
      */
-    private void maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
+    private Observable<Integer> maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
     {
         // Note that want to deal with the keyspace and its table a bit differently: for the keyspace definition
         // itself, we want to create it if it doesn't exist yet, but if it does exist, we don't want to modify it,
@@ -1088,24 +1093,41 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // (#8162 being an example), so even if the table definition exists, we still need to force the "current"
         // version of the schema, the one the node will be expecting.
 
-        KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
+        // KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
         // If the keyspace doesn't exist, create it
-        if (defined == null)
+        Observable<Integer> observable;
+        if (Schema.instance.getKSMetaData(expected.name) == null)
         {
-            maybeAddKeyspace(expected);
-            defined = Schema.instance.getKSMetaData(expected.name);
+            logger.warn("#### maybe adding keyspace {}", expected);
+            observable = maybeAddKeyspace(expected);
+             //     defined = Schema.instance.getKSMetaData(expected.name);
+        }
+        else
+        {
+            observable = Observable.just(0);
         }
 
-        // While the keyspace exists, it might miss table or have outdated one
-        // There is also the potential for a race, as schema migrations add the bare
-        // keyspace into Schema.instance before adding its tables, so double check that
-        // all the expected tables are present
-        for (CFMetaData expectedTable : expected.tables)
-        {
-            CFMetaData definedTable = defined.tables.get(expectedTable.cfName).orElse(null);
-            if (definedTable == null || !definedTable.equals(expectedTable))
-                MigrationManager.forceAnnounceNewColumnFamily(expectedTable);
-        }
+        return observable.flatMap(v -> {
+            KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
+            logger.warn("#### defined ksm: {}", defined);
+
+            // While the keyspace exists, it might miss table or have outdated one
+            // There is also the potential for a race, as schema migrations add the bare
+            // keyspace into Schema.instance before adding its tables, so double check that
+            // all the expected tables are present
+            Observable<Integer> cfObservable = null;
+            for (CFMetaData expectedTable : expected.tables)
+            {
+                CFMetaData definedTable = defined.tables.get(expectedTable.cfName).orElse(null);
+                if (definedTable == null || !definedTable.equals(expectedTable))
+                {
+                    Observable<Integer> singleCfObservable = MigrationManager.forceAnnounceNewColumnFamily(expectedTable);
+                    cfObservable = cfObservable == null ? singleCfObservable : cfObservable.mergeWith(singleCfObservable);
+                }
+            }
+
+            return cfObservable == null ? Observable.just(0) : cfObservable.last(0).toObservable();
+        });
     }
 
     public boolean isJoined()

@@ -81,11 +81,11 @@ public class AlterTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         CFMetaData meta = validateColumnFamily(keyspace(), columnFamily());
         if (meta.isView())
-            throw new InvalidRequestException("Cannot use ALTER TABLE on Materialized View");
+            return error("Cannot use ALTER TABLE on Materialized View");
 
         CFMetaData cfm = meta.copy();
         ColumnIdentifier columnName = null;
@@ -115,14 +115,14 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
                     assert columnName != null;
                     if (cfm.isDense())
-                        throw new InvalidRequestException("Cannot add new column to a COMPACT STORAGE table");
+                        return error("Cannot add new column to a COMPACT STORAGE table");
 
                     if (isStatic)
                     {
                         if (!cfm.isCompound())
-                            throw new InvalidRequestException("Static columns are not allowed in COMPACT STORAGE tables");
+                            return error("Static columns are not allowed in COMPACT STORAGE tables");
                         if (cfm.clusteringColumns().isEmpty())
-                            throw new InvalidRequestException("Static columns are only useful (and thus allowed) if the table has at least one clustering column");
+                            return error("Static columns are only useful (and thus allowed) if the table has at least one clustering column");
                     }
 
                     if (def != null)
@@ -131,23 +131,23 @@ public class AlterTableStatement extends SchemaAlteringStatement
                         {
                             case PARTITION_KEY:
                             case CLUSTERING:
-                                throw new InvalidRequestException(String.format("Invalid column name %s because it conflicts with a PRIMARY KEY part", columnName));
+                                return error(String.format("Invalid column name %s because it conflicts with a PRIMARY KEY part", columnName));
                             default:
-                                throw new InvalidRequestException(String.format("Invalid column name %s because it conflicts with an existing column", columnName));
+                                return error(String.format("Invalid column name %s because it conflicts with an existing column", columnName));
                         }
                     }
 
                     // Cannot re-add a dropped counter column. See #7831.
                     if (meta.isCounter() && meta.getDroppedColumns().containsKey(columnName.bytes))
-                        throw new InvalidRequestException(String.format("Cannot re-add previously dropped counter column %s", columnName));
+                        return error(String.format("Cannot re-add previously dropped counter column %s", columnName));
 
                     AbstractType<?> type = validator.getType();
                     if (type.isCollection() && type.isMultiCell())
                     {
                         if (!cfm.isCompound())
-                            throw new InvalidRequestException("Cannot use non-frozen collections in COMPACT STORAGE tables");
+                            return error("Cannot use non-frozen collections in COMPACT STORAGE tables");
                         if (cfm.isSuper())
-                            throw new InvalidRequestException("Cannot use non-frozen collections with super column families");
+                            return error("Cannot use non-frozen collections with super column families");
 
                         // If there used to be a non-frozen collection column with the same name (that has been dropped),
                         // we could still have some data using the old type, and so we can't allow adding a collection
@@ -161,7 +161,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
                                               + " and a different type (%s) has already been used in the past",
                                               columnName,
                                               dropped.type.asCQL3Type());
-                            throw new InvalidRequestException(message);
+                            return error(message);
                         }
                     }
 
@@ -200,7 +200,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
                 assert columnName != null;
                 if (def == null)
-                    throw new InvalidRequestException(String.format("Column %s was not found in table %s", columnName, columnFamily()));
+                    return error(String.format("Column %s was not found in table %s", columnName, columnFamily()));
 
                 AbstractType<?> validatorType = def.isReversedType() && !validator.getType().isReversed()
                                                 ? ReversedType.getInstance(validator.getType())
@@ -240,15 +240,15 @@ public class AlterTableStatement extends SchemaAlteringStatement
                     }
                     assert columnName != null;
                     if (!cfm.isCQLTable())
-                        throw new InvalidRequestException("Cannot drop columns from a non-CQL3 table");
+                        return error("Cannot drop columns from a non-CQL3 table");
                     if (def == null)
-                        throw new InvalidRequestException(String.format("Column %s was not found in table %s", columnName, columnFamily()));
+                        return error(String.format("Column %s was not found in table %s", columnName, columnFamily()));
 
                     switch (def.kind)
                     {
                          case PARTITION_KEY:
                          case CLUSTERING:
-                              throw new InvalidRequestException(String.format("Cannot drop PRIMARY KEY part %s", columnName));
+                              return error(String.format("Cannot drop PRIMARY KEY part %s", columnName));
                          case REGULAR:
                          case STATIC:
                               ColumnDefinition toDelete = null;
@@ -274,12 +274,8 @@ public class AlterTableStatement extends SchemaAlteringStatement
                         ColumnFamilyStore store = Keyspace.openAndGetStore(cfm);
                         Set<IndexMetadata> dependentIndexes = store.indexManager.getDependentIndexes(def);
                         if (!dependentIndexes.isEmpty())
-                            throw new InvalidRequestException(String.format("Cannot drop column %s because it has " +
-                                                                            "dependent secondary indexes (%s)",
-                                                                            def,
-                                                                            dependentIndexes.stream()
-                                                                                            .map(i -> i.name)
-                                                                                            .collect(Collectors.joining(","))));
+                            return error(String.format("Cannot drop column %s because it has dependent secondary indexes (%s)",
+                                                       def, dependentIndexes.stream().map(i -> i.name).collect(Collectors.joining(","))));
                     }
 
                     // If a column is dropped which is included in a view, we don't allow the drop to take place.
@@ -294,30 +290,28 @@ public class AlterTableStatement extends SchemaAlteringStatement
                         builder.append(view.viewName);
                     }
                     if (rejectAlter)
-                        throw new InvalidRequestException(String.format("Cannot drop column %s, depended on by materialized views (%s.{%s})",
-                                                                        columnName.toString(),
-                                                                        keyspace(),
-                                                                        builder.toString()));
+                        return error(String.format("Cannot drop column %s, depended on by materialized views (%s.{%s})",
+                                                   columnName.toString(), keyspace(), builder.toString()));
                 }
                 break;
             case OPTS:
                 if (attrs == null)
-                    throw new InvalidRequestException("ALTER TABLE WITH invoked, but no parameters found");
+                    return error("ALTER TABLE WITH invoked, but no parameters found");
                 attrs.validate();
 
                 TableParams params = attrs.asAlteredTableParams(cfm.params);
 
                 if (!Iterables.isEmpty(views) && params.gcGraceSeconds == 0)
                 {
-                    throw new InvalidRequestException("Cannot alter gc_grace_seconds of the base table of a " +
-                                                      "materialized view to 0, since this value is used to TTL " +
-                                                      "undelivered updates. Setting gc_grace_seconds too low might " +
-                                                      "cause undelivered updates to expire " +
-                                                      "before being replayed.");
+                    return error("Cannot alter gc_grace_seconds of the base table of a " +
+                                 "materialized view to 0, since this value is used to TTL " +
+                                 "undelivered updates. Setting gc_grace_seconds too low might " +
+                                 "cause undelivered updates to expire " +
+                                 "before being replayed.");
                 }
 
                 if (meta.isCounter() && params.defaultTimeToLive > 0)
-                    throw new InvalidRequestException("Cannot set default_time_to_live on a table with counters");
+                    return error("Cannot set default_time_to_live on a table with counters");
 
                 cfm.params(params);
 
@@ -347,14 +341,16 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
         }
 
-        MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly);
+        io.reactivex.Observable<Integer> observable = MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly);
 
         if (viewUpdates != null)
         {
             for (ViewDefinition viewUpdate : viewUpdates)
-                MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly);
+                observable = observable.mergeWith(MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly));
         }
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+
+        return observable.last(0).toObservable()
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 
     private static void validateAlter(CFMetaData cfm, ColumnDefinition def, AbstractType<?> validatorType)

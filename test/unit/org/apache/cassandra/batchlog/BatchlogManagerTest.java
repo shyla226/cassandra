@@ -193,7 +193,7 @@ public class BatchlogManagerTest
         for (int i = 0; i < 100; i++)
         {
             String query = String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD1, i);
-            UntypedResultSet result = executeInternal(query);
+            UntypedResultSet result = executeInternal(query).blockingFirst();
             assertNotNull(result);
             if (i < 50)
             {
@@ -218,7 +218,7 @@ public class BatchlogManagerTest
         }
 
         // Ensure that no stray mutations got somehow applied.
-        UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD1));
+        UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD1)).blockingFirst();
         assertNotNull(result);
         assertEquals(500, result.one().getLong("count"));
     }
@@ -270,7 +270,7 @@ public class BatchlogManagerTest
         // We should see half of Standard2-targeted mutations written after the replay and all of Standard3 mutations applied.
         for (int i = 0; i < 1000; i++)
         {
-            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD2,i));
+            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD2,i)).blockingFirst();
             assertNotNull(result);
             if (i >= 500)
             {
@@ -286,7 +286,7 @@ public class BatchlogManagerTest
 
         for (int i = 0; i < 1000; i++)
         {
-            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD3, i));
+            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD3, i)).blockingFirst();
             assertNotNull(result);
             assertEquals(ByteBufferUtil.bytes(i), result.one().getBytes("key"));
             assertEquals("name" + i, result.one().getString("name"));
@@ -348,10 +348,10 @@ public class BatchlogManagerTest
         assertEquals(1500, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(0, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);
 
-        UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_BATCHLOG));
+        UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_BATCHLOG)).blockingFirst();
         assertNotNull(result);
         assertEquals("Count in blog legacy", 0, result.one().getLong("count"));
-        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES));
+        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES)).blockingFirst();
         assertNotNull(result);
         assertEquals("Count in blog", 1500, result.one().getLong("count"));
 
@@ -364,7 +364,7 @@ public class BatchlogManagerTest
 
         for (int i = 0; i < 1500; i++)
         {
-            result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD4, i));
+            result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD4, i)).blockingFirst();
             assertNotNull(result);
             if (i < 700 || i >= 1400 && i < 1450)
             {
@@ -379,15 +379,15 @@ public class BatchlogManagerTest
         }
 
         // Ensure that no stray mutations got somehow applied.
-        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD4));
+        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD4)).blockingFirst();
         assertNotNull(result);
         assertEquals(750, result.one().getLong("count"));
 
         // Ensure batchlog is left as expected.
-        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES));
+        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES)).blockingFirst();
         assertNotNull(result);
         assertEquals("Count in blog after initial replay", 750, result.one().getLong("count"));
-        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_BATCHLOG));
+        result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_BATCHLOG)).blockingFirst();
         assertNotNull(result);
         assertEquals("Count in blog legacy after initial replay ", 0, result.one().getLong("count"));
     }
@@ -419,7 +419,7 @@ public class BatchlogManagerTest
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES,
                                      uuid);
-        UntypedResultSet result = executeInternal(query);
+        UntypedResultSet result = executeInternal(query).blockingFirst();
         assertNotNull(result);
         assertEquals(1L, result.one().getLong("count"));
     }
@@ -456,7 +456,7 @@ public class BatchlogManagerTest
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES,
                                      uuid);
-        UntypedResultSet result = executeInternal(query);
+        UntypedResultSet result = executeInternal(query).blockingFirst();
         assertNotNull(result);
         assertEquals(0L, result.one().getLong("count"));
     }

@@ -22,6 +22,8 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import io.reactivex.Observable;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -516,19 +518,18 @@ public class Schema
      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
      * will be converted into UUID which would act as content-based version of the schema.
      */
-    public void updateVersion()
+    public Observable<UntypedResultSet> updateVersion()
     {
         version = SchemaKeyspace.calculateSchemaDigest();
-        SystemKeyspace.updateSchemaVersion(version);
+        return SystemKeyspace.updateSchemaVersion(version);
     }
 
     /*
      * Like updateVersion, but also announces via gossip
      */
-    public void updateVersionAndAnnounce()
+    public Observable<UntypedResultSet> updateVersionAndAnnounce()
     {
-        updateVersion();
-        MigrationManager.passiveAnnounce(version);
+        return updateVersion().doOnComplete(() -> MigrationManager.passiveAnnounce(version));
     }
 
     /**

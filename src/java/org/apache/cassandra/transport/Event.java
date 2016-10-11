@@ -235,6 +235,9 @@ public abstract class Event
 
     public static class SchemaChange extends Event
     {
+        // a singleton placeholder for "no" schema change event
+        // public static final SchemaChange NONE = new SchemaChange(Change.CREATED, "");
+
         public enum Change { CREATED, UPDATED, DROPPED }
         public enum Target { KEYSPACE, TABLE, TYPE, FUNCTION, AGGREGATE }
 

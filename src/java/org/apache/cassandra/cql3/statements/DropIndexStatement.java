@@ -70,11 +70,11 @@ public class DropIndexStatement extends SchemaAlteringStatement
     @Override
     public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
-        Event.SchemaChange ce = announceMigration(false);
-        return ce == null ? Observable.just(new ResultMessage.Void()) : Observable.just(new ResultMessage.SchemaChange(ce));
+        Observable<Event.SchemaChange> ce = announceMigration(false);
+        return ce == null ? Observable.just(new ResultMessage.Void()) : ce.map(ResultMessage.SchemaChange::new);
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         CFMetaData cfm = lookupIndexedTable();
         if (cfm == null)
@@ -82,11 +82,11 @@ public class DropIndexStatement extends SchemaAlteringStatement
 
         CFMetaData updatedCfm = cfm.copy();
         updatedCfm.indexes(updatedCfm.getIndexes().without(indexName));
-        MigrationManager.announceColumnFamilyUpdate(updatedCfm, isLocalOnly);
         // Dropping an index is akin to updating the CF
         // Note that we shouldn't call columnFamily() at this point because the index has been dropped and the call to lookupIndexedTable()
         // in that method would now throw.
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, cfm.ksName, cfm.cfName);
+        return MigrationManager.announceColumnFamilyUpdate(updatedCfm, isLocalOnly)
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, cfm.ksName, cfm.cfName));
     }
 
     /**

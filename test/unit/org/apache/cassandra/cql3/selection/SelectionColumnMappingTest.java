@@ -488,7 +488,7 @@ public class SelectionColumnMappingTest extends CQLTester
     throws RequestExecutionException, RequestValidationException
     {
         UntypedResultSet rs = UntypedResultSet.create(statement.executeInternal(QueryState.forInternalCalls(),
-                                                                                QueryOptions.DEFAULT).result);
+                                                                                QueryOptions.DEFAULT).blockingFirst().result);
 
         assertEquals(expectedResultColumns, rs.one().getColumns());
     }

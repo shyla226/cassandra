@@ -78,7 +78,8 @@ public final class LegacySchemaMigrator
         // if already upgraded, or starting a new 3.0 node, abort early
         if (keyspaces.isEmpty())
         {
-            unloadLegacySchemaTables();
+            // TODO disabled temporarily for PPC prototype
+            // unloadLegacySchemaTables();
             return;
         }
 
@@ -1013,7 +1014,8 @@ public final class LegacySchemaMigrator
 
     private static UntypedResultSet query(String query, Object... values)
     {
-        return QueryProcessor.executeOnceInternal(query, values);
+        // TODO make async?
+        return QueryProcessor.executeOnceInternal(query, values).blockingFirst();
     }
 
     private static AbstractType<?> parseType(String str)

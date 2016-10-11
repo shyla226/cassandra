@@ -61,6 +61,7 @@ public class SettingsMode implements Serializable
                     ? ProtocolVersion.NEWEST_SUPPORTED
                     : ProtocolVersion.fromInt(Integer.parseInt(opts.protocolVersion.value()));
             api = opts.mode().displayPrefix.equals("native") ? ConnectionAPI.JAVA_DRIVER_NATIVE : ConnectionAPI.THRIFT;
+            System.err.println("#### is useUnPrepared set? " + opts.useUnPrepared.setByUser());
             style = opts.useUnPrepared.setByUser() ? ConnectionStyle.CQL :  ConnectionStyle.CQL_PREPARED;
             compression = ProtocolOptions.Compression.valueOf(opts.useCompression.value().toUpperCase()).name();
             username = opts.user.value();
@@ -101,6 +102,7 @@ public class SettingsMode implements Serializable
             Cql3SimpleNativeOptions opts = (Cql3SimpleNativeOptions) options;
             protocolVersion = ProtocolVersion.NEWEST_SUPPORTED;
             api = ConnectionAPI.SIMPLE_NATIVE;
+            System.err.println("#### is usePrepared set? " + opts.usePrepared.setByUser());
             style = opts.usePrepared.setByUser() ? ConnectionStyle.CQL_PREPARED : ConnectionStyle.CQL;
             compression = ProtocolOptions.Compression.NONE.name();
             username = null;
