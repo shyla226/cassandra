@@ -285,7 +285,8 @@ public final class SystemDistributedKeyspace
     public static void setViewRemoved(String keyspaceName, String viewName)
     {
         String buildReq = "DELETE FROM %s.%s WHERE keyspace_name = ? AND view_name = ?";
-        QueryProcessor.executeInternal(String.format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName);
+        // TODO make async?
+        QueryProcessor.executeInternal(String.format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName).blockingFirst();
         forceBlockingFlush(VIEW_BUILD_STATUS);
     }
 

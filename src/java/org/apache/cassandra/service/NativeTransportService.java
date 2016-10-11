@@ -18,9 +18,7 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -49,7 +47,8 @@ public class NativeTransportService
 {
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
 
-    private Collection<Server> servers = Collections.emptyList();
+    private List<Server> servers = Collections.emptyList();
+    private List<EventLoopGroup> workerGroups = Collections.emptyList();
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
@@ -58,7 +57,6 @@ public class NativeTransportService
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
-    private EventLoopGroup workerGroup;
 
     private final InetAddress nativeAddr;
     private final int nativePort;
@@ -87,28 +85,39 @@ public class NativeTransportService
 
 
         if (useEpoll())
-        {
-            workerGroup = new EpollEventLoopGroup();
-            logger.info("Netty using native Epoll event loop");
-        }
+            logger.info("Netty using native Epoll event loops");
         else
-        {
-            workerGroup = new NioEventLoopGroup();
-            logger.info("Netty using Java NIO event loop");
-        }
+            logger.info("Netty using Java NIO event loops");
 
         int nativePortSSL = DatabaseDescriptor.getNativeTransportPortSSL();
 
-        org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                                                                .withEventLoopGroup(workerGroup)
-                                                                .withHost(nativeAddr);
-
         if (!DatabaseDescriptor.getClientEncryptionOptions().enabled)
         {
-            servers = Collections.singleton(builder.withSSL(false).withPort(nativePort).build());
+            workerGroups = new ArrayList<>(NUM_NETTY_THREADS);
+            servers = new ArrayList<>(NUM_NETTY_THREADS);
+            for (int i = 0; i < NUM_NETTY_THREADS; i++)
+            {
+                // force one thread per event loop group
+                EventLoopGroup loopGroup = useEpoll() ? new EpollEventLoopGroup(1) : new NioEventLoopGroup(1);
+                org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
+                        .withEventLoopGroup(loopGroup)
+                        .withHost(nativeAddr)
+                        .withPort(nativePort + i)
+                        .withSSL(false);
+
+                workerGroups.add(loopGroup);
+                servers.add(builder.build());
+            }
         }
         else
         {
+            // TODO TPC/PPC
+            throw new UnsupportedOperationException("SSL isn't supported for PPC yet");
+            /*
+            org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
+                    .withEventLoopGroup(workerGroup)
+                    .withHost(nativeAddr);
+
             if (nativePort != nativePortSSL)
             {
                 // user asked for dedicated ssl port for supporting both non-ssl and ssl connections
@@ -122,8 +131,9 @@ public class NativeTransportService
             else
             {
                 // ssl only mode using configured native port
-                servers = Collections.singleton(builder.withSSL(true).withPort(nativePort).build());
+                servers = Collections.singletonList(builder.withSSL(true).withPort(nativePort).build());
             }
+            */
         }
 
 
@@ -146,33 +156,29 @@ public class NativeTransportService
         if (tpcInitialized)
             return;
 
+        logger.info("Netting ioWork ratio to {}", pIO);
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
-            EventLoop loop = workerGroup.next();
+            EventLoopGroup workerGroup = workerGroups.get(i);
+            if (useEpoll())
+                ((EpollEventLoopGroup)workerGroup).setIoRatio(pIO);
+            else
+                ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
 
+            EventLoop loop = workerGroup.next();
             loop.schedule(() -> {
                 NettyRxScheduler.instance(loop, cpuId);
 
                 if (affinity)
                 {
-                    logger.info("Locking {} netty thread to {}", cpuId, Thread.currentThread().getName());
+                    logger.info("Locking {} netty thread to {}, port {}", cpuId, Thread.currentThread().getName(), nativePort + cpuId);
                     AffinitySupport.setAffinity(1L << cpuId);
                 }
                 {
-                    logger.info("Allocated netty thread to {}", Thread.currentThread().getName());
+                    logger.info("Allocated netty {} thread to {}, port {}", workerGroup, Thread.currentThread().getName(), nativePort + cpuId);
                 }
             }, 0, TimeUnit.SECONDS);
-        }
-
-        logger.info("Netting ioWork ration to {}", pIO);
-        if (useEpoll())
-        {
-            ((EpollEventLoopGroup)workerGroup).setIoRatio(pIO);
-        }
-        else
-        {
-            ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
         }
 
         tpcInitialized = true;
@@ -207,7 +213,8 @@ public class NativeTransportService
         servers = Collections.emptyList();
 
         // shutdown executors used by netty for native transport server
-        workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
+        for (EventLoopGroup workerGroup : workerGroups)
+            workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
     }
 
     /**
@@ -230,9 +237,9 @@ public class NativeTransportService
     }
 
     @VisibleForTesting
-    EventLoopGroup getWorkerGroup()
+    List<EventLoopGroup> getWorkerGroups()
     {
-        return workerGroup;
+        return workerGroups;
     }
 
     @VisibleForTesting

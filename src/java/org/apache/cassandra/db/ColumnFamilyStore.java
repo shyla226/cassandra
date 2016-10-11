@@ -38,6 +38,7 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
 import io.reactivex.Scheduler;
+import io.reactivex.Single;
 import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1094,7 +1095,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             // mark writes older than the barrier as blocking progress, permitting them to exceed our memory limit
             // if they are stuck waiting on it, then wait for them all to complete
             writeBarrier.markBlocking();
+            logger.warn("#### going to await write barrier ({}) for {}", writeBarrier, ColumnFamilyStore.this);
             writeBarrier.await();
+            logger.warn("#### done awaiting write barrier ({}) for {}", writeBarrier, ColumnFamilyStore.this);
 
             // mark all memtables as flushing, removing them from the live memtable list
             for (Memtable memtable : memtables)
@@ -1317,23 +1320,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public io.reactivex.Single<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public Single<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         final BehaviorSubject<Integer> publisher = BehaviorSubject.create();
         Scheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
         if (scheduler != null)
         {
+            logger.warn("!!!!!!!!!!!!!!!!!!! rescheduling mutation on {}", this);
             scheduler.scheduleDirect(() -> {
                 applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
             });
         }
         else
         {
+            logger.warn("#### directly applying mutation to {}", this);
             // we're still starting up, run this synchronously on the current thread
             applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
+            logger.warn("#### done directly applying mutation to {}", this);
         }
 
-        return publisher.first(0);
+        return publisher.first(0).doOnSuccess(v -> logger.warn("#### apply(), publisher.first() is done"));
     }
 
     private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
@@ -1350,6 +1356,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             metric.writeLatency.addNano(System.nanoTime() - start);
             if (timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(timeDelta);
+            logger.warn("#### applyInternal, calling onNext(0)");
             publisher.onNext(0);
         }
         catch (RuntimeException e)

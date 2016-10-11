@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.CFName;
@@ -51,7 +52,7 @@ public class DropViewStatement extends SchemaAlteringStatement
         // validated in findIndexedCf()
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         try
         {
@@ -73,14 +74,14 @@ public class DropViewStatement extends SchemaAlteringStatement
 //                    throw new InvalidRequestException(String.format("View '%s' could not be found in any of the tables of keyspace '%s'", cfName, keyspace()));
 //            }
 
-            MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly);
-            return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+            return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
+                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
         }
         catch (ConfigurationException e)
         {
             if (ifExists)
                 return null;
-            throw e;
+            return Observable.error(e);
         }
     }
 }

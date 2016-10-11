@@ -107,6 +107,7 @@ public class Server implements CassandraDaemon.Server
         }
         else
         {
+            logger.warn("!!!!!!!!!!!!!!!!!! creating new worker group");
             if (useEpoll)
                 workerGroup = new EpollEventLoopGroup();
             else

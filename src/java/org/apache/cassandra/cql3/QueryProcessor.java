@@ -269,7 +269,7 @@ public class QueryProcessor implements QueryHandler
             if (result instanceof ResultMessage.Rows)
                 return Observable.just(UntypedResultSet.create(((ResultMessage.Rows) result).result));
             else
-                return null;
+                return Observable.just(UntypedResultSet.create(Collections.emptyList()));
         });
     }
 
@@ -306,14 +306,17 @@ public class QueryProcessor implements QueryHandler
         return prepared;
     }
 
-    public static UntypedResultSet executeInternal(String query, Object... values)
+    public static Observable<UntypedResultSet> executeInternal(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
-        ResultMessage result = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
-        if (result instanceof ResultMessage.Rows)
-            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-        else
-            return null;
+        Observable<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+
+        return observable.map(result -> {
+            if (result instanceof ResultMessage.Rows)
+                return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+            else
+                return UntypedResultSet.create(Collections.emptyList());
+        });
     }
 
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, Object... values)
@@ -333,7 +336,7 @@ public class QueryProcessor implements QueryHandler
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else
-                return null;
+                return UntypedResultSet.create(Collections.emptyList());
         }
         catch (RequestValidationException e)
         {
@@ -356,15 +359,18 @@ public class QueryProcessor implements QueryHandler
      * Same than executeInternal, but to use for queries we know are only executed once so that the
      * created statement object is not cached.
      */
-    public static UntypedResultSet executeOnceInternal(String query, Object... values)
+    public static Observable<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
         prepared.statement.validate(internalQueryState().getClientState());
-        ResultMessage result = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
-        if (result instanceof ResultMessage.Rows)
-            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-        else
-            return null;
+        Observable<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+
+        return observable.map(result -> {
+            if (result instanceof ResultMessage.Rows)
+                return UntypedResultSet.create(((ResultMessage.Rows) result).result);
+            else
+                return UntypedResultSet.create(Collections.emptyList());
+        });
     }
 
     /**
@@ -372,14 +378,17 @@ public class QueryProcessor implements QueryHandler
      * Note that this only make sense for Selects so this only accept SELECT statements and is only useful in rare
      * cases.
      */
-    public static UntypedResultSet executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
+    public static Observable<UntypedResultSet> executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
         assert prepared.statement instanceof SelectStatement;
         SelectStatement select = (SelectStatement)prepared.statement;
-        ResultMessage result = select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
-        assert result instanceof ResultMessage.Rows;
-        return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+        Observable<? extends ResultMessage> observable = select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
+
+        return observable.map(result -> {
+            assert result instanceof ResultMessage.Rows;
+            return UntypedResultSet.create(((ResultMessage.Rows) result).result);
+        });
     }
 
     public static UntypedResultSet resultify(String query, RowIterator partition)

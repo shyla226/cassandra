@@ -23,6 +23,7 @@ import java.util.List;
 
 import com.google.common.base.Joiner;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.Schema;
@@ -127,7 +128,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
                                                             functionName, functionName, functionName));
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Function old = findFunction();
         if (old == null)
@@ -141,12 +142,11 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(old.name().keyspace);
         Collection<UDAggregate> referrers = ksm.functions.aggregatesUsingFunction(old);
         if (!referrers.isEmpty())
-            throw new InvalidRequestException(String.format("Function '%s' still referenced by %s", old, referrers));
+            return error(String.format("Function '%s' still referenced by %s", old, referrers));
 
-        MigrationManager.announceFunctionDrop((UDFunction) old, isLocalOnly);
-
-        return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
-                                      old.name().keyspace, old.name().name, AbstractType.asCQLTypeStringList(old.argTypes()));
+        return MigrationManager.announceFunctionDrop((UDFunction) old, isLocalOnly)
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
+                                      old.name().keyspace, old.name().name, AbstractType.asCQLTypeStringList(old.argTypes())));
     }
 
     private String getMissingFunctionError()

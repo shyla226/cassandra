@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ViewDefinition;
@@ -58,18 +59,19 @@ public class DropTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws ConfigurationException
+    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
         try
         {
             KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
             if (ksm == null)
-                throw new ConfigurationException(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+                return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+
             CFMetaData cfm = ksm.getTableOrViewNullable(columnFamily());
             if (cfm != null)
             {
                 if (cfm.isView())
-                    throw new InvalidRequestException("Cannot use DROP TABLE on Materialized View");
+                    return error("Cannot use DROP TABLE on Materialized View");
 
                 boolean rejectDrop = false;
                 StringBuilder messageBuilder = new StringBuilder();
@@ -85,19 +87,19 @@ public class DropTableStatement extends SchemaAlteringStatement
                 }
                 if (rejectDrop)
                 {
-                    throw new InvalidRequestException(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
-                                                                    keyspace(),
-                                                                    messageBuilder.toString()));
+                    return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
+                                               keyspace(), messageBuilder.toString()));
                 }
             }
-            MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly);
-            return new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+
+            return MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly)
+                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
         }
         catch (ConfigurationException e)
         {
             if (ifExists)
                 return null;
-            throw e;
+            return Observable.error(e);
         }
     }
 }

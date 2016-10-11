@@ -55,30 +55,30 @@ public class AlterViewStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Event.SchemaChange announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         CFMetaData meta = validateColumnFamily(keyspace(), columnFamily());
         if (!meta.isView())
-            throw new InvalidRequestException("Cannot use ALTER MATERIALIZED VIEW on Table");
+            return error("Cannot use ALTER MATERIALIZED VIEW on Table");
 
         ViewDefinition viewCopy = Schema.instance.getView(keyspace(), columnFamily()).copy();
 
         if (attrs == null)
-            throw new InvalidRequestException("ALTER MATERIALIZED VIEW WITH invoked, but no parameters found");
+            return error("ALTER MATERIALIZED VIEW WITH invoked, but no parameters found");
 
         attrs.validate();
 
         TableParams params = attrs.asAlteredTableParams(viewCopy.metadata.params);
         if (params.gcGraceSeconds == 0)
         {
-            throw new InvalidRequestException("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
-                                              "value is used to TTL undelivered updates. Setting gc_grace_seconds too " +
-                                              "low might cause undelivered updates to expire before being replayed.");
+            return error("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
+                         "value is used to TTL undelivered updates. Setting gc_grace_seconds too " +
+                         "low might cause undelivered updates to expire before being replayed.");
         }
         viewCopy.metadata.params(params);
 
-        MigrationManager.announceViewUpdate(viewCopy, isLocalOnly);
-        return new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
+        return MigrationManager.announceViewUpdate(viewCopy, isLocalOnly)
+                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 
     public String toString()

@@ -136,6 +136,13 @@ public class CounterMutation implements IMutation
         applyCounterMutation();
     }
 
+    public io.reactivex.Observable<Integer> applyAsync()
+    {
+        // TODO rx-ify
+        applyCounterMutation();
+        return io.reactivex.Observable.just(0);
+    }
+
     private void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException
     {
         long startTime = System.nanoTime();

@@ -105,7 +105,7 @@ public class MessagePayloadTest extends CQLTester
     {
         try
         {
-            QueryProcessor.executeOnceInternal("DROP TABLE " + KEYSPACE + ".atable");
+            QueryProcessor.executeOnceInternal("DROP TABLE " + KEYSPACE + ".atable").blockingFirst();
         }
         catch (Throwable t)
         {

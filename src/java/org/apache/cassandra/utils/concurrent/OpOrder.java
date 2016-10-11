@@ -18,6 +18,9 @@
  */
 package org.apache.cassandra.utils.concurrent;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 /**
@@ -79,6 +82,8 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
  */
 public class OpOrder
 {
+    private static final Logger logger = LoggerFactory.getLogger(OpOrder.class);
+
     /**
      * Constant that when an Ordered.running is equal to, indicates the Ordered is complete
      */
@@ -399,6 +404,7 @@ public class OpOrder
                 throw new IllegalStateException("This barrier needs to have issue() called on it before prior operations can complete");
             if (current.next.prev == null)
                 return true;
+            logger.warn("#### ops aren't finished on {}", current);
             return false;
         }
 

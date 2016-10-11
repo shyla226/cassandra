@@ -83,17 +83,18 @@ public class TruncateStatement extends CFStatement implements CQLStatement
         return Observable.just(new ResultMessage.Void());
     }
 
-    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    public Observable<ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         try
         {
+            // TODO rx-ify
             ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(columnFamily());
             cfs.truncateBlocking();
+            return Observable.just(new ResultMessage.Void());
         }
         catch (Exception e)
         {
-            throw new TruncateException(e);
+            return Observable.error(new TruncateException(e));
         }
-        return null;
     }
 }

@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -85,13 +86,13 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
      *
      * @throws RequestValidationException
      */
-    public abstract Event.SchemaChange announceMigration(boolean isLocalOnly) throws RequestValidationException;
+    public abstract Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException;
 
     public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
         // If an IF [NOT] EXISTS clause was used, this may not result in an actual schema change.  To avoid doing
         // extra work in the drivers to handle schema changes, we return an empty message in this case. (CASSANDRA-7600)
-        Event.SchemaChange ce = announceMigration(false);
+        Observable<Event.SchemaChange> ce = announceMigration(false);
         if (ce == null)
             return Observable.just(new ResultMessage.Void());
 
@@ -100,25 +101,35 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
         // * the user is not anonymous
         // * the configured IAuthorizer supports granting of permissions (not all do, AllowAllAuthorizer doesn't and
         //   custom external implementations may not)
-        AuthenticatedUser user = state.getClientState().getUser();
-        if (user != null && !user.isAnonymous() && ce.change == Event.SchemaChange.Change.CREATED)
-        {
-            try
+        return ce.map(event -> {
+            AuthenticatedUser user = state.getClientState().getUser();
+            if (user != null && !user.isAnonymous() && event.change == Event.SchemaChange.Change.CREATED)
             {
-                grantPermissionsToCreator(state);
+                try
+                {
+                    grantPermissionsToCreator(state);
+                }
+                catch (UnsupportedOperationException e)
+                {
+                    // not a problem, grant is an optional method on IAuthorizer
+                }
             }
-            catch (UnsupportedOperationException e)
-            {
-                // not a problem, grant is an optional method on IAuthorizer
-            }
-        }
-
-        return Observable.just(new ResultMessage.SchemaChange(ce));
+            return new ResultMessage.SchemaChange(event);
+        });
     }
 
-    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    public Observable<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
-        Event.SchemaChange ce = announceMigration(true);
-        return ce == null ? new ResultMessage.Void() : new ResultMessage.SchemaChange(ce);
+        return announceMigration(true).map(schemaChangeEvent ->
+            schemaChangeEvent == null
+                   ? new ResultMessage.Void()
+                   : new ResultMessage.SchemaChange(schemaChangeEvent)
+        );
     }
+
+    protected Observable<Event.SchemaChange> error(String msg)
+    {
+        return Observable.error(new InvalidRequestException(msg));
+    }
+
 }
