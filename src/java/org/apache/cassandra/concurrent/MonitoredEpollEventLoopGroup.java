@@ -195,7 +195,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.threadOffset = threadOffset;
 
-            this.externalQueue = new MpscArrayQueue<>(1 << 15);
+            if (threadOffset == 0)
+                this.externalQueue = new MpscArrayQueue<>(1 << 15);
+            else
+                this.externalQueue = null;
+
             this.incomingQueues = new MessagePassingQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
                 incomingQueues[i] = new SpscArrayQueue<>(1 << 15);
@@ -294,10 +298,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                         }
                     }
                 }
+
+                if (queue == null)
+                    queue = eventLoops[0].externalQueue;
+            }
+            else
+            {
+                task.run();
+                return;
             }
 
-            if (queue == null)
-                queue = externalQueue;
 
             if (!queue.offer(task))
                 throw new RuntimeException("Backpressure");
@@ -373,7 +383,8 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             for (int i = 0; i < incomingQueues.length; i++)
                 processed += incomingQueues[i].drain(Runnable::run);
 
-            processed += externalQueue.drain(Runnable::run);
+            if (externalQueue != null)
+                processed += externalQueue.drain(Runnable::run);
 
             return processed;
         }
@@ -386,7 +397,10 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 if (incomingQueues[i].relaxedPeek() != null)
                     return true;
 
-            boolean empty = externalQueue.relaxedPeek() == null;
+            boolean empty = true;
+
+            if (externalQueue != null)
+                empty = externalQueue.relaxedPeek() == null;
 
             if (empty)
                 empty = hasScheduledTasks();

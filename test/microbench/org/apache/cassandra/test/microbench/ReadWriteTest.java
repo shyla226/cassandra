@@ -64,8 +64,8 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1
 , jvmArgsAppend = {//"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
-                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler"
-//                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
+//                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
+//                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints"
                                    //"-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
                                   // "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
 }
