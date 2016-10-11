@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Lists;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -43,6 +44,126 @@ import static org.junit.Assert.*;
 
 public class IndexSummaryTest
 {
+    private final static Random random = new Random();
+    private final static IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
+
+    @BeforeClass
+    public static void setup()
+    {
+        final long seed = System.nanoTime();
+        System.out.println("Using seed: " + seed);
+        random.setSeed(seed);
+    }
+
+    @Test
+    public void testIndexSummaryKeySizes()
+    {
+        testIndexSummaryProperties(32, 100);
+        testIndexSummaryProperties(64, 100);
+        testIndexSummaryProperties(100, 100);
+        testIndexSummaryProperties(1000, 100);
+        testIndexSummaryProperties(10000, 100);
+    }
+
+    private void testIndexSummaryProperties(int keySize, int numKeys)
+    {
+        final int minIndexInterval = 1;
+        final List<DecoratedKey> keys = new ArrayList<>(numKeys);
+
+        try (IndexSummaryBuilder builder = new IndexSummaryBuilder(numKeys, minIndexInterval, BASE_SAMPLING_LEVEL))
+        {
+            for (int i = 0; i < numKeys; i++)
+            {
+                byte[] randomBytes = new byte[keySize];
+                random.nextBytes(randomBytes);
+                DecoratedKey key = partitioner.decorateKey(ByteBuffer.wrap(randomBytes));
+                keys.add(key);
+                builder.maybeAddEntry(key, i);
+            }
+
+            try(IndexSummary indexSummary = builder.build(partitioner))
+            {
+                assertEquals(numKeys, keys.size());
+                assertEquals(minIndexInterval, indexSummary.getMinIndexInterval());
+                assertEquals(numKeys, indexSummary.getMaxNumberOfEntries());
+                assertEquals(numKeys + 1, indexSummary.getEstimatedKeyCount());
+
+                for (int i = 0; i < numKeys; i++)
+                    assertEquals(keys.get(i).getKey(), ByteBuffer.wrap(indexSummary.getKey(i)));
+            }
+        }
+    }
+
+    /**
+     * Test an index summary whose total size is bigger than 2GB,
+     * the index summary builder should log an error but it should still
+     * create an index summary, albeit one that does not cover the entire sstable.
+     */
+    @Test
+    public void tesLargeIndexSummary()
+    {
+        final int numKeys = 1000000;
+        final int keySize = 3000;
+        final int minIndexInterval = 1;
+
+        try (IndexSummaryBuilder builder = new IndexSummaryBuilder(numKeys, minIndexInterval, BASE_SAMPLING_LEVEL))
+        {
+            for (int i = 0; i < numKeys; i++)
+            {
+                byte[] randomBytes = new byte[keySize];
+                random.nextBytes(randomBytes);
+                DecoratedKey key = partitioner.decorateKey(ByteBuffer.wrap(randomBytes));
+                builder.maybeAddEntry(key, i);
+            }
+
+            try (IndexSummary indexSummary = builder.build(partitioner))
+            {
+                assertNotNull(indexSummary);
+                assertEquals(numKeys, indexSummary.getMaxNumberOfEntries());
+                assertEquals(numKeys + 1, indexSummary.getEstimatedKeyCount());
+            }
+        }
+    }
+
+    /**
+     * Test an index summary whose total size is bigger than 2GB,
+     * having updated IndexSummaryBuilder.defaultExpectedKeySize to match the size,
+     * the index summary should be downsampled automatically.
+     */
+    @Test
+    public void tesLargeIndexSummaryWithExpectedSizeMatching()
+    {
+        final int numKeys = 1000000;
+        final int keySize = 3000;
+        final int minIndexInterval = 1;
+
+        long oldExpectedKeySize = IndexSummaryBuilder.defaultExpectedKeySize;
+        IndexSummaryBuilder.defaultExpectedKeySize = 3000;
+
+        try (IndexSummaryBuilder builder = new IndexSummaryBuilder(numKeys, minIndexInterval, BASE_SAMPLING_LEVEL))
+        {
+            for (int i = 0; i < numKeys; i++)
+            {
+                byte[] randomBytes = new byte[keySize];
+                random.nextBytes(randomBytes);
+                DecoratedKey key = partitioner.decorateKey(ByteBuffer.wrap(randomBytes));
+                builder.maybeAddEntry(key, i);
+            }
+
+            try (IndexSummary indexSummary = builder.build(partitioner))
+            {
+                assertNotNull(indexSummary);
+                assertEquals(minIndexInterval * 2, indexSummary.getMinIndexInterval());
+                assertEquals(numKeys / 2, indexSummary.getMaxNumberOfEntries());
+                assertEquals(numKeys + 2, indexSummary.getEstimatedKeyCount());
+            }
+        }
+        finally
+        {
+            IndexSummaryBuilder.defaultExpectedKeySize = oldExpectedKeySize;
+        }
+    }
+
     @Test
     public void testGetKey()
     {
@@ -81,7 +202,7 @@ public class IndexSummaryTest
         dos.writeUTF("JUNK");
         FileUtils.closeQuietly(dos);
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(dos.toByteArray()));
-        IndexSummary is = IndexSummary.serializer.deserialize(dis, DatabaseDescriptor.getPartitioner(), false, 1, 1);
+        IndexSummary is = IndexSummary.serializer.deserialize(dis, partitioner, false, 1, 1);
         for (int i = 0; i < 100; i++)
             assertEquals(i, is.binarySearch(random.left.get(i)));
         // read the junk
@@ -119,18 +240,21 @@ public class IndexSummaryTest
     private Pair<List<DecoratedKey>, IndexSummary> generateRandomIndex(int size, int interval)
     {
         List<DecoratedKey> list = Lists.newArrayList();
-        try (IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval, BASE_SAMPLING_LEVEL))
+        long keySize = ByteBufferUtil.bytes(UUID.randomUUID()).remaining();
+        try (IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(),
+                                                                   interval,
+                                                                   BASE_SAMPLING_LEVEL))
         {
             for (int i = 0; i < size; i++)
             {
                 UUID uuid = UUID.randomUUID();
-                DecoratedKey key = DatabaseDescriptor.getPartitioner().decorateKey(ByteBufferUtil.bytes(uuid));
+                DecoratedKey key = partitioner.decorateKey(ByteBufferUtil.bytes(uuid));
                 list.add(key);
             }
             Collections.sort(list);
             for (int i = 0; i < size; i++)
                 builder.maybeAddEntry(list.get(i), i);
-            IndexSummary summary = builder.build(DatabaseDescriptor.getPartitioner());
+            IndexSummary summary = builder.build(partitioner);
             return Pair.create(list, summary);
         }
     }
@@ -179,7 +303,7 @@ public class IndexSummaryTest
         int downsamplingRound = 1;
         for (int samplingLevel = BASE_SAMPLING_LEVEL - 1; samplingLevel >= 1; samplingLevel--)
         {
-            try (IndexSummary downsampled = downsample(original, samplingLevel, 128, DatabaseDescriptor.getPartitioner());)
+            try (IndexSummary downsampled = downsample(original, samplingLevel, 128, partitioner);)
             {
                 assertEquals(entriesAtSamplingLevel(samplingLevel, original.getMaxNumberOfEntries()), downsampled.size());
 
@@ -204,7 +328,7 @@ public class IndexSummaryTest
         downsamplingRound = 1;
         for (int downsampleLevel = BASE_SAMPLING_LEVEL - 1; downsampleLevel >= 1; downsampleLevel--)
         {
-            IndexSummary downsampled = downsample(previous, downsampleLevel, 128, DatabaseDescriptor.getPartitioner());
+            IndexSummary downsampled = downsample(previous, downsampleLevel, 128, partitioner);
             if (previous != original)
                 previous.close();
             assertEquals(entriesAtSamplingLevel(downsampleLevel, original.getMaxNumberOfEntries()), downsampled.size());
