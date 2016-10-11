@@ -57,12 +57,12 @@ import org.openjdk.jmh.runner.RunnerException;
 @Warmup(iterations = 5)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Fork(value = 1
-, jvmArgsAppend = {//"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
-                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
-                    "-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
-                    "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
-})
+@Fork(value = 1)
+//, jvmArgsAppend = {//"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
+//                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
+//                    "-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
+//                    "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
+//})
 @State(Scope.Thread)
 public class EventLoopBench {
     @State(Scope.Thread)
@@ -110,7 +110,7 @@ public class EventLoopBench {
             if (!Epoll.isAvailable())
                 throw new RuntimeException("Epoll Not available");
 
-            ((EpollEventLoopGroup)loops).setIoRatio(1);
+            ((EpollEventLoopGroup)loops).setIoRatio(100);
 
             EventExecutor loop1 = loops.next();
             CountDownLatch latch = new CountDownLatch(2);

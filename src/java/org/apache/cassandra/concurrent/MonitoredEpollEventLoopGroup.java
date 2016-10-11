@@ -126,7 +126,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             initLoops[i].submit(ready::countDown);
         }
 
-        Uninterruptibles.awaitUninterruptibly(ready );
+        Uninterruptibles.awaitUninterruptibly(ready);
     }
 
     protected EventLoop newChild(Executor executor, Object... args) throws Exception
@@ -172,9 +172,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     {
         private final int threadOffset;
 
-        private static final int busyExtraSpins =  1024 * 16;
-        private static final int yieldExtraSpins = 1024 * 16;
-        private static final int parkExtraSpins = 8192; // 1024 is ~50ms
+        private static final int busyExtraSpins =  1024 * 8;
+        private static final int yieldExtraSpins = 1024;
+        private static final int parkExtraSpins = 1024; // 1024 is ~50ms
+
+        @Contended
+        private volatile int pendingEpollEvents = 0;
 
         @Contended
         private volatile CoreState state;
@@ -214,15 +217,29 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                         {
                             int drained = drain();
                             if (drained > 0 || ++spins < busyExtraSpins)
+                            {
+                                if (drained > 0)
+                                    spins = 0;
+
                                 continue;
+                            }
                             else if (spins < busyExtraSpins + yieldExtraSpins)
                             {
                                 Thread.yield();
                             }
                             else if (spins < busyExtraSpins + yieldExtraSpins + parkExtraSpins)
+                            {
                                 LockSupport.parkNanos(1);
+                            }
                             else
                                 break;
+                        }
+                    }
+
+                    if (isShuttingDown()) {
+                        closeAll();
+                        if (confirmShutdown()) {
+                            return;
                         }
                     }
 
@@ -296,18 +313,31 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             try
             {
-                int t = this.selectNowSupplier.get();
+                int t;
 
-                switch (t)
+                if (this.pendingEpollEvents > 0)
                 {
-                    case -2:
-                        return 0;
-                    case -1:
-                        t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
-                        if (this.wakenUp == 1)
-                            Native.eventFdWrite(this.eventFd.intValue(), 1L);
-                    default:
+                    t = pendingEpollEvents;
+                    pendingEpollEvents = 0;
+                    logger.warn("Processing events from wakeup");
                 }
+                else
+                {
+                    t = this.selectStrategy.calculateStrategy(this.selectNowSupplier, hasTasks());
+                    switch (t)
+                    {
+                        case -2:
+                            return 0;
+                        case -1:
+                            t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+                            if (this.wakenUp == 1)
+                            {
+                                Native.eventFdWrite(this.eventFd.intValue(), 1L);
+                            }
+                        default:
+                    }
+                }
+
                 if (t > 0)
                 {
                     this.processReady(this.events, t);
@@ -322,7 +352,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             }
             catch (Exception e)
             {
-                logger.warn("Unexpected exception in the selector loop.", e);
+                logger.error("Unexpected exception in the selector loop.", e);
 
                 // Prevent possible consecutive immediate failures that lead to
                 // excessive CPU consumption.
@@ -340,33 +370,46 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             int processed = 0;
 
             for (int i = 0; i < incomingQueues.length; i++)
-                processed += incomingQueues[i].drain(Runnable::run, 8);
+                processed += incomingQueues[i].drain(Runnable::run);
 
-            processed += externalQueue.drain(Runnable::run, 8);
+            processed += externalQueue.drain(Runnable::run);
 
             return processed;
+        }
+
+        @Override
+        protected boolean hasTasks()
+        {
+            for (int i = 0; i < incomingQueues.length; i++)
+                if (incomingQueues[i].relaxedPeek() != null)
+                    return true;
+
+            boolean empty = externalQueue.relaxedPeek() == null;
+
+            if (empty)
+                empty = hasScheduledTasks();
+
+            return !empty;
         }
 
         @Inline
         boolean isEmpty()
         {
-            for (int i = 0; i < incomingQueues.length; i++)
-                if (!incomingQueues[i].isEmpty())
-                    return false;
-
-            boolean empty = externalQueue.isEmpty();
-
-            if (empty)
-                empty = hasScheduledTasks();
+            boolean empty = !hasTasks();
 
             try
             {
+                int t;
                 if (empty)
                 {
-                    int v = this.selectNowSupplier.get();
-                    if (v == -1)
-                        logger.warn("Hit epoll -1");
-                    return v <= -1;
+                    t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+
+                    if (t > 0)
+                        pendingEpollEvents = t;
+                    else
+                        Native.eventFdWrite(this.eventFd.intValue(), 1L);
+
+                    return t <= 0;
                 }
             }
             catch (Exception e)
