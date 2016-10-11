@@ -305,6 +305,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         int drain()
         {
+
             int processed = drainEpoll();
             return drainTasks() + processed;
         }
@@ -378,6 +379,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         }
 
         @Override
+        @Inline
         protected boolean hasTasks()
         {
             for (int i = 0; i < incomingQueues.length; i++)

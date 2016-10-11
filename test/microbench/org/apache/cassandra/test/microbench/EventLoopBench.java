@@ -53,7 +53,7 @@ import org.openjdk.jmh.runner.RunnerException;
 /**
  * Benchmark for eventloops
  */
-@BenchmarkMode(Mode.Throughput)
+@BenchmarkMode(Mode.AverageTime)
 @Warmup(iterations = 5)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -91,7 +91,7 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class NettyExecutorState {
 
-        @Param({"1", "1000000"})
+        @Param({"1000000"})
         public int count;
 
         private MultithreadEventExecutorGroup loops;
@@ -140,7 +140,7 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"1", "1000000"})
+        @Param({"1000000"})
         public int count;
 
         private MultithreadEventExecutorGroup loops;
