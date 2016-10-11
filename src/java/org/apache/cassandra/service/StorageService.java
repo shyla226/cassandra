@@ -20,6 +20,7 @@ package org.apache.cassandra.service;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.File;
+import java.io.IOError;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
@@ -65,10 +66,7 @@ import org.apache.cassandra.auth.Auth;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.KSMetaData;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.BatchlogManager;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.CounterMutationVerbHandler;
@@ -775,6 +773,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             Map<ApplicationState, VersionedValue> appStates = new EnumMap<>(ApplicationState.class);
 
+            if (SystemKeyspace.wasDecommissioned())
+            {
+                if (Boolean.getBoolean("cassandra.override_decommission"))
+                {
+                    logger.warn("This node was decommissioned, but overriding by operator request.");
+                    SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
+                }
+                else
+                    throw new ConfigurationException("This node was decommissioned and will not rejoin the ring unless cassandra.override_decommission=true has been set, or all existing data is removed and the node is bootstrapped again");
+            }
             if (DatabaseDescriptor.isReplacing() && !(Boolean.parseBoolean(System.getProperty("cassandra.join_ring", "true"))))
                 throw new ConfigurationException("Cannot set both join_ring=false and attempt to replace a node");
             if (DatabaseDescriptor.getReplaceTokens().size() > 0 || DatabaseDescriptor.getReplaceNode() != null)
@@ -3406,8 +3414,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 shutdownClientServers();
                 Gossiper.instance.stop();
-                MessagingService.instance().shutdown();
+                try {
+                    MessagingService.instance().shutdown();
+                } catch (IOError ioe) {
+                    logger.info("failed to shutdown message service: {}", ioe);
+                }
                 StageManager.shutdownNow();
+                SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.DECOMMISSIONED);
                 setMode(Mode.DECOMMISSIONED, true);
                 // let op be responsible for killing the process
             }
