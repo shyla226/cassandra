@@ -55,7 +55,7 @@ public class NativeTransportService
     private Collection<Server> servers = Collections.emptyList();
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
+    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 1))) - 1;
 

@@ -29,7 +29,6 @@ import io.netty.util.concurrent.MultithreadEventExecutorGroup;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
 import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
 import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
@@ -47,7 +46,6 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
-import org.openjdk.jmh.runner.RunnerException;
 
 
 /**
