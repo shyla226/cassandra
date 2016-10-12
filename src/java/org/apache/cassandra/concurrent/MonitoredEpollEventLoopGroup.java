@@ -53,16 +53,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(MonitoredEpollEventLoopGroup.class);
 
 
-    @Contended
+    //@Contended
     private SingleCoreEventLoop[] initLoops;
 
-    @Contended
+    //@Contended
     private Thread[] initThreads;
 
-    @Contended
+    //@Contended
     private final SingleCoreEventLoop[] eventLoops;
 
-    @Contended
+    //@Contended
     private final Thread[] runningThreads;
 
     private final Thread monitorThread;
@@ -176,16 +176,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private static final int yieldExtraSpins = 1024;
         private static final int parkExtraSpins = 1024; // 1024 is ~50ms
 
-        @Contended
+        //@Contended
         private volatile int pendingEpollEvents = 0;
 
-        @Contended
+        //@Contended
         private volatile CoreState state;
 
-        @Contended
+        //@Contended
         private final MessagePassingQueue<Runnable> externalQueue;
 
-        @Contended
+        //@Contended
         private final MessagePassingQueue<Runnable>[] incomingQueues;
 
 
@@ -202,7 +202,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.incomingQueues = new MessagePassingQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
-                incomingQueues[i] = new SpscArrayQueue<>(1 << 15);
+            {
+                //No local queue needed
+                if (i != threadOffset)
+                    incomingQueues[i] = new SpscArrayQueue<>(1 << 15);
+            }
 
             this.state = CoreState.WORKING;
         }
@@ -283,9 +287,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             if (runningThreads != null)
             {
+                //Run local core tasks directly
                 if (currentThread == runningThreads[threadOffset])
                 {
-                    queue = incomingQueues[threadOffset];
+                    task.run();
+                    return;
                 }
                 else
                 {
@@ -381,8 +387,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             int processed = 0;
 
             for (int i = 0; i < incomingQueues.length; i++)
-                processed += incomingQueues[i].drain(Runnable::run);
+            {
+                if (i == threadOffset)
+                    continue;
 
+                processed += incomingQueues[i].drain(Runnable::run);
+            }
             if (externalQueue != null)
                 processed += externalQueue.drain(Runnable::run);
 
@@ -394,8 +404,13 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         protected boolean hasTasks()
         {
             for (int i = 0; i < incomingQueues.length; i++)
+            {
+                if (i == threadOffset)
+                    continue;
+
                 if (incomingQueues[i].relaxedPeek() != null)
                     return true;
+            }
 
             boolean empty = true;
 

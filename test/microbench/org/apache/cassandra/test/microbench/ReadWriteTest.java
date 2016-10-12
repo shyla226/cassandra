@@ -26,7 +26,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.*;
 
+import com.datastax.driver.core.PreparedStatement;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -60,12 +64,12 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
+@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 100, time = 2, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1
-, jvmArgsAppend = {//"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
-//                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
-//                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints"
+, jvmArgsAppend = {"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
+                   "-XX:CompileCommandFile=/home/jake/workspace/cassandra/conf/hotspot_compiler",
+                                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints"
                                    //"-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
                                   // "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
 }
@@ -77,8 +81,8 @@ public class ReadWriteTest extends CQLTester
 {
     static String keyspace;
     String table;
-    String writeStatement;
-    String readStatement;
+    PreparedStatement writeStatement;
+    PreparedStatement readStatement;
     long numRows = 0;
     ColumnFamilyStore cfs;
 
@@ -87,11 +91,17 @@ public class ReadWriteTest extends CQLTester
     {
         CQLTester.setUpClass();
         CQLTester.requireNetwork();
+
+        RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
+        RxJavaPlugins.initIoScheduler(Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters())));
+        RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
+
+
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
         executeNet(4, "use "+keyspace+";");
-        writeStatement = "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)";
-        readStatement = "SELECT * from "+table+" where userid = 1 limit 1";
+        writeStatement = prepareNet(4, "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)");
+        readStatement = prepareNet(4, "SELECT * from "+table+" where userid = 1 limit 1");
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
@@ -99,7 +109,7 @@ public class ReadWriteTest extends CQLTester
         //Warm up
         System.err.println("Writing 50k");
         for (long i = 0; i < 5000; i++)
-            executeNet(4, writeStatement, i, i, i );
+            executeNet(4, writeStatement.bind(i,i,i));
     }
 
     @TearDown(Level.Trial)
@@ -112,13 +122,13 @@ public class ReadWriteTest extends CQLTester
     public Object write() throws Throwable
     {
         numRows++;
-        return executeNet(4,writeStatement, numRows, numRows, numRows );
+        return executeNet(4,writeStatement.bind(numRows, numRows, numRows));
     }
 
 
     @Benchmark
     public Object read() throws Throwable
     {
-        return executeNet(4, readStatement);
+        return executeNet(4, readStatement.bind());
     }
 }

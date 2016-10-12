@@ -709,6 +709,16 @@ public abstract class CQLTester
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
     }
 
+    protected com.datastax.driver.core.PreparedStatement prepareNet(int protocolVersion, String query)
+    {
+        return sessionNet(protocolVersion).prepare(query);
+    }
+
+    protected com.datastax.driver.core.ResultSet executeNet(int protocolVersion, BoundStatement statement)
+    {
+        return sessionNet(protocolVersion).execute(statement);
+    }
+
     protected Session sessionNet()
     {
         return sessionNet(PROTOCOL_VERSIONS.get(PROTOCOL_VERSIONS.size() - 1));
