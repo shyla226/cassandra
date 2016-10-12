@@ -52,16 +52,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(MonitoredEpollEventLoopGroup.class);
 
-    //@Contended
+    @Contended
     private SingleCoreEventLoop[] initLoops;
 
-    //@Contended
+    @Contended
     private Thread[] initThreads;
 
-    //@Contended
+    @Contended
     private final SingleCoreEventLoop[] eventLoops;
 
-    //@Contended
+    @Contended
     private final Thread[] runningThreads;
 
     private final Thread monitorThread;
@@ -175,16 +175,15 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private static final int yieldExtraSpins = 1024;
         private static final int parkExtraSpins = 1024; // 1024 is ~50ms
 
-        //@Contended
         private volatile int pendingEpollEvents = 0;
 
-        //@Contended
+        @Contended
         private volatile CoreState state;
 
-        //@Contended
+        @Contended
         private final MessagePassingQueue<Runnable> externalQueue;
 
-        //@Contended
+        @Contended
         private final MessagePassingQueue<Runnable>[] incomingQueues;
 
 
@@ -220,8 +219,8 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                             int drained = drain();
                             if (drained > 0 || ++spins < busyExtraSpins)
                             {
-                                //if (drained > 0)
-                                //    spins = 0;
+                                if (drained > 0)
+                                    spins = 0;
 
                                 continue;
                             }
@@ -330,7 +329,6 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 {
                     t = pendingEpollEvents;
                     pendingEpollEvents = 0;
-                    //logger.warn("Processing events from wakeup");
                 }
                 else
                 {
