@@ -1,4 +1,5 @@
 DSE backports
+ * Forward writes to replacement node when replace_address != broadcast_address (CASSANDRA-8523)
  * Fix authentication problem when invoking cqlsh copy from a SOURCE command (CASSANDRA-12642)
  * Decommissioned nodes will not rejoin the cluster (CASSANDRA-8801)
  * Only set broadcast_rpc_address on Ec2MultiRegionSnitch if it's not set (CASSANDRA-11356)
