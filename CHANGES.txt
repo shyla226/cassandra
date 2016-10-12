@@ -119,7 +119,6 @@ Merged from 2.2:
  * Fix leak errors and execution rejected exceptions when draining (CASSANDRA-12457)
  * Fix merkle tree depth calculation (CASSANDRA-12580)
  * Make Collections deserialization more robust (CASSANDRA-12618)
- * Better handle invalid system roles table (CASSANDRA-12700)
  * Fix exceptions when enabling gossip on nodes that haven't joined the ring (CASSANDRA-12253)
  * Fix authentication problem when invoking cqlsh copy from a SOURCE command (CASSANDRA-12642)
  * Decrement pending range calculator jobs counter in finally block
@@ -127,6 +126,7 @@ Merged from 2.2:
  * Forward writes to replacement node when replace_address != broadcast_address (CASSANDRA-8523)
  * Fail repair on non-existing table (CASSANDRA-12279)
  * Enable repair -pr and -local together (fix regression of CASSANDRA-7450) (CASSANDRA-12522)
+ * Better handle invalid system roles table (CASSANDRA-12700)
 
 
 3.8, 3.9
