@@ -24,8 +24,6 @@ import java.util.*;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.PeekingIterator;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -41,8 +39,6 @@ import org.apache.cassandra.net.MessagingService;
  */
 public abstract class UnfilteredDeserializer
 {
-    private static final Logger logger = LoggerFactory.getLogger(UnfilteredDeserializer.class);
-
     protected final CFMetaData metadata;
     protected final DataInputPlus in;
     protected final SerializationHelper helper;

@@ -26,6 +26,8 @@ import java.util.concurrent.locks.LockSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.*;
+import io.reactivex.*;
+import io.reactivex.Observable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -285,10 +287,10 @@ public abstract class AbstractCommitLogSegmentManager
         Keyspace.writeOrder.awaitNewBarrier();
 
         // flush and wait for all CFs that are dirty in segments up-to and including 'last'
-        Future<?> future = flushDataFrom(segmentsToRecycle, true);
+        Observable<?> observable = flushDataFrom(segmentsToRecycle, true);
         try
         {
-            future.get();
+            observable.blockingFirst();
 
             for (CommitLogSegment segment : activeSegments)
                 for (UUID cfId : droppedCfs)
@@ -359,14 +361,15 @@ public abstract class AbstractCommitLogSegmentManager
      *
      * @return a Future that will finish when all the flushes are complete.
      */
-    private Future<?> flushDataFrom(List<CommitLogSegment> segments, boolean force)
+    private Observable<?> flushDataFrom(List<CommitLogSegment> segments, boolean force)
     {
         if (segments.isEmpty())
-            return Futures.immediateFuture(null);
+            return Observable.just(0);
+
         final CommitLogPosition maxCommitLogPosition = segments.get(segments.size() - 1).getCurrentCommitLogPosition();
 
         // a map of CfId -> forceFlush() to ensure we only queue one flush per cf
-        final Map<UUID, ListenableFuture<?>> flushes = new LinkedHashMap<>();
+        final Map<UUID, Observable<CommitLogPosition>> flushes = new LinkedHashMap<>();
 
         for (CommitLogSegment segment : segments)
         {
@@ -391,7 +394,7 @@ public abstract class AbstractCommitLogSegmentManager
             }
         }
 
-        return Futures.allAsList(flushes.values());
+        return Observable.merge(flushes.values());
     }
 
     /**

@@ -38,6 +38,8 @@ import org.apache.cassandra.utils.FBUtilities;
 /** a utility for doing internal cql-based queries */
 public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 {
+    public static final UntypedResultSet EMPTY = create(Collections.emptyList());
+
     public static UntypedResultSet create(ResultSet rs)
     {
         return new FromResultSet(rs);

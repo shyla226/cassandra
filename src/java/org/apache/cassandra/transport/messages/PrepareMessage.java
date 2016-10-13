@@ -60,7 +60,7 @@ public class PrepareMessage extends Message.Request
         this.query = query;
     }
 
-    public Observable<Response> execute(QueryState state, long queryStartNanoTime)
+    public Observable<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -77,12 +77,16 @@ public class PrepareMessage extends Message.Request
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
             }
 
-            Message.Response response = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
+            Observable<ResultMessage.Prepared> observable = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
 
-            if (tracingId != null)
-                response.setTracingId(tracingId);
+            if (tracingId == null)
+                return observable;
 
-            return Observable.just(response);
+            final UUID finalTracingId = tracingId;
+            return observable.map(prepared -> {
+                prepared.setTracingId(finalTracingId);
+                return prepared;
+            });
         }
         catch (Exception e)
         {

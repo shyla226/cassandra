@@ -464,7 +464,7 @@ public class SecondaryIndexManager implements IndexRegistry
         if (indexes.isEmpty())
             return;
 
-        List<Future<?>> wait = new ArrayList<>();
+        List<io.reactivex.Observable<?>> wait = new ArrayList<>();
         List<Index> nonCfsIndexes = new ArrayList<>();
 
         // for each CFS backed index, submit a flush task which we'll wait on for completion
@@ -478,7 +478,7 @@ public class SecondaryIndexManager implements IndexRegistry
         }
 
         executeAllBlocking(nonCfsIndexes.stream(), Index::getBlockingFlushTask);
-        FBUtilities.waitOnFutures(wait);
+        io.reactivex.Observable.merge(wait).blockingLast();
     }
 
     /**

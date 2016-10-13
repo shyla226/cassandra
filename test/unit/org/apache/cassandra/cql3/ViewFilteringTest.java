@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.*;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -1466,14 +1467,14 @@ public class ViewFilteringTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            io.reactivex.Observable.merge(ks.flush()).blockingLast();
 
         //update c's timestamp TS=2
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            io.reactivex.Observable.merge(ks.flush()).blockingLast();
 
         //change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
@@ -1482,7 +1483,7 @@ public class ViewFilteringTest extends CQLTester
         if(flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            io.reactivex.Observable.merge(ks.flush()).blockingLast();
         }
 
         //change c's value back to 1 with TS=4, check we can see d
@@ -1490,7 +1491,7 @@ public class ViewFilteringTest extends CQLTester
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            FBUtilities.waitOnFutures(ks.flush());
+            io.reactivex.Observable.merge(ks.flush()).blockingLast();
         }
 
         assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
@@ -1501,7 +1502,7 @@ public class ViewFilteringTest extends CQLTester
         assertRows(execute("SELECT d, e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            io.reactivex.Observable.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=2
@@ -1509,7 +1510,7 @@ public class ViewFilteringTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            io.reactivex.Observable.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=3

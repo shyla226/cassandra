@@ -49,11 +49,14 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
                              });
     }
 
-    public ResultMessage.Prepared prepare(String query, QueryState state, Map<String, ByteBuffer> customPayload)
+    public Observable<ResultMessage.Prepared> prepare(String query, QueryState state, Map<String, ByteBuffer> customPayload)
     {
-        ResultMessage.Prepared prepared = queryProcessor.prepare(query, state, customPayload);
-        prepared.setCustomPayload(customPayload);
-        return prepared;
+        Observable<ResultMessage.Prepared> observable = queryProcessor.prepare(query, state, customPayload);
+        observable.map(prepared -> {
+            prepared.setCustomPayload(customPayload);
+            return prepared;
+        });
+        return observable;
     }
 
     public ParsedStatement.Prepared getPrepared(MD5Digest id)

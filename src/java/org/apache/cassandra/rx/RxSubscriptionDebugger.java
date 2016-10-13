@@ -82,8 +82,6 @@ public class RxSubscriptionDebugger
             RxJavaPlugins.setOnMaybeSubscribe(null);
             RxJavaPlugins.setOnObservableSubscribe(null);
             RxJavaPlugins.setOnFlowableSubscribe(null);
-
-            observables.clear();
         }
     }
 

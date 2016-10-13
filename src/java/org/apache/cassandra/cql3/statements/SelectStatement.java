@@ -436,7 +436,7 @@ public class SelectStatement implements CQLStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return processResults(Observable.just(data), options, nowInSec, userLimit);
+                    return Observable.just(new ResultMessage.Rows(processSync(data, options, nowInSec, userLimit)));
                 }
             }
             else
@@ -782,6 +782,26 @@ public class SelectStatement implements CQLStatement
             cqlRows.trim(userLimit);
             return cqlRows;
         }).toObservable().defaultIfEmpty(result.build());
+    }
+
+    private ResultSet processSync(PartitionIterator partitions,
+                                  QueryOptions options,
+                                  int nowInSec,
+                                  int userLimit) throws InvalidRequestException
+    {
+        final Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
+        while (partitions.hasNext())
+        {
+            try (RowIterator rowIterator = partitions.next())
+            {
+                processPartition(rowIterator, options, result, nowInSec);
+            }
+        }
+
+        ResultSet cqlRows = result.build();
+        orderResults(cqlRows);
+        cqlRows.trim(userLimit);
+        return cqlRows;
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)

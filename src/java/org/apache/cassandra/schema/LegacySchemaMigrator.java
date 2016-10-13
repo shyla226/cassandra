@@ -91,7 +91,7 @@ public final class LegacySchemaMigrator
         keyspaces.forEach(LegacySchemaMigrator::migrateBuiltIndexesForKeyspace);
 
         // flush the new tables before truncating the old ones
-        SchemaKeyspace.flush();
+        SchemaKeyspace.flush().blockingFirst();
 
         // truncate the original tables (will be snapshotted now, and will have been snapshotted by pre-flight checks)
         logger.info("Truncating legacy schema tables");

@@ -312,7 +312,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                             else
                             {
                                 // we'll be rescheduled by the constructor of the Memtable.
-                                forceFlush();
+                                forceFlush().subscribe();
                             }
                         }
                     }
@@ -851,7 +851,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      *
      * @param memtable
      */
-    public ListenableFuture<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
+    public io.reactivex.Observable<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
     {
         synchronized (data)
         {
@@ -868,15 +868,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * not complete until the Memtable (and all prior Memtables) have been successfully flushed, and the CL
      * marked clean up to the position owned by the Memtable.
      */
-    public ListenableFuture<CommitLogPosition> switchMemtable()
+    public io.reactivex.Observable<CommitLogPosition> switchMemtable()
     {
         synchronized (data)
         {
             logFlush();
             Flush flush = new Flush(false);
             flushExecutor.execute(flush);
-            postFlushExecutor.execute(flush.postFlushTask);
-            return flush.postFlushTask;
+            BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
+            postFlushExecutor.execute(() -> {
+                publisher.onNext(flush.postFlush.call());
+                publisher.onComplete();
+            });
+            return publisher;
         }
     }
 
@@ -917,7 +921,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public ListenableFuture<CommitLogPosition> forceFlush()
+    public io.reactivex.Observable<CommitLogPosition> forceFlush()
     {
         synchronized (data)
         {
@@ -936,7 +940,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public ListenableFuture<?> forceFlush(CommitLogPosition flushIfDirtyBefore)
+    public io.reactivex.Observable<CommitLogPosition> forceFlush(CommitLogPosition flushIfDirtyBefore)
     {
         // we don't loop through the remaining memtables since here we only care about commit log dirtiness
         // and this does not vary between a table and its table-backed indexes
@@ -950,22 +954,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    private ListenableFuture<CommitLogPosition> waitForFlushes()
+    private io.reactivex.Observable<CommitLogPosition> waitForFlushes()
     {
         // we grab the current memtable; once any preceding memtables have flushed, we know its
         // commitLogLowerBound has been set (as this it is set with the upper bound of the preceding memtable)
         final Memtable current = data.getView().getCurrentMemtable();
-        ListenableFutureTask<CommitLogPosition> task = ListenableFutureTask.create(() -> {
+        BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
+        postFlushExecutor.execute(() -> {
             logger.debug("forceFlush requested but everything is clean in {}", name);
-            return current.getCommitLogLowerBound();
+            publisher.onNext(current.getCommitLogLowerBound());
+            publisher.onComplete();
         });
-        postFlushExecutor.execute(task);
-        return task;
+        return publisher;
     }
 
     public CommitLogPosition forceBlockingFlush()
     {
-        return FBUtilities.waitOnFuture(forceFlush());
+        return forceFlush().blockingFirst();
     }
 
     /**
@@ -1095,9 +1100,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             // mark writes older than the barrier as blocking progress, permitting them to exceed our memory limit
             // if they are stuck waiting on it, then wait for them all to complete
             writeBarrier.markBlocking();
-            logger.warn("#### going to await write barrier ({}) for {}", writeBarrier, ColumnFamilyStore.this);
             writeBarrier.await();
-            logger.warn("#### done awaiting write barrier ({}) for {}", writeBarrier, ColumnFamilyStore.this);
 
             // mark all memtables as flushing, removing them from the live memtable list
             for (Memtable memtable : memtables)
@@ -1326,20 +1329,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Scheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
         if (scheduler != null)
         {
-            logger.warn("!!!!!!!!!!!!!!!!!!! rescheduling mutation on {}", this);
             scheduler.scheduleDirect(() -> {
                 applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
             });
         }
         else
         {
-            logger.warn("#### directly applying mutation to {}", this);
-            // we're still starting up, run this synchronously on the current thread
+            // We're either already on the correct scheduler, or we're still starting up. Run this synchronously on
+            // the current thread.
             applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
-            logger.warn("#### done directly applying mutation to {}", this);
         }
 
-        return publisher.first(0).doOnSuccess(v -> logger.warn("#### apply(), publisher.first() is done"));
+        return publisher.first(0);
     }
 
     private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
@@ -1356,7 +1357,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             metric.writeLatency.addNano(System.nanoTime() - start);
             if (timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(timeDelta);
-            logger.warn("#### applyInternal, calling onNext(0)");
             publisher.onNext(0);
         }
         catch (RuntimeException e)

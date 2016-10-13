@@ -37,9 +37,9 @@ public interface QueryHandler
                           Map<String, ByteBuffer> customPayload,
                           long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
-    ResultMessage.Prepared prepare(String query,
-                                   QueryState state,
-                                   Map<String, ByteBuffer> customPayload) throws RequestValidationException;
+    Observable<ResultMessage.Prepared> prepare(String query,
+                                               QueryState state,
+                                               Map<String, ByteBuffer> customPayload) throws RequestValidationException;
 
     ParsedStatement.Prepared getPrepared(MD5Digest id);
 

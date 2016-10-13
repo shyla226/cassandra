@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Sets;
+import io.reactivex.*;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -174,7 +175,7 @@ public class IndexSummaryManagerTest
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
 
-        ArrayList<Future> futures = new ArrayList<>(numSSTables);
+        ArrayList<io.reactivex.Observable<?>> observables = new ArrayList<>(numSSTables);
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
         for (int sstable = 0; sstable < numSSTables; sstable++)
         {
@@ -188,18 +189,9 @@ public class IndexSummaryManagerTest
                     .build()
                     .applyUnsafe();
             }
-            futures.add(cfs.forceFlush());
+            observables.add(cfs.forceFlush());
         }
-        for (Future future : futures)
-        {
-            try
-            {
-                future.get();
-            } catch (InterruptedException | ExecutionException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
+        io.reactivex.Observable.merge(observables).blockingLast();
         assertEquals(numSSTables, cfs.getLiveSSTables().size());
         validateData(cfs, numPartition);
     }

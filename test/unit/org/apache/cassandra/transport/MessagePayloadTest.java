@@ -299,17 +299,20 @@ public class MessagePayloadTest extends CQLTester
             return QueryProcessor.instance.getPreparedForThrift(id);
         }
 
-        public ResultMessage.Prepared prepare(String query,
-                                              QueryState state,
-                                              Map<String, ByteBuffer> customPayload)
-                                                      throws RequestValidationException
+        public Observable<ResultMessage.Prepared> prepare(String query,
+                                                          QueryState state,
+                                                          Map<String, ByteBuffer> customPayload)
+                                                          throws RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            ResultMessage.Prepared result = QueryProcessor.instance.prepare(query, state, customPayload);
+            Observable<ResultMessage.Prepared> result = QueryProcessor.instance.prepare(query, state, customPayload);
             if (customPayload != null)
             {
-                result.setCustomPayload(responsePayload);
+                result.map(prepared -> {
+                    prepared.setCustomPayload(responsePayload);
+                    return prepared;
+                });
                 responsePayload = null;
             }
             return result;

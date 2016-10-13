@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import io.reactivex.Observable;
+import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.*;

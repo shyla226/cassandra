@@ -2366,7 +2366,8 @@ public class CassandraServer implements Cassandra.Iface
         try
         {
             cState.validateLogin();
-            return ClientState.getCQLQueryHandler().prepare(queryString, cState.getQueryState(), null).toThriftPreparedResult();
+            // TODO make async?
+            return ClientState.getCQLQueryHandler().prepare(queryString, cState.getQueryState(), null).blockingFirst().toThriftPreparedResult();
         }
         catch (RequestValidationException e)
         {

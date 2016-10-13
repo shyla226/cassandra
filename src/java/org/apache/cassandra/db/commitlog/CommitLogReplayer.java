@@ -30,6 +30,7 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.*;
 import org.apache.commons.lang3.StringUtils;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.slf4j.Logger;
@@ -156,20 +157,20 @@ public class CommitLogReplayer implements CommitLogReadHandler
         futures.clear();
         boolean flushingSystem = false;
 
-        List<Future<?>> futures = new ArrayList<Future<?>>();
+        List<io.reactivex.Observable<?>> observables = new ArrayList<>();
         for (Keyspace keyspace : keyspacesReplayed)
         {
             if (keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 flushingSystem = true;
 
-            futures.addAll(keyspace.flush());
+            observables.addAll(keyspace.flush());
         }
 
         // also flush batchlog incase of any MV updates
         if (!flushingSystem)
-            futures.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
+            observables.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
 
-        FBUtilities.waitOnFutures(futures);
+        io.reactivex.Observable.merge(observables).blockingLast();
 
         return replayedCount.get();
     }
