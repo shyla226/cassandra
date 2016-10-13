@@ -233,7 +233,7 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        public abstract Observable<Response> execute(QueryState queryState, long queryStartNanoTime);
+        public abstract Observable<? extends Response> execute(QueryState queryState, long queryStartNanoTime);
 
         public void setTracingRequested()
         {

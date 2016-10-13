@@ -603,7 +603,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
                 StorageProxy.instance.verifyNoHintsInProgress();
 
-                List<Future<?>> flushes = new ArrayList<>();
+                List<Observable<?>> flushes = new ArrayList<>();
                 for (Keyspace keyspace : Keyspace.all())
                 {
                     KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace.getName());
@@ -613,7 +613,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 }
                 try
                 {
-                    FBUtilities.waitOnFutures(flushes);
+                    Observable.merge(flushes).blockingLast();
                 }
                 catch (Throwable t)
                 {
@@ -813,7 +813,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // gossip snitch infos (local DC and rack)
             gossipSnitchInfo();
             // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
-            Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
+            Schema.instance.updateVersionAndAnnounce().blockingFirst(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
             BatchlogManager.instance.start();
@@ -1097,19 +1097,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // If the keyspace doesn't exist, create it
         Observable<Integer> observable;
         if (Schema.instance.getKSMetaData(expected.name) == null)
-        {
-            logger.warn("#### maybe adding keyspace {}", expected);
             observable = maybeAddKeyspace(expected);
-             //     defined = Schema.instance.getKSMetaData(expected.name);
-        }
         else
-        {
             observable = Observable.just(0);
-        }
 
         return observable.flatMap(v -> {
             KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
-            logger.warn("#### defined ksm: {}", defined);
 
             // While the keyspace exists, it might miss table or have outdated one
             // There is also the potential for a race, as schema migrations add the bare
@@ -4324,7 +4317,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             totalCFs += keyspace.getColumnFamilyStores().size();
         remainingCFs = totalCFs;
         // flush
-        List<Future<?>> flushes = new ArrayList<>();
+        List<Observable<?>> flushes = new ArrayList<>();
         for (Keyspace keyspace : Keyspace.nonSystem())
         {
             for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
@@ -4333,9 +4326,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // wait for the flushes.
         // TODO this is a godawful way to track progress, since they flush in parallel.  a long one could
         // thus make several short ones "instant" if we wait for them later.
-        for (Future f : flushes)
+        for (Observable<?> f : flushes)
         {
-            FBUtilities.waitOnFuture(f);
+            f.blockingLast();
             remainingCFs--;
         }
         // flush the system ones after all the rest are done, just in case flushing modifies any system state
@@ -4346,7 +4339,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
                 flushes.add(cfs.forceFlush());
         }
-        FBUtilities.waitOnFutures(flushes);
+        Observable.merge(flushes).blockingLast();
 
         HintsService.instance.shutdownBlocking();
 

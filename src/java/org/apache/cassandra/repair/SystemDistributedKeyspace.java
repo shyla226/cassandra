@@ -310,7 +310,7 @@ public final class SystemDistributedKeyspace
     public static void forceBlockingFlush(String table)
     {
         if (!Boolean.getBoolean("cassandra.unsafesystem"))
-            FBUtilities.waitOnFuture(Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush());
+            Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush().blockingFirst();
     }
 
     private enum RepairState

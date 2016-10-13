@@ -28,7 +28,10 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.MapDifference;
 import com.google.common.collect.Maps;
-import io.reactivex.Single;
+import com.google.common.collect.Maps;
+import io.reactivex.*;
+import io.reactivex.Observable;
+import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -275,10 +278,19 @@ public final class SchemaKeyspace
         ALL.forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
-    static void flush()
+    static Observable<Integer> flush()
     {
         if (!Boolean.getBoolean("cassandra.unsafesystem"))
-            ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush()));
+        {
+            List<io.reactivex.Observable<?>> observables = new ArrayList<>(ALL.size());
+            for (String table : ALL)
+                observables.add(getSchemaCFS(table).forceFlush());
+
+            return Observable.merge(observables).map(clPosition -> 0).last(0).toObservable();
+            // ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush()));
+        }
+
+        return Observable.just(0);
     }
 
     /**
@@ -1267,13 +1279,19 @@ public final class SchemaKeyspace
      */
     public static synchronized io.reactivex.Observable<Integer> mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
     {
-        return mergeSchema(mutations).doOnComplete(Schema.instance::updateVersionAndAnnounce);
+        return mergeSchema(mutations, true);
     }
 
-    // TODO need an async lock for this?
-    public static synchronized io.reactivex.Observable<Integer> mergeSchema(Collection<Mutation> mutations)
+    public static io.reactivex.Observable<Integer> mergeSchema(Collection<Mutation> mutations)
     {
-        logger.warn("#### merging schema");
+        return mergeSchema(mutations, false);
+    }
+
+    // TODO need an async lock for this, synchronization doesn't cover what's run in the map/flatMap call
+    public static synchronized io.reactivex.Observable<Integer> mergeSchema(Collection<Mutation> mutations, boolean announce)
+    {
+        logger.debug("Going to merge schema change");
+
         // only compare the keyspaces affected by this set of schema mutations
         Set<String> affectedKeyspaces =
         mutations.stream()
@@ -1294,14 +1312,9 @@ public final class SchemaKeyspace
         }
 
         assert mergedObservable != null;
-        return mergedObservable.doOnComplete(() -> {
-            if (FLUSH_SCHEMA_TABLES)
-            {
-                logger.warn("##### starting flush");
-                flush();
-                logger.warn("##### done with flush");
-            }
-
+        return mergedObservable.flatMap(vv ->
+            FLUSH_SCHEMA_TABLES ? flush() : Observable.just(0)
+        ).flatMap(vv -> {
             // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
             Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
 
@@ -1333,7 +1346,13 @@ public final class SchemaKeyspace
             // updated keyspaces
             for (Map.Entry<String, MapDifference.ValueDifference<KeyspaceMetadata>> diff : keyspacesDiff.entriesDiffering().entrySet())
                 updateKeyspace(diff.getKey(), diff.getValue().leftValue(), diff.getValue().rightValue());
-            logger.warn("#### done merging schema");
+
+            logger.debug("Done merging schema");
+
+            if (announce)
+                return Schema.instance.updateVersionAndAnnounce().map(resultSet -> 0);
+            else
+                return io.reactivex.Observable.just(0);
         });
     }
 

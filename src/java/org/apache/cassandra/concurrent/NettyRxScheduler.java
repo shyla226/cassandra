@@ -121,7 +121,7 @@ public class NettyRxScheduler extends Scheduler
         NettyRxScheduler scheduler = perCoreSchedulers[core];
         assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
 
-        return Thread.currentThread().getId() == scheduler.cpuThreadId ? immediateScheduler : scheduler;
+        return scheduler;
     }
 
     public static Scheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)
@@ -129,16 +129,10 @@ public class NettyRxScheduler extends Scheduler
         // force all system table operations to go through a single core
         if (cfs.hasSpecialHandlingForTPC)
         {
-            // TODO not guaranteed to avoid deadlock
-            // int index = new Random().nextInt(perCoreSchedulers.length);
             if (perCoreSchedulers[0] != null)
-            {
-                logger.warn("#### returning 0 scheduler");
                 return perCoreSchedulers[0];
-            }
 
             // during initial startup we have no schedulers, and should run tasks directly
-            logger.warn("#### returning null from getForKey");
             return null;
         }
 
@@ -150,19 +144,31 @@ public class NettyRxScheduler extends Scheduler
             PartitionPosition next = keyspaceRanges.get(i);
             if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
             {
-                NettyRxScheduler matchingScheduler = (NettyRxScheduler) getForCore(i - 1);
+                Scheduler matchingScheduler = getForCore(i - 1);
                 if (matchingScheduler == localNettyEventLoop.get())
                 {
-                    logger.warn("#### already on correct scheduler ({}, {}) for {}", matchingScheduler.cpuThreadName, matchingScheduler.cpuThreadId, key);
+                    // already on the correct scheduler, this should be run directly
                     return null;
                 }
                 else
                 {
-                    logger.warn("#### on wrong scheduler ({}, threadId={}, cpuID={}) for {}, currently on ({}, {}, {}); ranges are {}",
-                            matchingScheduler.cpuThreadName, matchingScheduler.cpuThreadId, matchingScheduler.cpuId,
-                            key,
-                            Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
-                            keyspaceRanges);
+                    if (matchingScheduler instanceof NettyRxScheduler)
+                    {
+                        NettyRxScheduler rxScheduler = (NettyRxScheduler) matchingScheduler;
+                        logger.warn("#### on wrong scheduler ({}, threadId={}, cpuID={}) for {}, currently on ({}, {}, {}); ranges are {}",
+                                rxScheduler.cpuThreadName, rxScheduler.cpuThreadId, rxScheduler.cpuId,
+                                key,
+                                Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
+                                keyspaceRanges);
+                    }
+                    else
+                    {
+                        logger.warn("#### on wrong scheduler ({}) for {}, currently on ({}, {}, {}); ranges are {}",
+                                matchingScheduler,
+                                key,
+                                Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
+                                keyspaceRanges);
+                    }
                     return matchingScheduler;
                 }
             }

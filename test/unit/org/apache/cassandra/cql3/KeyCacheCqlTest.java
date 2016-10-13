@@ -257,7 +257,7 @@ public class KeyCacheCqlTest extends CQLTester
         assertNull(Schema.instance.getColumnFamilyStoreIncludingIndexes(Pair.create(KEYSPACE, "bar")));
 
         dropTable("DROP TABLE %s");
-        Schema.instance.updateVersion();
+        Schema.instance.updateVersion().blockingFirst();
 
         //Test loading for a dropped 2i/table
         CacheService.instance.keyCache.clear();
@@ -498,7 +498,7 @@ public class KeyCacheCqlTest extends CQLTester
 
             if (i % 10 == 9)
             {
-                Keyspace.open(KEYSPACE).getColumnFamilyStore(table).forceFlush().get();
+                Keyspace.open(KEYSPACE).getColumnFamilyStore(table).forceFlush().blockingFirst();
                 if (index != null)
                     triggerBlockingFlush(Keyspace.open(KEYSPACE).getColumnFamilyStore(table).indexManager.getIndexByName(index));
             }
@@ -508,7 +508,7 @@ public class KeyCacheCqlTest extends CQLTester
     private static void prepareTable(String table) throws IOException, InterruptedException, java.util.concurrent.ExecutionException
     {
         StorageService.instance.disableAutoCompaction(KEYSPACE, table);
-        Keyspace.open(KEYSPACE).getColumnFamilyStore(table).forceFlush().get();
+        Keyspace.open(KEYSPACE).getColumnFamilyStore(table).forceFlush().blockingFirst();
         Keyspace.open(KEYSPACE).getColumnFamilyStore(table).truncateBlocking();
     }
 

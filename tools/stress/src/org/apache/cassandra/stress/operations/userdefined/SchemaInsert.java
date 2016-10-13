@@ -111,7 +111,6 @@ public class SchemaInsert extends SchemaStatement
                     stmt = batch;
                 }
 
-                System.err.println("#### executing statement: " + stmt);
                 client.getSession().execute(stmt);
             }
             return true;

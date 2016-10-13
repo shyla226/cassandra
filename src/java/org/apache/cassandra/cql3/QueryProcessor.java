@@ -265,11 +265,11 @@ public class QueryProcessor implements QueryHandler
     {
         Observable<? extends ResultMessage> obs = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values), System.nanoTime());
 
-        return obs.flatMap( result -> {
+        return obs.map(result -> {
             if (result instanceof ResultMessage.Rows)
-                return Observable.just(UntypedResultSet.create(((ResultMessage.Rows) result).result));
+                return UntypedResultSet.create(((ResultMessage.Rows) result).result);
             else
-                return Observable.just(UntypedResultSet.create(Collections.emptyList()));
+                return UntypedResultSet.EMPTY;
         });
     }
 
@@ -313,9 +313,9 @@ public class QueryProcessor implements QueryHandler
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)
-                return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+                return UntypedResultSet.create(((ResultMessage.Rows) result).result);
             else
-                return UntypedResultSet.create(Collections.emptyList());
+                return UntypedResultSet.EMPTY;
         });
     }
 
@@ -336,7 +336,7 @@ public class QueryProcessor implements QueryHandler
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else
-                return UntypedResultSet.create(Collections.emptyList());
+                return UntypedResultSet.EMPTY;
         }
         catch (RequestValidationException e)
         {
@@ -369,7 +369,7 @@ public class QueryProcessor implements QueryHandler
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows) result).result);
             else
-                return UntypedResultSet.create(Collections.emptyList());
+                return UntypedResultSet.EMPTY;
         });
     }
 
@@ -406,24 +406,24 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public ResultMessage.Prepared prepare(String query,
-                                          QueryState state,
-                                          Map<String, ByteBuffer> customPayload) throws RequestValidationException
+    public Observable<ResultMessage.Prepared> prepare(String query,
+                                                      QueryState state,
+                                                      Map<String, ByteBuffer> customPayload) throws RequestValidationException
     {
         return prepare(query, state);
     }
 
-    public ResultMessage.Prepared prepare(String queryString, QueryState queryState)
+    public Observable<ResultMessage.Prepared> prepare(String queryString, QueryState queryState)
     {
         ClientState cState = queryState.getClientState();
         return prepare(queryString, cState, cState instanceof ThriftClientState);
     }
 
-    public static ResultMessage.Prepared prepare(String queryString, ClientState clientState, boolean forThrift)
+    public static Observable<ResultMessage.Prepared> prepare(String queryString, ClientState clientState, boolean forThrift)
     {
         ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace(), forThrift);
         if (existing != null)
-            return existing;
+            return Observable.just(existing);
 
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
         prepared.rawCQLStatement = queryString;
@@ -464,7 +464,7 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    private static ResultMessage.Prepared storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared, boolean forThrift)
+    private static Observable<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared, boolean forThrift)
     throws InvalidRequestException
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
@@ -480,7 +480,7 @@ public class QueryProcessor implements QueryHandler
                                                                 queryString.substring(0, 200)));
             Integer statementId = computeThriftId(queryString, keyspace);
             thriftPreparedStatements.put(statementId, prepared);
-            return ResultMessage.Prepared.forThrift(statementId, prepared.boundNames);
+            return Observable.just(ResultMessage.Prepared.forThrift(statementId, prepared.boundNames));
         }
         else
         {
@@ -491,8 +491,8 @@ public class QueryProcessor implements QueryHandler
                                                                 queryString.substring(0, 200)));
             MD5Digest statementId = computeId(queryString, keyspace);
             preparedStatements.put(statementId, prepared);
-            SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
-            return new ResultMessage.Prepared(statementId, prepared);
+            Observable<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
+            return observable.map(resultSet -> new ResultMessage.Prepared(statementId, prepared));
         }
     }
 

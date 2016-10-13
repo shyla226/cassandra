@@ -90,8 +90,9 @@ public class Schema
     public Schema loadFromDisk(boolean updateVersion)
     {
         load(SchemaKeyspace.fetchNonSystemKeyspaces());
+        // TODO make async?
         if (updateVersion)
-            updateVersion();
+            updateVersion().blockingFirst();
         return this;
     }
 
@@ -545,7 +546,7 @@ public class Schema
             clearKeyspaceMetadata(ksm);
         }
 
-        updateVersionAndAnnounce();
+        updateVersionAndAnnounce().blockingFirst();
     }
 
     public void addKeyspace(KeyspaceMetadata ksm)

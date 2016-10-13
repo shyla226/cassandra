@@ -404,7 +404,6 @@ public class OpOrder
                 throw new IllegalStateException("This barrier needs to have issue() called on it before prior operations can complete");
             if (current.next.prev == null)
                 return true;
-            logger.warn("#### ops aren't finished on {}", current);
             return false;
         }
 

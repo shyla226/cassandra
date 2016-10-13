@@ -727,10 +727,10 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      */
     private void flushSSTables(Iterable<ColumnFamilyStore> stores)
     {
-        List<Future<?>> flushes = new ArrayList<>();
+        List<io.reactivex.Observable<?>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
-        FBUtilities.waitOnFutures(flushes);
+        io.reactivex.Observable.merge(flushes).blockingLast();
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)

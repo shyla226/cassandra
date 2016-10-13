@@ -95,8 +95,8 @@ public class RecoveryManagerFlushedTest
     public void testWithFlush() throws Exception
     {
         // Flush everything that may be in the commit log now to start fresh
-        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush());
-        FBUtilities.waitOnFutures(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush());
+        io.reactivex.Observable.merge(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
+        io.reactivex.Observable.merge(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
 
 
         CompactionManager.instance.disableAutoCompaction();

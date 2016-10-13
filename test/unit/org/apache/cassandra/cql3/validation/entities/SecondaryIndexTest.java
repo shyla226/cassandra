@@ -1181,7 +1181,7 @@ public class SecondaryIndexTest extends CQLTester
     {
         return QueryProcessor.prepare(String.format(cql, KEYSPACE, currentTable()),
                                       ClientState.forInternalCalls(),
-                                      forThrift);
+                                      forThrift).blockingFirst();
     }
 
     private void validateCell(Cell cell, ColumnDefinition def, ByteBuffer val, long timestamp)
