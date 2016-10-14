@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.util.concurrent.TimeoutException;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
@@ -65,7 +66,7 @@ public class TruncateStatement extends CFStatement implements CQLStatement
         ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
     }
 
-    public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException
     {
         try
         {
@@ -80,21 +81,21 @@ public class TruncateStatement extends CFStatement implements CQLStatement
             throw new TruncateException(e);
         }
 
-        return Observable.just(new ResultMessage.Void());
+        return Single.just(new ResultMessage.Void());
     }
 
-    public Observable<ResultMessage> executeInternal(QueryState state, QueryOptions options)
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         try
         {
             // TODO rx-ify
             ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(columnFamily());
             cfs.truncateBlocking();
-            return Observable.just(new ResultMessage.Void());
+            return Single.just(new ResultMessage.Void());
         }
         catch (Exception e)
         {
-            return Observable.error(new TruncateException(e));
+            return Single.error(new TruncateException(e));
         }
     }
 }

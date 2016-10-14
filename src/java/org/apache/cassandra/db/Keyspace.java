@@ -21,14 +21,13 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.Lock;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
-import io.reactivex.*;
 import io.reactivex.Observable;
+import io.reactivex.Single;
+import io.reactivex.SingleSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -423,17 +422,17 @@ public class Keyspace
         }
     }
 
-    public io.reactivex.Observable<Integer> apply(Mutation mutation, boolean writeCommitLog)
+    public Single<Integer> apply(Mutation mutation, boolean writeCommitLog)
     {
         return apply(mutation, writeCommitLog, true, false);
     }
 
-    public io.reactivex.Observable<Integer> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    public Single<Integer> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
         return apply(mutation, writeCommitLog, updateIndexes, false);
     }
 
-    public io.reactivex.Observable<Integer> applyFromCommitLog(Mutation mutation)
+    public Single<Integer> applyFromCommitLog(Mutation mutation)
     {
         return apply(mutation, false, true, true);
     }
@@ -447,13 +446,13 @@ public class Keyspace
      * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
      * @param isClReplay     true if caller is the commitlog replayer
      */
-    public io.reactivex.Observable<Integer> apply(final Mutation mutation,
+    public Single<Integer> apply(final Mutation mutation,
                                                             final boolean writeCommitLog,
                                                             boolean updateIndexes,
                                                             boolean isClReplay)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
-            return io.reactivex.Observable.error(new RuntimeException("Testing write failures"));
+            return io.reactivex.Single.error(new RuntimeException("Testing write failures"));
 
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
@@ -527,7 +526,7 @@ public class Keyspace
         OpOrder.Group opGroup = writeOrder.start();
 
         // write the mutation to the commitlog
-        io.reactivex.Observable<CommitLogPosition> commitLogPositionObservable;
+        Single<CommitLogPosition> commitLogPositionObservable;
         if (writeCommitLog)
         {
             Tracing.trace("Appending to commitlog");
@@ -535,12 +534,11 @@ public class Keyspace
         }
         else
         {
-            commitLogPositionObservable = io.reactivex.Observable.just(CommitLogPosition.NONE);
+            commitLogPositionObservable = Single.just(CommitLogPosition.NONE);
         }
 
-        // io.reactivex.Observable.concat
         return commitLogPositionObservable.flatMap(commitLogPosition -> {
-            List<io.reactivex.Observable<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
+            List<Single<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
@@ -573,7 +571,7 @@ public class Keyspace
                 UpdateTransaction indexTransaction = updateIndexes
                                                      ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
                                                      : UpdateTransaction.NO_OP;
-                io.reactivex.Observable<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition).toObservable();
+                Single<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
                 memtablePutObservables.add(memtableObservable);
 
                 /*
@@ -584,12 +582,11 @@ public class Keyspace
 
             // avoid the expensive merge call if there's only 1 observable
             if (memtablePutObservables.size() == 1)
-                return memtablePutObservables.get(0).last(0).toObservable();
+                return memtablePutObservables.get(0);
             else
-                return io.reactivex.Observable.merge(memtablePutObservables).last(0).toObservable();
-        }).first(0).doOnEvent((i, throwable) -> {
-            opGroup.close();
-        }).toObservable();
+                return Single.merge(memtablePutObservables).last(0);
+
+        }).doOnEvent((i, throwable) -> opGroup.close());
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

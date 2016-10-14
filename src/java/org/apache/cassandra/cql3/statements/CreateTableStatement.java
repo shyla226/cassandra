@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import io.reactivex.Observable;
-import org.apache.cassandra.rx.RxSubscriptionDebugger;
+import io.reactivex.Single;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.*;
@@ -84,7 +84,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         try
         {
@@ -95,7 +95,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
         {
             if (ifNotExists)
                 return null;
-            return Observable.error(e);
+            return Single.error(e);
         }
     }
 

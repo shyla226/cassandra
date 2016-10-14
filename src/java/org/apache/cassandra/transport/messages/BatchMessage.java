@@ -25,7 +25,7 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -155,7 +155,7 @@ public class BatchMessage extends Message.Request
         this.options = options;
     }
 
-    public Observable<Message.Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -236,7 +236,7 @@ public class BatchMessage extends Message.Request
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return Observable.just(ErrorMessage.fromException(e));
+            return Single.just(ErrorMessage.fromException(e));
         }
         finally
         {

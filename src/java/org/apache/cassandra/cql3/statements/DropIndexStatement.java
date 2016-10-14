@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
@@ -68,13 +68,13 @@ public class DropIndexStatement extends SchemaAlteringStatement
     }
 
     @Override
-    public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
-        Observable<Event.SchemaChange> ce = announceMigration(false);
-        return ce == null ? Observable.just(new ResultMessage.Void()) : ce.map(ResultMessage.SchemaChange::new);
+        Single<Event.SchemaChange> ce = announceMigration(false);
+        return ce == null ? Single.just(new ResultMessage.Void()) : ce.map(ResultMessage.SchemaChange::new);
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         CFMetaData cfm = lookupIndexedTable();
         if (cfm == null)
@@ -85,8 +85,8 @@ public class DropIndexStatement extends SchemaAlteringStatement
         // Dropping an index is akin to updating the CF
         // Note that we shouldn't call columnFamily() at this point because the index has been dropped and the call to lookupIndexedTable()
         // in that method would now throw.
-        return MigrationManager.announceColumnFamilyUpdate(updatedCfm, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, cfm.ksName, cfm.cfName));
+        Event.SchemaChange event = new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, cfm.ksName, cfm.cfName);
+        return MigrationManager.announceColumnFamilyUpdate(updatedCfm, isLocalOnly).map(v -> event);
     }
 
     /**

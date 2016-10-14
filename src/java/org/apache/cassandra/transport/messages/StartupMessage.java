@@ -21,7 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.CBUtil;
@@ -65,7 +65,7 @@ public class StartupMessage extends Message.Request
         this.options = options;
     }
 
-    public Observable<Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         String cqlVersion = options.get(CQL_VERSION);
         if (cqlVersion == null)
@@ -101,9 +101,9 @@ public class StartupMessage extends Message.Request
         }
 
         if (DatabaseDescriptor.getAuthenticator().requireAuthentication())
-            return Observable.just(new AuthenticateMessage(DatabaseDescriptor.getAuthenticator().getClass().getName()));
+            return Single.just(new AuthenticateMessage(DatabaseDescriptor.getAuthenticator().getClass().getName()));
         else
-            return Observable.just(new ReadyMessage());
+            return Single.just(new ReadyMessage());
     }
 
     private static Map<String, String> upperCaseKeys(Map<String, String> options)

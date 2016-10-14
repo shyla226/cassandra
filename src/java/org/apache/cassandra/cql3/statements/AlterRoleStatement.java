@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IRoleManager.Option;
 import org.apache.cassandra.auth.Permission;
@@ -88,10 +88,10 @@ public class AlterRoleStatement extends AuthenticationStatement
         }
     }
 
-    public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         if (!opts.isEmpty())
             DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-        return Observable.just(new ResultMessage.Void());
+        return Single.just(new ResultMessage.Void());
     }
 }

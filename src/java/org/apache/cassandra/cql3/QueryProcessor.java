@@ -34,6 +34,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
+import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -210,7 +211,7 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public Observable<? extends ResultMessage> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
@@ -221,22 +222,22 @@ public class QueryProcessor implements QueryHandler
         return statement.execute(queryState, options, queryStartNanoTime);
     }
 
-    public static Observable<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
+    public static Single<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()),  queryStartNanoTime);
     }
 
-    public Observable<? extends ResultMessage> process(String query,
-                                 QueryState state,
-                                 QueryOptions options,
-                                 Map<String, ByteBuffer> customPayload,
-                                 long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> process(String query,
+                                                   QueryState state,
+                                                   QueryOptions options,
+                                                   Map<String, ByteBuffer> customPayload,
+                                                   long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         return process(query, state, options, queryStartNanoTime);
     }
 
-    public Observable<? extends ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> process(String queryString, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState());
@@ -256,14 +257,14 @@ public class QueryProcessor implements QueryHandler
         return getStatement(queryStr, queryState.getClientState());
     }
 
-    public static Observable<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
+    public static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
         return process(query, cl, Collections.<ByteBuffer>emptyList());
     }
 
-    public static Observable<UntypedResultSet> process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
+    public static Single<UntypedResultSet> process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
     {
-        Observable<? extends ResultMessage> obs = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values), System.nanoTime());
+        Single<? extends ResultMessage> obs = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values), System.nanoTime());
 
         return obs.map(result -> {
             if (result instanceof ResultMessage.Rows)
@@ -306,10 +307,10 @@ public class QueryProcessor implements QueryHandler
         return prepared;
     }
 
-    public static Observable<UntypedResultSet> executeInternal(String query, Object... values)
+    public static Single<UntypedResultSet> executeInternal(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
-        Observable<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+        Single<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)
@@ -331,8 +332,7 @@ public class QueryProcessor implements QueryHandler
         try
         {
             ParsedStatement.Prepared prepared = prepareInternal(query);
-            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime())
-                                                     .blockingSingle();
+            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()).blockingGet();
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else
@@ -359,11 +359,11 @@ public class QueryProcessor implements QueryHandler
      * Same than executeInternal, but to use for queries we know are only executed once so that the
      * created statement object is not cached.
      */
-    public static Observable<UntypedResultSet> executeOnceInternal(String query, Object... values)
+    public static Single<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
         prepared.statement.validate(internalQueryState().getClientState());
-        Observable<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+        Single<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)
@@ -378,12 +378,12 @@ public class QueryProcessor implements QueryHandler
      * Note that this only make sense for Selects so this only accept SELECT statements and is only useful in rare
      * cases.
      */
-    public static Observable<UntypedResultSet> executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
+    public static Single<UntypedResultSet> executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
         assert prepared.statement instanceof SelectStatement;
         SelectStatement select = (SelectStatement)prepared.statement;
-        Observable<? extends ResultMessage> observable = select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
+        Single<? extends ResultMessage> observable = select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
 
         return observable.map(result -> {
             assert result instanceof ResultMessage.Rows;
@@ -406,24 +406,24 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public Observable<ResultMessage.Prepared> prepare(String query,
-                                                      QueryState state,
-                                                      Map<String, ByteBuffer> customPayload) throws RequestValidationException
+    public Single<ResultMessage.Prepared> prepare(String query,
+                                                  QueryState state,
+                                                  Map<String, ByteBuffer> customPayload) throws RequestValidationException
     {
         return prepare(query, state);
     }
 
-    public Observable<ResultMessage.Prepared> prepare(String queryString, QueryState queryState)
+    public Single<ResultMessage.Prepared> prepare(String queryString, QueryState queryState)
     {
         ClientState cState = queryState.getClientState();
         return prepare(queryString, cState, cState instanceof ThriftClientState);
     }
 
-    public static Observable<ResultMessage.Prepared> prepare(String queryString, ClientState clientState, boolean forThrift)
+    public static Single<ResultMessage.Prepared> prepare(String queryString, ClientState clientState, boolean forThrift)
     {
         ResultMessage.Prepared existing = getStoredPreparedStatement(queryString, clientState.getRawKeyspace(), forThrift);
         if (existing != null)
-            return Observable.just(existing);
+            return Single.just(existing);
 
         ParsedStatement.Prepared prepared = getStatement(queryString, clientState);
         prepared.rawCQLStatement = queryString;
@@ -464,7 +464,7 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    private static Observable<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared, boolean forThrift)
+    private static Single<ResultMessage.Prepared> storePreparedStatement(String queryString, String keyspace, ParsedStatement.Prepared prepared, boolean forThrift)
     throws InvalidRequestException
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
@@ -480,7 +480,7 @@ public class QueryProcessor implements QueryHandler
                                                                 queryString.substring(0, 200)));
             Integer statementId = computeThriftId(queryString, keyspace);
             thriftPreparedStatements.put(statementId, prepared);
-            return Observable.just(ResultMessage.Prepared.forThrift(statementId, prepared.boundNames));
+            return Single.just(ResultMessage.Prepared.forThrift(statementId, prepared.boundNames));
         }
         else
         {
@@ -491,22 +491,22 @@ public class QueryProcessor implements QueryHandler
                                                                 queryString.substring(0, 200)));
             MD5Digest statementId = computeId(queryString, keyspace);
             preparedStatements.put(statementId, prepared);
-            Observable<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
+            Single<UntypedResultSet> observable = SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
             return observable.map(resultSet -> new ResultMessage.Prepared(statementId, prepared));
         }
     }
 
-    public Observable<? extends ResultMessage> processPrepared(CQLStatement statement,
-                                         QueryState state,
-                                         QueryOptions options,
-                                         Map<String, ByteBuffer> customPayload,
-                                         long queryStartNanoTime)
-                                                 throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> processPrepared(CQLStatement statement,
+                                                           QueryState state,
+                                                           QueryOptions options,
+                                                           Map<String, ByteBuffer> customPayload,
+                                                           long queryStartNanoTime)
+    throws RequestExecutionException, RequestValidationException
     {
         return processPrepared(statement, state, options, queryStartNanoTime);
     }
 
-    public Observable<? extends ResultMessage> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         List<ByteBuffer> variables = options.getValues();
@@ -529,24 +529,24 @@ public class QueryProcessor implements QueryHandler
         return processStatement(statement, queryState, options, queryStartNanoTime);
     }
 
-    public Observable<ResultMessage> processBatch(BatchStatement statement,
-                                      QueryState state,
-                                      BatchQueryOptions options,
-                                      Map<String, ByteBuffer> customPayload,
-                                      long queryStartNanoTime)
-                                              throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage> processBatch(BatchStatement statement,
+                                              QueryState state,
+                                              BatchQueryOptions options,
+                                              Map<String, ByteBuffer> customPayload,
+                                              long queryStartNanoTime)
+    throws RequestExecutionException, RequestValidationException
     {
         return processBatch(statement, state, options, queryStartNanoTime);
     }
 
-    public Observable<ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ClientState clientState = queryState.getClientState();
         batch.checkAccess(clientState);
         batch.validate();
         batch.validate(clientState);
-        return Observable.just(batch.execute(queryState, options, queryStartNanoTime));
+        return Single.just(batch.execute(queryState, options, queryStartNanoTime));
     }
 
     public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)

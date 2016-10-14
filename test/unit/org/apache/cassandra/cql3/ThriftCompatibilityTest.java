@@ -105,6 +105,6 @@ public class ThriftCompatibilityTest extends SchemaLoader
 
     private static UntypedResultSet execute(String query)
     {
-        return QueryProcessor.executeInternal(query).blockingFirst();
+        return QueryProcessor.executeInternal(query).blockingGet();
     }
 }

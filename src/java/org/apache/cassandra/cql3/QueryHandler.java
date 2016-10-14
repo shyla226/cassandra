@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -31,29 +31,29 @@ import org.apache.cassandra.utils.MD5Digest;
 
 public interface QueryHandler
 {
-    Observable<? extends ResultMessage> process(String query,
-                          QueryState state,
-                          QueryOptions options,
-                          Map<String, ByteBuffer> customPayload,
-                          long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+    Single<? extends ResultMessage> process(String query,
+                                            QueryState state,
+                                            QueryOptions options,
+                                            Map<String, ByteBuffer> customPayload,
+                                            long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
-    Observable<ResultMessage.Prepared> prepare(String query,
-                                               QueryState state,
-                                               Map<String, ByteBuffer> customPayload) throws RequestValidationException;
+    Single<ResultMessage.Prepared> prepare(String query,
+                                           QueryState state,
+                                           Map<String, ByteBuffer> customPayload) throws RequestValidationException;
 
     ParsedStatement.Prepared getPrepared(MD5Digest id);
 
     ParsedStatement.Prepared getPreparedForThrift(Integer id);
 
-    Observable<? extends ResultMessage> processPrepared(CQLStatement statement,
-                                  QueryState state,
-                                  QueryOptions options,
-                                  Map<String, ByteBuffer> customPayload,
-                                  long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+    Single<? extends ResultMessage> processPrepared(CQLStatement statement,
+                                                    QueryState state,
+                                                    QueryOptions options,
+                                                    Map<String, ByteBuffer> customPayload,
+                                                    long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
-    Observable<ResultMessage> processBatch(BatchStatement statement,
-                               QueryState state,
-                               BatchQueryOptions options,
-                               Map<String, ByteBuffer> customPayload,
-                               long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+    Single<ResultMessage> processBatch(BatchStatement statement,
+                                       QueryState state,
+                                       BatchQueryOptions options,
+                                       Map<String, ByteBuffer> customPayload,
+                                       long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 }

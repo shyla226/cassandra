@@ -50,6 +50,7 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.Single;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -654,7 +655,7 @@ public class StorageProxy implements StorageProxyMBean
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      * @return an Observable that emits a single (null) item when all mutations have completed
      */
-    public static Observable<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
+    public static Single<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
     throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
@@ -662,11 +663,12 @@ public class StorageProxy implements StorageProxyMBean
 
         long startTime = System.nanoTime();
 
-        Observable<ResultMessage.Void> observable = null;
+        Single<ResultMessage.Void> observable = null;
 
+        List<Single<ResultMessage.Void>> singles = mutations.size() == 1 ? null : new ArrayList<>(mutations.size());
         for (IMutation mutation : mutations)
         {
-            Observable<ResultMessage.Void> singleMutationObservable;
+            Single<ResultMessage.Void> singleMutationObservable;
             if (mutation instanceof CounterMutation)
             {
                 singleMutationObservable = mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime).get();
@@ -677,60 +679,63 @@ public class StorageProxy implements StorageProxyMBean
                 singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, standardWritePerformer, wt, queryStartNanoTime).get();
             }
 
-            observable = observable == null
-                         ? singleMutationObservable
-                         : observable.mergeWith(singleMutationObservable);
+            if (singles == null)
+                observable = singleMutationObservable;
+            else
+                singles.add(singleMutationObservable);
         }
-        assert observable != null;
+
+        if (observable == null)
+            observable = Single.merge(singles).last(new ResultMessage.Void());
 
         // we only want to emit a single item when all mutations have completed
-        return observable
-                .last(new ResultMessage.Void()).toObservable()
-                .doAfterTerminate(() -> {
-                    long latency = System.nanoTime() - startTime;
-                    writeMetrics.addNano(latency);
-                    writeMetricsMap.get(consistency_level).addNano(latency);
-                })
-                .doOnError(exc -> {
-                    if (exc instanceof WriteTimeoutException || exc instanceof WriteFailureException)
+        return observable.doOnEvent((val, exc) -> {
+            long latency = System.nanoTime() - startTime;
+            writeMetrics.addNano(latency);
+            writeMetricsMap.get(consistency_level).addNano(latency);
+
+            if (exc != null)
+            {
+                if (exc instanceof WriteTimeoutException || exc instanceof WriteFailureException)
+                {
+                    if (consistency_level == ConsistencyLevel.ANY)
                     {
-                        if (consistency_level == ConsistencyLevel.ANY)
+                        // TODO Rx-ify?
+                        hintMutations(mutations);
+                    }
+                    else
+                    {
+                        if (exc instanceof WriteFailureException)
                         {
-                            // TODO Rx-ify?
-                            hintMutations(mutations);
+                            writeMetrics.failures.mark();
+                            writeMetricsMap.get(consistency_level).failures.mark();
+                            WriteFailureException fe = (WriteFailureException) exc;
+                            Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
+                                    fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
                         }
                         else
                         {
-                            if (exc instanceof WriteFailureException)
-                            {
-                                writeMetrics.failures.mark();
-                                writeMetricsMap.get(consistency_level).failures.mark();
-                                WriteFailureException fe = (WriteFailureException)exc;
-                                Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                              fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
-                            }
-                            else
-                            {
-                                writeMetrics.timeouts.mark();
-                                writeMetricsMap.get(consistency_level).timeouts.mark();
-                                WriteTimeoutException te = (WriteTimeoutException)exc;
-                                Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
-                            }
+                            writeMetrics.timeouts.mark();
+                            writeMetricsMap.get(consistency_level).timeouts.mark();
+                            WriteTimeoutException te = (WriteTimeoutException) exc;
+                            Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
                         }
                     }
-                    else if (exc instanceof UnavailableException)
-                    {
-                        writeMetrics.unavailables.mark();
-                        writeMetricsMap.get(consistency_level).unavailables.mark();
-                        Tracing.trace("Unavailable");
-                    }
-                    else if (exc instanceof OverloadedException)
-                    {
-                        writeMetrics.unavailables.mark();
-                        writeMetricsMap.get(consistency_level).unavailables.mark();
-                        Tracing.trace("Overloaded");
-                    }
-                });
+                }
+                else if (exc instanceof UnavailableException)
+                {
+                    writeMetrics.unavailables.mark();
+                    writeMetricsMap.get(consistency_level).unavailables.mark();
+                    Tracing.trace("Unavailable");
+                }
+                else if (exc instanceof OverloadedException)
+                {
+                    writeMetrics.unavailables.mark();
+                    writeMetricsMap.get(consistency_level).unavailables.mark();
+                    Tracing.trace("Overloaded");
+                }
+            }
+        });
     }
 
     /**
@@ -891,7 +896,7 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("unchecked")
-    public static Observable<ResultMessage.Void> mutateWithTriggers(Collection<? extends IMutation> mutations,
+    public static Single<ResultMessage.Void> mutateWithTriggers(Collection<? extends IMutation> mutations,
                                                       ConsistencyLevel consistencyLevel,
                                                       boolean mutateAtomically,
                                                       long queryStartNanoTime)
@@ -907,7 +912,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             // TODO Rx-ify
             mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime);
-            return Observable.just(new ResultMessage.Void());
+            return Single.just(new ResultMessage.Void());
         }
         else
         {
@@ -915,7 +920,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 // TODO Rx-ify
                 mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime);
-                return Observable.just(new ResultMessage.Void());
+                return Single.just(new ResultMessage.Void());
             }
             else
             {
@@ -1348,18 +1353,15 @@ public class StorageProxy implements StorageProxyMBean
         if (insertLocal)
         {
             mutation.applyAsync().subscribe(
-                    // onNext (unused)
-                    v -> {},
+                    // onSuccess
+                    v -> responseHandler.response(null),
 
                     // onError
                     exc -> {
                         if (!(exc instanceof WriteTimeoutException))
                             logger.error("Failed to apply mutation locally : {}", exc);
                         responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                    },
-
-                    // onComplete
-                    () -> responseHandler.response(null)
+                    }
             );
         }
 
@@ -1612,7 +1614,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime).blockingSingle(), command);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime).blockingGet(), command);
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
@@ -1620,14 +1622,14 @@ public class StorageProxy implements StorageProxyMBean
     {
         // When using serial CL, the ClientState should be provided
         assert !consistencyLevel.isSerialConsistency();
-        return read(group, consistencyLevel, null, queryStartNanoTime).blockingSingle();
+        return read(group, consistencyLevel, null, queryStartNanoTime).blockingGet();
     }
 
     /**
      * Performs the actual reading of a row out of the StorageService, fetching
      * a specific set of column names from a given column family.
      */
-    public static Observable<PartitionIterator> read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
+    public static Single<PartitionIterator> read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(group.commands))
@@ -1638,7 +1640,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return consistencyLevel.isSerialConsistency()
-             ? Observable.just(readWithPaxos(group, consistencyLevel, state, queryStartNanoTime))
+             ? Single.just(readWithPaxos(group, consistencyLevel, state, queryStartNanoTime))
              : readRegular(group, consistencyLevel, queryStartNanoTime);
     }
 
@@ -1682,7 +1684,7 @@ public class StorageProxy implements StorageProxyMBean
                 throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
             }
 
-            result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime).blockingSingle();
+            result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime).blockingGet();
         }
         catch (UnavailableException e)
         {
@@ -1718,13 +1720,13 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("resource")
-    private static Observable<PartitionIterator> readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static Single<PartitionIterator> readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         long start = System.nanoTime();
         try
         {
-            Observable<PartitionIterator> resultObs = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
+            Single<PartitionIterator> resultObs = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
             if (group.commands.size() <= 1)
                 return resultObs;
 
@@ -1772,7 +1774,7 @@ public class StorageProxy implements StorageProxyMBean
      * 4. If the digests (if any) match the data return the data
      * 5. else carry out read repair by getting data from all the nodes.
      */
-    private static Observable<PartitionIterator> fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static Single<PartitionIterator> fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         if (commands.size() == 1)
@@ -1780,9 +1782,9 @@ public class StorageProxy implements StorageProxyMBean
 
         return Observable.fromIterable(commands)
                          .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime))
-                         .flatMap(SinglePartitionReadLifecycle::getPartitionIterator)
+                         .flatMap(readLifecycle -> readLifecycle.getPartitionIterator().toObservable())
                          .toList()
-                         .map(PartitionIterators::concat).toObservable();
+                         .map(PartitionIterators::concat);
     }
 
     private static class SinglePartitionReadLifecycle
@@ -1818,13 +1820,13 @@ public class StorageProxy implements StorageProxyMBean
             executor.maybeTryAdditionalReplicas();
         }
 
-        Observable<PartitionIterator> getPartitionIterator()
+        Single<PartitionIterator> getPartitionIterator()
         {
-            Observable<PartitionIterator> obs = executor.handler.get().onErrorResumeNext(e -> {
+            Single<PartitionIterator> obs = executor.handler.get().onErrorResumeNext(e -> {
                 if (e instanceof DigestMismatchException)
                     return retryOnDigestMismatch();
 
-                return Observable.error(e);
+                return Single.error(e);
             });
 
             doInitialQueries();
@@ -1834,7 +1836,7 @@ public class StorageProxy implements StorageProxyMBean
             return obs;
         }
 
-        Observable<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
+        Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
         {
 
             ReadRepairMetrics.repairedBlocking.mark();
@@ -1860,9 +1862,9 @@ public class StorageProxy implements StorageProxyMBean
 
             return repairHandler.get().onErrorResumeNext(e -> {
                 if (e instanceof DigestMismatchException)
-                    return Observable.error(new RuntimeException("Digest mismatch hit on readRepair", e));
+                    return Single.error(new RuntimeException("Digest mismatch hit on readRepair", e));
 
-                return Observable.error(e);
+                return Single.error(e);
             });
         }
 
@@ -2090,7 +2092,7 @@ public class StorageProxy implements StorageProxyMBean
             if (result != null)
                 return;
 
-            result = handler.get().blockingSingle();
+            result = handler.get().blockingGet();
         }
 
         protected RowIterator computeNext()

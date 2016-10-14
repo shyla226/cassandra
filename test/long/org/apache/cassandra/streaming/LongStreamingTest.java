@@ -168,7 +168,7 @@ public class LongStreamingTest
                                          millis / 1000d,
                                          (dataSize * 2 / (1 << 20) / (millis / 1000d)) * 8));
 
-        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace.table1 limit 100;").blockingFirst();
+        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace.table1 limit 100;").blockingGet();
         assertEquals(100, rs.size());
     }
 }

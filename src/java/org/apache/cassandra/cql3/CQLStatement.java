@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -51,19 +51,18 @@ public interface CQLStatement
 
     /**
      * Execute the statement and return the resulting result or null if there is no result.
-     *
-     * @param state the current query state
+     *  @param state the current query state
      * @param options options for this query (consistency, variables, pageSize, ...)
      * @param queryStartNanoTime the timestamp returned by System.nanoTime() when this statement was received
      */
-    public Observable<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException;
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException;
 
     /**
      * Variant of execute used for internal query against the system tables, and thus only query the local node.
      *
      * @param state the current query state
      */
-    public Observable<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
 
     /**
      * Return an Iterable over all of the functions (both native and user-defined) used by any component

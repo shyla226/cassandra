@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -32,9 +32,9 @@ public class GrantRoleStatement extends RoleManagementStatement
         super(name, grantee);
     }
 
-    public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         DatabaseDescriptor.getRoleManager().grantRole(state.getUser(), role, grantee);
-        return Observable.just(new ResultMessage.Void());
+        return Single.just(new ResultMessage.Void());
     }
 }

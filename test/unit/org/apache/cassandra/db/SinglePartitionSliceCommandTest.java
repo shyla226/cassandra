@@ -103,10 +103,10 @@ public class SinglePartitionSliceCommandTest
 
         UntypedResultSet rows;
 
-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s, i, v) VALUES ('k', 's', 0, 'v')").blockingFirst();
-        QueryProcessor.executeInternal("DELETE v FROM ks.tbl WHERE k='k' AND i=0").blockingFirst();
-        QueryProcessor.executeInternal("DELETE FROM ks.tbl WHERE k='k' AND i=0").blockingFirst();
-        rows = QueryProcessor.executeInternal("SELECT * FROM ks.tbl WHERE k='k' AND i=0").blockingFirst();
+        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s, i, v) VALUES ('k', 's', 0, 'v')").blockingGet();
+        QueryProcessor.executeInternal("DELETE v FROM ks.tbl WHERE k='k' AND i=0").blockingGet();
+        QueryProcessor.executeInternal("DELETE FROM ks.tbl WHERE k='k' AND i=0").blockingGet();
+        rows = QueryProcessor.executeInternal("SELECT * FROM ks.tbl WHERE k='k' AND i=0").blockingGet();
 
         for (UntypedResultSet.Row row: rows)
         {
@@ -170,8 +170,8 @@ public class SinglePartitionSliceCommandTest
     {
         DecoratedKey key = cfm.decorateKey(ByteBufferUtil.bytes("k1"));
 
-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s) VALUES ('k1', 's')").blockingFirst();
-        Assert.assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").blockingFirst().isEmpty());
+        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s) VALUES ('k1', 's')").blockingGet();
+        Assert.assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").blockingGet().isEmpty());
 
         ColumnFilter columnFilter = ColumnFilter.selection(PartitionColumns.of(s));
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.NONE, false);

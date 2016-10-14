@@ -31,11 +31,11 @@ import java.util.Optional;
 import java.util.SortedSet;
 
 import com.google.common.base.MoreObjects;
+import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Observable;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -249,7 +249,7 @@ public class SelectStatement implements CQLStatement
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
-    public Observable<ResultMessage.Rows> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
@@ -288,13 +288,13 @@ public class SelectStatement implements CQLStatement
         return getSliceCommands(options, limit, nowInSec);
     }
 
-    private Observable<ResultMessage.Rows> execute(ReadQuery query,
-                                       QueryOptions options,
-                                       QueryState state,
-                                       int nowInSec,
-                                       int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<ResultMessage.Rows> execute(ReadQuery query,
+                                               QueryOptions options,
+                                               QueryState state,
+                                               int nowInSec,
+                                               int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        Observable<PartitionIterator> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime);
+        Single<PartitionIterator> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime);
         return processResults(data, options, nowInSec, userLimit);
     }
 
@@ -393,7 +393,7 @@ public class SelectStatement implements CQLStatement
         ResultMessage.Rows msg;
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
-            msg = processResults(Observable.just(page), options, nowInSec, userLimit).blockingSingle();
+            msg = processResults(Single.just(page), options, nowInSec, userLimit).blockingGet();
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
@@ -410,20 +410,20 @@ public class SelectStatement implements CQLStatement
         ClientWarn.instance.warn(msg);
     }
 
-    private Observable<ResultMessage.Rows> processResults(Observable<PartitionIterator> partitions,
-                                              QueryOptions options,
-                                              int nowInSec,
-                                              int userLimit) throws RequestValidationException
+    private Single<ResultMessage.Rows> processResults(Single<PartitionIterator> partitions,
+                                                      QueryOptions options,
+                                                      int nowInSec,
+                                                      int userLimit) throws RequestValidationException
     {
         return process(partitions, options, nowInSec, userLimit).map(ResultMessage.Rows::new);
     }
 
-    public Observable<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
         return executeInternal(state, options, FBUtilities.nowInSeconds(), System.nanoTime());
     }
 
-    public Observable<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
@@ -436,7 +436,7 @@ public class SelectStatement implements CQLStatement
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
-                    return Observable.just(new ResultMessage.Rows(processSync(data, options, nowInSec, userLimit)));
+                    return Single.just(new ResultMessage.Rows(processSync(data, options, nowInSec, userLimit)));
                 }
             }
             else
@@ -444,7 +444,7 @@ public class SelectStatement implements CQLStatement
                 QueryPager pager = getPager(query, options);
 
                 // TODO rx-ify
-                return Observable.just(execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime));
+                return Single.just(execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime));
             }
         }
     }
@@ -461,7 +461,7 @@ public class SelectStatement implements CQLStatement
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
     {
-        return process(Observable.just(partitions), QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT)).blockingSingle();
+        return process(Single.just(partitions), QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT)).blockingGet();
     }
 
     public String keyspace()
@@ -763,25 +763,26 @@ public class SelectStatement implements CQLStatement
         return filter;
     }
 
-    private Observable<ResultSet> process(final Observable<PartitionIterator> partitions,
-                              QueryOptions options,
-                              int nowInSec,
-                              int userLimit) throws InvalidRequestException
+    private Single<ResultSet> process(final Single<PartitionIterator> partitions,
+                                      QueryOptions options,
+                                      int nowInSec,
+                                      int userLimit) throws InvalidRequestException
     {
         final Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
 
         return partitions.map(partitionIterator -> {
+            // TODO more efficient way to do this?
             partitionIterator.forEachRemaining(rowIterator -> {
                 processPartition(rowIterator, options, result, nowInSec);
                 rowIterator.close();
             });
             return 1;
-        }).last(0).map(v -> {
+        }).map(v -> {
             ResultSet cqlRows = result.build();
             orderResults(cqlRows);
             cqlRows.trim(userLimit);
             return cqlRows;
-        }).toObservable().defaultIfEmpty(result.build());
+        });
     }
 
     private ResultSet processSync(PartitionIterator partitions,

@@ -286,7 +286,7 @@ public final class SystemDistributedKeyspace
     {
         String buildReq = "DELETE FROM %s.%s WHERE keyspace_name = ? AND view_name = ?";
         // TODO make async?
-        QueryProcessor.executeInternal(String.format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName).blockingFirst();
+        QueryProcessor.executeInternal(String.format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName).blockingGet();
         forceBlockingFlush(VIEW_BUILD_STATUS);
     }
 

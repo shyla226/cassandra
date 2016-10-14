@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Map;
 
+import io.reactivex.Single;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -105,7 +106,7 @@ public class MessagePayloadTest extends CQLTester
     {
         try
         {
-            QueryProcessor.executeOnceInternal("DROP TABLE " + KEYSPACE + ".atable").blockingFirst();
+            QueryProcessor.executeOnceInternal("DROP TABLE " + KEYSPACE + ".atable").blockingGet();
         }
         catch (Throwable t)
         {
@@ -299,14 +300,14 @@ public class MessagePayloadTest extends CQLTester
             return QueryProcessor.instance.getPreparedForThrift(id);
         }
 
-        public Observable<ResultMessage.Prepared> prepare(String query,
-                                                          QueryState state,
-                                                          Map<String, ByteBuffer> customPayload)
-                                                          throws RequestValidationException
+        public Single<ResultMessage.Prepared> prepare(String query,
+                                                      QueryState state,
+                                                      Map<String, ByteBuffer> customPayload)
+        throws RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            Observable<ResultMessage.Prepared> result = QueryProcessor.instance.prepare(query, state, customPayload);
+            Single<ResultMessage.Prepared> result = QueryProcessor.instance.prepare(query, state, customPayload);
             if (customPayload != null)
             {
                 result.map(prepared -> {
@@ -318,12 +319,12 @@ public class MessagePayloadTest extends CQLTester
             return result;
         }
 
-        public Observable<ResultMessage> process(String query,
-                                                 QueryState state,
-                                                 QueryOptions options,
-                                                 Map<String, ByteBuffer> customPayload,
-                                                 long queryStartNanoTime)
-                                            throws RequestExecutionException, RequestValidationException
+        public Single<ResultMessage> process(String query,
+                                             QueryState state,
+                                             QueryOptions options,
+                                             Map<String, ByteBuffer> customPayload,
+                                             long queryStartNanoTime)
+        throws RequestExecutionException, RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
@@ -340,12 +341,12 @@ public class MessagePayloadTest extends CQLTester
 
         }
 
-        public Observable<ResultMessage> processBatch(BatchStatement statement,
-                                          QueryState state,
-                                          BatchQueryOptions options,
-                                          Map<String, ByteBuffer> customPayload,
-                                          long queryStartNanoTime)
-                                                  throws RequestExecutionException, RequestValidationException
+        public Single<ResultMessage> processBatch(BatchStatement statement,
+                                                  QueryState state,
+                                                  BatchQueryOptions options,
+                                                  Map<String, ByteBuffer> customPayload,
+                                                  long queryStartNanoTime)
+                throws RequestExecutionException, RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
@@ -361,12 +362,12 @@ public class MessagePayloadTest extends CQLTester
                                           });
         }
 
-        public Observable<ResultMessage> processPrepared(CQLStatement statement,
-                                             QueryState state,
-                                             QueryOptions options,
-                                             Map<String, ByteBuffer> customPayload,
-                                             long queryStartNanoTime)
-                                                    throws RequestExecutionException, RequestValidationException
+        public Single<ResultMessage> processPrepared(CQLStatement statement,
+                                                     QueryState state,
+                                                     QueryOptions options,
+                                                     Map<String, ByteBuffer> customPayload,
+                                                     long queryStartNanoTime)
+        throws RequestExecutionException, RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;

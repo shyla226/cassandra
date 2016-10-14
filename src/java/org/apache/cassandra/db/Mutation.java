@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
+import io.reactivex.Single;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.config.CFMetaData;
@@ -206,20 +207,20 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    private io.reactivex.Observable<Integer> applyAsync(boolean durableWrites)
+    private Single<Integer> applyAsync(boolean durableWrites)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
         return ks.apply(this, durableWrites);
     }
 
-    public io.reactivex.Observable<Integer> applyAsync()
+    public Single<Integer> applyAsync()
     {
         return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
     }
 
     public void apply(boolean durableWrites)
     {
-        applyAsync(durableWrites).blockingLast();
+        applyAsync(durableWrites).blockingGet();
     }
 
     /*

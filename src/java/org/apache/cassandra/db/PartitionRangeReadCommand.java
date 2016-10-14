@@ -24,7 +24,7 @@ import java.util.Optional;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.*;
@@ -185,9 +185,9 @@ public class PartitionRangeReadCommand extends ReadCommand
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+    public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
     {
-        return Observable.just(StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime));
+        return Single.just(StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime));
     }
 
     public QueryPager getPager(PagingState pagingState, int protocolVersion)

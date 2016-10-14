@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
+import io.reactivex.Single;
 import org.apache.commons.lang3.tuple.Pair;
 
 import io.reactivex.Observable;
@@ -371,7 +372,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               clusteringIndexFilter);
     }
 
-    public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+    public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
     {
         return StorageProxy.read(Group.one(this), consistency, clientState, queryStartNanoTime);
     }
@@ -847,7 +848,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 StageManager.getStage(Stage.MUTATION).execute(() -> {
                     // skipping commitlog and index updates is fine since we're just de-fragmenting existing data
                     // TODO make this async
-                    Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false).blockingNext();
+                    Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false).blockingGet();
                 });
             }
         }
@@ -1012,7 +1013,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             return new Group(Collections.singletonList(command), command.limits());
         }
 
-        public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+        public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
         {
             return StorageProxy.read(this, consistency, clientState, queryStartNanoTime);
         }

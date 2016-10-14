@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.RoleOptions;
@@ -68,15 +68,15 @@ public class CreateRoleStatement extends AuthenticationStatement
             throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
     }
 
-    public Observable<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException
     {
         // not rejected in validate()
         if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return Observable.empty();
+            return Single.just(new ResultMessage.Void());
 
         DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
         grantPermissionsToCreator(state);
-        return Observable.just(new ResultMessage.Void());
+        return Single.just(new ResultMessage.Void());
     }
 
     /**

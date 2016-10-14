@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -78,7 +78,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
     {
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Collection<Function> olds = Schema.instance.getFunctions(functionName);
 

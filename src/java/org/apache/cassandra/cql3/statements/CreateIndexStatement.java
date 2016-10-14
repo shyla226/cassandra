@@ -24,7 +24,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import io.reactivex.*;
-import io.reactivex.Observable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -182,7 +181,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
                 throw new InvalidRequestException("Duplicate column " + target.column + " in index target list");
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), columnFamily()).copy();
         List<IndexTarget> targets = new ArrayList<>(rawTargets.size());

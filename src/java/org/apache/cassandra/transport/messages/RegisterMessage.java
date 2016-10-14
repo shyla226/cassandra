@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Connection;
@@ -68,7 +68,7 @@ public class RegisterMessage extends Message.Request
         this.eventTypes = eventTypes;
     }
 
-    public Observable<Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         assert connection instanceof ServerConnection;
         Connection.Tracker tracker = connection.getTracker();
@@ -79,7 +79,7 @@ public class RegisterMessage extends Message.Request
                 throw new ProtocolException("Event " + type.name() + " not valid for protocol version " + connection.getVersion());
             ((Server.ConnectionTracker) tracker).register(type, connection().channel());
         }
-        return Observable.just(new ReadyMessage());
+        return Single.just(new ReadyMessage());
     }
 
     @Override

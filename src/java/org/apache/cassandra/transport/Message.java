@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
+import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +48,6 @@ import io.netty.channel.EventLoop;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
-import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
@@ -233,7 +233,7 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        public abstract Observable<? extends Response> execute(QueryState queryState, long queryStartNanoTime);
+        public abstract Single<? extends Response> execute(QueryState queryState, long queryStartNanoTime);
 
         public void setTracingRequested()
         {
@@ -610,9 +610,12 @@ public abstract class Message
             logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
             request.execute(qstate, queryStartNanoTime)
-                   .observeOn(NettyRxScheduler.instance())
+
+                    // TODO evaluate the performance impact of this, we shouldn't need it if the PPC requests are to the correct port
+                   // .observeOn(NettyRxScheduler.instance())
+
                    .subscribe(
-                    // onNext
+                    // onSuccess
                     response -> {
                         response.setStreamId(request.getStreamId());
 
@@ -622,6 +625,7 @@ public abstract class Message
 
                         logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                        ClientWarn.instance.resetWarnings();
                     },
 
                     // onError
@@ -630,10 +634,8 @@ public abstract class Message
                         UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
                         Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                    },
-
-                    // onComplete
-                    ClientWarn.instance::resetWarnings
+                        ClientWarn.instance.resetWarnings();
+                    }
             );
         }
 

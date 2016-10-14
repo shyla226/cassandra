@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -54,13 +54,13 @@ public class UseStatement extends ParsedStatement implements CQLStatement
     {
     }
 
-    public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException
     {
         state.getClientState().setKeyspace(keyspace);
-        return Observable.just(new ResultMessage.SetKeyspace(keyspace));
+        return Single.just(new ResultMessage.SetKeyspace(keyspace));
     }
 
-    public Observable<ResultMessage> executeInternal(QueryState state, QueryOptions options) throws InvalidRequestException
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws InvalidRequestException
     {
         // In production, internal queries are exclusively on the system keyspace and 'use' is thus useless
         // but for some unit tests we need to set the keyspace (e.g. for tests with DROP INDEX)

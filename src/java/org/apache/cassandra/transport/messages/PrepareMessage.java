@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
@@ -60,7 +61,7 @@ public class PrepareMessage extends Message.Request
         this.query = query;
     }
 
-    public Observable<? extends Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -77,7 +78,7 @@ public class PrepareMessage extends Message.Request
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
             }
 
-            Observable<ResultMessage.Prepared> observable = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
+            Single<ResultMessage.Prepared> observable = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
 
             if (tracingId == null)
                 return observable;
@@ -91,7 +92,7 @@ public class PrepareMessage extends Message.Request
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return Observable.just(ErrorMessage.fromException(e));
+            return Single.just(ErrorMessage.fromException(e));
         }
         finally
         {

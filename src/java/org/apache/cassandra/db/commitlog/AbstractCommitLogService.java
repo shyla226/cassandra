@@ -157,12 +157,12 @@ public abstract class AbstractCommitLogService
     /**
      * Block for @param alloc to be sync'd as necessary, and handle bookkeeping
      */
-    public Observable<Long> finishWriteFor(Allocation alloc)
+    public Single<Long> finishWriteFor(Allocation alloc)
     {
-        return maybeWaitForSync(alloc).doOnTerminate(written::incrementAndGet);
+        return maybeWaitForSync(alloc).doOnSuccess(v -> written.incrementAndGet());
     }
 
-    protected abstract Observable<Long> maybeWaitForSync(Allocation alloc);
+    protected abstract Single<Long> maybeWaitForSync(Allocation alloc);
 
     /**
      * Request an additional sync cycle without blocking.
@@ -191,9 +191,9 @@ public abstract class AbstractCommitLogService
         awaitSyncAt(requestTime);
     }
 
-    Observable<Long> awaitSyncAt(long syncTime)
+    Single<Long> awaitSyncAt(long syncTime)
     {
-        return syncTimePublisher.takeFirst(v -> v >= syncTime);
+        return syncTimePublisher.filter(v -> v >= syncTime).first(0L);
     }
 
     public void awaitTermination() throws InterruptedException

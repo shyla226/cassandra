@@ -91,7 +91,7 @@ public final class LegacySchemaMigrator
         keyspaces.forEach(LegacySchemaMigrator::migrateBuiltIndexesForKeyspace);
 
         // flush the new tables before truncating the old ones
-        SchemaKeyspace.flush().blockingFirst();
+        SchemaKeyspace.flush().blockingGet();
 
         // truncate the original tables (will be snapshotted now, and will have been snapshotted by pre-flight checks)
         logger.info("Truncating legacy schema tables");
@@ -1015,7 +1015,7 @@ public final class LegacySchemaMigrator
     private static UntypedResultSet query(String query, Object... values)
     {
         // TODO make async?
-        return QueryProcessor.executeOnceInternal(query, values).blockingFirst();
+        return QueryProcessor.executeOnceInternal(query, values).blockingGet();
     }
 
     private static AbstractType<?> parseType(String str)

@@ -22,6 +22,7 @@ import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.AuthenticationException;
@@ -72,7 +73,7 @@ public class CredentialsMessage extends Message.Request
         this.credentials = credentials;
     }
 
-    public Observable<Message.Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -84,10 +85,10 @@ public class CredentialsMessage extends Message.Request
         {
             AuthMetrics.instance.markFailure();
 
-            return Observable.just(ErrorMessage.fromException(e));
+            return Single.just(ErrorMessage.fromException(e));
         }
 
-        return Observable.just(new ReadyMessage());
+        return Single.just(new ReadyMessage());
     }
 
     @Override

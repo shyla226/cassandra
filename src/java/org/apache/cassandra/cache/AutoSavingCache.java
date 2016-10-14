@@ -348,7 +348,7 @@ public class AutoSavingCache<K extends CacheKey, V> extends InstrumentingCache<K
                 UUID schemaVersion = Schema.instance.getVersion();
                 if (schemaVersion == null)
                 {
-                    Schema.instance.updateVersion().blockingFirst();
+                    Schema.instance.updateVersion().blockingGet();
                     schemaVersion = Schema.instance.getVersion();
                 }
                 writer.writeLong(schemaVersion.getMostSignificantBits());

@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
 import io.reactivex.Scheduler;
+import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
@@ -200,7 +201,7 @@ public abstract class AbstractReadExecutor
      * wait for an answer.  Blocks until success or timeout, so it is caller's
      * responsibility to call maybeTryAdditionalReplicas first.
      */
-    public Observable<PartitionIterator> get()
+    public Single<PartitionIterator> get()
     {
         return handler.get();
     }

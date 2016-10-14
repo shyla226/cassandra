@@ -21,7 +21,7 @@ package org.apache.cassandra.service;
 import java.net.InetAddress;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
@@ -71,7 +71,7 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         wrapped.assureSufficientLiveNodes();
     }
 
-    public Observable<ResultMessage.Void> get() throws WriteTimeoutException, WriteFailureException
+    public Single<ResultMessage.Void> get() throws WriteTimeoutException, WriteFailureException
     {
         return wrapped.get();
     }
