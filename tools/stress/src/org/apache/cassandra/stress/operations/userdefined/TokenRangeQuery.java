@@ -153,7 +153,7 @@ public class TokenRangeQuery extends Operation
             if (state.pagingState != null)
                 statement.setPagingState(state.pagingState);
 
-            results = client.getSession().execute(statement);
+            results = client.execute(statement);
             state.pagingState = results.getExecutionInfo().getPagingState();
 
             int remaining = results.getAvailableWithoutFetching();

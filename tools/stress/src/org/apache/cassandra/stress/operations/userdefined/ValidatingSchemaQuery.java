@@ -114,7 +114,7 @@ public class ValidatingSchemaQuery extends PartitionOperation
 
         public boolean run() throws Exception
         {
-            ResultSet rs = client.getSession().execute(bind(statementIndex));
+            ResultSet rs = client.execute(bind(statementIndex));
             int[] valueIndex = new int[rs.getColumnDefinitions().size()];
             {
                 int i = 0;

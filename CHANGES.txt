@@ -1,4 +1,5 @@
 DSE 5.1.0
+ * Added show-queries, query-log-file and no-progress log options to cassandra-stress (APOLLO-41)
  * Allow large partition generation in cassandra-stress user mode (APOLLO-35)
  * Optimize VIntCoding and BufferedDataOutputStreamPlus (APOLLO-49)
  * Improve metrics and reduce overhead under contention (APOLLO-81)

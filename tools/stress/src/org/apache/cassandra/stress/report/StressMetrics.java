@@ -68,6 +68,8 @@ public class StressMetrics implements MeasurementSink
     private volatile boolean stop = false;
     private volatile boolean cancelled = false;
 
+    private final boolean printProgress;
+
 
     // collected data for intervals and summary
     private final Map<String, TimingInterval> opTypeToCurrentTimingInterval = new TreeMap<>();
@@ -124,6 +126,7 @@ public class StressMetrics implements MeasurementSink
             reportingLoop(logIntervalMillis);
         });
         thread.setName("StressMetrics");
+        printProgress = !settings.log.noProgress;
     }
     public void start()
     {
@@ -246,7 +249,7 @@ public class StressMetrics implements MeasurementSink
             {
                 final String opName = type.getKey();
                 final TimingInterval opInterval = type.getValue();
-                if (logPerOpSummaryLine)
+                if (logPerOpSummaryLine && printProgress)
                 {
                     printRow("", opName, opInterval, opTypeToSummaryTimingInterval.get(opName), gcStats, rowRateUncertainty, output);
                 }
@@ -254,7 +257,11 @@ public class StressMetrics implements MeasurementSink
                 opInterval.reset();
             }
 
-            printRow("", "total", totalCurrentInterval, totalSummaryInterval, gcStats, rowRateUncertainty, output);
+            if (printProgress)
+            {
+                printRow("", "total", totalCurrentInterval, totalSummaryInterval, gcStats, rowRateUncertainty, output);
+            }
+
             totalCurrentInterval.reset();
         }
     }
