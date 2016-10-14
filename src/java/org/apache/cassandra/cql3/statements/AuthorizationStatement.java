@@ -18,7 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -43,18 +43,18 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
         return 0;
     }
 
-    public Observable<ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         return execute(state.getClientState());
     }
 
-    public abstract Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException;
+    public abstract Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException;
 
-    public Observable<ResultMessage> executeInternal(QueryState state, QueryOptions options)
+    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         // executeInternal is for local query only, thus altering permission doesn't make sense and is not supported
-        return Observable.error(new UnsupportedOperationException());
+        return Single.error(new UnsupportedOperationException());
     }
 
     public static IResource maybeCorrectResource(IResource resource, ClientState state) throws InvalidRequestException

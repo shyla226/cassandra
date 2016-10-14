@@ -19,6 +19,7 @@ package org.apache.cassandra.db.commitlog;
 
 import com.codahale.metrics.Timer;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
@@ -30,21 +31,21 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod());
     }
 
-    protected Observable<Long> maybeWaitForSync(CommitLogSegment.Allocation alloc)
+    protected Single<Long> maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
         long expectedSyncTime = System.nanoTime() - blockWhenSyncLagsNanos;
         Timer.Context timerContext = commitLog.metrics.waitingOnCommit.time();
         if (lastSyncedAt < expectedSyncTime)
         {
             pending.incrementAndGet();
-            return awaitSyncAt(expectedSyncTime).doOnTerminate(() -> {
+            return awaitSyncAt(expectedSyncTime).doOnEvent((timestamp, exc) -> {
                 timerContext.stop();
                 pending.decrementAndGet();
             });
         }
         else
         {
-            return Observable.just(lastSyncedAt);
+            return Single.just(lastSyncedAt);
         }
     }
 }

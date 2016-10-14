@@ -174,7 +174,7 @@ public class DefsTest
         // now read and write to it.
         QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, col, val) VALUES (?, ?, ?)",
                                                      ksName, tableName),
-                                       "key0", "col0", "val0").blockingFirst();
+                                       "key0", "col0", "val0").blockingGet();
 
         // flush to exercise more than just hitting the memtable
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(tableName);
@@ -182,7 +182,7 @@ public class DefsTest
         cfs.forceBlockingFlush();
 
         // and make sure we get out what we put in
-        UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", ksName, tableName)).blockingFirst();
+        UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", ksName, tableName)).blockingGet();
         assertRows(rows, row("key0", "col0", "val0"));
     }
 
@@ -199,7 +199,7 @@ public class DefsTest
         for (int i = 0; i < 100; i++)
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
                                                          KEYSPACE1, TABLE1),
-                                           "dropCf", "col" + i, "anyvalue").blockingFirst();
+                                           "dropCf", "col" + i, "anyvalue").blockingGet();
         ColumnFamilyStore store = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
         assertNotNull(store);
         store.forceBlockingFlush();
@@ -215,7 +215,7 @@ public class DefsTest
         {
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
                                                          KEYSPACE1, TABLE1),
-                                           "dropCf", "col0", "anyvalue").blockingFirst();
+                                           "dropCf", "col0", "anyvalue").blockingGet();
         }
         catch (Throwable th)
         {
@@ -248,12 +248,12 @@ public class DefsTest
 
         // test reads and writes.
         QueryProcessor.executeInternal("INSERT INTO newkeyspace1.newstandard1 (key, col, val) VALUES (?, ?, ?)",
-                                       "key0", "col0", "val0").blockingFirst();
+                                       "key0", "col0", "val0").blockingGet();
         ColumnFamilyStore store = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
         assertNotNull(store);
         store.forceBlockingFlush();
 
-        UntypedResultSet rows = QueryProcessor.executeInternal("SELECT * FROM newkeyspace1.newstandard1").blockingFirst();
+        UntypedResultSet rows = QueryProcessor.executeInternal("SELECT * FROM newkeyspace1.newstandard1").blockingGet();
         assertRows(rows, row("key0", "col0", "val0"));
     }
 
@@ -270,7 +270,7 @@ public class DefsTest
         for (int i = 0; i < 100; i++)
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
                                                          KEYSPACE1, TABLE2),
-                                           "dropKs", "col" + i, "anyvalue").blockingFirst();
+                                           "dropKs", "col" + i, "anyvalue").blockingGet();
         ColumnFamilyStore cfs = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
         assertNotNull(cfs);
         cfs.forceBlockingFlush();
@@ -286,7 +286,7 @@ public class DefsTest
         {
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
                                                          KEYSPACE1, TABLE2),
-                                           "dropKs", "col0", "anyvalue").blockingFirst();
+                                           "dropKs", "col0", "anyvalue").blockingGet();
         }
         catch (Throwable th)
         {
@@ -320,7 +320,7 @@ public class DefsTest
         for (int i = 0; i < 100; i++)
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, name, val) VALUES (?, ?, ?)",
                                                          KEYSPACE3, TABLE1),
-                                           "dropKs", "col" + i, "anyvalue").blockingFirst();
+                                           "dropKs", "col" + i, "anyvalue").blockingGet();
 
         MigrationManager.announceKeyspaceDrop(ks.name);
 
@@ -350,13 +350,13 @@ public class DefsTest
         // now read and write to it.
         QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (key, col, val) VALUES (?, ?, ?)",
                                                      EMPTY_KEYSPACE, tableName),
-                                       "key0", "col0", "val0").blockingFirst();
+                                       "key0", "col0", "val0").blockingGet();
 
         ColumnFamilyStore cfs = Keyspace.open(newKs.name).getColumnFamilyStore(newCf.cfName);
         assertNotNull(cfs);
         cfs.forceBlockingFlush();
 
-        UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", EMPTY_KEYSPACE, tableName)).blockingFirst();
+        UntypedResultSet rows = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.%s", EMPTY_KEYSPACE, tableName)).blockingGet();
         assertRows(rows, row("key0", "col0", "val0"));
     }
 
@@ -507,7 +507,7 @@ public class DefsTest
                                                     "INSERT INTO %s.%s (key, c1, birthdate, notbirthdate) VALUES (?, ?, ?, ?)",
                                                     KEYSPACE6,
                                                     TABLE1i),
-                                       "key0", "col0", 1L, 1L).blockingFirst();
+                                       "key0", "col0", 1L, 1L).blockingGet();
 
         cfs.forceBlockingFlush();
         ColumnFamilyStore indexCfs = cfs.indexManager.getIndexByName(indexName)

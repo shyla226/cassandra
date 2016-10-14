@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
@@ -345,9 +346,9 @@ public class BatchStatement implements CQLStatement
     }
 
 
-    public Observable<ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
-        return Observable.just(execute(queryState, BatchQueryOptions.withoutPerStatementVariables(options), queryStartNanoTime));
+        return Single.just(execute(queryState, BatchQueryOptions.withoutPerStatementVariables(options), queryStartNanoTime));
     }
 
     public ResultMessage execute(QueryState queryState, BatchQueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
@@ -453,7 +454,7 @@ public class BatchStatement implements CQLStatement
         return Pair.create(casRequest, columnsWithConditions);
     }
 
-    public Observable<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Single<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         if (hasConditions)
             return executeInternalWithConditions(BatchQueryOptions.withoutPerStatementVariables(options), queryState);
@@ -461,24 +462,23 @@ public class BatchStatement implements CQLStatement
         return executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
-    private Observable<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        Observable<Integer> observable = null;
-        for (IMutation mutation : getMutations(BatchQueryOptions.withoutPerStatementVariables(options), true, queryState.getTimestamp(), queryStartNanoTime))
-        {
-            Observable<Integer> singleMutationObservable = mutation.applyAsync();
-            observable = observable == null
-                       ? singleMutationObservable
-                       : observable.mergeWith(singleMutationObservable);
-        }
+        Collection<? extends IMutation> mutations = getMutations(BatchQueryOptions.withoutPerStatementVariables(options), true, queryState.getTimestamp(), queryStartNanoTime);
+        if (mutations.isEmpty())
+            return Single.just(new ResultMessage.Void());
 
-        if (observable == null)
-            return Observable.just(new ResultMessage.Void());
+        List<Single<Integer>> mutationObservables = new ArrayList<>(mutations.size());
+        for (IMutation mutation : mutations)
+            mutationObservables.add(mutation.applyAsync());
 
-        return observable.last(0).map(v -> new ResultMessage.Void()).toObservable();
+        if (mutationObservables.size() == 1)
+            return mutationObservables.get(0).map(v -> new ResultMessage.Void());
+        else
+            return Single.merge(mutationObservables).last(0).map(v -> new ResultMessage.Void());
     }
 
-    private Observable<? extends ResultMessage> executeInternalWithConditions(BatchQueryOptions options, QueryState state) throws RequestExecutionException, RequestValidationException
+    private Single<? extends ResultMessage> executeInternalWithConditions(BatchQueryOptions options, QueryState state) throws RequestExecutionException, RequestValidationException
     {
         Pair<CQL3CasRequest, Set<ColumnDefinition>> p = makeCasRequest(options, state);
         CQL3CasRequest request = p.left;
@@ -490,7 +490,7 @@ public class BatchStatement implements CQLStatement
         // TODO rx-ify
         try (RowIterator result = ModificationStatement.casInternal(request, state))
         {
-            return Observable.just(new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName, tableName, result, columnsWithConditions, true, options.forStatement(0))));
+            return Single.just(new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName, tableName, result, columnsWithConditions, true, options.forStatement(0))));
         }
     }
 

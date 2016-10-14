@@ -622,7 +622,7 @@ public class CommitLogTest
                                  .clustering("bytes")
                                  .add("val", bytes("this is a string"))
                                  .build();
-            CommitLogPosition position = CommitLog.instance.add(rm1).blockingFirst();
+            CommitLogPosition position = CommitLog.instance.add(rm1).blockingGet();
 
             if (i == discardPosition)
                 commitLogPosition = position;

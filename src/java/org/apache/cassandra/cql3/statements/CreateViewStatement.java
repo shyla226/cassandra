@@ -19,7 +19,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
@@ -113,7 +112,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         }
     }
 
-    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         // We need to make sure that:
         //  - primary key includes all columns in base table's primary key
@@ -293,7 +292,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         {
             if (ifNotExists)
                 return null;
-            return Observable.error(e);
+            return Single.error(e);
         }
     }
 

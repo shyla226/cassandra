@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import io.reactivex.Single;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
@@ -118,7 +119,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         return new UserType(name.getKeyspace(), name.getUserTypeName(), columnNames, types, true);
     }
 
-    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         assert ksm != null; // should haven't validate otherwise

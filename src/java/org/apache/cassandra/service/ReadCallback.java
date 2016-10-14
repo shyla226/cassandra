@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import io.reactivex.Single;
+import org.apache.cassandra.db.*;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,11 +39,6 @@ import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.ReadFailureException;
@@ -80,7 +77,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
 
     final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
-    final Observable<PartitionIterator> observable;
+    final Single<PartitionIterator> observable;
 
     /**
      * Constructor when response count has to be calculated and blocked for.
@@ -115,13 +112,12 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     }
 
 
-    private Observable<PartitionIterator> makeObservable()
+    private Single<PartitionIterator> makeObservable()
     {
         return publishSubject
                .timeout(command.getTimeout(), TimeUnit.MILLISECONDS)
-               .firstElement().toObservable()
+               .first(EmptyIterators.partition())
                .onErrorResumeNext(exc -> {
-
                    if (Tracing.isTracing())
                    {
                        String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
@@ -134,13 +130,13 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                    }
 
                    if (exc instanceof TimeoutException)
-                       return Observable.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
+                       return Single.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
 
-                   return Observable.error(exc);
+                   return Single.error(exc);
                });
     }
 
-    public Observable<PartitionIterator> get()
+    public Single<PartitionIterator> get()
     {
         return observable;
     }

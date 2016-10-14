@@ -153,7 +153,7 @@ public class BatchlogManager implements BatchlogManagerMBean
     {
         String query = String.format("SELECT count(*) FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES);
         // TODO make async
-        UntypedResultSet results = executeInternal(query).blockingFirst();
+        UntypedResultSet results = executeInternal(query).blockingGet();
         if (results == null || results.isEmpty())
             return 0;
 
@@ -332,7 +332,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
                 try
                 {
-                    handler.get().blockingFirst();
+                    handler.get().blockingGet();
                 }
                 catch (WriteTimeoutException|WriteFailureException e)
                 {

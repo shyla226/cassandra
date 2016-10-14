@@ -32,6 +32,7 @@ import com.google.common.collect.Maps;
 import io.reactivex.*;
 import io.reactivex.Observable;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -265,7 +266,7 @@ public final class SchemaKeyspace
             String query = String.format("DELETE FROM %s.%s USING TIMESTAMP ? WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, schemaTable);
             // TODO make async?
             for (String systemKeyspace : SchemaConstants.SYSTEM_KEYSPACE_NAMES)
-                executeOnceInternal(query, timestamp, systemKeyspace).blockingFirst();
+                executeOnceInternal(query, timestamp, systemKeyspace).blockingGet();
         }
 
         // (+1 to timestamp to make sure we don't get shadowed by the tombstones we just added)
@@ -278,19 +279,18 @@ public final class SchemaKeyspace
         ALL.forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
-    static Observable<Integer> flush()
+    static Single<Integer> flush()
     {
         if (!Boolean.getBoolean("cassandra.unsafesystem"))
         {
-            List<io.reactivex.Observable<?>> observables = new ArrayList<>(ALL.size());
+            List<Single<?>> observables = new ArrayList<>(ALL.size());
             for (String table : ALL)
-                observables.add(getSchemaCFS(table).forceFlush());
+                observables.add(getSchemaCFS(table).forceFlush().single(CommitLogPosition.NONE));
 
-            return Observable.merge(observables).map(clPosition -> 0).last(0).toObservable();
-            // ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush()));
+            return Single.merge(observables).last(CommitLogPosition.NONE).map(clPosition -> 0);
         }
 
-        return Observable.just(0);
+        return Single.just(0);
     }
 
     /**
@@ -871,7 +871,7 @@ public final class SchemaKeyspace
 
         Keyspaces.Builder keyspaces = org.apache.cassandra.schema.Keyspaces.builder();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query).blockingFirst())
+        for (UntypedResultSet.Row row : query(query).blockingGet())
         {
             String keyspaceName = row.getString("keyspace_name");
             if (!excludedKeyspaceNames.contains(keyspaceName))
@@ -890,7 +890,7 @@ public final class SchemaKeyspace
 
         Keyspaces.Builder keyspaces = org.apache.cassandra.schema.Keyspaces.builder();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, new ArrayList<>(includedKeyspaceNames)).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, new ArrayList<>(includedKeyspaceNames)).blockingGet())
             keyspaces.add(fetchKeyspace(row.getString("keyspace_name")));
         return keyspaces.build();
     }
@@ -910,7 +910,7 @@ public final class SchemaKeyspace
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, KEYSPACES);
 
         // TODO make async?
-        UntypedResultSet.Row row = query(query, keyspaceName).blockingFirst().one();
+        UntypedResultSet.Row row = query(query, keyspaceName).blockingGet().one();
         boolean durableWrites = row.getBoolean(KeyspaceParams.Option.DURABLE_WRITES.toString());
         Map<String, String> replication = row.getFrozenTextMap(KeyspaceParams.Option.REPLICATION.toString());
         return KeyspaceParams.create(durableWrites, replication);
@@ -922,7 +922,7 @@ public final class SchemaKeyspace
 
         Types.RawBuilder types = org.apache.cassandra.schema.Types.rawBuilder(keyspaceName);
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
         {
             String name = row.getString("type_name");
             List<String> fieldNames = row.getFrozenList("field_names", UTF8Type.instance);
@@ -938,7 +938,7 @@ public final class SchemaKeyspace
 
         Tables.Builder tables = org.apache.cassandra.schema.Tables.builder();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             tables.add(fetchTable(keyspaceName, row.getString("table_name"), types));
         return tables.build();
     }
@@ -947,7 +947,7 @@ public final class SchemaKeyspace
     {
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TABLES);
         // TODO make async?
-        UntypedResultSet rows = query(query, keyspaceName, tableName).blockingFirst();
+        UntypedResultSet rows = query(query, keyspaceName, tableName).blockingGet();
         if (rows.isEmpty())
             throw new RuntimeException(String.format("%s:%s not found in the schema definitions keyspace.", keyspaceName, tableName));
         UntypedResultSet.Row row = rows.one();
@@ -1015,7 +1015,7 @@ public final class SchemaKeyspace
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
         List<ColumnDefinition> columns = new ArrayList<>();
         // TODO make async?
-        query(query, keyspace, table).blockingFirst().forEach(row -> columns.add(createColumnFromRow(row, types)));
+        query(query, keyspace, table).blockingGet().forEach(row -> columns.add(createColumnFromRow(row, types)));
         return columns;
     }
 
@@ -1043,7 +1043,7 @@ public final class SchemaKeyspace
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, DROPPED_COLUMNS);
         Map<ByteBuffer, CFMetaData.DroppedColumn> columns = new HashMap<>();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, keyspace, table).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, keyspace, table).blockingGet())
         {
             CFMetaData.DroppedColumn column = createDroppedColumnFromRow(row);
             columns.put(UTF8Type.instance.decompose(column.name), column);
@@ -1070,7 +1070,7 @@ public final class SchemaKeyspace
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, INDEXES);
         Indexes.Builder indexes = org.apache.cassandra.schema.Indexes.builder();
         // TODO make async
-        query(query, keyspace, table).blockingFirst().forEach(row -> indexes.add(createIndexMetadataFromRow(row)));
+        query(query, keyspace, table).blockingGet().forEach(row -> indexes.add(createIndexMetadataFromRow(row)));
         return indexes.build();
     }
 
@@ -1087,7 +1087,7 @@ public final class SchemaKeyspace
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, TRIGGERS);
         Triggers.Builder triggers = org.apache.cassandra.schema.Triggers.builder();
         // TODO make async?
-        query(query, keyspace, table).blockingFirst().forEach(row -> triggers.add(createTriggerFromRow(row)));
+        query(query, keyspace, table).blockingGet().forEach(row -> triggers.add(createTriggerFromRow(row)));
         return triggers.build();
     }
 
@@ -1104,7 +1104,7 @@ public final class SchemaKeyspace
 
         Views.Builder views = org.apache.cassandra.schema.Views.builder();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             views.add(fetchView(keyspaceName, row.getString("view_name"), types));
         return views.build();
     }
@@ -1113,7 +1113,7 @@ public final class SchemaKeyspace
     {
         String query = String.format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND view_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, VIEWS);
         // TODO make async?
-        UntypedResultSet rows = query(query, keyspaceName, viewName).blockingFirst();
+        UntypedResultSet rows = query(query, keyspaceName, viewName).blockingGet();
         if (rows.isEmpty())
             throw new RuntimeException(String.format("%s:%s not found in the schema definitions keyspace.", keyspaceName, viewName));
         UntypedResultSet.Row row = rows.one();
@@ -1164,7 +1164,7 @@ public final class SchemaKeyspace
 
         Functions.Builder functions = org.apache.cassandra.schema.Functions.builder();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             functions.add(createUDFFromRow(row, types));
         return functions.build();
     }
@@ -1226,7 +1226,7 @@ public final class SchemaKeyspace
 
         Functions.Builder aggregates = org.apache.cassandra.schema.Functions.builder();
         // TODO make async?
-        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingFirst())
+        for (UntypedResultSet.Row row : query(query, keyspaceName).blockingGet())
             aggregates.add(createUDAFromRow(row, udfs, types));
         return aggregates.build();
     }
@@ -1260,7 +1260,7 @@ public final class SchemaKeyspace
         }
     }
 
-    private static io.reactivex.Observable<UntypedResultSet> query(String query, Object... variables)
+    private static Single<UntypedResultSet> query(String query, Object... variables)
     {
         return executeInternal(query, variables);
     }
@@ -1277,18 +1277,18 @@ public final class SchemaKeyspace
      *
      * @throws ConfigurationException If one of metadata attributes has invalid value
      */
-    public static synchronized io.reactivex.Observable<Integer> mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
+    public static synchronized Single<Integer> mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
     {
         return mergeSchema(mutations, true);
     }
 
-    public static io.reactivex.Observable<Integer> mergeSchema(Collection<Mutation> mutations)
+    public static Single<Integer> mergeSchema(Collection<Mutation> mutations)
     {
         return mergeSchema(mutations, false);
     }
 
     // TODO need an async lock for this, synchronization doesn't cover what's run in the map/flatMap call
-    public static synchronized io.reactivex.Observable<Integer> mergeSchema(Collection<Mutation> mutations, boolean announce)
+    public static synchronized Single<Integer> mergeSchema(Collection<Mutation> mutations, boolean announce)
     {
         logger.debug("Going to merge schema change");
 
@@ -1302,18 +1302,12 @@ public final class SchemaKeyspace
         Keyspaces before = Schema.instance.getKeyspaces(affectedKeyspaces);
 
         // apply the schema mutations and flush
-        io.reactivex.Observable<Integer> mergedObservable = null;
+        List<Single<Integer>> singles = new ArrayList<>(mutations.size());
         for (Mutation mutation : mutations)
-        {
-            io.reactivex.Observable<Integer> singleMutationObservable = mutation.applyAsync();
-            mergedObservable = mergedObservable == null
-                             ? singleMutationObservable
-                             : mergedObservable.mergeWith(singleMutationObservable);
-        }
+            singles.add(mutation.applyAsync());
 
-        assert mergedObservable != null;
-        return mergedObservable.flatMap(vv ->
-            FLUSH_SCHEMA_TABLES ? flush() : Observable.just(0)
+        return Single.merge(singles).last(0).flatMap(uu ->
+            FLUSH_SCHEMA_TABLES ? flush() : Single.just(0)
         ).flatMap(vv -> {
             // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
             Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
@@ -1352,7 +1346,7 @@ public final class SchemaKeyspace
             if (announce)
                 return Schema.instance.updateVersionAndAnnounce().map(resultSet -> 0);
             else
-                return io.reactivex.Observable.just(0);
+                return Single.just(0);
         });
     }
 

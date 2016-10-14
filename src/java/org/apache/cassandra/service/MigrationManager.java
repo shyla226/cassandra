@@ -24,7 +24,7 @@ import java.util.concurrent.*;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -284,33 +284,33 @@ public class MigrationManager
             listener.onDropAggregate(udf.name().keyspace, udf.name().name, udf.argTypes());
     }
 
-    public static Observable<Integer> announceNewKeyspace(KeyspaceMetadata ksm) throws ConfigurationException
+    public static Single<Integer> announceNewKeyspace(KeyspaceMetadata ksm) throws ConfigurationException
     {
         return announceNewKeyspace(ksm, false);
     }
 
-    public static Observable<Integer> announceNewKeyspace(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceNewKeyspace(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
     {
         return announceNewKeyspace(ksm, FBUtilities.timestampMicros(), announceLocally);
     }
 
-    public static Observable<Integer> announceNewKeyspace(KeyspaceMetadata ksm, long timestamp, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceNewKeyspace(KeyspaceMetadata ksm, long timestamp, boolean announceLocally) throws ConfigurationException
     {
         ksm.validate();
 
         if (Schema.instance.getKSMetaData(ksm.name) != null)
-            return Observable.error(new AlreadyExistsException(ksm.name));
+            return Single.error(new AlreadyExistsException(ksm.name));
 
         logger.info(String.format("Create new Keyspace: %s", ksm));
         return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
     }
 
-    public static Observable<Integer> announceNewColumnFamily(CFMetaData cfm) throws ConfigurationException
+    public static Single<Integer> announceNewColumnFamily(CFMetaData cfm) throws ConfigurationException
     {
         return announceNewColumnFamily(cfm, false);
     }
 
-    public static Observable<Integer> announceNewColumnFamily(CFMetaData cfm, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceNewColumnFamily(CFMetaData cfm, boolean announceLocally) throws ConfigurationException
     {
         return announceNewColumnFamily(cfm, announceLocally, true);
     }
@@ -325,12 +325,12 @@ public class MigrationManager
      * Note that this is only safe for system tables where we know the cfId is fixed and will be the same whatever version
      * of the definition is used.
      */
-    public static Observable<Integer> forceAnnounceNewColumnFamily(CFMetaData cfm) throws ConfigurationException
+    public static Single<Integer> forceAnnounceNewColumnFamily(CFMetaData cfm) throws ConfigurationException
     {
         return announceNewColumnFamily(cfm, false, false);
     }
 
-    private static Observable<Integer> announceNewColumnFamily(CFMetaData cfm, boolean announceLocally, boolean throwOnDuplicate) throws ConfigurationException
+    private static Single<Integer> announceNewColumnFamily(CFMetaData cfm, boolean announceLocally, boolean throwOnDuplicate) throws ConfigurationException
     {
         cfm.validate();
 
@@ -345,7 +345,7 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceNewView(ViewDefinition view, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceNewView(ViewDefinition view, boolean announceLocally) throws ConfigurationException
     {
         view.metadata.validate();
 
@@ -359,32 +359,32 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceNewType(UserType newType, boolean announceLocally)
+    public static Single<Integer> announceNewType(UserType newType, boolean announceLocally)
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(newType.keyspace);
         return announce(SchemaKeyspace.makeCreateTypeMutation(ksm, newType, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceNewFunction(UDFunction udf, boolean announceLocally)
+    public static Single<Integer> announceNewFunction(UDFunction udf, boolean announceLocally)
     {
         logger.info(String.format("Create scalar function '%s'", udf.name()));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeCreateFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceNewAggregate(UDAggregate udf, boolean announceLocally)
+    public static Single<Integer> announceNewAggregate(UDAggregate udf, boolean announceLocally)
     {
         logger.info(String.format("Create aggregate function '%s'", udf.name()));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeCreateAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceKeyspaceUpdate(KeyspaceMetadata ksm) throws ConfigurationException
+    public static Single<Integer> announceKeyspaceUpdate(KeyspaceMetadata ksm) throws ConfigurationException
     {
         return announceKeyspaceUpdate(ksm, false);
     }
 
-    public static Observable<Integer> announceKeyspaceUpdate(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceKeyspaceUpdate(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
     {
         ksm.validate();
 
@@ -396,12 +396,12 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceColumnFamilyUpdate(CFMetaData cfm) throws ConfigurationException
+    public static Single<Integer> announceColumnFamilyUpdate(CFMetaData cfm) throws ConfigurationException
     {
         return announceColumnFamilyUpdate(cfm, false);
     }
 
-    public static Observable<Integer> announceColumnFamilyUpdate(CFMetaData cfm, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceColumnFamilyUpdate(CFMetaData cfm, boolean announceLocally) throws ConfigurationException
     {
         cfm.validate();
 
@@ -416,7 +416,7 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeUpdateTableMutation(ksm, oldCfm, cfm, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceViewUpdate(ViewDefinition view, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceViewUpdate(ViewDefinition view, boolean announceLocally) throws ConfigurationException
     {
         view.metadata.validate();
 
@@ -431,18 +431,18 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeUpdateViewMutation(ksm, oldView, view, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceTypeUpdate(UserType updatedType, boolean announceLocally)
+    public static Single<Integer> announceTypeUpdate(UserType updatedType, boolean announceLocally)
     {
         logger.info(String.format("Update type '%s.%s' to %s", updatedType.keyspace, updatedType.getNameAsString(), updatedType));
         return announceNewType(updatedType, announceLocally);
     }
 
-    public static Observable<Integer> announceKeyspaceDrop(String ksName) throws ConfigurationException
+    public static Single<Integer> announceKeyspaceDrop(String ksName) throws ConfigurationException
     {
         return announceKeyspaceDrop(ksName, false);
     }
 
-    public static Observable<Integer> announceKeyspaceDrop(String ksName, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceKeyspaceDrop(String ksName, boolean announceLocally) throws ConfigurationException
     {
         KeyspaceMetadata oldKsm = Schema.instance.getKSMetaData(ksName);
         if (oldKsm == null)
@@ -452,12 +452,12 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceColumnFamilyDrop(String ksName, String cfName) throws ConfigurationException
+    public static Single<Integer> announceColumnFamilyDrop(String ksName, String cfName) throws ConfigurationException
     {
         return announceColumnFamilyDrop(ksName, cfName, false);
     }
 
-    public static Observable<Integer> announceColumnFamilyDrop(String ksName, String cfName, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceColumnFamilyDrop(String ksName, String cfName, boolean announceLocally) throws ConfigurationException
     {
         CFMetaData oldCfm = Schema.instance.getCFMetaData(ksName, cfName);
         if (oldCfm == null)
@@ -468,7 +468,7 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeDropTableMutation(ksm, oldCfm, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceViewDrop(String ksName, String viewName, boolean announceLocally) throws ConfigurationException
+    public static Single<Integer> announceViewDrop(String ksName, String viewName, boolean announceLocally) throws ConfigurationException
     {
         ViewDefinition view = Schema.instance.getView(ksName, viewName);
         if (view == null)
@@ -479,25 +479,25 @@ public class MigrationManager
         return announce(SchemaKeyspace.makeDropViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceTypeDrop(UserType droppedType)
+    public static Single<Integer> announceTypeDrop(UserType droppedType)
     {
         return announceTypeDrop(droppedType, false);
     }
 
-    public static Observable<Integer> announceTypeDrop(UserType droppedType, boolean announceLocally)
+    public static Single<Integer> announceTypeDrop(UserType droppedType, boolean announceLocally)
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(droppedType.keyspace);
         return announce(SchemaKeyspace.dropTypeFromSchemaMutation(ksm, droppedType, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceFunctionDrop(UDFunction udf, boolean announceLocally)
+    public static Single<Integer> announceFunctionDrop(UDFunction udf, boolean announceLocally)
     {
         logger.info(String.format("Drop scalar function overload '%s' args '%s'", udf.name(), udf.argTypes()));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeDropFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
-    public static Observable<Integer> announceAggregateDrop(UDAggregate udf, boolean announceLocally)
+    public static Single<Integer> announceAggregateDrop(UDAggregate udf, boolean announceLocally)
     {
         logger.info(String.format("Drop aggregate function overload '%s' args '%s'", udf.name(), udf.argTypes()));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
@@ -508,7 +508,7 @@ public class MigrationManager
      * actively announce a new version to active hosts via rpc
      * @param schema The schema mutation to be applied
      */
-    private static Observable<Integer> announce(Mutation.SimpleBuilder schema, boolean announceLocally)
+    private static Single<Integer> announce(Mutation.SimpleBuilder schema, boolean announceLocally)
     {
         List<Mutation> mutations = Collections.singletonList(schema.build());
 
@@ -527,9 +527,9 @@ public class MigrationManager
     }
 
     // Returns a future on the local application of the schema
-    private static Observable<Integer> announce(final Collection<Mutation> schema)
+    private static Single<Integer> announce(final Collection<Mutation> schema)
     {
-        Observable<Integer> observable = SchemaKeyspace.mergeSchemaAndAnnounceVersion(schema);
+        Single<Integer> observable = SchemaKeyspace.mergeSchemaAndAnnounceVersion(schema);
 
         for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
         {

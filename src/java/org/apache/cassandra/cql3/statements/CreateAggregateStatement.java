@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.List;
 
+import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
@@ -208,7 +209,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             throw new InvalidRequestException(String.format("Cannot add aggregate '%s' to non existing keyspace '%s'.", functionName.name, functionName.keyspace));
     }
 
-    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Function old = Schema.instance.findFunction(functionName, argTypes).orElse(null);
         boolean replaced = old != null;

@@ -105,7 +105,7 @@ public class CQLSSTableWriterTest
 
             loadSSTables(writer.getInnermostDirectory(), KS);
 
-            UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace.table1;").blockingFirst();
+            UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace.table1;").blockingGet();
             assertEquals(4, rs.size());
 
             Iterator<UntypedResultSet.Row> iter = rs.iterator();
@@ -297,7 +297,7 @@ public class CQLSSTableWriterTest
 
         loadSSTables(cfs.getDirectories().getDirectoryForNewSSTables(), KS);
 
-        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace2.table2;").blockingFirst();
+        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace2.table2;").blockingGet();
         assertEquals(threads.length * NUMBER_WRITES_IN_RUNNABLE, rs.size());
     }
 
@@ -349,7 +349,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(writer.getInnermostDirectory(), KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingFirst();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
         TypeCodec collectionCodec = UDHelper.codecFor(DataType.CollectionType.frozenList(tuple2Type));
         TypeCodec tuple3Codec = UDHelper.codecFor(tuple3Type);
 
@@ -420,7 +420,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(writer.getInnermostDirectory(), KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingFirst();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
 
         assertEquals(resultSet.size(), 100);
         int cnt = 0;
@@ -511,7 +511,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(writer.getInnermostDirectory(), KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingFirst();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
         Iterator<UntypedResultSet.Row> iter = resultSet.iterator();
         UntypedResultSet.Row r1 = iter.next();
         assertEquals(1, r1.getInt("k"));

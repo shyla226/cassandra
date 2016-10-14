@@ -93,7 +93,7 @@ public class CassandraServer implements Cassandra.Iface
             schedule(DatabaseDescriptor.getReadRpcTimeout());
             try
             {
-                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState, queryStartNanoTime).blockingSingle();
+                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState, queryStartNanoTime).blockingGet();
             }
             finally
             {
@@ -2335,7 +2335,7 @@ public class CassandraServer implements Cassandra.Iface
                                                             QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel),
                                                                                     Collections.<ByteBuffer>emptyList()),
                                                             null,
-                                                            queryStartNanoTime).blockingSingle().toThriftResult();
+                                                            queryStartNanoTime).blockingGet().toThriftResult();
         }
         catch (RequestExecutionException e)
         {
@@ -2367,7 +2367,7 @@ public class CassandraServer implements Cassandra.Iface
         {
             cState.validateLogin();
             // TODO make async?
-            return ClientState.getCQLQueryHandler().prepare(queryString, cState.getQueryState(), null).blockingFirst().toThriftPreparedResult();
+            return ClientState.getCQLQueryHandler().prepare(queryString, cState.getQueryState(), null).blockingGet().toThriftPreparedResult();
         }
         catch (RequestValidationException e)
         {
@@ -2409,7 +2409,7 @@ public class CassandraServer implements Cassandra.Iface
                                                                     cState.getQueryState(),
                                                                     QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel), bindVariables),
                                                                     null,
-                                                                    queryStartNanoTime).blockingSingle().toThriftResult();
+                                                                    queryStartNanoTime).blockingGet().toThriftResult();
         }
         catch (RequestExecutionException e)
         {

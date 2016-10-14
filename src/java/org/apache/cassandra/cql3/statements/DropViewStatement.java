@@ -19,6 +19,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.CFName;
@@ -52,7 +53,7 @@ public class DropViewStatement extends SchemaAlteringStatement
         // validated in findIndexedCf()
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         try
         {
@@ -81,7 +82,7 @@ public class DropViewStatement extends SchemaAlteringStatement
         {
             if (ifExists)
                 return null;
-            return Observable.error(e);
+            return Single.error(e);
         }
     }
 }

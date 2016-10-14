@@ -21,12 +21,13 @@ import java.util.Collection;
 import java.util.UUID;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 
 public interface IMutation
 {
     public void apply();
-    public Observable<Integer> applyAsync();
+    public Single<Integer> applyAsync();
     public String getKeyspaceName();
     public Collection<UUID> getColumnFamilyIds();
     public DecoratedKey key();

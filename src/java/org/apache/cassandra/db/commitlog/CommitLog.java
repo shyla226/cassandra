@@ -34,6 +34,7 @@ import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -248,7 +249,7 @@ public class CommitLog implements CommitLogMBean
      * @param mutation the Mutation to add to the log
      * @throws WriteTimeoutException
      */
-    public Observable<CommitLogPosition> add(Mutation mutation) throws WriteTimeoutException
+    public Single<CommitLogPosition> add(Mutation mutation) throws WriteTimeoutException
     {
         assert mutation != null;
 
@@ -260,7 +261,7 @@ public class CommitLog implements CommitLogMBean
             int totalSize = size + ENTRY_OVERHEAD_SIZE;
             if (totalSize > MAX_MUTATION_SIZE)
             {
-                return Observable.error(
+                return Single.error(
                     new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
                                                                FBUtilities.prettyPrintMemory(totalSize),
                                                                FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
@@ -285,7 +286,7 @@ public class CommitLog implements CommitLogMBean
             }
             catch (IOException e)
             {
-                return Observable.error(new FSWriteError(e, alloc.getSegment().getPath()));
+                return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
             }
             finally
             {
@@ -296,7 +297,7 @@ public class CommitLog implements CommitLogMBean
         }
         catch (IOException e)
         {
-            return Observable.error(new FSWriteError(e, segmentManager.allocatingFrom().getPath()));
+            return Single.error(new FSWriteError(e, segmentManager.allocatingFrom().getPath()));
         }
     }
 

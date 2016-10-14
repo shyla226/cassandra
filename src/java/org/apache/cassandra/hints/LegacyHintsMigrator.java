@@ -126,7 +126,7 @@ public final class LegacyHintsMigrator
         ByteBuffer buffer = ByteBuffer.allocateDirect(256 * 1024);
         String query = String.format("SELECT DISTINCT target_id FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.LEGACY_HINTS);
         //noinspection ConstantConditions
-        QueryProcessor.executeInternal(query).blockingFirst().forEach(row -> migrateLegacyHints(row.getUUID("target_id"), buffer));
+        QueryProcessor.executeInternal(query).blockingGet().forEach(row -> migrateLegacyHints(row.getUUID("target_id"), buffer));
         FileUtils.clean(buffer);
     }
 

@@ -23,7 +23,7 @@ import java.util.List;
 
 import com.google.common.base.Joiner;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.Schema;
@@ -128,7 +128,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
                                                             functionName, functionName, functionName));
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Function old = findFunction();
         if (old == null)

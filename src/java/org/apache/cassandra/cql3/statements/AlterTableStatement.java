@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 
+import io.reactivex.Single;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
@@ -81,7 +82,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public io.reactivex.Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         CFMetaData meta = validateColumnFamily(keyspace(), columnFamily());
         if (meta.isView())
@@ -341,15 +342,15 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
         }
 
-        io.reactivex.Observable<Integer> observable = MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly);
-
+        List<Single<Integer>> singles = new ArrayList<>();
+        singles.add(MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly));
         if (viewUpdates != null)
         {
             for (ViewDefinition viewUpdate : viewUpdates)
-                observable = observable.mergeWith(MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly));
+                singles.add(MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly));
         }
 
-        return observable.last(0).toObservable()
+        return Single.merge(singles).last(0)
                 .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 

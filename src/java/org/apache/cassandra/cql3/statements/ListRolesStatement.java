@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.auth.Permission;
@@ -81,7 +82,7 @@ public class ListRolesStatement extends AuthorizationStatement
     {
     }
 
-    public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
         boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
@@ -106,14 +107,14 @@ public class ListRolesStatement extends AuthorizationStatement
         }
     }
 
-    private Observable<ResultMessage> resultMessage(Set<RoleResource> roles)
+    private Single<ResultMessage> resultMessage(Set<RoleResource> roles)
     {
         if (roles.isEmpty())
-            return Observable.just(new ResultMessage.Void());
+            return Single.just(new ResultMessage.Void());
 
         List<RoleResource> sorted = Lists.newArrayList(roles);
         Collections.sort(sorted);
-        return Observable.just(formatResults(sorted));
+        return Single.just(formatResults(sorted));
     }
 
     // overridden in ListUsersStatement to include legacy metadata

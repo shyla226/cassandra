@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 class BatchCommitLogService extends AbstractCommitLogService
@@ -27,7 +27,7 @@ class BatchCommitLogService extends AbstractCommitLogService
         super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow());
     }
 
-    protected Observable<Long> maybeWaitForSync(CommitLogSegment.Allocation alloc)
+    protected Single<Long> maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
         // TODO Rx-ify
         // wait until record has been safely persisted to disk
@@ -35,6 +35,6 @@ class BatchCommitLogService extends AbstractCommitLogService
         requestExtraSync();
         alloc.awaitDiskSync(commitLog.metrics.waitingOnCommit);
         pending.decrementAndGet();
-        return Observable.just(0L);
+        return Single.just(0L);
     }
 }

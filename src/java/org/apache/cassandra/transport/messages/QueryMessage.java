@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -83,7 +84,7 @@ public class QueryMessage extends Message.Request
         this.options = options;
     }
 
-    public Observable<Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -133,7 +134,7 @@ public class QueryMessage extends Message.Request
             JVMStabilityInspector.inspectThrowable(e);
             if (!((e instanceof RequestValidationException) || (e instanceof RequestExecutionException)))
                 logger.error("Unexpected error during query", e);
-            return Observable.just(ErrorMessage.fromException(e));
+            return Single.just(ErrorMessage.fromException(e));
         }
         finally
         {

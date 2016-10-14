@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,7 +59,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
     {
         CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), columnFamily()).copy();
         Triggers triggers = cfm.getTriggers();

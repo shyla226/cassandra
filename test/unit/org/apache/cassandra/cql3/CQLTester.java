@@ -589,7 +589,7 @@ public abstract class CQLTester
         String currentTable = createTableName();
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
-        QueryProcessor.executeOnceInternal(fullQuery).blockingFirst();
+        QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
     protected void alterTable(String query)
@@ -603,7 +603,7 @@ public abstract class CQLTester
     {
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
-        QueryProcessor.executeOnceInternal(fullQuery).blockingFirst();
+        QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
     protected void dropTable(String query)
@@ -654,7 +654,7 @@ public abstract class CQLTester
     {
         String fullQuery = formatQuery(query);
         logger.info(fullQuery);
-        QueryProcessor.executeOnceInternal(fullQuery).blockingFirst();
+        QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
     protected void dropIndex(String query) throws Throwable
@@ -690,7 +690,7 @@ public abstract class CQLTester
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());
 
-            lastSchemaChangeResult = prepared.statement.executeInternal(queryState, options).blockingFirst();
+            lastSchemaChangeResult = prepared.statement.executeInternal(queryState, options).blockingGet();
         }
         catch (Exception e)
         {
@@ -744,7 +744,7 @@ public abstract class CQLTester
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
     {
-        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls(), false).blockingFirst();
+        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls(), false).blockingGet();
     }
 
     protected UntypedResultSet execute(String query, Object... values) throws Throwable
@@ -761,7 +761,7 @@ public abstract class CQLTester
                 logger.trace("Executing: {} with values {}", query, formatAllValues(values));
             if (reusePrepared)
             {
-                rs = QueryProcessor.executeInternal(query, transformValues(values)).blockingFirst();
+                rs = QueryProcessor.executeInternal(query, transformValues(values)).blockingGet();
 
                 // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
                 // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
@@ -772,7 +772,7 @@ public abstract class CQLTester
             }
             else
             {
-                rs = QueryProcessor.executeOnceInternal(query, transformValues(values)).blockingFirst();
+                rs = QueryProcessor.executeOnceInternal(query, transformValues(values)).blockingGet();
             }
         }
         else
@@ -780,7 +780,7 @@ public abstract class CQLTester
             query = replaceValues(query, values);
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = QueryProcessor.executeOnceInternal(query).blockingFirst();
+            rs = QueryProcessor.executeOnceInternal(query).blockingGet();
         }
         if (rs != null)
         {

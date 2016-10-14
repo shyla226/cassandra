@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -90,7 +91,7 @@ public class ExecuteMessage extends Message.Request
         this.options = options;
     }
 
-    public Observable<Response> execute(QueryState state, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState state, long queryStartNanoTime)
     {
         try
         {
@@ -146,7 +147,7 @@ public class ExecuteMessage extends Message.Request
             // Some custom QueryHandlers are interested by the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
-            Observable<? extends ResultMessage> obs = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
+            Single<? extends ResultMessage> obs = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
             final UUID finalTracingId = tracingId;
             return obs.map(response -> {
                 if (options.skipMetadata() && response instanceof ResultMessage.Rows)
@@ -161,7 +162,7 @@ public class ExecuteMessage extends Message.Request
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return Observable.just(ErrorMessage.fromException(e));
+            return Single.just(ErrorMessage.fromException(e));
         }
         finally
         {

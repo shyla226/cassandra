@@ -39,6 +39,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -813,7 +814,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // gossip snitch infos (local DC and rack)
             gossipSnitchInfo();
             // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
-            Schema.instance.updateVersionAndAnnounce().blockingFirst(); // Ensure we know our own actual Schema UUID in preparation for updates
+            Schema.instance.updateVersionAndAnnounce().blockingGet(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
             BatchlogManager.instance.start();
@@ -1050,10 +1051,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    private Observable<Integer> doAuthSetup()
+    private Single<Integer> doAuthSetup()
     {
         return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
-                .doAfterTerminate(() -> {
+                .doOnEvent((value, exc) -> {
                     DatabaseDescriptor.getRoleManager().setup();
                     DatabaseDescriptor.getAuthenticator().setup();
                     DatabaseDescriptor.getAuthorizer().setup();
@@ -1067,7 +1068,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return authSetupComplete;
     }
 
-    private Observable<Integer> maybeAddKeyspace(KeyspaceMetadata ksm)
+    private Single<Integer> maybeAddKeyspace(KeyspaceMetadata ksm)
     {
         try
         {
@@ -1076,7 +1077,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         catch (AlreadyExistsException e)
         {
             logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
-            return Observable.just(0);
+            return Single.just(0);
         }
     }
 
@@ -1084,7 +1085,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Ensure the schema of a pseudo-system keyspace (a distributed system keyspace: traces, auth and the so-called distributedKeyspace),
      * is up to date with what we expected (creating it if it doesn't exist and updating tables that may have been upgraded).
      */
-    private Observable<Integer> maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
+    private Single<Integer> maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
     {
         // Note that want to deal with the keyspace and its table a bit differently: for the keyspace definition
         // itself, we want to create it if it doesn't exist yet, but if it does exist, we don't want to modify it,
@@ -1095,11 +1096,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         // KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
         // If the keyspace doesn't exist, create it
-        Observable<Integer> observable;
+        Single<Integer> observable;
         if (Schema.instance.getKSMetaData(expected.name) == null)
             observable = maybeAddKeyspace(expected);
         else
-            observable = Observable.just(0);
+            observable = Single.just(0);
 
         return observable.flatMap(v -> {
             KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
@@ -1108,18 +1109,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // There is also the potential for a race, as schema migrations add the bare
             // keyspace into Schema.instance before adding its tables, so double check that
             // all the expected tables are present
-            Observable<Integer> cfObservable = null;
+            List<Single<Integer>> singles = new ArrayList<>();
             for (CFMetaData expectedTable : expected.tables)
             {
                 CFMetaData definedTable = defined.tables.get(expectedTable.cfName).orElse(null);
                 if (definedTable == null || !definedTable.equals(expectedTable))
-                {
-                    Observable<Integer> singleCfObservable = MigrationManager.forceAnnounceNewColumnFamily(expectedTable);
-                    cfObservable = cfObservable == null ? singleCfObservable : cfObservable.mergeWith(singleCfObservable);
-                }
+                    singles.add(MigrationManager.forceAnnounceNewColumnFamily(expectedTable));
             }
 
-            return cfObservable == null ? Observable.just(0) : cfObservable.last(0).toObservable();
+            return singles.isEmpty() ? Single.just(0) : Single.merge(singles).last(0);
         });
     }
 

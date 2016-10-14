@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.exceptions.AuthenticationException;
@@ -72,7 +73,7 @@ public class AuthResponse extends Message.Request
     }
 
     @Override
-    public Observable<Response> execute(QueryState queryState, long queryStartNanoTime)
+    public Single<? extends Response> execute(QueryState queryState, long queryStartNanoTime)
     {
         try
         {
@@ -84,17 +85,17 @@ public class AuthResponse extends Message.Request
                 queryState.getClientState().login(user);
                 AuthMetrics.instance.markSuccess();
                 // authentication is complete, send a ready message to the client
-                return Observable.just(new AuthSuccess(challenge));
+                return Single.just(new AuthSuccess(challenge));
             }
             else
             {
-                return Observable.just(new AuthChallenge(challenge));
+                return Single.just(new AuthChallenge(challenge));
             }
         }
         catch (AuthenticationException e)
         {
             AuthMetrics.instance.markFailure();
-            return Observable.just(ErrorMessage.fromException(e));
+            return Single.just(ErrorMessage.fromException(e));
         }
     }
 }

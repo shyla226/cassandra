@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.util.regex.Pattern;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
@@ -97,7 +98,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
             throw new ConfigurationException("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
     }
 
-    public Observable<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
         try
@@ -109,7 +110,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         {
             if (ifNotExists)
                 return null;
-            return Observable.error(e);
+            return Single.error(e);
         }
     }
 

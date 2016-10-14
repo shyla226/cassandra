@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -42,9 +43,9 @@ public interface ReadQuery
             return ReadExecutionController.empty();
         }
 
-        public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
+        public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
         {
-            return Observable.just(EmptyIterators.partition());
+            return Single.just(EmptyIterators.partition());
         }
 
         public PartitionIterator executeInternal(ReadExecutionController controller)
@@ -84,7 +85,7 @@ public interface ReadQuery
     /**
      * Starts a new read operation.
      * <p>
-     * This must be called before {@link executeInternal} and passed to it to protect the read.
+     * This must be called before {@link #executeInternal} and passed to it to protect the read.
      * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
      * use it in a try-with-ressource construction.
      *
@@ -101,7 +102,7 @@ public interface ReadQuery
      *
      * @return the result of the query.
      */
-    public Observable<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException;
+    public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries (that is, it basically executes the query locally).
@@ -115,7 +116,7 @@ public interface ReadQuery
      * Execute the query locally. This is similar to {@link ReadQuery#executeInternal(ReadExecutionController)}
      * but it returns an unfiltered partition iterator that can be merged later on.
      *
-     * @param controller the {@code ReadExecutionController} protecting the read.
+     * @param executionController the {@code ReadExecutionController} protecting the read.
      * @return the result of the read query.
      */
     public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController);

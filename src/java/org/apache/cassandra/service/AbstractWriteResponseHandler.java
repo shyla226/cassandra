@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import io.reactivex.subjects.BehaviorSubject;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.slf4j.Logger;
@@ -56,7 +57,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     private final long queryStartNanoTime;
 
     final BehaviorSubject<ResultMessage.Void> publishSubject = BehaviorSubject.create();
-    final Observable<ResultMessage.Void> observable;
+    final Single<ResultMessage.Void> observable;
 
     /**
      * @param queryStartNanoTime the time at which the query started
@@ -79,12 +80,12 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     }
 
 
-    public Observable<ResultMessage.Void> get()
+    public Single<ResultMessage.Void> get()
     {
         return observable;
     }
 
-    private Observable<ResultMessage.Void> makeObservable()
+    private Single<ResultMessage.Void> makeObservable()
     {
         long requestTimeout = writeType == WriteType.COUNTER
                             ? DatabaseDescriptor.getCounterWriteRpcTimeout()
@@ -94,7 +95,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         return publishSubject
             .timeout(timeout, TimeUnit.NANOSECONDS)
-            .first(0).toObservable()
+            .first(new ResultMessage.Void())
             .onErrorResumeNext(exc -> {
                 if (exc instanceof TimeoutException)
                 {
@@ -106,10 +107,10 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
                     if (acks >= blockedFor)
                         acks = blockedFor - 1;
 
-                    return Observable.error(new WriteTimeoutException(writeType, consistencyLevel, ackCount(), totalBlockFor()));
+                    return Single.error(new WriteTimeoutException(writeType, consistencyLevel, ackCount(), totalBlockFor()));
                 }
 
-                return Observable.error(exc);
+                return Single.error(exc);
             });
     }
 

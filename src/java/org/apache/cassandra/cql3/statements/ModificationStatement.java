@@ -32,6 +32,7 @@ import java.util.SortedSet;
 import java.util.UUID;
 
 import com.google.common.collect.Iterables;
+import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -406,7 +407,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
         }
 
-        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime).blockingSingle())
+        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime).blockingGet())
         {
             return asMaterializedMap(iter);
         }
@@ -430,18 +431,18 @@ public abstract class ModificationStatement implements CQLStatement
         return !conditions.isEmpty();
     }
 
-    public Observable<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         if (options.getConsistency() == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
         return hasConditions()
-             ? Observable.just(executeWithCondition(queryState, options, queryStartNanoTime))
+             ? Single.just(executeWithCondition(queryState, options, queryStartNanoTime))
              : executeWithoutCondition(queryState, options, queryStartNanoTime);
     }
 
-    private Observable<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    private Single<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -454,7 +455,7 @@ public abstract class ModificationStatement implements CQLStatement
         if (!mutations.isEmpty())
             return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
 
-        return Observable.just(new ResultMessage.Void());
+        return Single.just(new ResultMessage.Void());
     }
 
     public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
@@ -583,36 +584,36 @@ public abstract class ModificationStatement implements CQLStatement
         return builder.build();
     }
 
-    public Observable<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Single<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         return hasConditions()
                ? executeInternalWithCondition(queryState, options)
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
-    public Observable<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    public Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        Observable<Integer> mutationObservables = null;
-        for (IMutation mutation : getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime))
-        {
-            Observable<Integer> singleMutationObservable = mutation.applyAsync();
-            mutationObservables = mutationObservables == null
-                                  ? singleMutationObservable
-                                  : mutationObservables.mergeWith(singleMutationObservable);
-        }
-        if (mutationObservables == null)
-            return Observable.just(new ResultMessage.Void());
+        Collection<? extends IMutation> mutations = getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime);
+        if (mutations.isEmpty())
+            return Single.just(new ResultMessage.Void());
 
-        return mutationObservables.last(0).map(v -> new ResultMessage.Void()).toObservable();
+        List<Single<Integer>> mutationObservables = new ArrayList<>(mutations.size());
+        for (IMutation mutation : mutations)
+            mutationObservables.add(mutation.applyAsync());
+
+        if (mutationObservables.size() == 1)
+            return mutationObservables.get(0).map(v -> new ResultMessage.Void());
+        else
+            return Single.merge(mutationObservables).last(0).map(v -> new ResultMessage.Void());
     }
 
-    public Observable<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    public Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         CQL3CasRequest request = makeCasRequest(state, options);
         try (RowIterator result = casInternal(request, state))
         {
             // TODO rx-ify
-            return Observable.just(new ResultMessage.Rows(buildCasResultSet(result, options)));
+            return Single.just(new ResultMessage.Rows(buildCasResultSet(result, options)));
         }
     }
 

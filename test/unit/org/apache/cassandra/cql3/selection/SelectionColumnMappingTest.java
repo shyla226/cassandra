@@ -23,6 +23,7 @@ package org.apache.cassandra.cql3.selection;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -487,8 +488,8 @@ public class SelectionColumnMappingTest extends CQLTester
     private void checkExecution(SelectStatement statement, List<ColumnSpecification> expectedResultColumns)
     throws RequestExecutionException, RequestValidationException
     {
-        UntypedResultSet rs = UntypedResultSet.create(statement.executeInternal(QueryState.forInternalCalls(),
-                                                                                QueryOptions.DEFAULT).blockingFirst().result);
+        ResultMessage.Rows result = (ResultMessage.Rows) statement.executeInternal(QueryState.forInternalCalls(), QueryOptions.DEFAULT).blockingGet();
+        UntypedResultSet rs = UntypedResultSet.create(result.result);
 
         assertEquals(expectedResultColumns, rs.one().getColumns());
     }
