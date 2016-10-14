@@ -447,9 +447,9 @@ public class Keyspace
      * @param isClReplay     true if caller is the commitlog replayer
      */
     public Single<Integer> apply(final Mutation mutation,
-                                                            final boolean writeCommitLog,
-                                                            boolean updateIndexes,
-                                                            boolean isClReplay)
+                                 final boolean writeCommitLog,
+                                 boolean updateIndexes,
+                                 boolean isClReplay)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return io.reactivex.Single.error(new RuntimeException("Testing write failures"));
@@ -458,9 +458,6 @@ public class Keyspace
 
         // TODO support MVs
         assert !requiresViewUpdate;
-
-        // TODO just for debugging
-        String cfsString = mutation.getPartitionUpdates().stream().map(upd -> columnFamilyStores.get(upd.metadata().cfId)).map(Object::toString).collect(Collectors.joining(", ", "[", "]"));
 
         // Lock[] locks = null;
         // final CompletableFuture<?> mark = future == null ? new CompletableFuture<>() : future;
