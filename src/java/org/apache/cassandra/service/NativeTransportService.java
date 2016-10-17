@@ -91,7 +91,7 @@ public class NativeTransportService
 
         if (useEpoll())
         {
-            workerGroup = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
+            workerGroup = new EpollEventLoopGroup(NUM_NETTY_THREADS);
             logger.info("Netty using native Epoll event loop");
         }
         else
