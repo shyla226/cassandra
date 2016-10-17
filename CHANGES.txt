@@ -6,7 +6,7 @@ Merged from 4.0:
  * Reject invalid replication settings when creating or altering a keyspace (CASSANDRA-12681)
 
 
-DSE 5.1.0:
+DSE 5.1.0
  * Insert default superuser role with fixed timestamp (APOLLO-18)
 Merged from 3.x:
  * Improve sum aggregate functions (CASSANDRA-12417)
