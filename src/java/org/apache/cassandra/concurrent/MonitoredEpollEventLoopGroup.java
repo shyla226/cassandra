@@ -302,7 +302,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 if (queue == null)
                     queue = externalQueue;
 
-                if (!queue.relaxedOffer(task))
+                if (!queue.offer(task))
                     throw new RuntimeException("Backpressure");
             }
             else
