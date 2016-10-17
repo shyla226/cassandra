@@ -195,7 +195,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.threadOffset = threadOffset;
 
-            this.externalQueue = new MpscArrayQueue<>(1073741824);
+            this.externalQueue = new MpscChunkedArrayQueue<>(1024, 1073741824, true);
 
             this.incomingQueues = new MessagePassingQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
