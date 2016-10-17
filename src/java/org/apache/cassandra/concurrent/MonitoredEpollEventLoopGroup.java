@@ -45,6 +45,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
 import org.jctools.queues.MpscChunkedArrayQueue;
+import org.jctools.queues.MpscLinkedQueue8;
 import org.jctools.queues.SpscArrayQueue;
 import org.jctools.queues.SpscLinkedQueue;
 import sun.misc.Contended;
@@ -195,7 +196,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.threadOffset = threadOffset;
 
-            this.externalQueue = new MpscChunkedArrayQueue<>(1024, 1073741824, true);
+            this.externalQueue = new MpscLinkedQueue8<>();
 
             this.incomingQueues = new MessagePassingQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
