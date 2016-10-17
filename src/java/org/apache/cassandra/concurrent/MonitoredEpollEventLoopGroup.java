@@ -44,6 +44,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
+import org.jctools.queues.MpscChunkedArrayQueue;
 import org.jctools.queues.SpscArrayQueue;
 import sun.misc.Contended;
 
@@ -193,12 +194,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.threadOffset = threadOffset;
 
-            this.externalQueue = new MpscArrayQueue<>(1 << 16);
+            this.externalQueue = new MpscArrayQueue<>(1073741824);
 
             this.incomingQueues = new MessagePassingQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
             {
-                incomingQueues[i] = new SpscArrayQueue<>(1 << 16);
+                incomingQueues[i] = new SpscArrayQueue<>(1073741824);
             }
 
             this.state = CoreState.WORKING;
@@ -306,11 +307,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             else
             {
                 task.run();
-                return;
             }
-
-
-
         }
 
         int drain()
@@ -379,9 +376,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             int processed = 0;
 
             for (int i = 0; i < incomingQueues.length; i++)
-                processed += incomingQueues[i].drain(Runnable::run, 8);
+                processed += incomingQueues[i].drain(Runnable::run);
 
-            processed += externalQueue.drain(Runnable::run, 8);
+            processed += externalQueue.drain(Runnable::run);
 
             return processed;
         }
@@ -433,7 +430,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         }
 
         @Inline
-        boolean fetchFromDelayedQueue()
+        void fetchFromDelayedQueue()
         {
             long nanoTime = AbstractScheduledEventExecutor.nanoTime();
             Runnable scheduledTask  = pollScheduledTask(nanoTime);
@@ -442,7 +439,6 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 submit(scheduledTask);
                 scheduledTask = pollScheduledTask(nanoTime);
             }
-            return true;
         }
     }
 }
