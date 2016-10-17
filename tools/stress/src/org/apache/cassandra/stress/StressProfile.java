@@ -58,6 +58,7 @@ import org.apache.cassandra.stress.util.ResultLogger;
 import org.apache.cassandra.stress.util.ThriftClient;
 import org.apache.cassandra.thrift.Compression;
 import org.apache.cassandra.thrift.ThriftConversion;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.thrift.TException;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.Constructor;
@@ -84,6 +85,8 @@ public class StressProfile implements Serializable
     transient volatile GeneratorFactory generatorFactory;
 
     transient volatile BatchStatement.Type batchType;
+    transient volatile DistributionFactory maxRowsPerBatch;
+    transient volatile SchemaInsert.PartitionsPerBatch partitionsPerBatch;
     transient volatile DistributionFactory partitions;
     transient volatile RatioDistributionFactory selectchance;
     transient volatile RatioDistributionFactory rowPopulation;
@@ -97,6 +100,32 @@ public class StressProfile implements Serializable
 
     private static final Pattern lowercaseAlphanumeric = Pattern.compile("[a-z0-9_]+");
 
+    private Pair<Double, Double> minMaxBatchSize(PartitionGenerator generator, StressSettings stressSettings)
+    {
+        // Not absolutely accurate if selectchance < 1, but close enough to
+        // guarantee the vast majority of actions occur in these bounds:
+
+        double minPartitionsPerBatch = partitions.get().minValue();
+        double maxPartitionsPerBatch = partitions.get().maxValue();
+        if (partitionsPerBatch == SchemaInsert.PartitionsPerBatch.SINGLE)
+        {
+            minPartitionsPerBatch = maxPartitionsPerBatch = 1;
+        }
+
+        double minBatchSize = selectchance.get().min() * minPartitionsPerBatch * generator.minRowCount *
+            (1d / stressSettings.insert.visits.get().maxValue());
+
+        double maxBatchSize = selectchance.get().max() * maxPartitionsPerBatch * generator.maxRowCount *
+            (1d / stressSettings.insert.visits.get().minValue());
+
+        if (maxRowsPerBatch.get().maxValue() != 0)
+        {
+            minBatchSize = Math.min(maxRowsPerBatch.get().minValue(), minBatchSize);
+            maxBatchSize = Math.max(maxRowsPerBatch.get().maxValue(), maxBatchSize);
+        }
+
+        return Pair.of(minBatchSize, maxBatchSize);
+    }
 
     public void printSettings(ResultLogger out, StressSettings stressSettings)
     {
@@ -127,14 +156,13 @@ public class StressProfile implements Serializable
         }
 
         PartitionGenerator generator = newGenerator(stressSettings);
-        Distribution visits = stressSettings.insert.visits.get();
         SchemaInsert tmp = getInsert(null, generator, null, stressSettings); //just calling this to initialize selectchance and partitions vals for calc below
 
-        double minBatchSize = selectchance.get().min() * partitions.get().minValue() * generator.minRowCount * (1d / visits.maxValue());
-        double maxBatchSize = selectchance.get().max() * partitions.get().maxValue() * generator.maxRowCount * (1d / visits.minValue());
+        Pair<Double, Double> range = minMaxBatchSize(generator, stressSettings);
+
         out.printf("Generating batches with [%d..%d] partitions and [%.0f..%.0f] rows (of [%.0f..%.0f] total rows in the partitions)%n",
                           partitions.get().minValue(), partitions.get().maxValue(),
-                          minBatchSize, maxBatchSize,
+                          range.getLeft(), range.getRight(),
                           partitions.get().minValue() * generator.minRowCount,
                           partitions.get().maxValue() * generator.maxRowCount);
 
@@ -591,26 +619,21 @@ public class StressProfile implements Serializable
                                 : !insert.containsKey("batchtype")
                                   ? BatchStatement.Type.LOGGED
                                   : BatchStatement.Type.valueOf(insert.remove("batchtype"));
+                    maxRowsPerBatch = select(null, "max-rows-per-batch", "fixed(100)", insert, OptionDistribution.BUILDER);
+                    partitionsPerBatch = !insert.containsKey("partitions-per-batch")
+                        ? SchemaInsert.PartitionsPerBatch.SINGLE
+                        : SchemaInsert.PartitionsPerBatch.valueOf(insert.remove("partitions-per-batch"));
+
                     if (!insert.isEmpty())
                         throw new IllegalArgumentException("Unrecognised insert option(s): " + insert);
 
-                    Distribution visits = settings.insert.visits.get();
-                    // these min/max are not absolutely accurate if selectchance < 1, but they're close enough to
-                    // guarantee the vast majority of actions occur in these bounds
-                    double minBatchSize = selectchance.get().min() * partitions.get().minValue() * generator.minRowCount * (1d / visits.maxValue());
-                    double maxBatchSize = selectchance.get().max() * partitions.get().maxValue() * generator.maxRowCount * (1d / visits.minValue());
-
                     if (generator.maxRowCount > 100 * 1000 * 1000)
                         System.err.printf("WARNING: You have defined a schema that permits very large partitions (%.0f max rows (>100M))%n", generator.maxRowCount);
-                    if (batchType == BatchStatement.Type.LOGGED && maxBatchSize > 65535)
-                    {
-                        System.err.printf("ERROR: You have defined a workload that generates batches with more than 65k rows (%.0f), but have required the use of LOGGED batches. There is a 65k row limit on a single batch.%n",
-                                          selectchance.get().max() * partitions.get().maxValue() * generator.maxRowCount);
-                        System.exit(1);
-                    }
+
+                    double maxBatchSize = minMaxBatchSize(generator, settings).getRight();
+
                     if (maxBatchSize > 100000)
-                        System.err.printf("WARNING: You have defined a schema that permits very large batches (%.0f max rows (>100K)). This may OOM this stress client, or the server.%n",
-                                          selectchance.get().max() * partitions.get().maxValue() * generator.maxRowCount);
+                        System.err.printf("WARNING: You have defined a schema that permits very large batches (%.0f max rows (>100K)). This may OOM this stress client, or the server.%n", maxBatchSize);
 
                     JavaDriverClient client = settings.getJavaDriverClient();
                     String query = sb.toString();
@@ -632,7 +655,7 @@ public class StressProfile implements Serializable
             }
         }
 
-        return new SchemaInsert(timer, settings, generator, seedManager, partitions.get(), selectchance.get(), rowPopulation.get(), thriftInsertId, insertStatement, ThriftConversion.fromThrift(settings.command.consistencyLevel), batchType);
+        return new SchemaInsert(timer, settings, generator, seedManager, maxRowsPerBatch.get(), partitionsPerBatch, partitions.get(), selectchance.get(), rowPopulation.get(), thriftInsertId, insertStatement, ThriftConversion.fromThrift(settings.command.consistencyLevel), batchType);
     }
 
     public List<ValidatingSchemaQuery> getValidate(Timer timer, PartitionGenerator generator, SeedManager seedManager, StressSettings settings)

@@ -30,6 +30,7 @@ import com.datastax.driver.core.BatchStatement;
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Statement;
+import com.datastax.driver.core.querybuilder.Batch;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.io.sstable.StressCQLSSTableWriter;
@@ -42,17 +43,22 @@ import org.apache.cassandra.stress.util.ThriftClient;
 
 public class SchemaInsert extends SchemaStatement
 {
+    public enum PartitionsPerBatch { SINGLE, MULTIPLE };
 
     private final String tableSchema;
     private final String insertStatement;
     private final BatchStatement.Type batchType;
+    private final Distribution maxRowsPerBatchDistribution;
+    private final PartitionsPerBatch partitionsPerBatch;
 
-    public SchemaInsert(Timer timer, StressSettings settings, PartitionGenerator generator, SeedManager seedManager, Distribution batchSize, RatioDistribution useRatio, RatioDistribution rowPopulation, Integer thriftId, PreparedStatement statement, ConsistencyLevel cl, BatchStatement.Type batchType)
+    public SchemaInsert(Timer timer, StressSettings settings, PartitionGenerator generator, SeedManager seedManager, Distribution maxRowsPerBatchDistribution, PartitionsPerBatch partitionsPerBatch, Distribution batchSize, RatioDistribution useRatio, RatioDistribution rowPopulation, Integer thriftId, PreparedStatement statement, ConsistencyLevel cl, BatchStatement.Type batchType)
     {
         super(timer, settings, new DataSpec(generator, seedManager, batchSize, useRatio, rowPopulation), statement, statement.getVariables().asList().stream().map(d -> d.getName()).collect(Collectors.toList()), thriftId, cl);
         this.batchType = batchType;
         this.insertStatement = null;
         this.tableSchema = null;
+        this.maxRowsPerBatchDistribution = maxRowsPerBatchDistribution;
+        this.partitionsPerBatch = partitionsPerBatch;
     }
 
     /**
@@ -64,47 +70,78 @@ public class SchemaInsert extends SchemaStatement
         this.batchType = BatchStatement.Type.UNLOGGED;
         this.insertStatement = statement;
         this.tableSchema = tableSchema;
+        this.maxRowsPerBatchDistribution = new DistributionFixed(1);
+        this.partitionsPerBatch = PartitionsPerBatch.SINGLE;
     }
 
     private class JavaDriverRun extends Runner
     {
         final JavaDriverClient client;
+        private final List<BoundStatement> stmts = new ArrayList<>();
+        private long maxRowsPerBatch = maxRowsPerBatchDistribution.next();
 
         private JavaDriverRun(JavaDriverClient client)
         {
             this.client = client;
         }
 
+        private void addStatement(BoundStatement stmt)
+        {
+            stmts.add(stmt);
+            if (maxRowsPerBatch != 0 && stmts.size() == maxRowsPerBatch)
+            {
+                executeStatements();
+            }
+        }
+
+        private void executeStatements()
+        {
+            if (stmts.size() == 0)
+            {
+                return;
+            }
+
+            Statement stmt;
+            if (stmts.size() == 1)
+            {
+                stmt = stmts.get(0);
+            }
+            else
+            {
+                BatchStatement batch = new BatchStatement(batchType);
+                batch.setConsistencyLevel(JavaDriverClient.from(cl));
+                batch.addAll(stmts);
+                stmt = batch;
+            }
+
+            client.getSession().execute(stmt);
+
+            stmts.clear();
+            maxRowsPerBatch = maxRowsPerBatchDistribution.next();
+        }
+
         public boolean run() throws Exception
         {
-            List<BoundStatement> stmts = new ArrayList<>();
             partitionCount = partitions.size();
 
             for (PartitionIterator iterator : partitions)
-                while (iterator.hasNext())
-                    stmts.add(bindRow(iterator.next()));
-
-            rowCount += stmts.size();
-
-            // 65535 is max number of stmts per batch, so if we have more, we need to manually batch them
-            for (int j = 0 ; j < stmts.size() ; j += 65535)
             {
-                List<BoundStatement> substmts = stmts.subList(j, Math.min(j + stmts.size(), j + 65535));
-                Statement stmt;
-                if (stmts.size() == 1)
+                while (iterator.hasNext())
                 {
-                    stmt = substmts.get(0);
-                }
-                else
-                {
-                    BatchStatement batch = new BatchStatement(batchType);
-                    batch.setConsistencyLevel(JavaDriverClient.from(cl));
-                    batch.addAll(substmts);
-                    stmt = batch;
+                    addStatement(bindRow(iterator.next()));
                 }
 
-                client.getSession().execute(stmt);
+                if (partitionsPerBatch == PartitionsPerBatch.SINGLE)
+                {
+                    executeStatements();
+                }
             }
+
+            if (partitionsPerBatch == PartitionsPerBatch.MULTIPLE)
+            {
+                executeStatements();
+            }
+
             return true;
         }
     }
