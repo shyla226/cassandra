@@ -340,9 +340,7 @@ public abstract class AbstractReadExecutor
             // no latency information, or we're overloaded
             if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
                 return;
-
-            Observable<PartitionIterator> observable = get();
-
+            
             NettyRxScheduler.instance().scheduleDirect(() -> {
 
                 if (handler.hasValue())

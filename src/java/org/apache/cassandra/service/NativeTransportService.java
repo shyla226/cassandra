@@ -101,7 +101,7 @@ public class NativeTransportService
             for (int i = 0; i < NUM_NETTY_THREADS; i++)
             {
                 // force one thread per event loop group
-                EventLoopGroup loopGroup = useEpoll() ? new EpollEventLoopGroup(1) : new NioEventLoopGroup(1);
+                EventLoopGroup loopGroup = useEpoll() ? new MonitoredEpollEventLoopGroup(1) : new NioEventLoopGroup(1);
                 org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
                         .withEventLoopGroup(loopGroup)
                         .withHost(nativeAddr)
@@ -166,9 +166,7 @@ public class NativeTransportService
         {
             final int cpuId = i;
             EventLoopGroup workerGroup = workerGroups.get(i);
-            if (useEpoll())
-                ((EpollEventLoopGroup)workerGroup).setIoRatio(pIO);
-            else
+            if (!useEpoll())
                 ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
 
             EventLoop loop = workerGroup.next();
@@ -189,7 +187,6 @@ public class NativeTransportService
         }
 
         Uninterruptibles.awaitUninterruptibly(ready);
-
 
         tpcInitialized = true;
     }
