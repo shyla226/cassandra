@@ -84,9 +84,7 @@ public class NativeTransportServiceTest
     public void testDestroy()
     {
         withService((NativeTransportService service) -> {
-            Supplier<Boolean> allTerminated = () ->
-                                              service.getWorkerGroups().stream()
-                                                      .allMatch(workerGroup -> workerGroup.isShutdown() && workerGroup.isTerminated());
+            Supplier<Boolean> allTerminated = () -> service.getWorkerGroup().isShutdown() && service.getWorkerGroup().isTerminated();
             assertFalse(allTerminated.get());
             service.destroy();
             assertTrue(allTerminated.get());

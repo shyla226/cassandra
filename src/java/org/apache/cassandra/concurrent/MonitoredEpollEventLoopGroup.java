@@ -44,10 +44,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
-import org.jctools.queues.MpscChunkedArrayQueue;
-import org.jctools.queues.MpscLinkedQueue8;
 import org.jctools.queues.SpscArrayQueue;
-import org.jctools.queues.SpscLinkedQueue;
 import sun.misc.Contended;
 
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup

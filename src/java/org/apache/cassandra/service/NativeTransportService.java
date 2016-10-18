@@ -51,7 +51,7 @@ public class NativeTransportService
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
 
     private List<Server> servers = Collections.emptyList();
-    private List<EventLoopGroup> workerGroups = Collections.emptyList();
+    private EventLoopGroup workerGroup;
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
@@ -86,29 +86,29 @@ public class NativeTransportService
         if (initialized)
             return;
 
-
         if (useEpoll())
+        {
+            workerGroup = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
             logger.info("Netty using native Epoll event loops");
+        }
         else
+        {
+            workerGroup = new NioEventLoopGroup(NUM_NETTY_THREADS);
             logger.info("Netty using Java NIO event loops");
-
+        }
         int nativePortSSL = DatabaseDescriptor.getNativeTransportPortSSL();
 
         if (!DatabaseDescriptor.getClientEncryptionOptions().enabled)
         {
-            workerGroups = new ArrayList<>(NUM_NETTY_THREADS);
             servers = new ArrayList<>(NUM_NETTY_THREADS);
             for (int i = 0; i < NUM_NETTY_THREADS; i++)
             {
-                // force one thread per event loop group
-                EventLoopGroup loopGroup = useEpoll() ? new MonitoredEpollEventLoopGroup(1) : new NioEventLoopGroup(1);
                 org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                        .withEventLoopGroup(loopGroup)
+                        .withEventLoopGroup(workerGroup.next())
                         .withHost(nativeAddr)
                         .withPort(nativePort + i)
                         .withSSL(false);
 
-                workerGroups.add(loopGroup);
                 servers.add(builder.build());
             }
         }
@@ -165,7 +165,6 @@ public class NativeTransportService
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
-            EventLoopGroup workerGroup = workerGroups.get(i);
             if (!useEpoll())
                 ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
 
@@ -190,7 +189,6 @@ public class NativeTransportService
 
         tpcInitialized = true;
     }
-
 
     /**
      * Starts native transport servers.
@@ -220,8 +218,7 @@ public class NativeTransportService
         servers = Collections.emptyList();
 
         // shutdown executors used by netty for native transport server
-        for (EventLoopGroup workerGroup : workerGroups)
-            workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
+        workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
     }
 
     /**
@@ -244,9 +241,9 @@ public class NativeTransportService
     }
 
     @VisibleForTesting
-    List<EventLoopGroup> getWorkerGroups()
+    EventLoopGroup getWorkerGroup()
     {
-        return workerGroups;
+        return workerGroup;
     }
 
     @VisibleForTesting
