@@ -1,6 +1,7 @@
 DSE 5.1.0
  * Insert default superuser role with fixed timestamp (APOLLO-18)
 Merged from 3.x:
+ * Fix timeout in ReplicationAwareTokenAllocatorTest (CASSANDRA-12784)
  * Improve sum aggregate functions (CASSANDRA-12417)
  * Make cassandra.yaml docs for batch_size_*_threshold_in_kb reflect changes in CASSANDRA-10876 (CASSANDRA-12761)
  * cqlsh fails to format collections when using aliases (CASSANDRA-11534)
