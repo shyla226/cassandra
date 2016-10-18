@@ -101,7 +101,7 @@ public class NativeTransportService
             for (int i = 0; i < NUM_NETTY_THREADS; i++)
             {
                 // force one thread per event loop group
-                EventLoopGroup loopGroup = useEpoll() ? new MonitoredEpollEventLoopGroup(1) : new NioEventLoopGroup(1);
+                EventLoopGroup loopGroup = useEpoll() ? new EpollEventLoopGroup(1) : new NioEventLoopGroup(1);
                 org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
                         .withEventLoopGroup(loopGroup)
                         .withHost(nativeAddr)
