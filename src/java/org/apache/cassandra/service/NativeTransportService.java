@@ -54,9 +54,9 @@ public class NativeTransportService
     private EventLoopGroup workerGroup;
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
+    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
 
-    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() - 1)));
+    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
