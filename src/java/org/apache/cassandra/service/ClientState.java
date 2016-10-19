@@ -269,7 +269,7 @@ public class ClientState
         // Login privilege is not inherited via granted roles, so just
         // verify that the role with the credentials that were actually
         // supplied has it
-        if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user.getPrimaryRole()))
+        if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user))
             this.user = user;
         else
             throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
