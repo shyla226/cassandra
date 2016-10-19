@@ -737,12 +737,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             }
             catch (UnknownIndexException e)
             {
-                String message = String.format("Couldn't find a defined index on %s.%s with the id %s. " +
-                                               "If an index was just created, this is likely due to the schema not " +
-                                               "being fully propagated. Local read will proceed without using the " +
-                                               "index. Please wait for schema agreement after index creation.",
-                                               cfm.ksName, cfm.cfName, e.indexId.toString());
-                logger.info(message);
+                logger.info("Couldn't find a defined index on {}.{} with the id {}. " +
+                            "If an index was just created, this is likely due to the schema not " +
+                            "being fully propagated. Local read will proceed without using the " +
+                            "index. Please wait for schema agreement after index creation.",
+                            cfm.ksName, cfm.cfName, e.indexId);
                 return Optional.empty();
             }
         }
@@ -836,7 +835,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
                     out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(rangeCommand.limits().count(), filter.requestedSlices()));
 
                 int compositesToGroup;
-                boolean selectsStatics = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+                boolean selectsStatics = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() && filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
                 if (limits.kind() == DataLimits.Kind.THRIFT_LIMIT)
                     compositesToGroup = -1;
                 else if (limits.isDistinct() && !selectsStatics)
@@ -1108,7 +1107,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             // slice filter's stop.
             DataRange.Paging pagingRange = (DataRange.Paging) rangeCommand.dataRange();
             Clustering lastReturned = pagingRange.getLastReturned();
-            ClusteringBound newStart = ClusteringBound.exclusiveStartOf(lastReturned);
+            ClusteringBound newStart = ClusteringBound.inclusiveStartOf(lastReturned);
             Slice lastSlice = filter.requestedSlices().get(filter.requestedSlices().size() - 1);
             ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeBound(metadata, newStart, true), out);
             ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeClustering(metadata, lastSlice.end().clustering()), out);
@@ -1117,10 +1116,8 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
 
             // command-level limit
             // Pre-3.0 we would always request one more row than we actually needed and the command-level "start" would
-            // be the last-returned cell name, so the response would always include it.  When dealing with compound comparators,
-            // we can pass an exclusive start and use the normal limit.  However, when dealing with non-compound comparators,
-            // pre-3.0 nodes cannot perform exclusive slices, so we need to request one extra row.
-            int maxResults = rangeCommand.limits().count() + (metadata.isCompound() ? 0 : 1);
+            // be the last-returned cell name, so the response would always include it.
+            int maxResults = rangeCommand.limits().count() + 1;
             out.writeInt(maxResults);
 
             // countCQL3Rows

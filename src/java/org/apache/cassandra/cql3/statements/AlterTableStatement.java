@@ -94,7 +94,6 @@ public class AlterTableStatement extends SchemaAlteringStatement
         CQL3Type.Raw dataType = null;
         boolean isStatic = false;
         CQL3Type validator = null;
-        ColumnDefinition.Raw rawColumnName = null;
 
         List<ViewDefinition> viewUpdates = null;
         Iterable<ViewDefinition> views = View.findAll(keyspace(), columnFamily());
@@ -102,21 +101,17 @@ public class AlterTableStatement extends SchemaAlteringStatement
         switch (oType)
         {
             case ADD:
+                if (cfm.isDense())
+                    return error("Cannot add new column to a COMPACT STORAGE table");
+
                 for (AlterTableStatementColumn colData : colNameList)
                 {
-                    rawColumnName = colData.getColumnName();
-                    if (rawColumnName != null)
-                    {
-                        columnName = rawColumnName.getIdentifier(cfm);
-                        def =  cfm.getColumnDefinition(columnName);
-                        dataType = colData.getColumnType();
-                        isStatic = colData.getStaticType();
-                        validator = dataType == null ? null : dataType.prepare(keyspace());
-                    }
-
-                    assert columnName != null;
-                    if (cfm.isDense())
-                        return error("Cannot add new column to a COMPACT STORAGE table");
+                    columnName = colData.getColumnName().getIdentifier(cfm);
+                    def = cfm.getColumnDefinition(columnName);
+                    dataType = colData.getColumnType();
+                    assert dataType != null;
+                    isStatic = colData.getStaticType();
+                    validator = dataType.prepare(keyspace());
 
                     if (isStatic)
                     {
@@ -190,16 +185,12 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
 
             case ALTER:
-                rawColumnName = colNameList.get(0).getColumnName();
-                if (rawColumnName != null)
-                {
-                    columnName = rawColumnName.getIdentifier(cfm);
-                    def = cfm.getColumnDefinition(columnName);
-                    dataType = colNameList.get(0).getColumnType();
-                    validator = dataType == null ? null : dataType.prepare(keyspace());
-                }
+                columnName = colNameList.get(0).getColumnName().getIdentifier(cfm);
+                def = cfm.getColumnDefinition(columnName);
+                dataType = colNameList.get(0).getColumnType();
+                assert dataType != null;
+                validator = dataType.prepare(keyspace());
 
-                assert columnName != null;
                 if (def == null)
                     return error(String.format("Column %s was not found in table %s", columnName, columnFamily()));
 
@@ -230,18 +221,14 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
 
             case DROP:
+                if (!cfm.isCQLTable())
+                    return error("Cannot drop columns from a non-CQL3 table");
+
                 for (AlterTableStatementColumn colData : colNameList)
                 {
-                    columnName = null;
-                    rawColumnName = colData.getColumnName();
-                    if (rawColumnName != null)
-                    {
-                        columnName = rawColumnName.getIdentifier(cfm);
-                        def = cfm.getColumnDefinition(columnName);
-                    }
-                    assert columnName != null;
-                    if (!cfm.isCQLTable())
-                        return error("Cannot drop columns from a non-CQL3 table");
+                    columnName = colData.getColumnName().getIdentifier(cfm);
+                    def = cfm.getColumnDefinition(columnName);
+
                     if (def == null)
                         return error(String.format("Column %s was not found in table %s", columnName, columnFamily()));
 

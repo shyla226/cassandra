@@ -13,11 +13,31 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+4.0
+===
+
+New features
+------------
+
+Upgrading
+---------
+    - Cassandra will no longer allow invalid keyspace replication options, such as invalid datacenter names for
+      NetworkTopologyStrategy. Operators MUST add new nodes to a datacenter before they can set set ALTER or 
+      CREATE keyspace replication policies using that datacenter. Existing keyspaces will continue to operate, 
+      but CREATE and ALTER will validate that all datacenters specified exist in the cluster. 
+
 3.10
 ====
 
 New features
 ------------
+   - New `DurationType` (cql duration). See CASSANDRA-11873
+   - Runtime modification of concurrent_compactors is now available via nodetool
+   - Support for the assignment operators +=/-= has been added for update queries.
+   - An Index implementation may now provide a task which runs prior to joining
+     the ring. See CASSANDRA-12039
+   - Filtering on partition key columns is now also supported for queries without
+     secondary indexes.
    - A slow query log has been added: slow queries will be logged at DEBUG level.
      For more details refer to CASSANDRA-12403 and slow_query_log_timeout_in_ms
      in cassandra.yaml.
@@ -87,7 +107,13 @@ Upgrading
       a standalone tool or client application, use the DatabaseDescriptor.toolInitialization() or
       DatabaseDescriptor.clientInitialization() methods. Tool initialization sets up partitioner,
       snitch, encryption context. Client initialization just applies the configuration but does not
-      setup anything.
+      setup anything. Instead of using Config.setClientMode() or Config.isClientMode(), which are
+      deprecated now, use one of the appropiate new methods in DatabaseDescriptor.
+    - Application layer keep-alives were added to the streaming protocol to prevent idle incoming connections from
+      timing out and failing the stream session (CASSANDRA-11839). This effectively deprecates the streaming_socket_timeout_in_ms
+      property in favor of streaming_keep_alive_period_in_secs. See cassandra.yaml for more details about this property.
+    - Duration litterals support the ISO 8601 format. By consequence, identifiers matching that format
+      (e.g P2Y or P1MT6H) will not be supported anymore (CASSANDRA-11873).
 
 3.8
 ===

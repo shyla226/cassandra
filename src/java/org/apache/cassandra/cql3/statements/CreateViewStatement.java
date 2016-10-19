@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.DurationType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
@@ -87,7 +88,8 @@ public class CreateViewStatement extends SchemaAlteringStatement
         // We do validation in announceMigration to reduce doubling up of work
     }
 
-    private interface AddColumn {
+    private interface AddColumn
+    {
         void add(ColumnIdentifier identifier, AbstractType<?> type);
     }
 
@@ -184,6 +186,9 @@ public class CreateViewStatement extends SchemaAlteringStatement
 
             if (cdef.isStatic())
                 return error(String.format("Cannot use Static column '%s' in PRIMARY KEY of materialized view", identifier));
+
+            if (cdef.type instanceof DurationType)
+                return error(String.format("Cannot use Duration column '%s' in PRIMARY KEY of materialized view", identifier));
         }
 
         // build the select statement

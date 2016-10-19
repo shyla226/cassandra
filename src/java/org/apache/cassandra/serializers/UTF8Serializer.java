@@ -37,7 +37,8 @@ public class UTF8Serializer extends AbstractTextSerializer
 
     static class UTF8Validator
     {
-        enum State {
+        enum State
+        {
             START,
             TWO,
             TWO_80,
@@ -52,6 +53,9 @@ public class UTF8Serializer extends AbstractTextSerializer
         // buf has already been sliced/duplicated.
         static boolean validate(ByteBuffer buf)
         {
+            if (buf == null)
+                return false;
+
             buf = buf.slice();
             int b = 0;
             State state = State.START;

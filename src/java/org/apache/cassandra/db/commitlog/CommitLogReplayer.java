@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -56,9 +57,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
     public static long MAX_OUTSTANDING_REPLAY_BYTES = Long.getLong("cassandra.commitlog_max_outstanding_replay_bytes", 1024 * 1024 * 64);
     @VisibleForTesting
     public static MutationInitiator mutationInitiator = new MutationInitiator();
-    static final String IGNORE_REPLAY_ERRORS_PROPERTY = "cassandra.commitlog.ignorereplayerrors";
+    static final String IGNORE_REPLAY_ERRORS_PROPERTY = Config.PROPERTY_PREFIX + "commitlog.ignorereplayerrors";
     private static final Logger logger = LoggerFactory.getLogger(CommitLogReplayer.class);
-    private static final int MAX_OUTSTANDING_REPLAY_COUNT = Integer.getInteger("cassandra.commitlog_max_outstanding_replay_count", 1024);
+    private static final int MAX_OUTSTANDING_REPLAY_COUNT = Integer.getInteger(Config.PROPERTY_PREFIX + "commitlog_max_outstanding_replay_count", 1024);
 
     private final Set<Keyspace> keyspacesReplayed;
     private final Queue<Future<Integer>> futures;
@@ -147,7 +148,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     public int blockForWrites()
     {
         for (Map.Entry<UUID, AtomicInteger> entry : commitLogReader.getInvalidMutations())
-            logger.warn(String.format("Skipped %d mutations from unknown (probably removed) CF with id %s", entry.getValue().intValue(), entry.getKey()));
+            logger.warn("Skipped {} mutations from unknown (probably removed) CF with id {}", entry.getValue(), entry.getKey());
 
         // wait for all the writes to finish on the mutation stage
         FBUtilities.waitOnFutures(futures);
@@ -263,9 +264,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
     public static CommitLogPosition firstNotCovered(Collection<IntervalSet<CommitLogPosition>> ranges)
     {
         return ranges.stream()
-                .map(intervals -> Iterables.getFirst(intervals.ends(), CommitLogPosition.NONE)) 
+                .map(intervals -> Iterables.getFirst(intervals.ends(), CommitLogPosition.NONE))
                 .min(Ordering.natural())
-                .get(); // iteration is per known-CF, there must be at least one. 
+                .get(); // iteration is per known-CF, there must be at least one.
     }
 
     abstract static class ReplayFilter

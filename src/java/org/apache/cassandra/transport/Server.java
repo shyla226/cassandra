@@ -132,7 +132,7 @@ public class Server implements CassandraDaemon.Server
 
     public synchronized void start()
     {
-        if(isRunning()) 
+        if(isRunning())
             return;
 
         // Configure the server.
@@ -147,9 +147,10 @@ public class Server implements CassandraDaemon.Server
         if (workerGroup != null)
             bootstrap = bootstrap.group(workerGroup);
 
-        final EncryptionOptions.ClientEncryptionOptions clientEnc = DatabaseDescriptor.getClientEncryptionOptions();
         if (this.useSSL)
         {
+            final EncryptionOptions.ClientEncryptionOptions clientEnc = DatabaseDescriptor.getClientEncryptionOptions();
+
             if (clientEnc.optional)
             {
                 logger.info("Enabling optionally encrypted CQL connections between client and server");
@@ -182,12 +183,12 @@ public class Server implements CassandraDaemon.Server
     {
         return connectionTracker.getConnectedClients();
     }
-    
+
     private void close()
     {
         // Close opened connections
         connectionTracker.closeAll();
-        
+
         logger.info("Stop listening for CQL clients");
     }
 
@@ -282,7 +283,7 @@ public class Server implements CassandraDaemon.Server
         public int getConnectedClients()
         {
             /*
-              - When server is running: allChannels contains all clients' connections (channels) 
+              - When server is running: allChannels contains all clients' connections (channels)
                 plus one additional channel used for the server's own bootstrap.
                - When server is stopped: the size is 0
             */
@@ -354,7 +355,8 @@ public class Server implements CassandraDaemon.Server
             }
         }
 
-        protected final SslHandler createSslHandler() {
+        protected final SslHandler createSslHandler()
+        {
             SSLEngine sslEngine = sslContext.createSSLEngine();
             sslEngine.setUseClientMode(false);
             String[] suites = SSLFactory.filterCipherSuites(sslEngine.getSupportedCipherSuites(), encryptionOptions.cipher_suites);
@@ -465,7 +467,8 @@ public class Server implements CassandraDaemon.Server
 
 
         private static final InetAddress bindAll;
-        static {
+        static
+        {
             try
             {
                 bindAll = InetAddress.getByAddress(new byte[4]);

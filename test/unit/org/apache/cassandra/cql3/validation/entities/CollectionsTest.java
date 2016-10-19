@@ -17,11 +17,7 @@
  */
 package org.apache.cassandra.cql3.validation.entities;
 
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
-import java.util.Arrays;
-import java.util.UUID;
+import java.util.*;
 
 import org.junit.Test;
 
@@ -118,6 +114,19 @@ public class CollectionsTest extends CQLTester
                    row(set("v7"))
         );
 
+        execute("UPDATE %s SET s += ? WHERE k = 0", set("v5"));
+        execute("UPDATE %s SET s += ? WHERE k = 0", set("v6"));
+
+        assertRows(execute("SELECT s FROM %s WHERE k = 0"),
+                   row(set("v5", "v6", "v7"))
+        );
+
+        execute("UPDATE %s SET s -= ? WHERE k = 0", set("v6", "v5"));
+
+        assertRows(execute("SELECT s FROM %s WHERE k = 0"),
+                   row(set("v7"))
+        );
+
         execute("DELETE s[?] FROM %s WHERE k = 0", set("v7"));
 
         // Deleting an element that does not exist will succeed
@@ -166,7 +175,19 @@ public class CollectionsTest extends CQLTester
                    row(map("v5", 5, "v6", 6, "v7", 7))
         );
 
-        execute("DELETE m[?] FROM %s WHERE k = 0", "v7");
+        execute("UPDATE %s SET m = m - ? WHERE k = 0", set("v7"));
+
+        assertRows(execute("SELECT m FROM %s WHERE k = 0"),
+                   row(map("v5", 5, "v6", 6))
+        );
+
+        execute("UPDATE %s SET m += ? WHERE k = 0", map("v7", 7));
+
+        assertRows(execute("SELECT m FROM %s WHERE k = 0"),
+                   row(map("v5", 5, "v6", 6, "v7", 7))
+        );
+
+        execute("UPDATE %s SET m -= ? WHERE k = 0", set("v7"));
 
         assertRows(execute("SELECT m FROM %s WHERE k = 0"),
                    row(map("v5", 5, "v6", 6))
@@ -233,6 +254,14 @@ public class CollectionsTest extends CQLTester
         execute("UPDATE %s SET l = l - ? WHERE k = 0", list("v5", "v8"));
 
         assertRows(execute("SELECT l FROM %s WHERE k = 0"), row(list("v9", "v6", "v7")));
+
+        execute("UPDATE %s SET l += ? WHERE k = 0", list("v8"));
+
+        assertRows(execute("SELECT l FROM %s WHERE k = 0"), row(list("v9", "v6", "v7", "v8")));
+
+        execute("UPDATE %s SET l -= ? WHERE k = 0", list("v6", "v8"));
+
+        assertRows(execute("SELECT l FROM %s WHERE k = 0"), row(list("v9", "v7")));
 
         execute("DELETE l FROM %s WHERE k = 0");
 
@@ -863,5 +892,47 @@ public class CollectionsTest extends CQLTester
 
          execute("UPDATE %s SET l[0] = null WHERE k=0");
          assertRows(execute("SELECT * FROM %s"), row(0, list(2, 3)));
+    }
+
+    @Test
+    public void testInvalidInputForList() throws Throwable
+    {
+        createTable("CREATE TABLE %s(pk int PRIMARY KEY, l list<text>)");
+        assertInvalidMessage("Not enough bytes to read a list",
+                             "INSERT INTO %s (pk, l) VALUES (?, ?)", 1, "test");
+        assertInvalidMessage("Not enough bytes to read a list",
+                             "INSERT INTO %s (pk, l) VALUES (?, ?)", 1, Long.MAX_VALUE);
+        assertInvalidMessage("Not enough bytes to read a list",
+                             "INSERT INTO %s (pk, l) VALUES (?, ?)", 1, "");
+        assertInvalidMessage("The data cannot be deserialized as a list",
+                             "INSERT INTO %s (pk, l) VALUES (?, ?)", 1, -1);
+    }
+
+    @Test
+    public void testInvalidInputForSet() throws Throwable
+    {
+        createTable("CREATE TABLE %s(pk int PRIMARY KEY, s set<text>)");
+        assertInvalidMessage("Not enough bytes to read a set",
+                             "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, "test");
+        assertInvalidMessage("String didn't validate.",
+                             "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, Long.MAX_VALUE);
+        assertInvalidMessage("Not enough bytes to read a set",
+                             "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, "");
+        assertInvalidMessage("The data cannot be deserialized as a set",
+                             "INSERT INTO %s (pk, s) VALUES (?, ?)", 1, -1);
+    }
+
+    @Test
+    public void testInvalidInputForMap() throws Throwable
+    {
+        createTable("CREATE TABLE %s(pk int PRIMARY KEY, m map<text, text>)");
+        assertInvalidMessage("Not enough bytes to read a map",
+                             "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, "test");
+        assertInvalidMessage("String didn't validate.",
+                             "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, Long.MAX_VALUE);
+        assertInvalidMessage("Not enough bytes to read a map",
+                             "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, "");
+        assertInvalidMessage("The data cannot be deserialized as a map",
+                             "INSERT INTO %s (pk, m) VALUES (?, ?)", 1, -1);
     }
 }

@@ -115,7 +115,7 @@ public class CompactionsTest
         return store;
     }
 
-    private long populate(String ks, String cf, int startRowKey, int endRowKey, int ttl)
+    public static long populate(String ks, String cf, int startRowKey, int endRowKey, int ttl)
     {
         long timestamp = System.currentTimeMillis();
         CFMetaData cfm = Keyspace.open(ks).getColumnFamilyStore(cf).metadata;
@@ -640,5 +640,16 @@ public class CompactionsTest
                                                                        150, 199,
                                                                        200, 209,
                                                                        300, 301)));
+    }
+
+    @Test
+    public void testConcurrencySettings()
+    {
+        CompactionManager.instance.setConcurrentCompactors(2);
+        assertEquals(2, CompactionManager.instance.getCoreCompactorThreads());
+        CompactionManager.instance.setConcurrentCompactors(3);
+        assertEquals(3, CompactionManager.instance.getCoreCompactorThreads());
+        CompactionManager.instance.setConcurrentCompactors(1);
+        assertEquals(1, CompactionManager.instance.getCoreCompactorThreads());
     }
 }

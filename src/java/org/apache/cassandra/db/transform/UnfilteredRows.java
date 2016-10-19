@@ -22,6 +22,7 @@ package org.apache.cassandra.db.transform;
 
 import io.reactivex.Observable;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.PartitionColumns;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -29,11 +30,13 @@ import org.reactivestreams.Subscription;
 
 final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> implements UnfilteredRowIterator
 {
+    private PartitionColumns partitionColumns;
     private DeletionTime partitionLevelDeletion;
 
     public UnfilteredRows(UnfilteredRowIterator input)
     {
         super(input);
+        partitionColumns = input.columns();
         partitionLevelDeletion = input.partitionLevelDeletion();
     }
 
@@ -41,9 +44,17 @@ final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> i
     void add(Transformation add)
     {
         super.add(add);
+        partitionColumns = add.applyToPartitionColumns(partitionColumns);
         partitionLevelDeletion = add.applyToDeletion(partitionLevelDeletion);
     }
 
+    @Override
+    public PartitionColumns columns()
+    {
+        return partitionColumns;
+    }
+
+    @Override
     public DeletionTime partitionLevelDeletion()
     {
         return partitionLevelDeletion;

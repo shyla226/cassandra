@@ -870,13 +870,13 @@ slow_query_log_timeout_in_ms: 500
 # and the times are synchronized between the nodes.
 cross_node_timeout: false
 
-# Set socket timeout for streaming operation.
-# The stream session is failed if no data/ack is received by any of the participants
-# within that period, which means this should also be sufficient to stream a large
-# sstable or rebuild table indexes.
-# Default value is 86400000ms, which means stale streams timeout after 24 hours.
-# A value of zero means stream sockets should never time out.
-# streaming_socket_timeout_in_ms: 86400000
+# Set keep-alive period for streaming
+# This node will send a keep-alive message periodically with this period.
+# If the node does not receive a keep-alive message from the peer for
+# 2 keep-alive cycles the stream session times out and fail
+# Default value is 300s (5 minutes), which means stalled stream
+# times out in 10 minutes by default
+# streaming_keep_alive_period_in_secs: 300
 
 # phi value that must be reached for a host to be marked down.
 # most users should never need to adjust this.
@@ -1150,11 +1150,11 @@ transparent_data_encryption_options:
 tombstone_warn_threshold: 1000
 tombstone_failure_threshold: 100000
 
-# Log WARN on any batch size exceeding this value. 5kb per batch by default.
+# Log WARN on any multiple-partition batch size exceeding this value. 5kb per batch by default.
 # Caution should be taken on increasing the size of this threshold as it can lead to node instability.
 batch_size_warn_threshold_in_kb: 5
 
-# Fail any batch exceeding this value. 50kb (10x warn threshold) by default.
+# Fail any multiple-partition batch exceeding this value. 50kb (10x warn threshold) by default.
 batch_size_fail_threshold_in_kb: 50
 
 # Log WARN on any batches not of type LOGGED than span across more partitions than this limit
@@ -1172,3 +1172,25 @@ gc_warn_threshold_in_ms: 1000
 # early. Any value size larger than this threshold will result into marking an SSTable
 # as corrupted.
 # max_value_size_in_mb: 256
+
+# Back-pressure settings #
+# If enabled, the coordinator will apply the back-pressure strategy specified below to each mutation
+# sent to replicas, with the aim of reducing pressure on overloaded replicas.
+back_pressure_enabled: false
+# The back-pressure strategy applied.
+# The default implementation, RateBasedBackPressure, takes three arguments:
+# high ratio, factor, and flow type, and uses the ratio between incoming mutation responses and outgoing mutation requests.
+# If below high ratio, outgoing mutations are rate limited according to the incoming rate decreased by the given factor;
+# if above high ratio, the rate limiting is increased by the given factor;
+# such factor is usually best configured between 1 and 10, use larger values for a faster recovery
+# at the expense of potentially more dropped mutations;
+# the rate limiting is applied according to the flow type: if FAST, it's rate limited at the speed of the fastest replica,
+# if SLOW at the speed of the slowest one.
+# New strategies can be added. Implementors need to implement org.apache.cassandra.net.BackpressureStrategy and
+# provide a public constructor accepting a Map<String, Object>.
+back_pressure_strategy:
+    - class_name: org.apache.cassandra.net.RateBasedBackPressure
+      parameters:
+        - high_ratio: 0.90
+          factor: 5
+          flow: FAST

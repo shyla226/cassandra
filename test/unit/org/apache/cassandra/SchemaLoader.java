@@ -88,6 +88,7 @@ public class SchemaLoader
         String ks4 = testName + "Keyspace4";
         String ks5 = testName + "Keyspace5";
         String ks6 = testName + "Keyspace6";
+        String ks7 = testName + "Keyspace7";
         String ks_kcs = testName + "KeyCacheSpace";
         String ks_rcs = testName + "RowCacheSpace";
         String ks_ccs = testName + "CounterCacheSpace";
@@ -111,6 +112,7 @@ public class SchemaLoader
         compactionOptions.put("tombstone_compaction_interval", "1");
         Map<String, String> leveledOptions = new HashMap<String, String>();
         leveledOptions.put("sstable_size_in_mb", "1");
+        leveledOptions.put("fanout_size", "5");
 
         // Keyspace 1
         schema.add(KeyspaceMetadata.create(ks1,
@@ -191,10 +193,16 @@ public class SchemaLoader
         schema.add(KeyspaceMetadata.create(ks5,
                 KeyspaceParams.simple(2),
                 Tables.of(standardCFMD(ks5, "Standard1"))));
+
         // Keyspace 6
         schema.add(KeyspaceMetadata.create(ks6,
                 KeyspaceParams.simple(1),
                 Tables.of(keysIndexCFMD(ks6, "Indexed1", true))));
+
+        // Keyspace 7
+        schema.add(KeyspaceMetadata.create(ks7,
+                KeyspaceParams.simple(1),
+                Tables.of(customIndexCFMD(ks7, "Indexed1"))));
 
         // KeyCacheSpace
         schema.add(KeyspaceMetadata.create(ks_kcs,
@@ -210,6 +218,7 @@ public class SchemaLoader
                 Tables.of(
                 standardCFMD(ks_rcs, "CFWithoutCache").caching(CachingParams.CACHE_NOTHING),
                 standardCFMD(ks_rcs, "CachedCF").caching(CachingParams.CACHE_EVERYTHING),
+                standardCFMD(ks_rcs, "CachedNoClustering", 1, IntegerType.instance, IntegerType.instance, null).caching(CachingParams.CACHE_EVERYTHING),
                 standardCFMD(ks_rcs, "CachedIntCF").
                         caching(new CachingParams(true, 100)))));
 
@@ -355,17 +364,21 @@ public class SchemaLoader
 
     public static CFMetaData standardCFMD(String ksName, String cfName, int columnCount, AbstractType<?> keyType, AbstractType<?> valType, AbstractType<?> clusteringType)
     {
-        CFMetaData.Builder builder = CFMetaData.Builder.create(ksName, cfName)
-                .addPartitionKey("key", keyType)
-                .addClusteringColumn("name", clusteringType)
-                .addRegularColumn("val", valType);
+        CFMetaData.Builder builder;
+        builder = CFMetaData.Builder.create(ksName, cfName)
+                                    .addPartitionKey("key", keyType)
+                                    .addRegularColumn("val", valType);
+
+        if(clusteringType != null)
+            builder = builder.addClusteringColumn("name", clusteringType);
 
         for (int i = 0; i < columnCount; i++)
             builder.addRegularColumn("val" + i, AsciiType.instance);
 
         return builder.build()
-               .compression(getCompressionParameters());
+                      .compression(getCompressionParameters());
     }
+
 
     public static CFMetaData denseCFMD(String ksName, String cfName)
     {
@@ -455,6 +468,7 @@ public class SchemaLoader
 
         return cfm.compression(getCompressionParameters());
     }
+
     public static CFMetaData keysIndexCFMD(String ksName, String cfName, boolean withIndex) throws ConfigurationException
     {
         CFMetaData cfm = CFMetaData.Builder.createDense(ksName, cfName, false, false)
@@ -475,6 +489,30 @@ public class SchemaLoader
                                                          "birthdate_composite_index",
                                                          IndexMetadata.Kind.KEYS,
                                                          Collections.EMPTY_MAP)));
+
+
+        return cfm.compression(getCompressionParameters());
+    }
+
+    public static CFMetaData customIndexCFMD(String ksName, String cfName) throws ConfigurationException
+    {
+        CFMetaData cfm = CFMetaData.Builder.createDense(ksName, cfName, false, false)
+                                           .addPartitionKey("key", AsciiType.instance)
+                                           .addClusteringColumn("c1", AsciiType.instance)
+                                           .addRegularColumn("value", LongType.instance)
+                                           .build();
+
+            cfm.indexes(
+                cfm.getIndexes()
+                .with(IndexMetadata.fromIndexTargets(cfm,
+                                                     Collections.singletonList(
+                                                             new IndexTarget(new ColumnIdentifier("value", true),
+                                                                             IndexTarget.Type.VALUES)),
+                                                     "value_index",
+                                                     IndexMetadata.Kind.CUSTOM,
+                                                     Collections.singletonMap(
+                                                             IndexTarget.CUSTOM_INDEX_OPTION_NAME,
+                                                             StubIndex.class.getName()))));
 
 
         return cfm.compression(getCompressionParameters());
@@ -751,10 +789,14 @@ public class SchemaLoader
         for (int i = offset; i < offset + numberOfRows; i++)
         {
             RowUpdateBuilder builder = new RowUpdateBuilder(cfm, FBUtilities.timestampMicros(), ByteBufferUtil.bytes("key"+i));
-            builder.clustering(ByteBufferUtil.bytes("col"+ i)).add("val", ByteBufferUtil.bytes("val" + i));
+            if (cfm.clusteringColumns() != null && !cfm.clusteringColumns().isEmpty())
+                builder.clustering(ByteBufferUtil.bytes("col"+ i)).add("val", ByteBufferUtil.bytes("val" + i));
+            else
+                builder.add("val", ByteBufferUtil.bytes("val"+i));
             builder.build().apply();
         }
     }
+
 
     public static void cleanupSavedCaches()
     {

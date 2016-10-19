@@ -2443,7 +2443,7 @@ public class CassandraServer implements Cassandra.Iface
         {
             logger.trace("get_multi_slice");
         }
-        try 
+        try
         {
             ClientState cState = state();
             String keyspace = cState.getKeyspace();
@@ -2489,8 +2489,8 @@ public class CassandraServer implements Cassandra.Iface
         catch (RequestValidationException e)
         {
             throw ThriftConversion.toThrift(e);
-        } 
-        finally 
+        }
+        finally
         {
             Tracing.instance.stopSession();
         }
@@ -2500,7 +2500,8 @@ public class CassandraServer implements Cassandra.Iface
      * Set the to start-of end-of value of "" for start and finish.
      * @param columnSlice
      */
-    private static void fixOptionalSliceParameters(org.apache.cassandra.thrift.ColumnSlice columnSlice) {
+    private static void fixOptionalSliceParameters(org.apache.cassandra.thrift.ColumnSlice columnSlice)
+    {
         if (!columnSlice.isSetStart())
             columnSlice.setStart(new byte[0]);
         if (!columnSlice.isSetFinish())

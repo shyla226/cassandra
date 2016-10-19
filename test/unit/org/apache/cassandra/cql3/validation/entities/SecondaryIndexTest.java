@@ -174,10 +174,12 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (userid, firstname, lastname, age) VALUES (?, 'Frodo', 'Baggins', 32)", id1);
         execute("UPDATE %s SET firstname = 'Samwise', lastname = 'Gamgee', age = 33 WHERE userid = ?", id2);
 
-        assertEmpty(execute("SELECT firstname FROM %s WHERE userid = ? AND age = 33", id1));
+        beforeAndAfterFlush(() -> {
+            assertEmpty(execute("SELECT firstname FROM %s WHERE userid = ? AND age = 33", id1));
 
-        assertRows(execute("SELECT firstname FROM %s WHERE userid = ? AND age = 33", id2),
-                   row("Samwise"));
+            assertRows(execute("SELECT firstname FROM %s WHERE userid = ? AND age = 33", id2),
+                       row("Samwise"));
+        });
     }
 
     /**
@@ -195,9 +197,11 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (id, birth_year) VALUES ('Paul', 24)");
         execute("INSERT INTO %s (id, birth_year) VALUES ('Bob', 42)");
 
-        assertRows(execute("SELECT id FROM %s WHERE birth_year = 42"),
-                   row("Tom"),
-                   row("Bob"));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT id FROM %s WHERE birth_year = 42"),
+                       row("Tom"),
+                       row("Bob"));
+        });
 
         execute("DROP INDEX %s_birth_year_idx");
 
@@ -221,8 +225,10 @@ public class SecondaryIndexTest extends CQLTester
 
         assertInvalid("SELECT * FROM %s WHERE setid = 0 AND row < 1");
 
-        assertRows(execute("SELECT * FROM %s WHERE setid = 0 AND row < 1 ALLOW FILTERING"),
-                   row(0, 0, 0));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT * FROM %s WHERE setid = 0 AND row < 1 ALLOW FILTERING"),
+                       row(0, 0, 0));
+        });
     }
 
     /**
@@ -237,16 +243,6 @@ public class SecondaryIndexTest extends CQLTester
 
         assertInvalidThrow(ConfigurationException.class, String.format("CREATE TABLE %s (key varchar PRIMARY KEY, password varchar, gender varchar) WITH compression = { 'sstable_compressor': 'DeflateCompressor' }",
                                                                        tableName));
-    }
-
-    /**
-     * Check one can use arbitrary name for datacenter when creating keyspace (#4278),
-     * migrated from cql_tests.py:TestCQL.keyspace_creation_options_test()
-     */
-    @Test
-    public void testDataCenterName() throws Throwable
-    {
-       execute("CREATE KEYSPACE Foo WITH replication = { 'class' : 'NetworkTopologyStrategy', 'us-east' : 1, 'us-west' : 1 };");
     }
 
     /**
@@ -267,27 +263,33 @@ public class SecondaryIndexTest extends CQLTester
 
         assertTrue(waitForIndex(keyspace(), tableName, "authoridx"));
 
-        assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
-                   row(1, 0),
-                   row(0, 0),
-                   row(0, 2));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
+                       row(1, 0),
+                       row(0, 0),
+                       row(0, 2));
+        });
 
         execute("INSERT INTO %s (blog_id, timestamp, author, content) VALUES (?, ?, ?, ?)", 1, 1, "tom", "6th post");
         execute("INSERT INTO %s (blog_id, timestamp, author, content) VALUES (?, ?, ?, ?)", 1, 2, "tom", "7th post");
         execute("INSERT INTO %s (blog_id, timestamp, author, content) VALUES (?, ?, ?, ?)", 1, 3, "bob", "8th post");
 
-        assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
-                   row(1, 0),
-                   row(1, 3),
-                   row(0, 0),
-                   row(0, 2));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
+                       row(1, 0),
+                       row(1, 3),
+                       row(0, 0),
+                       row(0, 2));
+        });
 
         execute("DELETE FROM %s WHERE blog_id = 0 AND timestamp = 2");
 
-        assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
-                   row(1, 0),
-                   row(1, 3),
-                   row(0, 0));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT blog_id, timestamp FROM %s WHERE author = 'bob'"),
+                       row(1, 0),
+                       row(1, 3),
+                       row(0, 0));
+        });
     }
 
     /**
@@ -337,17 +339,19 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (pk0, pk1, ck0, ck1, ck2, value) VALUES (4, 5, 0, 1, 2, 3)");
         execute("INSERT INTO %s (pk0, pk1, ck0, ck1, ck2, value) VALUES (5, 0, 1, 2, 3, 4)");
 
-        assertRows(execute("SELECT value FROM %s WHERE pk0 = 2"),
-                   row(1));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT value FROM %s WHERE pk0 = 2"),
+                       row(1));
 
-        assertRows(execute("SELECT value FROM %s WHERE ck0 = 0"),
-                   row(3));
+            assertRows(execute("SELECT value FROM %s WHERE ck0 = 0"),
+                       row(3));
 
-        assertRows(execute("SELECT value FROM %s WHERE pk0 = 3 AND pk1 = 4 AND ck1 = 0"),
-                   row(2));
+            assertRows(execute("SELECT value FROM %s WHERE pk0 = 3 AND pk1 = 4 AND ck1 = 0"),
+                       row(2));
 
-        assertRows(execute("SELECT value FROM %s WHERE pk0 = 5 AND pk1 = 0 AND ck0 = 1 AND ck2 = 3 ALLOW FILTERING"),
-                   row(4));
+            assertRows(execute("SELECT value FROM %s WHERE pk0 = 5 AND pk1 = 0 AND ck0 = 1 AND ck2 = 3 ALLOW FILTERING"),
+                       row(4));
+        });
     }
 
     /**
@@ -370,8 +374,11 @@ public class SecondaryIndexTest extends CQLTester
         execute("insert into %s (interval, seq, id , severity) values('t',2, 3, 1)");
         execute("insert into %s (interval, seq, id , severity) values('t',2, 4, 2)");
 
-        assertRows(execute("select * from %s where severity = 3 and interval = 't' and seq =1"),
-                   row("t", 1, 4, 3));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("select * from %s where severity = 3 and interval = 't' and seq =1"),
+                       row("t", 1, 4, 3));
+
+        });
     }
 
     /**
@@ -402,23 +409,25 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (k, v, l, s, m) VALUES (1, 0, [1, 2, 4], {},         {'b' : 1})");
         execute("INSERT INTO %s (k, v, l, s, m) VALUES (1, 1, [4, 5],    {'d'},      {'a' : 1, 'b' : 3})");
 
-        // lists
-        assertRows(execute("SELECT k, v FROM %s WHERE l CONTAINS 1"), row(1, 0), row(0, 0), row(0, 2));
-        assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND l CONTAINS 1"), row(0, 0), row(0, 2));
-        assertRows(execute("SELECT k, v FROM %s WHERE l CONTAINS 2"), row(1, 0), row(0, 0));
-        assertEmpty(execute("SELECT k, v FROM %s WHERE l CONTAINS 6"));
+        beforeAndAfterFlush(() -> {
+            // lists
+            assertRows(execute("SELECT k, v FROM %s WHERE l CONTAINS 1"), row(1, 0), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND l CONTAINS 1"), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE l CONTAINS 2"), row(1, 0), row(0, 0));
+            assertEmpty(execute("SELECT k, v FROM %s WHERE l CONTAINS 6"));
 
-        // sets
-        assertRows(execute("SELECT k, v FROM %s WHERE s CONTAINS 'a'"), row(0, 0), row(0, 2));
-        assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND s CONTAINS 'a'"), row(0, 0), row(0, 2));
-        assertRows(execute("SELECT k, v FROM %s WHERE s CONTAINS 'd'"), row(1, 1));
-        assertEmpty(execute("SELECT k, v FROM %s  WHERE s CONTAINS 'e'"));
+            // sets
+            assertRows(execute("SELECT k, v FROM %s WHERE s CONTAINS 'a'"), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND s CONTAINS 'a'"), row(0, 0), row(0, 2));
+            assertRows(execute("SELECT k, v FROM %s WHERE s CONTAINS 'd'"), row(1, 1));
+            assertEmpty(execute("SELECT k, v FROM %s  WHERE s CONTAINS 'e'"));
 
-        // maps
-        assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 1"), row(1, 0), row(1, 1), row(0, 0), row(0, 1));
-        assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS 1"), row(0, 0), row(0, 1));
-        assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 2"), row(0, 1));
-        assertEmpty(execute("SELECT k, v FROM %s  WHERE m CONTAINS 4"));
+            // maps
+            assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 1"), row(1, 0), row(1, 1), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS 1"), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS 2"), row(0, 1));
+            assertEmpty(execute("SELECT k, v FROM %s  WHERE m CONTAINS 4"));
+        });
     }
 
     /**
@@ -438,10 +447,12 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (k, v, m) VALUES (1, 1, {'a' : 1, 'b' : 3})");
 
         // maps
-        assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS KEY 'a'"), row(1, 1), row(0, 0), row(0, 1));
-        assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS KEY 'a'"), row(0, 0), row(0, 1));
-        assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS KEY 'c'"), row(0, 2));
-        assertEmpty(execute("SELECT k, v FROM %s  WHERE m CONTAINS KEY 'd'"));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS KEY 'a'"), row(1, 1), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS KEY 'a'"), row(0, 0), row(0, 1));
+            assertRows(execute("SELECT k, v FROM %s WHERE m CONTAINS KEY 'c'"), row(0, 2));
+            assertEmpty(execute("SELECT k, v FROM %s  WHERE m CONTAINS KEY 'd'"));
+        });
     }
 
     /**
@@ -464,10 +475,12 @@ public class SecondaryIndexTest extends CQLTester
         execute("INSERT INTO %s (k1, k2, v) VALUES (2, 1, 8)");
         execute("INSERT INTO %s (k1, k2, v) VALUES (3, 0, 1)");
 
-        assertRows(execute("SELECT * FROM %s WHERE k2 = 0 AND v >= 2 ALLOW FILTERING"),
-                   row(2, 0, 7),
-                   row(0, 0, 3),
-                   row(1, 0, 4));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT * FROM %s WHERE k2 = 0 AND v >= 2 ALLOW FILTERING"),
+                       row(2, 0, 7),
+                       row(0, 0, 3),
+                       row(1, 0, 4));
+        });
     }
 
     /**
@@ -482,11 +495,15 @@ public class SecondaryIndexTest extends CQLTester
         createIndex("create index ON %s (app_name)");
         createIndex("create index ON %s (last_access)");
 
-        assertRows(execute("select count(*) from %s where app_name='foo' and account='bar' and last_access > 4 allow filtering"), row(0L));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("select count(*) from %s where app_name='foo' and account='bar' and last_access > 4 allow filtering"), row(0L));
+        });
 
         execute("insert into %s (username, session_id, app_name, account, last_access, created_on) values ('toto', 'foo', 'foo', 'bar', 12, 13)");
 
-        assertRows(execute("select count(*) from %s where app_name='foo' and account='bar' and last_access > 4 allow filtering"), row(1L));
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("select count(*) from %s where app_name='foo' and account='bar' and last_access > 4 allow filtering"), row(1L));
+        });
     }
 
     @Test
@@ -1175,6 +1192,101 @@ public class SecondaryIndexTest extends CQLTester
 
         assertRows(execute("SELECT * FROM %s WHERE v = textAsBlob('');"),
                    row(bytes("foo124"), EMPTY_BYTE_BUFFER));
+    }
+
+    @Test
+    public void testPartitionKeyWithIndex() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY ((a, b)))");
+        createIndex("CREATE INDEX ON %s (a);");
+        createIndex("CREATE INDEX ON %s (b);");
+
+        execute("INSERT INTO %s (a, b, c) VALUES (1,2,3)");
+        execute("INSERT INTO %s (a, b, c) VALUES (2,3,4)");
+        execute("INSERT INTO %s (a, b, c) VALUES (5,6,7)");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT * FROM %s WHERE a = 1"),
+                       row(1, 2, 3));
+            assertRows(execute("SELECT * FROM %s WHERE b = 3"),
+                       row(2, 3, 4));
+
+        });
+    }
+
+    @Test
+    public void testAllowFilteringOnPartitionKeyWithSecondaryIndex() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk1 int, pk2 int, c1 int, c2 int, v int, " +
+                    "PRIMARY KEY ((pk1, pk2), c1, c2))");
+        createIndex("CREATE INDEX v_idx_1 ON %s (v);");
+
+        for (int i = 1; i <= 5; i++)
+        {
+            for (int j = 1; j <= 2; j++)
+            {
+                execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (?, ?, ?, ?, ?)", j, 1, 1, 1, i);
+                execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (?, ?, ?, ?, ?)", j, 1, 1, i, i);
+                execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (?, ?, ?, ?, ?)", j, 1, i, i, i);
+                execute("INSERT INTO %s (pk1, pk2, c1, c2, v) VALUES (?, ?, ?, ?, ?)", j, i, i, i, i);
+            }
+        }
+
+        beforeAndAfterFlush(() -> {
+            assertEmpty(execute("SELECT * FROM %s WHERE pk1 = 1 AND  c1 > 0 AND c1 < 5 AND c2 = 1 AND v = 3 ALLOW FILTERING;"));
+
+            assertRows(execute("SELECT * FROM %s WHERE pk1 = 1 AND  c1 > 0 AND c1 < 5 AND c2 = 3 AND v = 3 ALLOW FILTERING;"),
+                       row(1, 3, 3, 3, 3),
+                       row(1, 1, 1, 3, 3),
+                       row(1, 1, 3, 3, 3));
+
+            assertEmpty(execute("SELECT * FROM %s WHERE pk1 = 1 AND  c2 > 1 AND c2 < 5 AND v = 1 ALLOW FILTERING;"));
+
+            assertRows(execute("SELECT * FROM %s WHERE pk1 = 1 AND  c1 > 1 AND c2 > 2 AND v = 3 ALLOW FILTERING;"),
+                       row(1, 3, 3, 3, 3),
+                       row(1, 1, 3, 3, 3));
+
+            assertRows(execute("SELECT * FROM %s WHERE pk1 = 1 AND  pk2 > 1 AND c2 > 2 AND v = 3 ALLOW FILTERING;"),
+                       row(1, 3, 3, 3, 3));
+
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE pk2 > 1 AND  c1 IN(0,1,2) AND v <= 3 ALLOW FILTERING;"),
+                                    row(1, 2, 2, 2, 2),
+                                    row(2, 2, 2, 2, 2));
+
+            assertRows(execute("SELECT * FROM %s WHERE pk1 >= 2 AND pk2 <=3 AND  c1 IN(0,1,2) AND c2 IN(0,1,2) AND v < 3  ALLOW FILTERING;"),
+                       row(2, 2, 2, 2, 2),
+                       row(2, 1, 1, 2, 2),
+                       row(2, 1, 2, 2, 2));
+
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE pk1 >= 1 AND pk2 <=3 AND  c1 IN(0,1,2) AND c2 IN(0,1,2) AND v = 3");
+        });
+    }
+
+    @Test
+    public void testAllowFilteringOnPartitionKeyWithIndexForContains() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 int, v set<int>, PRIMARY KEY ((k1, k2)))");
+        createIndex("CREATE INDEX ON %s(k2)");
+
+        execute("INSERT INTO %s (k1, k2, v) VALUES (?, ?, ?)", 0, 0, set(1, 2, 3));
+        execute("INSERT INTO %s (k1, k2, v) VALUES (?, ?, ?)", 0, 1, set(2, 3, 4));
+        execute("INSERT INTO %s (k1, k2, v) VALUES (?, ?, ?)", 1, 0, set(3, 4, 5));
+        execute("INSERT INTO %s (k1, k2, v) VALUES (?, ?, ?)", 1, 1, set(4, 5, 6));
+
+        beforeAndAfterFlush(() -> {
+            assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                 "SELECT * FROM %s WHERE k2 > ?", 0);
+
+            assertRows(execute("SELECT * FROM %s WHERE k2 > ? ALLOW FILTERING", 0),
+                       row(0, 1, set(2, 3, 4)),
+                       row(1, 1, set(4, 5, 6)));
+
+            assertRows(execute("SELECT * FROM %s WHERE k2 >= ? AND v CONTAINS ? ALLOW FILTERING", 1, 6),
+                       row(1, 1, set(4, 5, 6)));
+
+            assertEmpty(execute("SELECT * FROM %s WHERE k2 < ? AND v CONTAINS ? ALLOW FILTERING", 0, 7));
+        });
     }
 
     private ResultMessage.Prepared prepareStatement(String cql, boolean forThrift)

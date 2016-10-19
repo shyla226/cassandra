@@ -26,10 +26,10 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
-import io.reactivex.Observable;
 import io.reactivex.Single;
 import io.reactivex.subjects.BehaviorSubject;
 import org.apache.cassandra.transport.messages.ResultMessage;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +55,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     private volatile int failures = 0;
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
+    private volatile boolean supportsBackPressure = true;
 
     final BehaviorSubject<ResultMessage.Void> publishSubject = BehaviorSubject.create();
     final Single<ResultMessage.Void> observable;
@@ -87,11 +88,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
     private Single<ResultMessage.Void> makeObservable()
     {
-        long requestTimeout = writeType == WriteType.COUNTER
-                            ? DatabaseDescriptor.getCounterWriteRpcTimeout()
-                            : DatabaseDescriptor.getWriteRpcTimeout();
-
-        long timeout = TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
+        long timeout = currentTimeout();
 
         return publishSubject
             .timeout(timeout, TimeUnit.NANOSECONDS)
@@ -114,8 +111,16 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
             });
     }
 
-    /** 
-     * @return the minimum number of endpoints that must reply. 
+    public final long currentTimeout()
+    {
+        long requestTimeout = writeType == WriteType.COUNTER
+                              ? DatabaseDescriptor.getCounterWriteRpcTimeout()
+                              : DatabaseDescriptor.getWriteRpcTimeout();
+        return TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
+    }
+
+    /**
+     * @return the minimum number of endpoints that must reply.
      */
     protected int totalBlockFor()
     {
@@ -124,8 +129,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         return consistencyLevel.blockFor(keyspace) + pendingEndpoints.size();
     }
 
-    /** 
-     * @return the total number of endpoints the request has been sent to. 
+    /**
+     * @return the total number of endpoints the request has been sent to.
      */
     protected int totalEndpoints()
     {
@@ -174,5 +179,16 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
             publishSubject.onError(
                     new WriteFailureException(consistencyLevel, ackCount(), totalBlockFor(), writeType, failureReasonByEndpoint));
         }
+    }
+
+    @Override
+    public boolean supportsBackPressure()
+    {
+        return supportsBackPressure;
+    }
+
+    public void setSupportsBackPressure(boolean supportsBackPressure)
+    {
+        this.supportsBackPressure = supportsBackPressure;
     }
 }

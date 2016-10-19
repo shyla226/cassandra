@@ -116,7 +116,8 @@ public class Memtable implements Comparable<Memtable>
 
     public static final class LastCommitLogPosition extends CommitLogPosition
     {
-        public LastCommitLogPosition(CommitLogPosition copy) {
+        public LastCommitLogPosition(CommitLogPosition copy)
+        {
             super(copy.segmentId, copy.position);
         }
     }
@@ -652,10 +653,10 @@ public class Memtable implements Comparable<Memtable>
             }
 
             long bytesFlushed = writer.getFilePointer();
-            logger.debug(String.format("Completed flushing %s (%s) for commitlog position %s",
+            logger.debug("Completed flushing {} ({}) for commitlog position {}",
                                                                               writer.getFilename(),
                                                                               FBUtilities.prettyPrintMemory(bytesFlushed),
-                                                                              commitLogUpperBound));
+                                                                              commitLogUpperBound);
             // Update the metrics
             cfs.metric.bytesFlushed.inc(bytesFlushed);
         }

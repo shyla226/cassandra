@@ -35,7 +35,6 @@ import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
@@ -217,7 +216,8 @@ public abstract class AbstractCommitLogSegmentManager
     @DontInline
     void advanceAllocatingFrom(CommitLogSegment old)
     {
-        while (true) {
+        while (true)
+        {
             synchronized (this)
             {
                 // do this in a critical section so we can maintain the order of segment construction when moving to allocatingFrom/activeSegments
@@ -467,7 +467,8 @@ public abstract class AbstractCommitLogSegmentManager
     private void discardAvailableSegment()
     {
         CommitLogSegment next = null;
-        synchronized (this) {
+        synchronized (this)
+        {
             next = availableSegment;
             availableSegment = null;
         }

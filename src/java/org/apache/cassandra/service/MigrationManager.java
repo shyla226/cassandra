@@ -301,7 +301,7 @@ public class MigrationManager
         if (Schema.instance.getKSMetaData(ksm.name) != null)
             return Single.error(new AlreadyExistsException(ksm.name));
 
-        logger.info(String.format("Create new Keyspace: %s", ksm));
+        logger.info("Create new Keyspace: {}", ksm);
         return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
     }
 
@@ -341,7 +341,7 @@ public class MigrationManager
         else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.cfName) != null)
             throw new AlreadyExistsException(cfm.ksName, cfm.cfName);
 
-        logger.info(String.format("Create new table: %s", cfm));
+        logger.info("Create new table: {}", cfm);
         return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -355,7 +355,7 @@ public class MigrationManager
         else if (ksm.getTableOrViewNullable(view.viewName) != null)
             throw new AlreadyExistsException(view.ksName, view.viewName);
 
-        logger.info(String.format("Create new view: %s", view));
+        logger.info("Create new view: {}", view);
         return announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -367,14 +367,14 @@ public class MigrationManager
 
     public static Single<Integer> announceNewFunction(UDFunction udf, boolean announceLocally)
     {
-        logger.info(String.format("Create scalar function '%s'", udf.name()));
+        logger.info("Create scalar function '{}'", udf.name());
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeCreateFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
     public static Single<Integer> announceNewAggregate(UDAggregate udf, boolean announceLocally)
     {
-        logger.info(String.format("Create aggregate function '%s'", udf.name()));
+        logger.info("Create aggregate function '{}'", udf.name());
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeCreateAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
@@ -392,7 +392,7 @@ public class MigrationManager
         if (oldKsm == null)
             throw new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name));
 
-        logger.info(String.format("Update Keyspace '%s' From %s To %s", ksm.name, oldKsm, ksm));
+        logger.info("Update Keyspace '{}' From {} To {}", ksm.name, oldKsm, ksm);
         return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -412,7 +412,7 @@ public class MigrationManager
 
         oldCfm.validateCompatibility(cfm);
 
-        logger.info(String.format("Update table '%s/%s' From %s To %s", cfm.ksName, cfm.cfName, oldCfm, cfm));
+        logger.info("Update table '{}/{}' From {} To {}", cfm.ksName, cfm.cfName, oldCfm, cfm);
         return announce(SchemaKeyspace.makeUpdateTableMutation(ksm, oldCfm, cfm, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -427,13 +427,13 @@ public class MigrationManager
 
         oldView.metadata.validateCompatibility(view.metadata);
 
-        logger.info(String.format("Update view '%s/%s' From %s To %s", view.ksName, view.viewName, oldView, view));
+        logger.info("Update view '{}/{}' From {} To {}", view.ksName, view.viewName, oldView, view);
         return announce(SchemaKeyspace.makeUpdateViewMutation(ksm, oldView, view, FBUtilities.timestampMicros()), announceLocally);
     }
 
     public static Single<Integer> announceTypeUpdate(UserType updatedType, boolean announceLocally)
     {
-        logger.info(String.format("Update type '%s.%s' to %s", updatedType.keyspace, updatedType.getNameAsString(), updatedType));
+        logger.info("Update type '{}.{}' to {}", updatedType.keyspace, updatedType.getNameAsString(), updatedType);
         return announceNewType(updatedType, announceLocally);
     }
 
@@ -448,7 +448,7 @@ public class MigrationManager
         if (oldKsm == null)
             throw new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName));
 
-        logger.info(String.format("Drop Keyspace '%s'", oldKsm.name));
+        logger.info("Drop Keyspace '{}'", oldKsm.name);
         return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -464,7 +464,7 @@ public class MigrationManager
             throw new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
 
-        logger.info(String.format("Drop table '%s/%s'", oldCfm.ksName, oldCfm.cfName));
+        logger.info("Drop table '{}/{}'", oldCfm.ksName, oldCfm.cfName);
         return announce(SchemaKeyspace.makeDropTableMutation(ksm, oldCfm, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -475,7 +475,7 @@ public class MigrationManager
             throw new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
 
-        logger.info(String.format("Drop table '%s/%s'", view.ksName, view.viewName));
+        logger.info("Drop table '{}/{}'", view.ksName, view.viewName);
         return announce(SchemaKeyspace.makeDropViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
     }
 
@@ -492,14 +492,14 @@ public class MigrationManager
 
     public static Single<Integer> announceFunctionDrop(UDFunction udf, boolean announceLocally)
     {
-        logger.info(String.format("Drop scalar function overload '%s' args '%s'", udf.name(), udf.argTypes()));
+        logger.info("Drop scalar function overload '{}' args '{}'", udf.name(), udf.argTypes());
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeDropFunctionMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }
 
     public static Single<Integer> announceAggregateDrop(UDAggregate udf, boolean announceLocally)
     {
-        logger.info(String.format("Drop aggregate function overload '%s' args '%s'", udf.name(), udf.argTypes()));
+        logger.info("Drop aggregate function overload '{}' args '{}'", udf.name(), udf.argTypes());
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(udf.name().keyspace);
         return announce(SchemaKeyspace.makeDropAggregateMutation(ksm, udf, FBUtilities.timestampMicros()), announceLocally);
     }

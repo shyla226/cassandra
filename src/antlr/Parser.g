@@ -181,6 +181,22 @@ options {
         }
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Recovery methods are overridden to avoid wasting work on recovering from errors when the result will be
+    // ignored anyway.
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    @Override
+    protected Object recoverFromMismatchedToken(IntStream input, int ttype, BitSet follow) throws RecognitionException
+    {
+        throw new MismatchedTokenException(ttype, input);
+    }
+
+    @Override
+    public void recover(IntStream input, RecognitionException re)
+    {
+        // Do nothing.
+    }
 }
 
 /** STATEMENTS **/
@@ -411,12 +427,12 @@ updateStatement returns [UpdateStatement.ParsedUpdate expr]
       K_WHERE wclause=whereClause
       ( K_IF ( K_EXISTS { ifExists = true; } | conditions=updateConditions ))?
       {
-          return new UpdateStatement.ParsedUpdate(cf,
-                                                  attrs,
-                                                  operations,
-                                                  wclause.build(),
-                                                  conditions == null ? Collections.<Pair<ColumnDefinition.Raw, ColumnCondition.Raw>>emptyList() : conditions,
-                                                  ifExists);
+          $expr = new UpdateStatement.ParsedUpdate(cf,
+                                                   attrs,
+                                                   operations,
+                                                   wclause.build(),
+                                                   conditions == null ? Collections.<Pair<ColumnDefinition.Raw, ColumnCondition.Raw>>emptyList() : conditions,
+                                                   ifExists);
      }
     ;
 
@@ -445,12 +461,12 @@ deleteStatement returns [DeleteStatement.Parsed expr]
       K_WHERE wclause=whereClause
       ( K_IF ( K_EXISTS { ifExists = true; } | conditions=updateConditions ))?
       {
-          return new DeleteStatement.Parsed(cf,
-                                            attrs,
-                                            columnDeletions,
-                                            wclause.build(),
-                                            conditions == null ? Collections.<Pair<ColumnDefinition.Raw, ColumnCondition.Raw>>emptyList() : conditions,
-                                            ifExists);
+          $expr = new DeleteStatement.Parsed(cf,
+                                             attrs,
+                                             columnDeletions,
+                                             wclause.build(),
+                                             conditions == null ? Collections.<Pair<ColumnDefinition.Raw, ColumnCondition.Raw>>emptyList() : conditions,
+                                             ifExists);
       }
     ;
 
@@ -506,7 +522,7 @@ batchStatement returns [BatchStatement.Parsed expr]
           ( s=batchStatementObjective ';'? { statements.add(s); } )*
       K_APPLY K_BATCH
       {
-          return new BatchStatement.Parsed(type, attrs, statements);
+          $expr = new BatchStatement.Parsed(type, attrs, statements);
       }
     ;
 
@@ -1197,12 +1213,12 @@ columnFamilyName returns [CFName name]
     ;
 
 userTypeName returns [UTName name]
-    : (ks=noncol_ident '.')? ut=non_type_ident { return new UTName(ks, ut); }
+    : (ks=noncol_ident '.')? ut=non_type_ident { $name = new UTName(ks, ut); }
     ;
 
 userOrRoleName returns [RoleName name]
-    @init { $name = new RoleName(); }
-    : roleName[name] {return $name;}
+    @init { RoleName role = new RoleName(); }
+    : roleName[role] {$name = role;}
     ;
 
 ksName[KeyspaceElementName name]
@@ -1239,6 +1255,7 @@ constant returns [Constants.Literal constant]
     | t=INTEGER        { $constant = Constants.Literal.integer($t.text); }
     | t=FLOAT          { $constant = Constants.Literal.floatingPoint($t.text); }
     | t=BOOLEAN        { $constant = Constants.Literal.bool($t.text); }
+    | t=DURATION       { $constant = Constants.Literal.duration($t.text);}
     | t=UUID           { $constant = Constants.Literal.uuid($t.text); }
     | t=HEXNUMBER      { $constant = Constants.Literal.hex($t.text); }
     | { String sign=""; } ('-' {sign = "-"; } )? t=(K_NAN | K_INFINITY) { $constant = Constants.Literal.floatingPoint(sign + $t.text); }
@@ -1332,6 +1349,7 @@ columnOperation[List<Pair<ColumnDefinition.Raw, Operation.RawUpdate>> operations
 
 columnOperationDifferentiator[List<Pair<ColumnDefinition.Raw, Operation.RawUpdate>> operations, ColumnDefinition.Raw key]
     : '=' normalColumnOperation[operations, key]
+    | shorthandColumnOperation[operations, key]
     | '[' k=term ']' collectionColumnOperation[operations, key, k]
     | '.' field=fident udtColumnOperation[operations, key, field]
     ;
@@ -1363,6 +1381,13 @@ normalColumnOperation[List<Pair<ColumnDefinition.Raw, Operation.RawUpdate>> oper
               // We don't yet allow a '+' in front of an integer, but we could in the future really, so let's be future-proof in our error message
               addRecognitionError("Only expressions of the form X = X " + ($i.text.charAt(0) == '-' ? '-' : '+') + " <value> are supported.");
           addRawUpdate(operations, key, new Operation.Addition(Constants.Literal.integer($i.text)));
+      }
+    ;
+
+shorthandColumnOperation[List<Pair<ColumnDefinition.Raw, Operation.RawUpdate>> operations, ColumnDefinition.Raw key]
+    : sig=('+=' | '-=') t=term
+      {
+          addRawUpdate(operations, key, $sig.text.equals("+=") ? new Operation.Addition(t) : new Operation.Substraction(t));
       }
     ;
 
@@ -1532,6 +1557,7 @@ native_type returns [CQL3Type t]
     | K_COUNTER   { $t = CQL3Type.Native.COUNTER; }
     | K_DECIMAL   { $t = CQL3Type.Native.DECIMAL; }
     | K_DOUBLE    { $t = CQL3Type.Native.DOUBLE; }
+    | K_DURATION    { $t = CQL3Type.Native.DURATION; }
     | K_FLOAT     { $t = CQL3Type.Native.FLOAT; }
     | K_INET      { $t = CQL3Type.Native.INET;}
     | K_INT       { $t = CQL3Type.Native.INT; }

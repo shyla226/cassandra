@@ -108,7 +108,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
         if (logger.isTraceEnabled())
-            logger.trace(String.format("Blockfor is %s; setting up requests to %s", blockfor, StringUtils.join(this.endpoints, ",")));
+            logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
     }
 
 
@@ -256,9 +256,9 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                     traceState.trace("Digest mismatch: {}", e.toString());
                 if (logger.isDebugEnabled())
                     logger.debug("Digest mismatch:", e);
-                
+
                 ReadRepairMetrics.repairedBackground.mark();
-                
+
                 final DataResolver repairResolver = new DataResolver(keyspace, command, consistencyLevel, endpoints.size(), queryStartNanoTime);
                 AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
 

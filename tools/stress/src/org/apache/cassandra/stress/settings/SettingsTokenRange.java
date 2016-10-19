@@ -18,21 +18,22 @@
 
 package org.apache.cassandra.stress.settings;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Ints;
 
-import org.apache.cassandra.stress.util.MultiPrintStream;
+import org.apache.cassandra.stress.util.ResultLogger;
 
-public class SettingsTokenRange
+public class SettingsTokenRange implements Serializable
 {
     public final boolean wrap;
     public final int splitFactor;
     private final TokenRangeOptions options;
 
-    public SettingsTokenRange(TokenRangeOptions options)
+    private SettingsTokenRange(TokenRangeOptions options)
     {
         this.options = options;
         this.wrap = options.wrap.setByUser();
@@ -69,7 +70,7 @@ public class SettingsTokenRange
         return new SettingsTokenRange(options);
     }
 
-    public void printSettings(MultiPrintStream out)
+    public void printSettings(ResultLogger out)
     {
         out.printf("  Wrap: %b%n", wrap);
         out.printf("  Split Factor: %d%n", splitFactor);

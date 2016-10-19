@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -269,7 +270,9 @@ public final class SystemDistributedKeyspace
                                              ConsistencyLevel.ONE,
                                              keyspace,
                                              view);
-        } catch (Exception e) {
+        }
+        catch (Exception e)
+        {
             return Collections.emptyMap();
         }
 
@@ -309,7 +312,7 @@ public final class SystemDistributedKeyspace
 
     public static void forceBlockingFlush(String table)
     {
-        if (!Boolean.getBoolean("cassandra.unsafesystem"))
+        if (!DatabaseDescriptor.isUnsafeSystem())
             Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush().blockingFirst();
     }
 

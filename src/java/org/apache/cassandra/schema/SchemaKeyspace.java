@@ -45,6 +45,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -145,6 +146,7 @@ public final class SchemaKeyspace
                 + "column_name text,"
                 + "dropped_time timestamp,"
                 + "type text,"
+                + "kind text,"
                 + "PRIMARY KEY ((keyspace_name), table_name, column_name))");
 
     private static final CFMetaData Triggers =
@@ -281,7 +283,7 @@ public final class SchemaKeyspace
 
     static Single<Integer> flush()
     {
-        if (!Boolean.getBoolean("cassandra.unsafesystem"))
+        if (!DatabaseDescriptor.isUnsafeSystem())
         {
             List<Single<?>> observables = new ArrayList<>(ALL.size());
             for (String table : ALL)
@@ -383,10 +385,35 @@ public final class SchemaKeyspace
                         mutationMap.put(key, mutation);
                     }
 
-                    mutation.add(PartitionUpdate.fromIterator(partition, cmd.columnFilter()));
+                    mutation.add(makeUpdateForSchema(partition, cmd.columnFilter()));
                 }
             }
         }
+    }
+
+    /**
+     * Creates a PartitionUpdate from a partition containing some schema table content.
+     * This is mainly calling {@code PartitionUpdate.fromIterator} except for the fact that it deals with
+     * the problem described in #12236.
+     */
+    private static PartitionUpdate makeUpdateForSchema(UnfilteredRowIterator partition, ColumnFilter filter)
+    {
+        // This method is used during schema migration tasks, and if cdc is disabled, we want to force excluding the
+        // 'cdc' column from the TABLES schema table because it is problematic if received by older nodes (see #12236
+        // and #12697). Otherwise though, we just simply "buffer" the content of the partition into a PartitionUpdate.
+        if (DatabaseDescriptor.isCDCEnabled() || !partition.metadata().cfName.equals(TABLES))
+            return PartitionUpdate.fromIterator(partition, filter);
+
+        // We want to skip the 'cdc' column. A simple solution for that is based on the fact that
+        // 'PartitionUpdate.fromIterator()' will ignore any columns that are marked as 'fetched' but not 'queried'.
+        ColumnFilter.Builder builder = ColumnFilter.allColumnsBuilder(partition.metadata());
+        for (ColumnDefinition column : filter.fetchedColumns())
+        {
+            if (!column.name.toString().equals("cdc"))
+                builder.add(column);
+        }
+
+        return PartitionUpdate.fromIterator(partition, builder.build());
     }
 
     private static boolean isSystemKeyspaceSchemaPartition(DecoratedKey partitionKey)
@@ -652,7 +679,8 @@ public final class SchemaKeyspace
         builder.update(DroppedColumns)
                .row(table.cfName, column.name)
                .add("dropped_time", new Date(TimeUnit.MICROSECONDS.toMillis(column.droppedTime)))
-               .add("type", expandUserTypes(column.type).asCQL3Type().toString());
+               .add("type", expandUserTypes(column.type).asCQL3Type().toString())
+               .add("kind", column.kind.toString().toLowerCase());
     }
 
     private static void addTriggerToSchemaMutation(CFMetaData table, TriggerMetadata trigger, Mutation.SimpleBuilder builder)
@@ -1024,8 +1052,6 @@ public final class SchemaKeyspace
         String keyspace = row.getString("keyspace_name");
         String table = row.getString("table_name");
 
-        ColumnIdentifier name = ColumnIdentifier.getInterned(row.getBytes("column_name_bytes"), row.getString("column_name"));
-
         ColumnDefinition.Kind kind = ColumnDefinition.Kind.valueOf(row.getString("kind").toUpperCase());
 
         int position = row.getInt("position");
@@ -1034,6 +1060,10 @@ public final class SchemaKeyspace
         AbstractType<?> type = parse(keyspace, row.getString("type"), types);
         if (order == ClusteringOrder.DESC)
             type = ReversedType.getInstance(type);
+
+        ColumnIdentifier name = ColumnIdentifier.getInterned(type,
+                                                             row.getBytes("column_name_bytes"),
+                                                             row.getString("column_name"));
 
         return new ColumnDefinition(keyspace, table, name, type, position, kind);
     }
@@ -1062,7 +1092,12 @@ public final class SchemaKeyspace
          */
         AbstractType<?> type = parse(keyspace, row.getString("type"), org.apache.cassandra.schema.Types.none());
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));
-        return new CFMetaData.DroppedColumn(name, type, droppedTime);
+        ColumnDefinition.Kind kind = row.has("kind")
+                                     ? ColumnDefinition.Kind.valueOf(row.getString("kind").toUpperCase())
+                                     : ColumnDefinition.Kind.REGULAR;
+        assert kind == ColumnDefinition.Kind.REGULAR || kind == ColumnDefinition.Kind.STATIC
+            : "Unexpected dropped column kind: " + kind.toString();
+        return new CFMetaData.DroppedColumn(name, type, droppedTime, kind);
     }
 
     private static Indexes fetchIndexes(String keyspace, String table)
