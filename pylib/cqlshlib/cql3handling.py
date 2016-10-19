@@ -18,8 +18,8 @@ from .cqlhandling import CqlParsingRuleSet, Hint
 from cassandra.metadata import maybe_escape_name
 
 
-simple_cql_types = set(('ascii', 'bigint', 'blob', 'boolean', 'counter', 'date', 'decimal', 'double', 'float', 'inet', 'int',
-                        'smallint', 'text', 'time', 'timestamp', 'timeuuid', 'tinyint', 'uuid', 'varchar', 'varint'))
+simple_cql_types = set(('ascii', 'bigint', 'blob', 'boolean', 'counter', 'date', 'decimal', 'double', 'duration', 'float',
+                        'inet', 'int', 'smallint', 'text', 'time', 'timestamp', 'timeuuid', 'tinyint', 'uuid', 'varchar', 'varint'))
 simple_cql_types.difference_update(('set', 'map', 'list'))
 
 from . import helptopics
@@ -512,6 +512,7 @@ def cf_prop_val_mapkey_completer(ctxt, cass):
             opts.add('bucket_low')
         elif csc == 'LeveledCompactionStrategy':
             opts.add('sstable_size_in_mb')
+            opts.add('fanout_size')
         elif csc == 'DateTieredCompactionStrategy':
             opts.add('base_time_seconds')
             opts.add('max_sstable_age_days')
