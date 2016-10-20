@@ -1,3 +1,7 @@
+DSE backports
+ * Allow the prepared statement cache size to be changed. (APOLLO-50)
+
+
 3.0.10
  * Fix ViewTest.testCompaction (CASSANDRA-12789)
  * Improve avg aggregate functions (CASSANDRA-12417)
