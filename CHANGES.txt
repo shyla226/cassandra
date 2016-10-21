@@ -9,6 +9,7 @@ Merged from 4.0:
 DSE 5.1.0
  * Insert default superuser role with fixed timestamp (APOLLO-18)
 3.10
+ * Fix RandomReplicationAwareTokenAllocatorTest.testExistingCluster (CASSANDRA-12812)
  * Upgrade commons-codec to 1.9 (CASSANDRA-12790)
  * Add duration data type (CASSANDRA-11873)
  * Make the fanout size for LeveledCompactionStrategy to be configurable (CASSANDRA-11550)
