@@ -1,4 +1,5 @@
 DSE backports
+ * Avoid assertion error when IndexSummary > 2G (CASSANDRA-12014)
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
  * Forward writes to replacement node when replace_address != broadcast_address (CASSANDRA-8523)
  * Fix authentication problem when invoking cqlsh copy from a SOURCE command (CASSANDRA-12642)
