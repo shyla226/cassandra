@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3.statements;
 import java.util.*;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.*;
@@ -57,7 +59,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
         this.permissions = permissions;
         this.resource = resource;
         this.recursive = recursive;
-        this.grantee = grantee.hasName()? RoleResource.role(grantee.getName()) : null;
+        this.grantee = grantee.hasName() ? RoleResource.role(grantee.getName()) : null;
     }
 
     public void validate(ClientState state) throws RequestValidationException

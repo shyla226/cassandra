@@ -27,6 +27,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.*;
@@ -331,7 +332,7 @@ public class UFAuthTest extends CQLTester
         String fFunc = createSimpleFinalFunction();
         // aside from the component functions, we need CREATE on the keyspace's functions
         DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                 ImmutableSet.of(Permission.CREATE),
+                                                 ImmutableSet.of(CorePermission.CREATE),
                                                  FunctionResource.keyspace(KEYSPACE),
                                                  role);
         String aggDef = String.format(aggregateCql(sFunc, fFunc),
@@ -511,7 +512,7 @@ public class UFAuthTest extends CQLTester
     private void grantExecuteOnFunction(String functionName)
     {
             DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     ImmutableSet.of(Permission.EXECUTE),
+                                                     ImmutableSet.of(CorePermission.EXECUTE),
                                                      functionResource(functionName),
                                                      role);
     }
@@ -519,7 +520,7 @@ public class UFAuthTest extends CQLTester
     private void revokeExecuteOnFunction(String functionName)
     {
         DatabaseDescriptor.getAuthorizer().revoke(AuthenticatedUser.SYSTEM_USER,
-                                                  ImmutableSet.of(Permission.EXECUTE),
+                                                  ImmutableSet.of(CorePermission.EXECUTE),
                                                   functionResource(functionName),
                                                   role);
     }
@@ -549,7 +550,7 @@ public class UFAuthTest extends CQLTester
         createTable(tableDef);
         // test user needs SELECT & MODIFY on the table regardless of permissions on any function
         DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                 ImmutableSet.of(Permission.SELECT, Permission.MODIFY),
+                                                 ImmutableSet.of(CorePermission.SELECT, CorePermission.MODIFY),
                                                  DataResource.table(KEYSPACE, currentTable()),
                                                  RoleResource.role(user.getName()));
     }

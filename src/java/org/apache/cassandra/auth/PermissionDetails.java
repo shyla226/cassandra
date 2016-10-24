@@ -43,7 +43,8 @@ public class PermissionDetails implements Comparable<PermissionDetails>
         return ComparisonChain.start()
                               .compare(grantee, other.grantee)
                               .compare(resource.getName(), other.resource.getName())
-                              .compare(permission, other.permission)
+                              .compare(permission.domain(), other.permission.domain())
+                              .compare(permission.ordinal(), other.permission.ordinal())
                               .result();
     }
 

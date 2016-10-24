@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.StorageService;
 
@@ -246,9 +247,9 @@ public class AuthorizationProxy implements InvocationHandler
      */
     private boolean authorizeMBeanServerMethod(RoleResource subject, String methodName)
     {
-        logger.trace("JMX invocation of {} on MBeanServer requires permission {}", methodName, Permission.DESCRIBE);
+        logger.trace("JMX invocation of {} on MBeanServer requires permission {}", methodName, CorePermission.DESCRIBE);
         return (MBEAN_SERVER_METHOD_WHITELIST.contains(methodName) &&
-            hasPermission(subject, Permission.DESCRIBE, JMXResource.root()));
+            hasPermission(subject, CorePermission.DESCRIBE, JMXResource.root()));
     }
 
     /**
@@ -414,12 +415,12 @@ public class AuthorizationProxy implements InvocationHandler
         {
             case "getAttribute":
             case "getAttributes":
-                return Permission.SELECT;
+                return CorePermission.SELECT;
             case "setAttribute":
             case "setAttributes":
-                return Permission.MODIFY;
+                return CorePermission.MODIFY;
             case "invoke":
-                return Permission.EXECUTE;
+                return CorePermission.EXECUTE;
             case "getInstanceOf":
             case "getMBeanInfo":
             case "hashCode":
@@ -427,7 +428,7 @@ public class AuthorizationProxy implements InvocationHandler
             case "isRegistered":
             case "queryMBeans":
             case "queryNames":
-                return Permission.DESCRIBE;
+                return CorePermission.DESCRIBE;
             default:
                 logger.debug("Access denied, method name {} does not map to any defined permission", methodName);
                 return null;
@@ -470,7 +471,10 @@ public class AuthorizationProxy implements InvocationHandler
         // get all permissions for the specified subject. We'll cache them as it's likely
         // we'll receive multiple lookups for the same subject (but for different resources
         // and permissions) in quick succession
-        return DatabaseDescriptor.getAuthorizer().list(AuthenticatedUser.SYSTEM_USER, Permission.ALL, null, subject)
+        return DatabaseDescriptor.getAuthorizer().list(AuthenticatedUser.SYSTEM_USER,
+                                                       JMXResource.root().applicablePermissions(),
+                                                       null,
+                                                       subject)
                                                  .stream()
                                                  .filter(details -> details.resource instanceof JMXResource)
                                                  .collect(Collectors.toSet());

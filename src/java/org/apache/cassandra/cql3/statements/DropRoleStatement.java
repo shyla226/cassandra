@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
@@ -37,7 +38,7 @@ public class DropRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.DROP, role);
+        super.checkPermission(state, CorePermission.DROP, role);
 
         // We only check superuser status for existing roles to avoid
         // caching info about roles which don't exist (CASSANDRA-9189)

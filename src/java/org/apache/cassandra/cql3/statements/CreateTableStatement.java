@@ -25,6 +25,7 @@ import com.google.common.collect.Multiset;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.*;
@@ -74,7 +75,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(keyspace(), Permission.CREATE);
+        state.hasKeyspaceAccess(keyspace(), CorePermission.CREATE);
     }
 
     public void validate(ClientState state)

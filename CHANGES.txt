@@ -1,5 +1,6 @@
 DSE 5.1.0
  * Insert default superuser role with fixed timestamp (APOLLO-18)
+ * Make Permissions extensible (APOLLO-26)
 Merged from 3.X:
 3.10
  * Fix crossNode value when receiving messages (CASSANDRA-12791)

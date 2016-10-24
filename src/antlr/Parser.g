@@ -147,13 +147,28 @@ options {
     {
         if (resource == null)
             return Collections.emptySet();
+
         Set<Permission> filtered = new HashSet<>(permissions);
         filtered.retainAll(resource.applicablePermissions());
+
         if (filtered.isEmpty())
             addRecognitionError("Resource type " + resource.getClass().getSimpleName() +
                                     " does not support any of the requested permissions");
 
         return filtered;
+    }
+
+    public Permission validatePermission(String domain, String name)
+    {
+       try
+       {
+          return Permissions.permission(domain, name);
+       }
+       catch (java.lang.IllegalArgumentException e)
+       {
+          addRecognitionError("Unknown permission " + domain + "." + name);
+       }
+       return null;
     }
 
     public String canonicalizeObjectName(String s, boolean enforcePattern)
@@ -969,14 +984,44 @@ listPermissionsStatement returns [ListPermissionsStatement stmt]
       { $stmt = new ListPermissionsStatement($permissionOrAll.perms, resource, grantee, recursive); }
     ;
 
+permissionDomain
+    : IDENT
+    | STRING_LITERAL
+    | QUOTED_NAME
+    | unreserved_keyword
+    ;
+
+permissionName
+    : IDENT
+    | STRING_LITERAL
+    | QUOTED_NAME
+    | corePermissionName
+    | unreserved_keyword
+    ;
+
+corePermissionName
+    : K_CREATE
+    | K_ALTER
+    | K_DROP
+    | K_SELECT
+    | K_MODIFY
+    | K_AUTHORIZE
+    | K_DESCRIBE
+    | K_EXECUTE
+    ;
+
 permission returns [Permission perm]
-    : p=(K_CREATE | K_ALTER | K_DROP | K_SELECT | K_MODIFY | K_AUTHORIZE | K_DESCRIBE | K_EXECUTE)
-    { $perm = Permission.valueOf($p.text.toUpperCase()); }
+    // unnamespaced permissions default to the SYSTEM namespace
+    : p=corePermissionName
+        { $perm = Permissions.permission(CorePermission.getDomain(), $p.text); }
+    | domain=permissionDomain '.' name=permissionName
+        { $perm = validatePermission($domain.text, $name.text); }
     ;
 
 permissionOrAll returns [Set<Permission> perms]
-    : K_ALL ( K_PERMISSIONS )?       { $perms = Permission.ALL; }
-    | p=permission ( K_PERMISSION )? { $perms = EnumSet.of($p.perm); }
+    : K_ALL ( K_PERMISSIONS )?       { $perms = Permissions.all(); }
+    | K_PERMISSIONS { $perms = Permissions.all(); }
+    | p=permission ( K_PERMISSION )? { $perms = $p.perm == null ? Collections.emptySet() : Permissions.setOf($p.perm); }
     ;
 
 resource returns [IResource res]
