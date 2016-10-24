@@ -152,4 +152,16 @@ public interface IAuthorizer
      * For example, use this method to create any required keyspaces/column families.
      */
     void setup();
+
+    /**
+     * Return the universe of valid permissions for a named IResource. By default, this
+     * just delegates to the resource implementation itself, but this may be overridden
+     * to allow custom permissions on certain types of resource.
+     * @param resource the IResource to get all allowed permissions for
+     * @return the set of all allowed permissions for the supplied resource
+     */
+    default Set<Permission> applicablePermissions(IResource resource)
+    {
+        return resource.applicablePermissions();
+    }
 }

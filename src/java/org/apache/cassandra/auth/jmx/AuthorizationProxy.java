@@ -472,7 +472,7 @@ public class AuthorizationProxy implements InvocationHandler
         // we'll receive multiple lookups for the same subject (but for different resources
         // and permissions) in quick succession
         return DatabaseDescriptor.getAuthorizer().list(AuthenticatedUser.SYSTEM_USER,
-                                                       JMXResource.root().applicablePermissions(),
+                                                       DatabaseDescriptor.getAuthorizer().applicablePermissions(JMXResource.root()),
                                                        null,
                                                        subject)
                                                  .stream()

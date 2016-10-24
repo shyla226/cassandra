@@ -117,17 +117,18 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
     {
         try
         {
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
             RoleResource role = RoleResource.role(state.getClientState().getUser().getName());
             DataResource keyspace = DataResource.keyspace(keyspace());
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     keyspace.applicablePermissions(),
-                                                     keyspace,
-                                                     role);
+            authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                             authorizer.applicablePermissions(keyspace),
+                             keyspace,
+                             role);
             FunctionResource functions = FunctionResource.keyspace(keyspace());
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     functions.applicablePermissions(),
-                                                     functions,
-                                                     role);
+            authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                             authorizer.applicablePermissions(functions),
+                             functions,
+                             role);
         }
         catch (RequestExecutionException e)
         {

@@ -126,7 +126,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
             result.addColumnValue(UTF8Type.instance.decompose(pd.grantee));
             result.addColumnValue(UTF8Type.instance.decompose(pd.grantee));
             result.addColumnValue(UTF8Type.instance.decompose(pd.resource.toString()));
-            result.addColumnValue(UTF8Type.instance.decompose(pd.permission.toString()));
+            result.addColumnValue(UTF8Type.instance.decompose(pd.permission.getFullName()));
         }
         return new ResultMessage.Rows(result);
     }

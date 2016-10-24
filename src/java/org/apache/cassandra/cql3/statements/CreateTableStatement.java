@@ -103,10 +103,11 @@ public class CreateTableStatement extends SchemaAlteringStatement
         try
         {
             IResource resource = DataResource.table(keyspace(), columnFamily());
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     resource.applicablePermissions(),
-                                                     resource,
-                                                     RoleResource.role(state.getClientState().getUser().getName()));
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                             authorizer.applicablePermissions(resource),
+                             resource,
+                             RoleResource.role(state.getClientState().getUser().getName()));
         }
         catch (RequestExecutionException e)
         {

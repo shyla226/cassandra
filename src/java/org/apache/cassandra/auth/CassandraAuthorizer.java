@@ -81,7 +81,7 @@ public class CassandraAuthorizer implements IAuthorizer
     public Set<Permission> authorize(AuthenticatedUser user, IResource resource)
     {
         if (user.isSuper())
-            return resource.applicablePermissions();
+            return applicablePermissions(resource);
 
         Set<Permission> permissions = Permissions.setOf();
         try

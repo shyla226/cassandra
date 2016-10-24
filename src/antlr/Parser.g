@@ -149,7 +149,7 @@ options {
             return Collections.emptySet();
 
         Set<Permission> filtered = new HashSet<>(permissions);
-        filtered.retainAll(resource.applicablePermissions());
+        filtered.retainAll(DatabaseDescriptor.getAuthorizer().applicablePermissions(resource));
 
         if (filtered.isEmpty())
             addRecognitionError("Resource type " + resource.getClass().getSimpleName() +
@@ -1024,7 +1024,7 @@ permissionOrAll returns [Set<Permission> perms]
     | p=permission ( K_PERMISSION )? { $perms = $p.perm == null ? Collections.emptySet() : Permissions.setOf($p.perm); }
     ;
 
-resource returns [IResource res]
+cassandraResource returns [IResource res]
     : d=dataResource { $res = $d.res; }
     | r=roleResource { $res = $r.res; }
     | f=functionResource { $res = $f.res; }

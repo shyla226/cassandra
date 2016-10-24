@@ -174,10 +174,11 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         try
         {
             IResource resource = FunctionResource.function(functionName.keyspace, functionName.name, argTypes);
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     resource.applicablePermissions(),
-                                                     resource,
-                                                     RoleResource.role(state.getClientState().getUser().getName()));
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                             authorizer.applicablePermissions(resource),
+                             resource,
+                             RoleResource.role(state.getClientState().getUser().getName()));
         }
         catch (RequestExecutionException e)
         {
