@@ -1095,6 +1095,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         public Collection<SSTableReader> flushMemtable(Memtable memtable, boolean flushNonCf2i)
         {
+            long start = System.currentTimeMillis();
             if (memtable.isClean() || truncate)
             {
                 memtable.cfs.replaceFlushed(memtable, Collections.emptyList());
@@ -1191,12 +1192,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             memtable.cfs.replaceFlushed(memtable, sstables);
             reclaim(memtable);
             memtable.cfs.compactionStrategyManager.compactionLogger.flush(sstables);
-            logger.debug("Flushed to {} ({} sstables, {}), biggest {}, smallest {}",
+            logger.debug("Flushed to {} ({} sstables, {}), biggest {}, smallest {} ({}ms)",
                          sstables,
                          sstables.size(),
                          FBUtilities.prettyPrintMemory(totalBytesOnDisk),
                          FBUtilities.prettyPrintMemory(maxBytesOnDisk),
-                         FBUtilities.prettyPrintMemory(minBytesOnDisk));
+                         FBUtilities.prettyPrintMemory(minBytesOnDisk),
+                         System.currentTimeMillis() - start);
             return sstables;
         }
 

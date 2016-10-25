@@ -130,6 +130,11 @@ public class MetadataCollector implements PartitionStatisticsCollector
         sstableLevel(level);
     }
 
+    public MetadataCollector copy()
+    {
+        return new MetadataCollector(comparator).commitLogIntervals(commitLogIntervals);
+    }
+
     public MetadataCollector addKey(ByteBuffer key)
     {
         long hashed = MurmurHash.hash2_64(key, key.position(), key.remaining(), 0);

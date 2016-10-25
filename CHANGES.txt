@@ -1,4 +1,5 @@
 DSE 5.2.0
+ * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from 4.0:
  * Use Caffeine (W-TinyLFU) for on-heap caches (CASSANDRA-10855)
