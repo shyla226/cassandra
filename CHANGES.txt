@@ -3,6 +3,9 @@ DSE backports
 
 
 3.0.10
+ * Fix for KeyCacheCqlTest flakiness (CASSANDRA-12801)
+ * Include SSTable filename in compacting large row message (CASSANDRA-12384)
+ * Fix potential socket leak (CASSANDRA-12329, CASSANDRA-12330)
  * Fix ViewTest.testCompaction (CASSANDRA-12789)
  * Improve avg aggregate functions (CASSANDRA-12417)
  * Preserve quoted reserved keyword column names in MV creation (CASSANDRA-11803)
@@ -24,7 +27,9 @@ DSE backports
  * Backport CASSANDRA-10756 (race condition in NativeTransportService shutdown) (CASSANDRA-12472)
  * If CF has no clustering columns, any row cache is full partition cache (CASSANDRA-12499)
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
+ * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
+ * Change cassandra.wait_for_tracing_events_timeout_secs default to 0 (CASSANDRA-12754)
  * Clean up permissions when a UDA is dropped (CASSANDRA-12720)
  * Limit colUpdateTimeDelta histogram updates to reasonable deltas (CASSANDRA-11117)
  * Fix leak errors and execution rejected exceptions when draining (CASSANDRA-12457)
@@ -35,8 +40,10 @@ Merged from 2.2:
  * Fix authentication problem when invoking cqlsh copy from a SOURCE command (CASSANDRA-12642)
  * Decrement pending range calculator jobs counter in finally block
   (CASSANDRA-12554)
+ * Split consistent range movement flag correction (CASSANDRA-12786)
 Merged from 2.1:
  * Add system property to set the max number of native transport requests in queue (CASSANDRA-11363)
+ * Don't skip sstables based on maxLocalDeletionTime (CASSANDRA-12765)
 
 
 3.0.9
