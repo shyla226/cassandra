@@ -10,6 +10,9 @@ DSE backports
  * Don't write shadowed range tombstone (CASSANDRA-12030)
  * Reduce contention getting instances of CompositeType (CASSANDRA-10433)
 
+2.1.17
+ * Fix RecoveryManagerTruncateTest (CASSANDRA-12802)
+ * Don't skip sstables based on maxLocalDeletionTime (CASSANDRA-12765)
 
 2.1.16
  * Avoid infinitely looping result set when paging SELECT queries with
