@@ -529,13 +529,10 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             @Override
             public void onClose()
             {
-                //Don't block responding for this
-                NettyRxScheduler.instance().createWorker().schedule(() -> {
-                    recordLatency(metric, System.nanoTime() - startTimeNanos);
+                recordLatency(metric, System.nanoTime() - startTimeNanos);
 
-                    metric.tombstoneScannedHistogram.update(tombstones);
-                    metric.liveScannedHistogram.update(liveRows);
-                });
+                metric.tombstoneScannedHistogram.update(tombstones);
+                metric.liveScannedHistogram.update(liveRows);
 
                 boolean warnTombstones = tombstones > warningThreshold && respectTombstoneThresholds;
                 if (warnTombstones)

@@ -152,7 +152,7 @@ public class NettyRxScheduler extends Scheduler
                 if (matchingScheduler == localNettyEventLoop.get())
                 {
                     // already on the correct scheduler, this should be run directly
-                    return null;
+                    return matchingScheduler;
                 }
                 else
                 {
