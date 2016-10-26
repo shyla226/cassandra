@@ -395,7 +395,9 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     protected void recordLatency(TableMetrics metric, long latencyNanos)
     {
-        metric.readLatency.addNano(latencyNanos);
+        return;
+
+    //       metric.readLatency.addNano(latencyNanos);
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
@@ -715,10 +717,10 @@ public class SinglePartitionReadCommand extends ReadCommand
         @SuppressWarnings("resource") //  Closed through the closing of the result of the caller method.
         UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators, nowInSec());
 
-        if (!merged.isEmpty())
+        if(!merged.isEmpty())
         {
-            DecoratedKey key = merged.partitionKey();
-            metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+            //DecoratedKey key = merged.partitionKey();
+            //metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
         }
 
         class UpdateSstablesIterated extends Transformation
@@ -730,7 +732,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                     .filter(it -> ((LazilyInitializedUnfilteredRowIterator)it).initialized())
                                                     .count();
 
-               metrics.updateSSTableIterated(sstablesIterated);
+               //metrics.updateSSTableIterated(sstablesIterated);
                Tracing.trace("Merged data from memtables and {} sstables", sstablesIterated);
            }
         };
@@ -807,7 +809,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     continue; // no tombstone at all, we can skip that sstable
 
                 // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-                sstable.incrementReadCount();
+                //sstable.incrementReadCount();
                 try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), Slices.ALL, columnFilter(), filter.isReversed(), isForThrift()))
                 {
                     if (iter.partitionLevelDeletion().isLive())
@@ -820,7 +822,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
 
             Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
-            sstable.incrementReadCount();
+           // sstable.incrementReadCount();
             try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed(), isForThrift()))
             {
                 if (iter.isEmpty())
@@ -833,13 +835,13 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        cfs.metric.updateSSTableIterated(sstablesIterated);
+        //cfs.metric.updateSSTableIterated(sstablesIterated);
 
         if (result == null || result.isEmpty())
             return EmptyIterators.unfilteredRow(metadata(), partitionKey(), false);
 
         DecoratedKey key = result.partitionKey();
-        cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+        //cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
         StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
 
         // "hoist up" the requested data into a more recent sstable
