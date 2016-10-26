@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.transport.messages.RequestContext;
 
 /**
  * Generic abstraction for read queries.
@@ -46,6 +47,12 @@ public interface ReadQuery
         public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
         {
             return Single.just(EmptyIterators.partition());
+        }
+
+        public void executePipeline(RequestContext requestContext) throws RequestExecutionException
+        {
+            // TODO
+            throw new UnsupportedOperationException("executePipeline not supported by ReadQuery.EMPTY yet");
         }
 
         public PartitionIterator executeInternal(ReadExecutionController controller)
@@ -103,6 +110,8 @@ public interface ReadQuery
      * @return the result of the query.
      */
     public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException;
+
+    public void executePipeline(RequestContext requestContext) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries (that is, it basically executes the query locally).

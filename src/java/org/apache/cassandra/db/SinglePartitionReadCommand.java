@@ -26,6 +26,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 import io.reactivex.Single;
+import org.apache.cassandra.transport.messages.RequestContext;
 import org.apache.commons.lang3.tuple.Pair;
 
 import io.reactivex.Observable;
@@ -375,6 +376,11 @@ public class SinglePartitionReadCommand extends ReadCommand
     public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
     {
         return StorageProxy.read(Group.one(this), consistency, clientState, queryStartNanoTime);
+    }
+
+    public void executePipeline(RequestContext requestContext) throws RequestExecutionException
+    {
+        StorageProxy.readPipeline(Group.one(this), requestContext);
     }
 
     public SinglePartitionPager getPager(PagingState pagingState, int protocolVersion)
@@ -1020,6 +1026,11 @@ public class SinglePartitionReadCommand extends ReadCommand
         public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
         {
             return StorageProxy.read(this, consistency, clientState, queryStartNanoTime);
+        }
+
+        public void executePipeline(RequestContext requestContext)
+        {
+            StorageProxy.readPipeline(this, requestContext);
         }
 
         public int nowInSec()

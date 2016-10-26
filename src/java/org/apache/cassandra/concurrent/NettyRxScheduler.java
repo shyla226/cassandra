@@ -46,7 +46,9 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
+import org.apache.cassandra.service.PipelineReadCallback;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,6 +105,8 @@ public class NettyRxScheduler extends Scheduler
             perCoreSchedulers[cpuId] = scheduler;
         }
 
+        // Message.buildChain(Message.localPublishSubject.get());
+        PipelineReadCallback.subscribeChain(PipelineReadCallback.localPublishSubject.get());
         return scheduler;
     }
 

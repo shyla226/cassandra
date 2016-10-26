@@ -34,7 +34,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
+import io.netty.util.concurrent.FastThreadLocal;
+import io.reactivex.Observable;
 import io.reactivex.Single;
+import io.reactivex.subjects.PublishSubject;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.QueryHandler;
+import org.apache.cassandra.transport.messages.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,23 +57,6 @@ import io.netty.handler.codec.MessageToMessageEncoder;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.messages.AuthChallenge;
-import org.apache.cassandra.transport.messages.AuthResponse;
-import org.apache.cassandra.transport.messages.AuthSuccess;
-import org.apache.cassandra.transport.messages.AuthenticateMessage;
-import org.apache.cassandra.transport.messages.BatchMessage;
-import org.apache.cassandra.transport.messages.CredentialsMessage;
-import org.apache.cassandra.transport.messages.ErrorMessage;
-import org.apache.cassandra.transport.messages.EventMessage;
-import org.apache.cassandra.transport.messages.ExecuteMessage;
-import org.apache.cassandra.transport.messages.OptionsMessage;
-import org.apache.cassandra.transport.messages.PrepareMessage;
-import org.apache.cassandra.transport.messages.QueryMessage;
-import org.apache.cassandra.transport.messages.ReadyMessage;
-import org.apache.cassandra.transport.messages.RegisterMessage;
-import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.transport.messages.StartupMessage;
-import org.apache.cassandra.transport.messages.SupportedMessage;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -76,6 +65,72 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
+
+    public final static FastThreadLocal<PublishSubject<RequestContext>> localPublishSubject = new FastThreadLocal<PublishSubject<RequestContext>>(){
+
+        protected PublishSubject<RequestContext> initialValue()
+        {
+            return PublishSubject.create();
+        }
+    };
+
+    // TODO we probably don't actually need any of this part of the chain at all, only the response chain...
+    public static void buildChain(Observable<RequestContext> observable)
+    {
+        observable.subscribe(
+                // onNext
+                requestContext -> {
+                    requestContext.request.executePipeline(requestContext);
+                },
+
+                // onError
+                exc -> {
+                    throw new UnsupportedOperationException("Can't handle onError yet");
+                },
+
+                () -> {
+                    throw new UnsupportedOperationException("Can't handle onComplete yet");
+                });
+        /*
+        observable.map(requestContext -> {
+            requestContext.request.executePipeline(requestContext);
+            return requestContext;
+        }).subscribe();
+        */
+    }
+
+    public static void subscribeChain(Observable<RequestContext> observable)
+    {
+        observable.subscribe(
+
+                // onNext
+                requestContext -> {
+
+                    Message.Response response = requestContext.response;
+                    Message.Request request = requestContext.request;
+                    response.setStreamId(requestContext.request.getStreamId());
+
+                    // TODO odds are low of this working correctly
+                    response.setWarnings(ClientWarn.instance.getWarnings());
+
+                    ((ServerConnection) request.connection).applyStateTransition(request.type, response.type);
+
+                    logger.trace("Responding: {}, v={} ON {}", response, request.connection.getVersion(), Thread.currentThread().getName());
+                    requestContext.dispatcher.flush(requestContext);
+                    ClientWarn.instance.resetWarnings();
+                },
+
+                // onError
+                exc ->  {
+                    throw new UnsupportedOperationException("Can't handle onError in chain yet");
+                },
+
+                // onComplete
+                () -> {
+                    throw new UnsupportedOperationException("Can't handle onComplete in chain yet");
+                }
+        );
+    }
 
     /**
      * When we encounter an unexpected IOException we look for these {@link Throwable#getMessage() messages}
@@ -243,6 +298,16 @@ public abstract class Message
         public boolean isTracingRequested()
         {
             return tracingRequested;
+        }
+
+        public boolean supportsPipelineExecution()
+        {
+            return false;
+        }
+
+        public void executePipeline(RequestContext requestContext)
+        {
+            throw new UnsupportedOperationException("executePipeline() not supported for this class: " + this.getClass().getName());
         }
     }
 
@@ -609,34 +674,47 @@ public abstract class Message
             QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion(), request.getStreamId());
             logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
-            request.execute(qstate, queryStartNanoTime)
+            if (request.supportsPipelineExecution())
+            {
+                RequestContext requestContext = new RequestContext(request, qstate, queryStartNanoTime, this, ctx);
+                requestContext.request.executePipeline(requestContext);
+            }
+            else
+            {
+                request.execute(qstate, queryStartNanoTime)
 
-                    // TODO evaluate the performance impact of this, we shouldn't need it if the PPC requests are to the correct port
-                   // .observeOn(NettyRxScheduler.instance())
+                        // TODO evaluate the performance impact of this, we shouldn't need it if the PPC requests are to the correct port
+                        // .observeOn(NettyRxScheduler.instance())
 
-                   .subscribe(
-                    // onSuccess
-                    response -> {
-                        response.setStreamId(request.getStreamId());
+                        .subscribe(
+                                // onSuccess
+                                response -> {
+                                    response.setStreamId(request.getStreamId());
 
-                        response.setWarnings(ClientWarn.instance.getWarnings());
-                        response.attach(connection);
-                        connection.applyStateTransition(request.type, response.type);
+                                    response.setWarnings(ClientWarn.instance.getWarnings());
+                                    response.attach(connection);
+                                    connection.applyStateTransition(request.type, response.type);
 
-                        logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
-                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                        ClientWarn.instance.resetWarnings();
-                    },
+                                    logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
+                                    flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                                    ClientWarn.instance.resetWarnings();
+                                },
 
-                    // onError
-                    t -> {
-                        JVMStabilityInspector.inspectThrowable(t);
-                        UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
-                        Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
-                        flush(new FlushItem(ctx, response, request.getSourceFrame()));
-                        ClientWarn.instance.resetWarnings();
-                    }
-            );
+                                // onError
+                                t -> {
+                                    JVMStabilityInspector.inspectThrowable(t);
+                                    UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
+                                    Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());
+                                    flush(new FlushItem(ctx, response, request.getSourceFrame()));
+                                    ClientWarn.instance.resetWarnings();
+                                }
+                        );
+            }
+        }
+
+        private void flush(RequestContext requestContext)
+        {
+            flush(new FlushItem(requestContext.channelHandlerContext, requestContext.response, requestContext.request.getSourceFrame()));
         }
 
         /** Aggregates writes from this event loop to be flushed at once

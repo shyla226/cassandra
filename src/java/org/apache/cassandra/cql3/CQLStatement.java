@@ -17,14 +17,17 @@
  */
 package org.apache.cassandra.cql3;
 
+import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.db.ReadQuery;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.messages.RequestContext;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public interface CQLStatement
@@ -70,4 +73,26 @@ public interface CQLStatement
      * @return functions all functions found (may contain duplicates)
      */
     public Iterable<Function> getFunctions();
+
+    public default void executePipeline(RequestContext requestContext)
+    {
+        throw new UnsupportedOperationException("This CQLStatement subclass does not support executePipleine");
+    }
+
+    public default boolean supportsPipelineExecution()
+    {
+        return false;
+    }
+
+    static void buildChain(Observable<RequestContext> observable)
+    {
+        /*
+        observable = observable.map(requestContext -> {
+            requestContext.statement.executePipeline(requestContext);
+            return requestContext;
+        });
+        observable.subscribe();
+        */
+        // TODO connect chain for all possible paths, use filtering to restrict used chain to single path?
+    }
 }
