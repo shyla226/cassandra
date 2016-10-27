@@ -1,6 +1,7 @@
 DSE 5.1.0
  * Insert default superuser role with fixed timestamp (APOLLO-18)
 Merged from 3.X:
+ * Properly format IPv6 addresses when logging JMX service URL (CASSANDRA-12454)
  * Optimize the vnode allocation for single replica per DC (CASSANDRA-12777)
  * Use non-token restrictions for bounds when token restrictions are overridden (CASSANDRA-12419)
  * Fix CQLSH auto completion for PER PARTITION LIMIT (CASSANDRA-12803)
