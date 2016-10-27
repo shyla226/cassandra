@@ -54,9 +54,10 @@ public class NativeTransportService
     private EventLoopGroup workerGroup;
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
+    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
 
-    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() * 2)));
+    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() - 1)));
+    public static final int NETTY_CORE_OFFSET = Math.max(0, FBUtilities.getAvailableProcessors() - NUM_NETTY_THREADS);
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
@@ -88,7 +89,7 @@ public class NativeTransportService
 
         if (useEpoll())
         {
-            workerGroup = new EpollEventLoopGroup(NUM_NETTY_THREADS);
+            workerGroup = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
             logger.info("Netty using native Epoll event loops");
         }
         else
@@ -162,6 +163,11 @@ public class NativeTransportService
         logger.info("Netting ioWork ratio to {}", pIO);
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
 
+        long cpuMaskTmp = 0L;
+        for (int i = NETTY_CORE_OFFSET; i < FBUtilities.getAvailableProcessors(); i++)
+            cpuMaskTmp |= 1L << i;
+
+        final long cpuMask = cpuMaskTmp;
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
@@ -175,7 +181,7 @@ public class NativeTransportService
                 if (affinity)
                 {
                     logger.info("Locking {} netty thread to {}, port {}", cpuId, Thread.currentThread().getName(), nativePort + cpuId);
-                    AffinitySupport.setAffinity(1L << cpuId);
+                    AffinitySupport.setAffinity(cpuMask);
                 }
                 {
                     logger.info("Allocated netty {} thread to {}, port {}", workerGroup, Thread.currentThread().getName(), nativePort + cpuId);

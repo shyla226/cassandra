@@ -77,8 +77,6 @@ public class NettyRxScheduler extends Scheduler
         }
     };
 
-    static final ImmediateRxScheduler immediateScheduler = new ImmediateRxScheduler();
-
     final static Map<String, List<PartitionPosition>> keyspaceToRangeMapping = new HashMap<>();
 
     //Each array entry maps to a cpuId. We assume there will be < 1024 CPUs
