@@ -11,6 +11,7 @@ DSE 5.1.0
  * Insert default superuser role with fixed timestamp (APOLLO-18)
 Merged from 3.X:
 3.10
+ * Set JOINING mode when running pre-join tasks (CASSANDRA-12836)
  * remove net.mintern.primitive library due to license issue (CASSANDRA-12845)
  * Properly format IPv6 addresses when logging JMX service URL (CASSANDRA-12454)
  * Optimize the vnode allocation for single replica per DC (CASSANDRA-12777)
