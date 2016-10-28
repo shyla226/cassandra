@@ -3,6 +3,7 @@ DSE backports
 
 
 3.0.10
+ * Avoid deadlock due to materialized view lock contention (CASSANDRA-12689)
  * Fix for KeyCacheCqlTest flakiness (CASSANDRA-12801)
  * Include SSTable filename in compacting large row message (CASSANDRA-12384)
  * Fix potential socket leak (CASSANDRA-12329, CASSANDRA-12330)
@@ -29,6 +30,7 @@ DSE backports
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
+ * Prepare legacy authenticate statement if credentials table initialised after node startup (CASSANDRA-12813)
  * Change cassandra.wait_for_tracing_events_timeout_secs default to 0 (CASSANDRA-12754)
  * Clean up permissions when a UDA is dropped (CASSANDRA-12720)
  * Limit colUpdateTimeDelta histogram updates to reasonable deltas (CASSANDRA-11117)
