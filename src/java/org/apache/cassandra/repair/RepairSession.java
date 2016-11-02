@@ -279,7 +279,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                 logger.info("[repair #{}] {}", getId(), "Session completed successfully");
                 Tracing.traceRepair("Completed sync of range {}", ranges);
                 set(new RepairSessionResult(id, keyspace, ranges, results));
-
+                // only shutdown task executor after setting the callback future
                 taskExecutor.shutdown();
                 // mark this session as terminated
                 terminate();
@@ -291,7 +291,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                 Tracing.traceRepair("Session completed with the following error: {}", t);
                 forceShutdown(t);
             }
-        });
+        }, taskExecutor); // run this on task executor so job executor can be shutdown without errors by RepairRunnable
     }
 
     public void terminate()
@@ -309,8 +309,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public void forceShutdown(Throwable reason)
     {
         setException(reason);
-        taskExecutor.shutdownNow();
         terminate();
+        taskExecutor.shutdownNow();
     }
 
     public void onJoin(InetAddress endpoint, EndpointState epState) {}
