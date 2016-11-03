@@ -169,6 +169,14 @@ public interface IRoleManager
     boolean canLogin(RoleResource role);
 
     /**
+     * Returns true if a user can login (usually if their primary role can log in)
+     */
+    default boolean canLogin(AuthenticatedUser user)
+    {
+        return canLogin(user.getPrimaryRole());
+    }
+
+    /**
      * Where an implementation supports OPTIONS in CREATE and ALTER operations
      * this method should return the {@code Map<String, String>} representing the custom
      * options associated with the role, as supplied to CREATE or ALTER.
