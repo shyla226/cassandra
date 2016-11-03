@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.IRoleManager.Option;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
@@ -77,7 +78,7 @@ public class AlterRoleStatement extends AuthenticationStatement
         else
         {
             // if not attempting to alter another role, ensure we have ALTER permissions on it
-            super.checkPermission(state, Permission.ALTER, role);
+            super.checkPermission(state, CorePermission.ALTER, role);
         }
     }
 

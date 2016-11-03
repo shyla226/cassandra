@@ -20,9 +20,10 @@ package org.apache.cassandra.auth;
 import java.util.Set;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.config.Schema;
 
 /**
@@ -41,18 +42,18 @@ public class DataResource implements IResource
     }
 
     // permissions which may be granted on tables
-    private static final Set<Permission> TABLE_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                         Permission.DROP,
-                                                                                         Permission.SELECT,
-                                                                                         Permission.MODIFY,
-                                                                                         Permission.AUTHORIZE);
+    private static final Set<Permission> TABLE_LEVEL_PERMISSIONS = Permissions.immutableSetOf(CorePermission.ALTER,
+                                                                                              CorePermission.DROP,
+                                                                                              CorePermission.SELECT,
+                                                                                              CorePermission.MODIFY,
+                                                                                              CorePermission.AUTHORIZE);
     // permissions which may be granted on one or all keyspaces
-    private static final Set<Permission> KEYSPACE_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.CREATE,
-                                                                                            Permission.ALTER,
-                                                                                            Permission.DROP,
-                                                                                            Permission.SELECT,
-                                                                                            Permission.MODIFY,
-                                                                                            Permission.AUTHORIZE);
+    private static final Set<Permission> KEYSPACE_LEVEL_PERMISSIONS = Permissions.immutableSetOf(CorePermission.CREATE,
+                                                                                                 CorePermission.ALTER,
+                                                                                                 CorePermission.DROP,
+                                                                                                 CorePermission.SELECT,
+                                                                                                 CorePermission.MODIFY,
+                                                                                                 CorePermission.AUTHORIZE);
     private static final String ROOT_NAME = "data";
     private static final DataResource ROOT_RESOURCE = new DataResource(Level.ROOT, null, null);
 

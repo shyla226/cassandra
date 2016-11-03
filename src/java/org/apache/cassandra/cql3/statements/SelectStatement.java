@@ -25,7 +25,7 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.*;
@@ -214,15 +214,15 @@ public class SelectStatement implements CQLStatement
         {
             CFMetaData baseTable = View.findBaseTable(keyspace(), columnFamily());
             if (baseTable != null)
-                state.hasColumnFamilyAccess(baseTable, Permission.SELECT);
+                state.hasColumnFamilyAccess(baseTable, CorePermission.SELECT);
         }
         else
         {
-            state.hasColumnFamilyAccess(cfm, Permission.SELECT);
+            state.hasColumnFamilyAccess(cfm, CorePermission.SELECT);
         }
 
         for (Function function : getFunctions())
-            state.ensureHasPermission(Permission.EXECUTE, function);
+            state.ensureHasPermission(CorePermission.EXECUTE, function);
     }
 
     public void validate(ClientState state) throws InvalidRequestException

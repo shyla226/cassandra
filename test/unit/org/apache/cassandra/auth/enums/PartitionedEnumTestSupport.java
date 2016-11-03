@@ -16,10 +16,40 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.auth;
+package org.apache.cassandra.auth.enums;
 
-import org.apache.cassandra.auth.enums.PartitionedEnum;
-
-public interface Permission extends PartitionedEnum
+public class PartitionedEnumTestSupport
 {
+    public interface TestPartitionedEnum extends PartitionedEnum
+    { }
+
+    public enum PartOne implements TestPartitionedEnum
+    {
+        ELEMENT_0, ELEMENT_1, ELEMENT_2, ELEMENT_3, ELEMENT_4;
+
+        public String domain()
+        {
+            return "PART_1";
+        }
+    }
+
+    public enum PartTwo implements TestPartitionedEnum
+    {
+        ELEMENT_0, ELEMENT_1;
+
+        public String domain()
+        {
+            return "PART_2";
+        }
+    }
+
+    public enum PartThree implements TestPartitionedEnum
+    {
+        ELEMENT_0;
+
+        public String domain()
+        {
+            return "PART_3";
+        }
+    }
 }

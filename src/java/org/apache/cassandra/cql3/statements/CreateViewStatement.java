@@ -23,7 +23,7 @@ import java.util.*;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
@@ -78,7 +78,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
     {
         if (!baseName.hasKeyspace())
             baseName.setKeyspace(keyspace(), true);
-        state.hasColumnFamilyAccess(keyspace(), baseName.getColumnFamily(), Permission.ALTER);
+        state.hasColumnFamilyAccess(keyspace(), baseName.getColumnFamily(), CorePermission.ALTER);
     }
 
     public void validate(ClientState state) throws RequestValidationException

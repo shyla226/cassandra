@@ -20,9 +20,10 @@ package org.apache.cassandra.auth;
 import java.util.Set;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 /**
@@ -41,15 +42,15 @@ public class RoleResource implements IResource, Comparable<RoleResource>
     }
 
     // permissions which may be granted on the root level resource
-    private static final Set<Permission> ROOT_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.CREATE,
-                                                                                        Permission.ALTER,
-                                                                                        Permission.DROP,
-                                                                                        Permission.AUTHORIZE,
-                                                                                        Permission.DESCRIBE);
+    private static final Set<Permission> ROOT_LEVEL_PERMISSIONS = Permissions.immutableSetOf(CorePermission.CREATE,
+                                                                                             CorePermission.ALTER,
+                                                                                             CorePermission.DROP,
+                                                                                             CorePermission.AUTHORIZE,
+                                                                                             CorePermission.DESCRIBE);
     // permissions which may be granted on role level resources
-    private static final Set<Permission> ROLE_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                        Permission.DROP,
-                                                                                        Permission.AUTHORIZE);
+    private static final Set<Permission> ROLE_LEVEL_PERMISSIONS = Permissions.immutableSetOf(CorePermission.ALTER,
+                                                                                             CorePermission.DROP,
+                                                                                             CorePermission.AUTHORIZE);
 
     private static final String ROOT_NAME = "roles";
     private static final RoleResource ROOT_RESOURCE = new RoleResource();

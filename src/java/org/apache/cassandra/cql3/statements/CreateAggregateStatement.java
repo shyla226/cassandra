@@ -24,6 +24,7 @@ import java.util.Objects;
 import java.util.List;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.*;
@@ -173,10 +174,11 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         try
         {
             IResource resource = FunctionResource.function(functionName.keyspace, functionName.name, argTypes);
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     resource.applicablePermissions(),
-                                                     resource,
-                                                     RoleResource.role(state.getClientState().getUser().getName()));
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                             authorizer.applicablePermissions(resource),
+                             resource,
+                             RoleResource.role(state.getClientState().getUser().getName()));
         }
         catch (RequestExecutionException e)
         {
@@ -187,16 +189,16 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
-            state.ensureHasPermission(Permission.ALTER, FunctionResource.function(functionName.keyspace,
+            state.ensureHasPermission(CorePermission.ALTER, FunctionResource.function(functionName.keyspace,
                                                                                   functionName.name,
                                                                                   argTypes));
         else
-            state.ensureHasPermission(Permission.CREATE, FunctionResource.keyspace(functionName.keyspace));
+            state.ensureHasPermission(CorePermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
 
-        state.ensureHasPermission(Permission.EXECUTE, stateFunction);
+        state.ensureHasPermission(CorePermission.EXECUTE, stateFunction);
 
         if (finalFunction != null)
-            state.ensureHasPermission(Permission.EXECUTE, finalFunction);
+            state.ensureHasPermission(CorePermission.EXECUTE, finalFunction);
     }
 
     public void validate(ClientState state) throws InvalidRequestException

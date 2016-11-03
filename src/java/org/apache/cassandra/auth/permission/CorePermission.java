@@ -16,10 +16,40 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.auth;
+package org.apache.cassandra.auth.permission;
 
-import org.apache.cassandra.auth.enums.PartitionedEnum;
+import org.apache.cassandra.auth.Permission;
 
-public interface Permission extends PartitionedEnum
+public enum CorePermission implements Permission
 {
+    @Deprecated
+    READ,
+    @Deprecated
+    WRITE,
+
+    CREATE,
+    ALTER,
+    DROP,
+    SELECT,
+    MODIFY,
+    AUTHORIZE,
+    DESCRIBE,
+    EXECUTE;
+
+    public String domain()
+    {
+        return getDomain();
+    }
+
+    public String getFullName()
+    {
+        // for backwards compatibilty with legacy clusters (which could already have stored
+        // permissions without namespacing), the base C* permissions never use theirs
+        return name();
+    }
+
+    public static String getDomain()
+    {
+        return "CORE";
+    }
 }

@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.auth;
+package org.apache.cassandra.auth.resource;
 
-import org.apache.cassandra.auth.enums.PartitionedEnum;
+import org.apache.cassandra.auth.IResource;
 
-public interface Permission extends PartitionedEnum
+public interface IResourceFactory
 {
+    IResource fromName(String name);
 }
