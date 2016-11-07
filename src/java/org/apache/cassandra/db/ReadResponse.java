@@ -131,11 +131,14 @@ public abstract class ReadResponse
     }
 
     // built on the owning node responding to a query
-    private static class LocalDataResponse extends DataResponse
+    private static class LocalDataResponse extends ReadResponse
     {
+        final UnfilteredPartitionIterator iter;
+
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
-            super(command, build(iter, command.columnFilter()), SerializationHelper.Flag.LOCAL);
+            super(command);
+            this.iter = iter;
         }
 
         private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
@@ -150,6 +153,21 @@ public abstract class ReadResponse
                 // We're serializing in memory so this shouldn't happen
                 throw new RuntimeException(e);
             }
+        }
+
+        public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+        {
+            return iter;
+        }
+
+        public ByteBuffer digest(ReadCommand command)
+        {
+            return makeDigest(iter, command);
+        }
+
+        public boolean isDigestResponse()
+        {
+            return false;
         }
     }
 

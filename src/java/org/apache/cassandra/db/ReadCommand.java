@@ -72,6 +72,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * General interface for storage-engine read commands (common to both range and
@@ -423,13 +424,19 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
         }
 
-        UnfilteredPartitionIterator resultIterator = searcher == null
-                                         ? queryStorage(cfs, executionController)
-                                         : searcher.search(executionController);
-
+        OpOrder.Group group = null;
+        UnfilteredPartitionIterator resultIterator = null;
         try
         {
+            //Local requests track their own oporder
+            group = cfs.readOrdering.start();
+
+            resultIterator = searcher == null
+                             ? queryStorage(cfs, executionController)
+                             : searcher.search(executionController);
+
             resultIterator = withStateTracking(resultIterator);
+            resultIterator = withOpOrderTracking(resultIterator, group);
             //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
@@ -446,7 +453,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         }
         catch (RuntimeException | Error e)
         {
-            resultIterator.close();
+            if (group != null)
+                group.close();
+
+            if (resultIterator != null)
+                resultIterator.close();
             throw e;
         }
     }
@@ -581,6 +592,27 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             return false;
         }
     }
+
+    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
+    {
+        final OpOrder.Group group;
+
+        TrackOpOrder(OpOrder.Group group)
+        {
+            this.group = group;
+        }
+
+        protected void onClose()
+        {
+            group.close();
+        }
+    }
+
+    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, OpOrder.Group group)
+    {
+        return Transformation.apply(iter, new TrackOpOrder(group));
+    }
+
 
     protected UnfilteredPartitionIterator withStateTracking(UnfilteredPartitionIterator iter)
     {

@@ -2122,9 +2122,9 @@ public class StorageProxy implements StorageProxyMBean
                 command.setMonitoringTime(new ConstructionTime(constructionTime), verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
 
                 ReadResponse response;
-                try (ReadExecutionController executionController = command.executionController();
-                     UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
+                try (ReadExecutionController executionController = command.executionController())
                 {
+                    UnfilteredPartitionIterator iterator = command.executeLocally(executionController);
                     response = command.createResponse(iterator);
                 }
 
