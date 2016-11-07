@@ -106,6 +106,8 @@ Merged from 3.X:
  * Restore resumable hints delivery (CASSANDRA-11960)
  * Properly report LWT contention (CASSANDRA-12626)
 Merged from 3.0:
+ * Batch with multiple conditional updates for the same partition causes AssertionError (CASSANDRA-12867)
+ * Make AbstractReplicationStrategy extendable from outside its package (CASSANDRA-12788)
  * Fix CommitLogTest.testDeleteIfNotDirty (CASSANDRA-12854)
  * Avoid deadlock due to MV lock contention (CASSANDRA-12689)
  * Fix for KeyCacheCqlTest flakiness (CASSANDRA-12801)
