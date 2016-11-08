@@ -1,6 +1,5 @@
 DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
-Backports
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
 
 3.0.10
