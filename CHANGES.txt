@@ -1,6 +1,7 @@
 DSE 5.0.4
- * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-83)
-
+ * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
+Backports
+ * Allow the prepared statement cache size to be changed. (APOLLO-50)
 
 3.0.10
  * Batch with multiple conditional updates for the same partition causes AssertionError (CASSANDRA-12867)
@@ -51,8 +52,6 @@ Merged from 2.2:
 Merged from 2.1:
  * Add system property to set the max number of native transport requests in queue (CASSANDRA-11363)
  * Don't skip sstables based on maxLocalDeletionTime (CASSANDRA-12765)
-DSE backports
- * Allow the prepared statement cache size to be changed. (APOLLO-50)
 
 
 3.0.9
