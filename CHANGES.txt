@@ -17,6 +17,8 @@ Merged from DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
 Merged from 3.X:
 3.10
+ * Fix CommitLogSegmentManagerTest (CASSANDRA-12283)
+ * Fix cassandra-stress truncate option (CASSANDRA-12695)
  * Fix crossNode value when receiving messages (CASSANDRA-12791)
  * Don't load MX4J beans twice (CASSANDRA-12869)
  * Extend native protocol request flags, add versions to SUPPORTED, and introduce ProtocolVersion enum (CASSANDRA-12838)
@@ -119,6 +121,7 @@ Merged from 3.X:
 Merged from 3.0:
  * Batch with multiple conditional updates for the same partition causes AssertionError (CASSANDRA-12867)
  * Make AbstractReplicationStrategy extendable from outside its package (CASSANDRA-12788)
+ * Don't tell users to turn off consistent rangemovements during rebuild. (CASSANDRA-12296)
  * Fix CommitLogTest.testDeleteIfNotDirty (CASSANDRA-12854)
  * Avoid deadlock due to MV lock contention (CASSANDRA-12689)
  * Fix for KeyCacheCqlTest flakiness (CASSANDRA-12801)
@@ -161,6 +164,7 @@ Merged from 3.0:
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
+ * Fix Util.spinAssertEquals (CASSANDRA-12283)
  * Fix potential NPE for compactionstats (CASSANDRA-12462)
  * Prepare legacy authenticate statement if credentials table initialised after node startup (CASSANDRA-12813)
  * Change cassandra.wait_for_tracing_events_timeout_secs default to 0 (CASSANDRA-12754)
