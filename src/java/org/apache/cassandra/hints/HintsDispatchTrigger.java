@@ -63,7 +63,7 @@ final class HintsDispatchTrigger implements Runnable
 
         catalog.stores()
                .filter(store -> !isScheduled(store))
-               .filter(HintsStore::isLive)
+               .filter(HintsStore::isReadyToDispatchHints)
                .filter(store -> store.isWriting() || store.hasFiles())
                .filter(store -> Gossiper.instance.valuesEqual(getBroadcastAddress(), store.address(), ApplicationState.SCHEMA))
                .forEach(this::schedule);

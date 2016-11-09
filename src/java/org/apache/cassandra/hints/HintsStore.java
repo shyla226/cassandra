@@ -24,11 +24,13 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.service.StorageService;
@@ -45,6 +47,9 @@ final class HintsStore
 {
     private static final Logger logger = LoggerFactory.getLogger(HintsStore.class);
 
+    private static final long MIN_DISPATCH_BACKOFF_DURATION = DatabaseDescriptor.getWriteRpcTimeout();
+    private static final long MAX_DISPATCH_BACKOFF_DURATION = TimeUnit.MINUTES.toMillis(10);
+
     public final UUID hostId;
     private final File hintsDirectory;
     private final ImmutableMap<String, Object> writerParams;
@@ -53,8 +58,12 @@ final class HintsStore
     private final Deque<HintsDescriptor> dispatchDequeue;
     private final Queue<HintsDescriptor> blacklistedFiles;
 
+    private volatile long dispatchBackoffDuration = MIN_DISPATCH_BACKOFF_DURATION;
+    private volatile long lastDispatchFailureTimestamp;
+
     // last timestamp used in a descriptor; make sure to not reuse the same timestamp for new descriptors.
     private volatile long lastUsedTimestamp;
+
     private volatile HintsWriter hintsWriter;
 
     private HintsStore(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
@@ -82,10 +91,14 @@ final class HintsStore
         return StorageService.instance.getEndpointForHostId(hostId);
     }
 
-    boolean isLive()
+    boolean isReadyToDispatchHints()
     {
         InetAddress address = address();
-        return address != null && FailureDetector.instance.isAlive(address);
+        long now = System.currentTimeMillis();
+
+        return address != null
+            && FailureDetector.instance.isAlive(address)
+            && lastDispatchFailureTimestamp < now - dispatchBackoffDuration;
     }
 
     HintsDescriptor poll()
@@ -209,5 +222,16 @@ final class HintsStore
     {
         if (hintsWriter != null)
             hintsWriter.fsync();
+    }
+
+    void recordDispatchFailure()
+    {
+        lastDispatchFailureTimestamp = System.currentTimeMillis();
+        dispatchBackoffDuration = Math.min(dispatchBackoffDuration * 2, MAX_DISPATCH_BACKOFF_DURATION);
+    }
+
+    void recordDispatchSuccess()
+    {
+        dispatchBackoffDuration = MIN_DISPATCH_BACKOFF_DURATION;
     }
 }

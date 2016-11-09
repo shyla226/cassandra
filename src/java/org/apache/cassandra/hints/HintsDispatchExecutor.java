@@ -25,6 +25,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
+import javax.ws.rs.HEAD;
+
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.slf4j.Logger;
@@ -258,6 +260,7 @@ final class HintsDispatchExecutor
 
                 if (dispatcher.dispatch())
                 {
+                    store.recordDispatchSuccess();
                     store.delete(descriptor);
                     store.cleanUp(descriptor);
                     logger.info("Finished hinted handoff of file {} to endpoint {}", descriptor.fileName(), hostId);
@@ -265,6 +268,7 @@ final class HintsDispatchExecutor
                 }
                 else
                 {
+                    store.recordDispatchFailure();
                     store.markDispatchOffset(descriptor, dispatcher.dispatchOffset());
                     store.offerFirst(descriptor);
                     logger.info("Finished hinted handoff of file {} to endpoint {}, partially", descriptor.fileName(), hostId);
