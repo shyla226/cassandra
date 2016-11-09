@@ -271,6 +271,7 @@ final class HintsDispatchExecutor
 
                 if (dispatcher.dispatch())
                 {
+                    store.recordDispatchSuccess();
                     store.delete(descriptor);
                     store.cleanUp(descriptor);
                     logger.info("Finished hinted handoff of file {} to endpoint {}", descriptor.fileName(), hostId);
@@ -278,6 +279,7 @@ final class HintsDispatchExecutor
                 }
                 else
                 {
+                    store.recordDispatchFailure();
                     store.markDispatchOffset(descriptor, dispatcher.dispatchPosition());
                     store.offerFirst(descriptor);
                     logger.info("Finished hinted handoff of file {} to endpoint {}, partially", descriptor.fileName(), hostId);
