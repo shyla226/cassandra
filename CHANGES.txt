@@ -7,6 +7,8 @@ DSE 5.1.0
 Merged from DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
 Merged from 3.X:
+3.0.11
+ * Pass root cause to CorruptBlockException when uncompression failed (CASSANDRA-12889)
 3.10
  * Fix CommitLogSegmentManagerTest (CASSANDRA-12283)
  * Fix cassandra-stress truncate option (CASSANDRA-12695)
