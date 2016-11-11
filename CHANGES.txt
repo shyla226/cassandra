@@ -6,6 +6,7 @@ DSE 5.1.0
  * Add private protocol version (APOLLO-2)
 Merged from DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
+ * Allow the prepared statement cache size to be changed. (APOLLO-50)
 Merged from 3.X:
 3.0.11
  * Pass root cause to CorruptBlockException when uncompression failed (CASSANDRA-12889)
