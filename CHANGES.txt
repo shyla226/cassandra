@@ -2,6 +2,7 @@ DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
 Merged from 3.0.X
+ * Prevent reloading of logback.xml from UDF sandbox (CASSANDRA-12535)
  * Disallow offheap_buffers memtable allocation (CASSANDRA-11039)
  * Fix CommitLogSegmentManagerTest (CASSANDRA-12283)
  * Pass root cause to CorruptBlockException when uncompression failed (CASSANDRA-12889)
