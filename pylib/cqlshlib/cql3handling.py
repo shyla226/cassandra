@@ -1474,10 +1474,10 @@ syntax_rules += r'''
 '''
 
 syntax_rules += r'''
-<grantStatement> ::= "GRANT" <permissionExpr> "ON" <resource> "TO" <rolename>
+<grantStatement> ::= "GRANT" <permissionExpr> "ON" (<resourceFromInternalName> | <resource>) "TO" <rolename>
                    ;
 
-<revokeStatement> ::= "REVOKE" <permissionExpr> "ON" <resource> "FROM" <rolename>
+<revokeStatement> ::= "REVOKE" <permissionExpr> "ON" (<resourceFromInternalName> | <resource>) "FROM" <rolename>
                     ;
 
 <listPermissionsStatement> ::= "LIST" <permissionExpr>
@@ -1497,6 +1497,8 @@ syntax_rules += r'''
 <permissionExpr> ::= ( <permission> "PERMISSION"? )
                    | ( "ALL" "PERMISSIONS"? )
                    ;
+
+<resourceFromInternalName> ::= "RESOURCE" "(" <stringLiteral> ")";
 
 <resource> ::= <dataResource>
              | <roleResource>
