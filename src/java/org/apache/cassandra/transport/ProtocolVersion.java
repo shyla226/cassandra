@@ -94,7 +94,7 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     public final static EnumSet<ProtocolVersion> UNSUPPORTED = EnumSet.complementOf(SUPPORTED);
 
     /** The preferred versions */
-    public final static ProtocolVersion CURRENT = DSE_V1;
+    public final static ProtocolVersion CURRENT = V4;
     public final static Optional<ProtocolVersion> BETA = Optional.empty();
 
     public static List<String> supportedVersions()
