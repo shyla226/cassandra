@@ -18,6 +18,7 @@
 package org.apache.cassandra.auth;
 
 import java.util.Set;
+import java.util.function.Supplier;
 
 import com.google.common.base.Objects;
 import org.apache.commons.lang3.StringUtils;
@@ -228,6 +229,14 @@ public class DataResource implements IResource
                 return TABLE_LEVEL_PERMISSIONS;
         }
         throw new AssertionError();
+    }
+
+    public IResource qualifyWithKeyspace(Supplier<String> keyspace)
+    {
+        if (level == Level.TABLE &&  this.keyspace == null)
+            return table(keyspace.get(), table);
+
+        return this;
     }
 
     @Override
