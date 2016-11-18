@@ -66,7 +66,6 @@ Merged from DSE 5.0.4
  * Allow filtering on partition key columns for queries without secondary indexes (CASSANDRA-11031)
  * Fix Cassandra Stress reporting thread model and precision (CASSANDRA-12585)
  * Add JMH benchmarks.jar (CASSANDRA-12586)
- * Add row offset support to SASI (CASSANDRA-11990)
  * Cleanup uses of AlterTableStatementColumn (CASSANDRA-12567)
  * Add keep-alive to streaming (CASSANDRA-11841)
  * Tracing payload is passed through newSession(..) (CASSANDRA-11706)
@@ -172,6 +171,8 @@ Merged from 3.0:
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
+ * Avoid blocking gossip during pending range calculation (CASSANDRA-12281)
+ * Fix purgeability of tombstones with max timestamp (CASSANDRA-12792)
  * Fail repair if participant dies during sync or anticompaction (CASSANDRA-12901)
  * cqlsh COPY: unprotected pk values before converting them if not using prepared statements (CASSANDRA-12863)
  * Fix Util.spinAssertEquals (CASSANDRA-12283)
