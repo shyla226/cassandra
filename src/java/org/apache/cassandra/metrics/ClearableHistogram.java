@@ -19,8 +19,6 @@ package org.apache.cassandra.metrics;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import com.codahale.metrics.Histogram;
-
 /**
  * Adds ability to reset a histogram
  */

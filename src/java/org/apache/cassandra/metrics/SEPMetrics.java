@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 
 import org.apache.cassandra.concurrent.SEPExecutor;

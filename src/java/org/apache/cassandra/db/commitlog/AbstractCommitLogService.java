@@ -24,9 +24,8 @@ import java.util.concurrent.locks.LockSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.Timer.Context;
-
 import org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
+import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
@@ -191,7 +190,7 @@ public abstract class AbstractCommitLogService
         awaitSyncAt(requestTime, null);
     }
 
-    void awaitSyncAt(long syncTime, Context context)
+    void awaitSyncAt(long syncTime, Timer.Context context)
     {
         do
         {

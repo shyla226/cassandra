@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.JmxReporter;
 
