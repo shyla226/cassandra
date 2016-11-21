@@ -9,6 +9,11 @@ Merged from DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
 
+3.12
+ * Add support for arithmetic operators (CASSANDRA-11935)
+
+3.11
+ * AnticompactionRequestSerializer serializedSize is incorrect (CASSANDRA-12934)
 
 3.10
  * Don't shut down socket input/output on StreamSession (CASSANDRA-12903)
