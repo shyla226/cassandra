@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 DSE 5.2.0
 Merged from 4.0:
  * Add column definition kind to dropped columns in schema (CASSANDRA-12705)
@@ -6,6 +7,8 @@ Merged from 4.0:
  * Reject invalid replication settings when creating or altering a keyspace (CASSANDRA-12681)
  * Clean up the SSTableReader#getScanner API wrt removal of RateLimiter (CASSANDRA-12422)
 
+=======
+>>>>>>> upstream/dse5.1
 DSE 5.1.0
  * Move responsibility for qualifying ks in authz stmts to IResource (APOLLO-76)
  * Insert default superuser role with fixed timestamp (APOLLO-18)
