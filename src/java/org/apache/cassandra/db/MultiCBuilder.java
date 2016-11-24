@@ -20,10 +20,13 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.TreeSet;
 
 import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
@@ -166,6 +169,13 @@ public abstract class MultiCBuilder
     public abstract NavigableSet<Clustering> build();
 
     /**
+     * Builds the serialized partition keys.
+     *
+     * @return the serialized partition keys
+     */
+    public abstract List<ByteBuffer> buildSerializedPartitionKeys();
+
+    /**
      * Builds the <code>ClusteringBound</code>s for slice restrictions.
      *
      * @param isStart specify if the bound is a start one
@@ -260,6 +270,23 @@ public abstract class MultiCBuilder
                 return BTreeSet.empty(comparator);
 
             return BTreeSet.of(comparator, size == 0 ? Clustering.EMPTY : Clustering.make(elements));
+        }
+
+        @Override
+        public List<ByteBuffer> buildSerializedPartitionKeys()
+        {
+            built = true;
+
+            if (hasMissingElements)
+                return Collections.emptyList();
+
+            if (size == 0)
+                return Collections.singletonList(ByteBufferUtil.EMPTY_BYTE_BUFFER);
+
+            if (size == 1)
+                return Collections.singletonList(elements[0]);
+
+            return Collections.singletonList(CompositeType.build(elements));
         }
 
         @Override
@@ -416,6 +443,35 @@ public abstract class MultiCBuilder
                 set.add(builder.buildWith(elements));
             }
             return set.build();
+        }
+
+        @Override
+        public List<ByteBuffer> buildSerializedPartitionKeys()
+        {
+            built = true;
+
+            if (hasMissingElements)
+                return Collections.emptyList();
+
+            TreeSet<ByteBuffer> set = comparator.size() == 1 ? new TreeSet<>(comparator.subtype(0))
+                                                             : new TreeSet<>(CompositeType.getInstance(comparator.subtypes()));
+
+            for (int i = 0, m = elementsList.size(); i < m; i++)
+            {
+                List<ByteBuffer> elements = elementsList.get(i);
+                set.add(comparator.size() == 1 ? elements.get(0) : toComposite(elements));
+            }
+            return new ArrayList<>(set);
+        }
+
+        private ByteBuffer toComposite(List<ByteBuffer> elements)
+        {
+            ByteBuffer[] tmp = new ByteBuffer[elements.size()];
+            for (int i = 0, m = elements.size(); i < m; i++)
+            {
+                tmp[i] = elements.get(i);
+            }
+            return CompositeType.build(tmp);
         }
 
         public NavigableSet<ClusteringBound> buildBoundForSlice(boolean isStart,
