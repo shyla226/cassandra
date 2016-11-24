@@ -18,13 +18,13 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.MultiCBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -55,14 +55,6 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
         this.comparator = restrictionSet.comparator;
     }
 
-    private List<ByteBuffer> toByteBuffers(SortedSet<? extends ClusteringPrefix> clusterings)
-    {
-        List<ByteBuffer> l = new ArrayList<>(clusterings.size());
-        for (ClusteringPrefix clustering : clusterings)
-            l.add(CFMetaData.serializePartitionKey(clustering));
-        return l;
-    }
-
     @Override
     public PartitionKeyRestrictions mergeWith(Restriction restriction)
     {
@@ -87,7 +79,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             if (builder.hasMissingElements())
                 break;
         }
-        return toByteBuffers(builder.build());
+        return builder.buildSerializedPartitionKeys();
     }
 
     @Override
@@ -100,7 +92,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             if (builder.hasMissingElements())
                 return Collections.emptyList();
         }
-        return toByteBuffers(builder.buildBound(bound.isStart(), true));
+        return builder.buildSerializedPartitionKeys();
     }
 
     @Override

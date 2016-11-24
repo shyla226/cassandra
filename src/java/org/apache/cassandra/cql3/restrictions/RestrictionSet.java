@@ -59,16 +59,23 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
      */
     private final boolean hasMultiColumnRestrictions;
 
+    /**
+     * {@code true} if it contains an IN restriction, {@code false} otherwise.
+     */
+    private final boolean hasIn;
+
     public RestrictionSet()
     {
-        this(new TreeMap<ColumnDefinition, SingleRestriction>(COLUMN_DEFINITION_COMPARATOR), false);
+        this(new TreeMap<ColumnDefinition, SingleRestriction>(COLUMN_DEFINITION_COMPARATOR), false, false);
     }
 
     private RestrictionSet(TreeMap<ColumnDefinition, SingleRestriction> restrictions,
-                           boolean hasMultiColumnRestrictions)
+                           boolean hasMultiColumnRestrictions,
+                           boolean hasIN)
     {
         this.restrictions = restrictions;
         this.hasMultiColumnRestrictions = hasMultiColumnRestrictions;
+        this.hasIn = hasIN;
     }
 
     @Override
@@ -113,7 +120,9 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
     {
         // RestrictionSet is immutable so we need to clone the restrictions map.
         TreeMap<ColumnDefinition, SingleRestriction> newRestrictions = new TreeMap<>(this.restrictions);
-        return new RestrictionSet(mergeRestrictions(newRestrictions, restriction), hasMultiColumnRestrictions || restriction.isMultiColumn());
+        return new RestrictionSet(mergeRestrictions(newRestrictions, restriction),
+                                  hasMultiColumnRestrictions || restriction.isMultiColumn(),
+                                  hasIn || restriction.isIN());
     }
 
     private TreeMap<ColumnDefinition, SingleRestriction> mergeRestrictions(TreeMap<ColumnDefinition, SingleRestriction> restrictions,
@@ -258,12 +267,7 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
      */
     public final boolean hasIN()
     {
-        for (SingleRestriction restriction : this)
-        {
-            if (restriction.isIN())
-                return true;
-        }
-        return false;
+        return hasIn;
     }
 
     public final boolean hasSlice()

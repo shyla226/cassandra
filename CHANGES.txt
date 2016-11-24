@@ -7,6 +7,7 @@ Merged from 4.0:
  * Clean up the SSTableReader#getScanner API wrt removal of RateLimiter (CASSANDRA-12422)
 
 DSE 5.1.0
+ * Improve StatementRestrictions::getPartitionKeys() execution speed (APOLLO-115)
  * Move responsibility for qualifying ks in authz stmts to IResource (APOLLO-76)
  * Insert default superuser role with fixed timestamp (APOLLO-18)
  * Make Permissions extensible (APOLLO-26)
