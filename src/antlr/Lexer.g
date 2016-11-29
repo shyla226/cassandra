@@ -134,6 +134,7 @@ K_EXECUTE:     E X E C U T E;
 K_NORECURSIVE: N O R E C U R S I V E;
 K_MBEAN:       M B E A N;
 K_MBEANS:      M B E A N S;
+K_RESOURCE:     R E S O U R C E;
 
 K_USER:        U S E R;
 K_USERS:       U S E R S;

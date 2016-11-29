@@ -1024,26 +1024,32 @@ truncateStatement returns [TruncateStatement stmt]
  * GRANT <permission> ON <resource> TO <rolename>
  */
 grantPermissionsStatement returns [GrantPermissionsStatement stmt]
+    @init {
+        IResource res = null;
+    }
     : K_GRANT
           permissionOrAll
       K_ON
-          resource
+          ( i=resourceFromInternalName { res = $i.res; } | r=resource { res = $r.res; } )
       K_TO
           grantee=userOrRoleName
-      { $stmt = new GrantPermissionsStatement(filterPermissions($permissionOrAll.perms, $resource.res), $resource.res, grantee); }
+      { $stmt = new GrantPermissionsStatement(filterPermissions($permissionOrAll.perms, res), res, grantee); }
     ;
 
 /**
  * REVOKE <permission> ON <resource> FROM <rolename>
  */
 revokePermissionsStatement returns [RevokePermissionsStatement stmt]
+    @init {
+        IResource res = null;
+    }
     : K_REVOKE
           permissionOrAll
       K_ON
-          resource
+          ( i=resourceFromInternalName { res = $i.res; } | r=resource { res = $r.res; } )
       K_FROM
           revokee=userOrRoleName
-      { $stmt = new RevokePermissionsStatement(filterPermissions($permissionOrAll.perms, $resource.res), $resource.res, revokee); }
+      { $stmt = new RevokePermissionsStatement(filterPermissions($permissionOrAll.perms, res), res, revokee); }
     ;
 
 /**
@@ -1120,6 +1126,10 @@ permissionOrAll returns [Set<Permission> perms]
     : K_ALL ( K_PERMISSIONS )?       { $perms = Permissions.all(); }
     | K_PERMISSIONS { $perms = Permissions.all(); }
     | p=permission ( K_PERMISSION )? { $perms = $p.perm == null ? Collections.emptySet() : Permissions.setOf($p.perm); }
+    ;
+
+resourceFromInternalName returns [IResource res]
+    : K_RESOURCE '(' s=STRING_LITERAL ')' { $res = Resources.fromName($s.text); }
     ;
 
 cassandraResource returns [IResource res]
@@ -1853,5 +1863,6 @@ basic_unreserved_keyword returns [String str]
         | K_PER
         | K_PARTITION
         | K_GROUP
+        | K_RESOURCE
         ) { $str = $k.text; }
     ;
