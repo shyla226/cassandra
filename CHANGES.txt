@@ -1,5 +1,6 @@
 DSE 5.2.0
 Merged from 4.0:
+ * Remove pre-3.0 compatibility code for 4.0 (CASSANDRA-12716)
  * Add column definition kind to dropped columns in schema (CASSANDRA-12705)
  * Add (automate) Nodetool Documentation (CASSANDRA-12672)
  * Update bundled cqlsh python driver to 3.7.0 (CASSANDRA-12736)
