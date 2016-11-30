@@ -747,6 +747,7 @@ public final class SystemKeyspace
             return;
 
         String req = "INSERT INTO system.%s (peer, tokens) VALUES (?, ?)";
+        logger.info("PEERS TOKENS for {} = {}", ep, tokensAsSet(tokens));
         executeInternal(String.format(req, PEERS), ep, tokensAsSet(tokens)).blockingGet();
     }
 
@@ -838,6 +839,7 @@ public final class SystemKeyspace
         ColumnFamilyStore cfs = Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(SystemDistributedKeyspace.REPAIR_HISTORY);
         List<PartitionPosition> ranges = NettyRxScheduler.getRangeList(cfs, false);
         String req = "INSERT INTO system.%s (key, token_boundaries) VALUES ('%s', ?)";
+        logger.info("LIST = " + tokensAsList(ranges));
         executeInternal(String.format(req, LOCAL, LOCAL), tokensAsList(ranges)).blockingGet();
         forceBlockingFlush(LOCAL);
     }

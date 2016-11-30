@@ -1071,6 +1071,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.debug("Not marking {} alive due to dead state", ep);
             markDead(ep, epState);
         }
+        logger.info("WRITING LOCAL JOIN INFO to " + subscribers);
+
         for (IEndpointStateChangeSubscriber subscriber : subscribers)
             subscriber.onJoin(ep, epState);
         // check this at the end so nodes will learn about the endpoint

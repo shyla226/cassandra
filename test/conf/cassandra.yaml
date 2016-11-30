@@ -3,7 +3,7 @@
 # Consider the effects on 'o.a.c.i.s.LegacySSTableTest' before changing schemas in this file.
 #
 cluster_name: Test Cluster
-num_tokens: 256
+num_tokens: 1
 # memtable_allocation_type: heap_buffers
 memtable_allocation_type: offheap_objects
 commitlog_sync: batch

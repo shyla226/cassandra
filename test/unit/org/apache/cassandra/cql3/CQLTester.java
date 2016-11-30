@@ -32,8 +32,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +56,7 @@ import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -116,9 +117,9 @@ public abstract class CQLTester
                 break;
             }
         }
-        PROTOCOL_VERSIONS = builder.build();
+        PROTOCOL_VERSIONS = com.google.common.collect.Lists.newArrayList(4); // builder.build();
 
-        nativeAddr = InetAddress.getLoopbackAddress();
+        nativeAddr = DatabaseDescriptor.getRpcAddress();
 
         // Register an EndpointSnitch which returns fixed values for test.
         DatabaseDescriptor.setEndpointSnitch(new AbstractEndpointSnitch()
@@ -128,18 +129,7 @@ public abstract class CQLTester
             @Override public int compareEndpoints(InetAddress target, InetAddress a1, InetAddress a2) { return 0; }
         });
 
-        try
-        {
-            try (ServerSocket serverSocket = new ServerSocket(0))
-            {
-                nativePort = serverSocket.getLocalPort();
-            }
-            Thread.sleep(250);
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 
     public static ResultMessage lastSchemaChangeResult;
@@ -355,7 +345,10 @@ public abstract class CQLTester
             return;
 
         SystemKeyspace.finishStartup();
+        SystemKeyspace.persistLocalMetadata();
+        StorageService.instance.populateTokenMetadata();
         StorageService.instance.initServer();
+        Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
 
         server = new NativeTransportService(nativeAddr, nativePort);
@@ -367,10 +360,17 @@ public abstract class CQLTester
             if (clusters.containsKey(version))
                 continue;
 
+            PoolingOptions poolingOpts = new PoolingOptions()
+                                         .setConnectionsPerHost(HostDistance.LOCAL, 1, 1)
+                                         .setMaxRequestsPerConnection(HostDistance.LOCAL, 32000)
+                                         .setNewConnectionThreshold(HostDistance.LOCAL, 100);
+
+
             Cluster cluster = Cluster.builder()
                                      .addContactPoints(nativeAddr)
                                      .withClusterName("Test Cluster")
                                      .withPort(nativePort)
+                                     .withPoolingOptions(poolingOpts)
                                      .withProtocolVersion(ProtocolVersion.fromInt(version))
                                      .withoutMetrics()
                                      .build();
@@ -729,6 +729,12 @@ public abstract class CQLTester
     {
         return sessionNet(protocolVersion).execute(statement);
     }
+
+    protected com.datastax.driver.core.ResultSetFuture executeNetAsync(int protocolVersion, BoundStatement statement)
+    {
+        return sessionNet(protocolVersion).executeAsync(statement);
+    }
+
 
     protected Session sessionNet()
     {

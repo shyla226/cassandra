@@ -375,9 +375,21 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             int processed = 0;
 
             for (int i = 0; i < incomingQueues.length; i++)
-                processed += incomingQueues[i].drain(Runnable::run);
+            {
+                Runnable r;
+                while ((r = incomingQueues[i].poll()) != null)
+                {
+                    r.run();
+                    processed++;
+                }
+            }
 
-            processed += externalQueue.drain(Runnable::run);
+            Runnable r;
+            while ((r = externalQueue.relaxedPoll()) != null)
+            {
+                r.run();
+                processed++;
+            }
 
             return processed;
         }

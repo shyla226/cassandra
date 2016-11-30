@@ -156,6 +156,7 @@ public class NettyRxScheduler extends Scheduler
                 {
                     /*
                      * Reenable to debug PPC problems with the wrong port being used
+                     */
                     if (matchingScheduler instanceof NettyRxScheduler)
                     {
                         NettyRxScheduler rxScheduler = (NettyRxScheduler) matchingScheduler;
@@ -173,7 +174,7 @@ public class NettyRxScheduler extends Scheduler
                                 Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
                                 keyspaceRanges);
                     }
-                    */
+
                     return matchingScheduler;
                 }
             }

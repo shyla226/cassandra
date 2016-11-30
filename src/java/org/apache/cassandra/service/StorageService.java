@@ -222,8 +222,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /** This method updates the local token on disk  */
     public void setTokens(Collection<Token> tokens)
     {
-        if (logger.isDebugEnabled())
-            logger.debug("Setting tokens to {}", tokens);
+        //if (logger.isDebugEnabled())
+            logger.info("Setting tokens to {}", tokens);
         SystemKeyspace.updateTokens(tokens);
         Collection<Token> localTokens = getLocalTokens();
         setGossipTokens(localTokens);
@@ -829,9 +829,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // We attempted to replace this with a schema-presence check, but you need a meaningful sleep
         // to get schema info from gossip which defeats the purpose.  See CASSANDRA-4427 for the gory details.
         Set<InetAddress> current = new HashSet<>();
-        if (logger.isDebugEnabled())
+        if (true)
         {
-            logger.debug("Bootstrap variables: {} {} {} {}",
+            logger.info("Bootstrap variables: {} {} {} {}",
                          DatabaseDescriptor.isAutoBootstrap(),
                          SystemKeyspace.bootstrapInProgress(),
                          SystemKeyspace.bootstrapComplete(),
@@ -980,8 +980,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         // TODO chain all this together
         // if we don't have system_traces keyspace at this point, then create it manually
-        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata()).subscribe();
-        maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata()).subscribe();
+        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata()).blockingGet();
+        maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata()).blockingGet();
 
         if (!isSurveyMode)
         {

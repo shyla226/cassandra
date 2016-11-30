@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
 import io.netty.util.concurrent.FastThreadLocal;
+import io.netty.util.internal.shaded.org.jctools.queues.MpscArrayQueue;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import io.reactivex.subjects.PublishSubject;
@@ -510,14 +512,50 @@ public abstract class Message
             }
         }
 
+        private static class ChannelFlusher
+        {
+            final ChannelHandlerContext ctx;
+            final List<FlushItem> flushItems = new ArrayList<>();
+            int runsSinceFlush = 0;
+
+            ChannelFlusher(ChannelHandlerContext ctx)
+            {
+                this.ctx = ctx;
+            }
+
+            void add(FlushItem item)
+            {
+                ctx.write(item.response, ctx.voidPromise());
+                flushItems.add(item);
+            }
+
+            boolean maybeFlush()
+            {
+                if (runsSinceFlush > 2 || flushItems.size() > 50)
+                {
+                    ctx.flush();
+                    for (FlushItem item : flushItems)
+                        item.sourceFrame.release();
+
+                    flushItems.clear();
+
+                    runsSinceFlush = 0;
+                    return true;
+                }
+
+                runsSinceFlush++;
+                return false;
+            }
+
+        }
+
         private static final class Flusher implements Runnable
         {
             final EventLoop eventLoop;
-            final ConcurrentLinkedQueue<FlushItem> queued = new ConcurrentLinkedQueue<>();
+            final MpscArrayQueue<FlushItem> queued = new MpscArrayQueue<>(1 << 16);
             final AtomicBoolean running = new AtomicBoolean(false);
-            final HashSet<ChannelHandlerContext> channels = new HashSet<>();
-            final List<FlushItem> flushed = new ArrayList<>();
-            int runsSinceFlush = 0;
+            final Map<ChannelHandlerContext, ChannelFlusher> channels = new IdentityHashMap<>();
+            final List<ChannelHandlerContext> finishedChannels = new ArrayList<>();
             int runsWithNoWork = 0;
             private Flusher(EventLoop eventLoop)
             {
@@ -526,36 +564,31 @@ public abstract class Message
             void start()
             {
                 if (!running.get() && running.compareAndSet(false, true))
-                {
                     this.eventLoop.execute(this);
-                }
             }
             public void run()
             {
 
                 boolean doneWork = false;
-                FlushItem flush;
-                while ( null != (flush = queued.poll()) )
+                FlushItem item;
+                while ( null != (item = queued.poll()) )
                 {
-                    channels.add(flush.ctx);
-                    flush.ctx.write(flush.response, flush.ctx.voidPromise());
-                    flushed.add(flush);
+                    channels.computeIfAbsent(item.ctx, ChannelFlusher::new).add(item);
                     doneWork = true;
                 }
 
-                runsSinceFlush++;
-
-                if (!doneWork || runsSinceFlush > 2 || flushed.size() > 50)
+                for (Map.Entry<ChannelHandlerContext, ChannelFlusher> c : channels.entrySet())
                 {
-                    for (ChannelHandlerContext channel : channels)
-                        channel.flush();
-                    for (FlushItem item : flushed)
-                        item.sourceFrame.release();
-
-                    channels.clear();
-                    flushed.clear();
-                    runsSinceFlush = 0;
+                    if (c.getKey().channel().isActive())
+                        c.getValue().maybeFlush();
+                    else
+                        finishedChannels.add(c.getKey());
                 }
+
+                for (ChannelHandlerContext c : finishedChannels)
+                    channels.remove(c);
+
+                finishedChannels.clear();
 
                 if (doneWork)
                 {
@@ -567,7 +600,12 @@ public abstract class Message
                     if (++runsWithNoWork > 5)
                     {
                         running.set(false);
-                        if (queued.isEmpty() || !running.compareAndSet(false, true))
+
+                        if (queued.isEmpty())
+                            return;
+
+                        //Somebody already took over so we can exit
+                        if (!running.compareAndSet(false, true))
                             return;
                     }
                 }
@@ -575,83 +613,6 @@ public abstract class Message
                 eventLoop.schedule(this, 10000, TimeUnit.NANOSECONDS);
             }
         }
-
-       /* private static final class Flusher implements Runnable
-        {
-            final EventLoop eventLoop;
-            final Queue<FlushItem> queued = new LinkedList<>();
-            boolean running = false;
-            ScheduledFuture scheduledFuture = null;
-            final HashSet<ChannelHandlerContext> channels = new HashSet<>();
-            final List<FlushItem> flushed = new ArrayList<>();
-            int runsSinceFlush = 0;
-            int runsWithNoWork = 0;
-            private Flusher(EventLoop eventLoop)
-            {
-                this.eventLoop = eventLoop;
-            }
-
-            void start()
-            {
-                if (!running)// || scheduledFuture != null )
-                {
-
-
-                    run();
-                }
-            }
-
-            public void run()
-            {
-                running = true;
-                boolean doneWork = false;
-                FlushItem flush;
-                while ( null != (flush = queued.poll()) )
-                {
-                    flush.ctx.write(flush.response, flush.ctx.voidPromise());
-                    channels.add(flush.ctx);
-                    flushed.add(flush);
-                    doneWork = true;
-                }
-
-                runsSinceFlush++;
-
-                if (!doneWork || runsSinceFlush > 2 || flushed.size() > 50)
-                {
-                    if (!channels.isEmpty() && !flushed.isEmpty())
-                    {
-                        for (ChannelHandlerContext channel : channels)
-                            channel.flush();
-                        for (FlushItem item : flushed)
-                            item.sourceFrame.release();
-
-                        channels.clear();
-                        flushed.clear();
-                    }
-
-                    runsSinceFlush = 0;
-                }
-
-                if (doneWork)
-                {
-                    runsWithNoWork = 0;
-                }
-                else
-                {
-                    // either reschedule or cancel
-                    if (++runsWithNoWork > 5)
-                    {
-                        running = false;
-                        if (queued.isEmpty())
-                            return;
-                    }
-                }
-
-                //We should only have one scheduled at a time
-                //if (scheduledFuture == null || scheduledFuture.isCancelled() || scheduledFuture.isDone())
-                scheduledFuture = eventLoop.schedule(this, 10000, TimeUnit.NANOSECONDS);
-            }
-        }*/
 
         private static final ConcurrentMap<EventLoop, Flusher> flusherLookup = new ConcurrentHashMap<>();
 
@@ -735,23 +696,6 @@ public abstract class Message
             flusher.queued.add(item);
             flusher.start();
         }
-
-        /*private void flush(FlushItem item)
-        {
-            EventLoop loop = item.ctx.channel().eventLoop();
-            assert loop.inEventLoop();
-            Flusher flusher = flusherLookup.get(loop);
-            if (flusher == null)
-            {
-                Flusher alt = flusherLookup.putIfAbsent(loop, flusher = new Flusher(loop));
-                if (alt != null)
-                    flusher = alt;
-            }
-
-            flusher.queued.add(item);
-            flusher.start();
-        }*/
-
 
         @Override
         public void exceptionCaught(final ChannelHandlerContext ctx, Throwable cause)
