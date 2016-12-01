@@ -181,11 +181,10 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private volatile CoreState state;
 
         @Contended
-        private final MessagePassingQueue<Runnable> externalQueue;
+        private final MpscArrayQueue<Runnable> externalQueue;
 
         @Contended
-        private final MessagePassingQueue<Runnable>[] incomingQueues;
-
+        private final SpscArrayQueue<Runnable>[] incomingQueues;
 
         private SingleCoreEventLoop(EventLoopGroup parent, Executor executor, int threadOffset, int totalCores)
         {
@@ -195,7 +194,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.externalQueue = new MpscArrayQueue<>(1 << 16);
 
-            this.incomingQueues = new MessagePassingQueue[totalCores];
+            this.incomingQueues = new SpscArrayQueue[totalCores];
             for (int i = 0; i < incomingQueues.length; i++)
             {
                 incomingQueues[i] = new SpscArrayQueue<>(1 << 16);
