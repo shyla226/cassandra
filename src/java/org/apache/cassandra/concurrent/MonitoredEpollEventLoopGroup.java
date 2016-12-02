@@ -95,7 +95,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 for (int i = 0; i < length; i++)
                     eventLoops[i].checkQueues();
 
-                LockSupport.parkNanos(1);
+                //LockSupport.parkNanos(0);
             }
         });
 
