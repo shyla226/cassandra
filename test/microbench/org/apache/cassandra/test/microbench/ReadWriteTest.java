@@ -137,7 +137,7 @@ public class ReadWriteTest extends CQLTester
                        .jvmArgs("-server")
                        .forks(1)
                        .mode(Mode.AverageTime)
-                       .addProfiler(LinuxPerfAsmProfiler.class)
+                       //.addProfiler(LinuxPerfAsmProfiler.class)
                        .build();
 
         Collection<RunResult> records = new Runner(opts).run();

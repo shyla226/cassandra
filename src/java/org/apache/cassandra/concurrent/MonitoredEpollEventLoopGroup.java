@@ -26,6 +26,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
 
 
@@ -265,15 +266,15 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         private void checkQueues()
         {
-            if (state == CoreState.PARKED && !isEmpty())
+            boolean epollReady = hasEpollReady();
+
+            if (state == CoreState.PARKED && (epollReady || !isEmpty()))
                 unpark();
         }
 
         public void addTask(Runnable task)
         {
             Thread currentThread = Thread.currentThread();
-
-            Queue<Runnable> queue = null;
 
             if (runningThreads != null)
             {
@@ -304,38 +305,18 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             try
             {
-                int t;
-
-                if (this.pendingEpollEvents > 0)
-                {
-                    t = pendingEpollEvents;
-                    pendingEpollEvents = 0;
-                }
-                else
-                {
-                    t = this.selectStrategy.calculateStrategy(this.selectNowSupplier, hasTasks());
-                    switch (t)
-                    {
-                        case -2:
-                            return 0;
-                        case -1:
-                            t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
-                            if (this.wakenUp == 1)
-                            {
-                                Native.eventFdWrite(this.eventFd.intValue(), 1L);
-                            }
-                        default:
-                    }
-                }
+                int t = pendingEpollEvents;
 
                 if (t > 0)
                 {
                     this.processReady(this.events, t);
-                }
 
-                if (this.allowGrowing && t == this.events.length())
-                {
-                    this.events.increase();
+                    pendingEpollEvents = 0;
+
+                    if (this.allowGrowing && t == this.events.length())
+                    {
+                        this.events.increase();
+                    }
                 }
 
                 return Math.max(t, 0);
@@ -387,32 +368,33 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             return !empty;
         }
 
-        @Inline
-        boolean isEmpty()
+        boolean hasEpollReady()
         {
-            boolean empty = !hasTasks();
+            if (pendingEpollEvents > 0)
+                return true;
 
             try
             {
-                int t;
-                if (empty)
-                {
-                    t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+                int t = this.selectNowSupplier.get();
 
-                    if (t > 0)
-                        pendingEpollEvents = t;
-                    else
-                        Native.eventFdWrite(this.eventFd.intValue(), 1L);
+                if (t >= 0)
+                    pendingEpollEvents = t;
+                else
+                    Native.eventFdWrite(this.eventFd.intValue(), 1L);
 
-                    return t <= 0;
-                }
+                return pendingEpollEvents > 0;
             }
             catch (Exception e)
             {
                 logger.error("Error selecting socket ", e);
+                return false;
             }
+        }
 
-            return empty;
+        @Inline
+        boolean isEmpty()
+        {
+            return !hasTasks();
         }
 
         @Inline
