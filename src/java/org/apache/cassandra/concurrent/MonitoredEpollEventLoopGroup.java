@@ -282,7 +282,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 //Run local core tasks directly
                 if (currentThread == runningThreads[threadOffset])
                 {
-                   queue = incomingQueues[threadOffset];
+                    task.run();
+                    return;
+                   //queue = incomingQueues[threadOffset];
                 }
                 else
                 {
