@@ -19,6 +19,8 @@
 package org.apache.cassandra.concurrent;
 
 
+import java.util.ArrayDeque;
+import java.util.Queue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
@@ -184,7 +186,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private final MpscArrayQueue<Runnable> externalQueue;
 
         @Contended
-        private final SpscArrayQueue<Runnable>[] incomingQueues;
+        private final ArrayDeque<Runnable> internalQueue;
 
         private SingleCoreEventLoop(EventLoopGroup parent, Executor executor, int threadOffset, int totalCores)
         {
@@ -194,11 +196,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             this.externalQueue = new MpscArrayQueue<>(1 << 16);
 
-            this.incomingQueues = new SpscArrayQueue[totalCores];
-            for (int i = 0; i < incomingQueues.length; i++)
-            {
-                incomingQueues[i] = new SpscArrayQueue<>(1 << 16);
-            }
+            this.internalQueue = new ArrayDeque<>(1 << 16);
 
             this.state = CoreState.WORKING;
         }
@@ -275,32 +273,20 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             Thread currentThread = Thread.currentThread();
 
-            MessagePassingQueue<Runnable> queue = null;
+            Queue<Runnable> queue = null;
 
             if (runningThreads != null)
             {
-                //Run local core tasks directly
                 if (currentThread == runningThreads[threadOffset])
                 {
-                    queue = incomingQueues[threadOffset];
+                    if (!internalQueue.offer(task))
+                        throw new RuntimeException("Backpressure");
                 }
                 else
                 {
-                    for (int i = 0; i < eventLoops.length; i++)
-                    {
-                        if (currentThread == runningThreads[i])
-                        {
-                            queue = incomingQueues[eventLoops[i].threadOffset];
-                            break;
-                        }
-                    }
+                    if (!externalQueue.offer(task))
+                        throw new RuntimeException("Backpressure");
                 }
-
-                if (queue == null)
-                    queue = externalQueue;
-
-                if (!queue.offer(task))
-                    throw new RuntimeException("Backpressure");
             }
             else
             {
@@ -373,17 +359,13 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             int processed = 0;
 
-            for (int i = 0; i < incomingQueues.length; i++)
+            Runnable r;
+            while ((r = internalQueue.poll()) != null)
             {
-                Runnable r;
-                while ((r = incomingQueues[i].poll()) != null)
-                {
-                    r.run();
-                    processed++;
-                }
+                r.run();
+                processed++;
             }
 
-            Runnable r;
             while ((r = externalQueue.relaxedPoll()) != null)
             {
                 r.run();
@@ -397,13 +379,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Inline
         protected boolean hasTasks()
         {
-            for (int i = 0; i < incomingQueues.length; i++)
-            {
-                if (!incomingQueues[i].isEmpty())
-                    return true;
-            }
-
-            boolean empty = externalQueue.isEmpty();
+            boolean empty = internalQueue.peek() == null && externalQueue.relaxedPeek() == null;
 
             if (empty)
                 empty = hasScheduledTasks();
