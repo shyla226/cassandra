@@ -89,12 +89,18 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         monitorThread = threadFactory.newThread(() -> {
             int length = eventLoops.length;
+            long now = -1;
 
             while (true)
             {
                 for (int i = 0; i < length; i++)
-                    eventLoops[i].checkQueues();
+                {
+                    if (i == 0)
+                        now = eventLoops[i].nanotime();
 
+                    eventLoops[i].checkQueues(now);
+                }
+                
                 LockSupport.parkNanos(1);
             }
         });
@@ -264,9 +270,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             LockSupport.unpark(runningThreads[threadOffset]);
         }
 
-        private void checkQueues()
+        private void checkQueues(long now)
         {
             boolean epollReady = hasEpollReady();
+
+            fetchFromDelayedQueue(now);
 
             if (state == CoreState.PARKED && (epollReady || !isEmpty()))
                 unpark();
@@ -336,8 +344,6 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Inline
         int drainTasks()
         {
-            fetchFromDelayedQueue();
-
             int processed = 0;
 
             Runnable r;
@@ -361,9 +367,6 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         protected boolean hasTasks()
         {
             boolean empty = internalQueue.peek() == null && externalQueue.relaxedPeek() == null;
-
-            if (empty)
-                empty = hasScheduledTasks();
 
             return !empty;
         }
@@ -397,10 +400,14 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             return !hasTasks();
         }
 
-        @Inline
-        void fetchFromDelayedQueue()
+        long nanotime()
         {
-            long nanoTime = AbstractScheduledEventExecutor.nanoTime();
+            return AbstractScheduledEventExecutor.nanoTime();
+        }
+
+        @Inline
+        void fetchFromDelayedQueue(long nanoTime)
+        {
             Runnable scheduledTask  = pollScheduledTask(nanoTime);
             while (scheduledTask != null)
             {

@@ -693,7 +693,8 @@ public abstract class Message
                     flusher = alt;
             }
 
-            flusher.queued.add(item);
+            if( !flusher.queued.offer(item) )
+                throw new RuntimeException("Backpressure");
             flusher.start();
         }
 
