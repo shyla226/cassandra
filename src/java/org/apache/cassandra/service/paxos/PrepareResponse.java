@@ -1,6 +1,4 @@
-package org.apache.cassandra.service.paxos;
 /*
- *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -19,18 +17,21 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  *
  */
-
+package org.apache.cassandra.service.paxos;
 
 import java.io.IOException;
 
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.service.paxos.LWTVerbs.LWTVersion;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 public class PrepareResponse
 {
-    public static final PrepareResponseSerializer serializer = new PrepareResponseSerializer();
+    public static final Versioned<LWTVersion, Serializer<PrepareResponse>> serializers = LWTVersion.versioned(PrepareSerializer::new);
 
     public final boolean promised;
 
@@ -58,28 +59,36 @@ public class PrepareResponse
         return String.format("PrepareResponse(%s, %s, %s)", promised, mostRecentCommit, inProgressCommit);
     }
 
-    public static class PrepareResponseSerializer implements IVersionedSerializer<PrepareResponse>
+    public static class PrepareSerializer extends VersionDependent<LWTVersion> implements Serializer<PrepareResponse>
     {
-        public void serialize(PrepareResponse response, DataOutputPlus out, int version) throws IOException
+        private final Commit.CommitSerializer commitSerializer;
+
+        private PrepareSerializer(LWTVersion version)
         {
-            out.writeBoolean(response.promised);
-            Commit.serializer.serialize(response.inProgressCommit, out, version);
-            Commit.serializer.serialize(response.mostRecentCommit, out, version);
+            super(version);
+            this.commitSerializer = Commit.serializers.get(version);
         }
 
-        public PrepareResponse deserialize(DataInputPlus in, int version) throws IOException
+        public void serialize(PrepareResponse response, DataOutputPlus out) throws IOException
+        {
+            out.writeBoolean(response.promised);
+            commitSerializer.serialize(response.inProgressCommit, out);
+            commitSerializer.serialize(response.mostRecentCommit, out);
+        }
+
+        public PrepareResponse deserialize(DataInputPlus in) throws IOException
         {
             boolean success = in.readBoolean();
-            Commit inProgress = Commit.serializer.deserialize(in, version);
-            Commit mostRecent = Commit.serializer.deserialize(in, version);
+            Commit inProgress = commitSerializer.deserialize(in);
+            Commit mostRecent = commitSerializer.deserialize(in);
             return new PrepareResponse(success, inProgress, mostRecent);
         }
 
-        public long serializedSize(PrepareResponse response, int version)
+        public long serializedSize(PrepareResponse response)
         {
             return TypeSizes.sizeof(response.promised)
-                 + Commit.serializer.serializedSize(response.inProgressCommit, version)
-                 + Commit.serializer.serializedSize(response.mostRecentCommit, version);
+                 + commitSerializer.serializedSize(response.inProgressCommit)
+                 + commitSerializer.serializedSize(response.mostRecentCommit);
         }
     }
 }

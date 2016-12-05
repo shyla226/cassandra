@@ -26,12 +26,12 @@ public class SessionFailedMessage extends StreamMessage
 {
     public static Serializer<SessionFailedMessage> serializer = new Serializer<SessionFailedMessage>()
     {
-        public SessionFailedMessage deserialize(ReadableByteChannel in, int version, StreamSession session)
+        public SessionFailedMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session)
         {
             return new SessionFailedMessage();
         }
 
-        public void serialize(SessionFailedMessage message, DataOutputStreamPlus out, int version, StreamSession session) {}
+        public void serialize(SessionFailedMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) {}
     };
 
     public SessionFailedMessage()

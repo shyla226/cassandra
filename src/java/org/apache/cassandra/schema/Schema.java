@@ -555,26 +555,26 @@ public final class Schema
      * Merge remote schema in form of mutations with local and mutate ks/cf metadata objects
      * (which also involves fs operations on add/drop ks/cf)
      *
-     * @param mutations the schema changes to apply
+     * @param schema the schema changes to apply
      *
      * @throws ConfigurationException If one of metadata attributes has invalid value
      */
-    synchronized void mergeAndAnnounceVersion(Collection<Mutation> mutations)
+    synchronized void mergeAndAnnounceVersion(SchemaMigration schema)
     {
-        merge(mutations);
+        merge(schema);
         updateVersionAndAnnounce();
     }
 
-    synchronized void merge(Collection<Mutation> mutations)
+    synchronized void merge(SchemaMigration schema)
     {
         // only compare the keyspaces affected by this set of schema mutations
-        Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(mutations);
+        Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(schema.mutations);
 
         // fetch the current state of schema for the affected keyspaces only
         Keyspaces before = keyspaces.filter(k -> affectedKeyspaces.contains(k.name));
 
         // apply the schema mutations
-        SchemaKeyspace.applyChanges(mutations);
+        SchemaKeyspace.applyChanges(schema.mutations);
 
         // apply the schema mutations and fetch the new versions of the altered keyspaces
         Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);

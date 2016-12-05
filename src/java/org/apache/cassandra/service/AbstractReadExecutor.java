@@ -18,7 +18,6 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -27,11 +26,11 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DigestVersion;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -39,12 +38,11 @@ import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
-import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 
 /**
@@ -62,61 +60,42 @@ public abstract class AbstractReadExecutor
     protected final ReadCommand command;
     protected final List<InetAddress> targetReplicas;
     protected final ReadCallback handler;
-    protected final TraceState traceState;
+    protected final DigestVersion digestVersion;
 
     AbstractReadExecutor(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
     {
         this.command = command;
         this.targetReplicas = targetReplicas;
         this.handler = new ReadCallback(new DigestResolver(keyspace, command, consistencyLevel, targetReplicas.size()), consistencyLevel, command, targetReplicas, queryStartNanoTime);
-        this.traceState = Tracing.instance.get();
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
-        // TODO: we need this when talking with pre-3.0 nodes. So if we preserve the digest format moving forward, we can get rid of this once
-        // we stop being compatible with pre-3.0 nodes.
-        int digestVersion = MessagingService.current_version;
+        MessagingVersion minVersion = MessagingService.current_version;
         for (InetAddress replica : targetReplicas)
-            digestVersion = Math.min(digestVersion, MessagingService.instance().getVersion(replica));
-        command.setDigestVersion(digestVersion);
+            minVersion = MessagingVersion.min(minVersion, MessagingService.instance().getVersion(replica));
+        this.digestVersion = minVersion.<ReadVerbs.ReadVersion>groupVersion(Verbs.Group.READS).digestVersion;
     }
 
-    protected void makeDataRequests(Iterable<InetAddress> endpoints)
+    protected void makeDataRequests(List<InetAddress> endpoints)
     {
+        assert !endpoints.isEmpty();
+        Tracing.trace("Reading data from {}", endpoints);
+        logger.trace("Reading data from {}", endpoints);
         makeRequests(command, endpoints);
 
     }
 
-    protected void makeDigestRequests(Iterable<InetAddress> endpoints)
+    protected void makeDigestRequests(List<InetAddress> endpoints)
     {
-        makeRequests(command.copy().setIsDigestQuery(true), endpoints);
+        assert !endpoints.isEmpty();
+        Tracing.trace("Reading digests from {}", endpoints);
+        logger.trace("Reading digests from {}", endpoints);
+        makeRequests(command.createDigestCommand(digestVersion), endpoints);
     }
 
-    private void makeRequests(ReadCommand readCommand, Iterable<InetAddress> endpoints)
+    private void makeRequests(ReadCommand readCommand, List<InetAddress> endpoints)
     {
-        boolean hasLocalEndpoint = false;
-
-        for (InetAddress endpoint : endpoints)
-        {
-            if (StorageProxy.canDoLocalRequest(endpoint))
-            {
-                hasLocalEndpoint = true;
-                continue;
-            }
-
-            if (traceState != null)
-                traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            logger.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            MessageOut<ReadCommand> message = readCommand.createMessage();
-            MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
-        }
-
-        // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
-        if (hasLocalEndpoint)
-        {
-            logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
-            StageManager.getStage(Stage.READ).maybeExecuteImmediately(new LocalReadRunnable(command, handler));
-        }
+        MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, readCommand), handler);
     }
 
     /**
@@ -130,7 +109,7 @@ public abstract class AbstractReadExecutor
      *
      * @return target replicas + the extra replica, *IF* we speculated.
      */
-    public abstract Collection<InetAddress> getContactedReplicas();
+    public abstract List<InetAddress> getContactedReplicas();
 
     /**
      * send the initial set of requests
@@ -244,7 +223,7 @@ public abstract class AbstractReadExecutor
             // no-op
         }
 
-        public Collection<InetAddress> getContactedReplicas()
+        public List<InetAddress> getContactedReplicas()
         {
             return targetReplicas;
         }
@@ -272,7 +251,7 @@ public abstract class AbstractReadExecutor
             // that the last replica in our list is "extra."
             List<InetAddress> initialReplicas = targetReplicas.subList(0, targetReplicas.size() - 1);
 
-            if (handler.blockfor < initialReplicas.size())
+            if (handler.blockFor() < initialReplicas.size())
             {
                 // We're hitting additional targets for read repair.  Since our "extra" replica is the least-
                 // preferred by the snitch, we do an extra data read to start with against a replica more
@@ -302,20 +281,19 @@ public abstract class AbstractReadExecutor
                 // Could be waiting on the data, or on enough digests.
                 ReadCommand retryCommand = command;
                 if (handler.resolver.isDataPresent())
-                    retryCommand = command.copy().setIsDigestQuery(true);
+                    retryCommand = command.createDigestCommand(digestVersion);
 
                 InetAddress extraReplica = Iterables.getLast(targetReplicas);
-                if (traceState != null)
-                    traceState.trace("speculating read retry on {}", extraReplica);
-                logger.trace("speculating read retry on {}", extraReplica);
-                MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), extraReplica, handler);
+                Tracing.trace("Speculating read retry on {}", extraReplica);
+                logger.trace("Speculating read retry on {}", extraReplica);
+                MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
                 speculated = true;
 
                 cfs.metric.speculativeRetries.inc();
             }
         }
 
-        public Collection<InetAddress> getContactedReplicas()
+        public List<InetAddress> getContactedReplicas()
         {
             return speculated
                  ? targetReplicas
@@ -343,7 +321,7 @@ public abstract class AbstractReadExecutor
             // no-op
         }
 
-        public Collection<InetAddress> getContactedReplicas()
+        public List<InetAddress> getContactedReplicas()
         {
             return targetReplicas;
         }

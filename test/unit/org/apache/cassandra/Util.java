@@ -663,8 +663,7 @@ public class Util
 
         private InternalPartitionRangeReadCommand(PartitionRangeReadCommand original)
         {
-            super(original.isDigestQuery(),
-                  original.digestVersion(),
+            super(original.digestVersion(),
                   original.metadata(),
                   original.nowInSec(),
                   original.columnFilter(),

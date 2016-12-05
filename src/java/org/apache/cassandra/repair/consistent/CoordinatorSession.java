@@ -39,14 +39,11 @@ import com.google.common.util.concurrent.SettableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.OneWayRequest;
 import org.apache.cassandra.repair.RepairSessionResult;
-import org.apache.cassandra.repair.messages.FailSession;
-import org.apache.cassandra.repair.messages.FinalizeCommit;
-import org.apache.cassandra.repair.messages.FinalizePropose;
-import org.apache.cassandra.repair.messages.PrepareConsistentRequest;
-import org.apache.cassandra.repair.messages.RepairMessage;
+import org.apache.cassandra.repair.messages.*;
 import org.apache.cassandra.service.ActiveRepairService;
 
 /**
@@ -128,10 +125,11 @@ public class CoordinatorSession extends ConsistentSession
         return getState() == State.FAILED || Iterables.any(participantStates.values(), v -> v == State.FAILED);
     }
 
-    protected void sendMessage(InetAddress destination, RepairMessage message)
+    // Overridden by tests to intercept messages
+    // TODO: the test could probably use the messaging service mocking instead
+    protected void send(OneWayRequest<? extends RepairMessage<?>> request)
     {
-        MessageOut<RepairMessage> messageOut = new MessageOut<RepairMessage>(MessagingService.Verb.REPAIR_MESSAGE, message, RepairMessage.serializer);
-        MessagingService.instance().sendOneWay(messageOut, destination);
+        MessagingService.instance().send(request);
     }
 
     public ListenableFuture<Boolean> prepare(Executor executor)
@@ -141,9 +139,7 @@ public class CoordinatorSession extends ConsistentSession
         logger.debug("Sending PrepareConsistentRequest message to {}", participants);
         PrepareConsistentRequest message = new PrepareConsistentRequest(sessionID, coordinator, participants);
         for (final InetAddress participant : participants)
-        {
-            executor.execute(() -> sendMessage(participant, message));
-        }
+            executor.execute(() -> send(Verbs.REPAIR.CONSISTENT_REQUEST.newRequest(participant, message)));
         return prepareFuture;
     }
 
@@ -181,9 +177,7 @@ public class CoordinatorSession extends ConsistentSession
         logger.debug("Sending FinalizePropose message to {}", participants);
         FinalizePropose message = new FinalizePropose(sessionID);
         for (final InetAddress participant : participants)
-        {
-            executor.execute(() -> sendMessage(participant, message));
-        }
+            executor.execute(() -> send(Verbs.REPAIR.FINALIZE_PROPOSE.newRequest(participant, message)));
         return finalizeProposeFuture;
     }
 
@@ -216,9 +210,7 @@ public class CoordinatorSession extends ConsistentSession
         logger.debug("Sending FinalizeCommit message to {}", participants);
         FinalizeCommit message = new FinalizeCommit(sessionID);
         for (final InetAddress participant : participants)
-        {
-            executor.execute(() -> sendMessage(participant, message));
-        }
+            executor.execute(() -> send(Verbs.REPAIR.FINALIZE_COMMIT.newRequest(participant, message)));
         setAll(State.FINALIZED);
     }
 
@@ -234,9 +226,7 @@ public class CoordinatorSession extends ConsistentSession
         for (final InetAddress participant : participants)
         {
             if (participantStates.get(participant) != State.FAILED)
-            {
-                executor.execute(() -> sendMessage(participant, message));
-            }
+                executor.execute(() -> send(Verbs.REPAIR.FAILED_SESSION.newRequest(participant, message)));
         }
         setAll(State.FAILED);
     }

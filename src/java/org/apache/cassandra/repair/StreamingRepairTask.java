@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncComplete;
 import org.apache.cassandra.repair.messages.SyncRequest;
@@ -123,7 +124,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     public void onSuccess(StreamState state)
     {
         logger.info("[repair #{}] streaming task succeed, returning response to {}", desc.sessionId, request.initiator);
-        MessagingService.instance().sendOneWay(new SyncComplete(desc, request.src, request.dst, true).createMessage(), request.initiator);
+        MessagingService.instance().send(Verbs.REPAIR.SYNC_COMPLETE.newRequest(request.initiator, new SyncComplete(desc, request.src, request.dst, true)));
     }
 
     /**
@@ -131,6 +132,6 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
      */
     public void onFailure(Throwable t)
     {
-        MessagingService.instance().sendOneWay(new SyncComplete(desc, request.src, request.dst, false).createMessage(), request.initiator);
+        MessagingService.instance().send(Verbs.REPAIR.SYNC_COMPLETE.newRequest(request.initiator, new SyncComplete(desc, request.src, request.dst, false)));
     }
 }

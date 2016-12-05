@@ -229,20 +229,20 @@ public final class IndexMetadata
 
     public static class Serializer
     {
-        public void serialize(IndexMetadata metadata, DataOutputPlus out, int version) throws IOException
+        public void serialize(IndexMetadata metadata, DataOutputPlus out) throws IOException
         {
-            UUIDSerializer.serializer.serialize(metadata.id, out, version);
+            UUIDSerializer.serializer.serialize(metadata.id, out);
         }
 
-        public IndexMetadata deserialize(DataInputPlus in, int version, TableMetadata table) throws IOException
+        public IndexMetadata deserialize(DataInputPlus in, TableMetadata table) throws IOException
         {
-            UUID id = UUIDSerializer.serializer.deserialize(in, version);
+            UUID id = UUIDSerializer.serializer.deserialize(in);
             return table.indexes.get(id).orElseThrow(() -> new UnknownIndexException(table, id));
         }
 
-        public long serializedSize(IndexMetadata metadata, int version)
+        public long serializedSize(IndexMetadata metadata)
         {
-            return UUIDSerializer.serializer.serializedSize(metadata.id, version);
+            return UUIDSerializer.serializer.serializedSize(metadata.id);
         }
     }
 }

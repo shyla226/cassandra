@@ -21,25 +21,26 @@ import java.io.IOException;
 import java.util.*;
 import java.util.function.Predicate;
 
-import com.google.common.annotations.VisibleForTesting;
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
-import org.apache.cassandra.db.monitoring.Monitorable;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexNotAvailableException;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.MessagingVersion;
+import org.apache.cassandra.net.ProtocolVersion;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -48,19 +49,21 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * General interface for storage-engine read commands (common to both range and
  * single partition commands).
  * <p>
- * This contains all the informations needed to do a local read.
+ * This contains all the information needed to do a local read.
  */
 public abstract class ReadCommand implements ReadQuery
 {
-    private static final int TEST_ITERATION_DELAY_MILLIS = Integer.parseInt(System.getProperty("cassandra.test.read_iteration_delay_ms", "0"));
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
-    public static final IVersionedSerializer<ReadCommand> serializer = new Serializer();
+
+    public static final Versioned<ReadVersion, Serializer<ReadCommand>> serializers = ReadVersion.versioned(ReadCommandSerializer::new);
 
     private final Kind kind;
     private final TableMetadata metadata;
@@ -80,15 +83,13 @@ public abstract class ReadCommand implements ReadQuery
     // still don't want to repeat it.
     private boolean indexManagerQueried = false;
 
-    private boolean isDigestQuery;
-    // if a digest query, the version for which the digest is expected. Ignored if not a digest.
-    private int digestVersion;
-
-    protected Monitorable optionalMonitor;
+    /** The version of the digest this must generate if it is a digest query, {@code null} if it isn't a digest query */
+    @Nullable
+    private final DigestVersion digestVersion;
 
     protected static abstract class SelectionDeserializer
     {
-        public abstract ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index) throws IOException;
+        public abstract ReadCommand deserialize(DataInputPlus in, ReadVersion version, DigestVersion digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index) throws IOException;
     }
 
     protected enum Kind
@@ -105,28 +106,24 @@ public abstract class ReadCommand implements ReadQuery
     }
 
     protected ReadCommand(Kind kind,
-                          boolean isDigestQuery,
-                          int digestVersion,
+                          DigestVersion digestVersion,
                           TableMetadata metadata,
                           int nowInSec,
                           ColumnFilter columnFilter,
                           RowFilter rowFilter,
-                          DataLimits limits,
-                          Monitorable optionalMonitor)
+                          DataLimits limits)
     {
         this.kind = kind;
-        this.isDigestQuery = isDigestQuery;
         this.digestVersion = digestVersion;
         this.metadata = metadata;
         this.nowInSec = nowInSec;
         this.columnFilter = columnFilter;
         this.rowFilter = rowFilter;
         this.limits = limits;
-        this.optionalMonitor = optionalMonitor;
     }
 
-    protected abstract void serializeSelection(DataOutputPlus out, int version) throws IOException;
-    protected abstract long selectionSerializedSize(int version);
+    protected abstract void serializeSelection(DataOutputPlus out, ReadVersion version) throws IOException;
+    protected abstract long selectionSerializedSize(ReadVersion version);
 
     /**
      * Creates a new <code>ReadCommand</code> instance with new limits.
@@ -211,47 +208,27 @@ public abstract class ReadCommand implements ReadQuery
      */
     public boolean isDigestQuery()
     {
-        return isDigestQuery;
+        return digestVersion != null;
     }
 
     /**
      * If the query is a digest one, the requested digest version.
      *
-     * @return the requested digest version if the query is a digest. Otherwise, this can return
-     * anything.
+     * @return the requested digest version if the query is a digest, {@code null} otherwise.
      */
-    public int digestVersion()
+    @Nullable
+    public DigestVersion digestVersion()
     {
         return digestVersion;
     }
 
     /**
-     * Sets whether this command should be a digest one or not.
+     * Returns a digest command for this command using the provided digest version.
      *
-     * @param isDigestQuery whether the command should be set as a digest one or not.
-     * @return this read command.
+     * @param digestVersion the version of the digest that the new command must generate.
+     * @return a newly created digest command, otherwise equivalent to this command.
      */
-    public ReadCommand setIsDigestQuery(boolean isDigestQuery)
-    {
-        this.isDigestQuery = isDigestQuery;
-        return this;
-    }
-
-    /**
-     * Sets the digest version, for when digest for that command is requested.
-     * <p>
-     * Note that we allow setting this independently of setting the command as a digest query as
-     * this allows us to use the command as a carrier of the digest version even if we only call
-     * setIsDigestQuery on some copy of it.
-     *
-     * @param digestVersion the version for the digest is this command is used for digest query..
-     * @return this read command.
-     */
-    public ReadCommand setDigestVersion(int digestVersion)
-    {
-        this.digestVersion = digestVersion;
-        return this;
-    }
+    public abstract ReadCommand createDigestCommand(DigestVersion digestVersion);
 
     /**
      * The clustering index filter this command to use for the provided key.
@@ -266,13 +243,6 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key);
 
-    /**
-     * Returns a copy of this command.
-     *
-     * @return a copy of this command.
-     */
-    public abstract ReadCommand copy();
-
     protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
@@ -284,10 +254,10 @@ public abstract class ReadCommand implements ReadQuery
              : ReadResponse.createDataResponse(iterator, this);
     }
 
-    public long indexSerializedSize(int version)
+    public long indexSerializedSize()
     {
         if (index.isPresent())
-            return IndexMetadata.serializer.serializedSize(index.get(), version);
+            return IndexMetadata.serializer.serializedSize(index.get());
         else
             return 0;
     }
@@ -365,7 +335,8 @@ public abstract class ReadCommand implements ReadQuery
 
         try
         {
-            resultIterator = withStateTracking(resultIterator);
+            if (executionController.monitor() != null)
+                resultIterator = executionController.monitor().withMonitoring(resultIterator);
             resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
@@ -397,6 +368,11 @@ public abstract class ReadCommand implements ReadQuery
     public ReadExecutionController executionController()
     {
         return ReadExecutionController.forCommand(this);
+    }
+
+    public ReadExecutionController executionController(Monitor monitor)
+    {
+        return ReadExecutionController.forCommand(this, monitor);
     }
 
     /**
@@ -485,111 +461,6 @@ public abstract class ReadCommand implements ReadQuery
         return Transformation.apply(iter, new MetricRecording());
     }
 
-    /**
-     * A transformation for aborting read commands that have exceeded the maximum
-     * duration. A read command is aborted if it has been running for longer
-     * that the client timeout, since in this case the client has already received a
-     * timeout error. Also, for continuous paging, local commands are time limited in
-     * order to prevent keeping resources for too long. In this case, after a command
-     * is aborted, it is scheduled again later on, and it continues from where it left
-     * off via the pagers, {@link org.apache.cassandra.service.pager.AbstractQueryPager},
-     * and the paging state, {@link org.apache.cassandra.service.pager.PagingState}.
-     */
-    protected class CheckForAbort extends StoppingTransformation<UnfilteredRowIterator>
-    {
-        long lastChecked = 0;
-        Row lastRow = null;
-
-        protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
-        {
-            if (maybeAbort())
-            {
-                partition.close();
-                return null;
-            }
-
-            lastRow = null;
-            return Transformation.apply(partition, this);
-        }
-
-        protected Row applyToRow(Row row)
-        {
-            if (TEST_ITERATION_DELAY_MILLIS > 0)
-                maybeDelayForTesting();
-
-            if (maybeAbort())
-                return null;
-
-            lastRow = row;
-            return row;
-        }
-
-        protected Row applyToStatic(Row row)
-        {
-            lastRow = row;
-            return row;
-        }
-
-        private boolean maybeAbort()
-        {
-            if (optionalMonitor == null)
-                return false;
-
-            /**
-             * The value returned by ApproximateTime.currentTimeMillis() is updated only every
-             * {@link ApproximateTime.CHECK_INTERVAL_MS}, by default 10 millis. Since MonitorableImpl
-             * relies on ApproximateTime, we don't need to check unless the approximate time has elapsed.
-             */
-            if (lastChecked == ApproximateTime.currentTimeMillis())
-                return false;
-
-            lastChecked = ApproximateTime.currentTimeMillis();
-
-            if (optionalMonitor.isAborted())
-            {
-                /** APOLLO-312: given that for continuous paging we rely on the pagers and the paging state to
-                 * resume commands after they've been interrupted in order to release resources periodically,
-                 * if we are processing the first row after a static row, then aborting right now would cause problems
-                 * to the pagers, since they would assume that there are no more rows in the partition, see
-                 * {@link AbstractQueryPager.Pager#getRemainingInPartition()}.
-                 * Removing this assumption in getRemainingInPartition() (in case of command interrupted) is not enough,
-                 * since currently we don't serialize a static clustering but we send a null row, resulting in the key
-                 * being ignored in the next page. Further, we also send the static row in some conditions if there are
-                 * no other rows, which is clearly incorrect if there are other rows in the partition.
-                 */
-                if (lastRow != null && lastRow.clustering() == Clustering.STATIC_CLUSTERING)
-                {
-                    lastChecked = 0; // reset so that we check again on the next row
-                    return false;
-                }
-
-                if (logger.isTraceEnabled())
-                    logger.trace("Stopping {} with monitorable {}", metadata, optionalMonitor);
-
-                stop();
-                return true;
-            }
-
-            return false;
-        }
-
-        private void maybeDelayForTesting()
-        {
-            if (!metadata.keyspace.startsWith("system"))
-                FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
-        }
-    }
-
-    protected UnfilteredPartitionIterator withStateTracking(UnfilteredPartitionIterator iter)
-    {
-        return Transformation.apply(iter, new CheckForAbort());
-    }
-
-    /**
-     * Creates a message for this command.
-     */
-    public abstract MessageOut<ReadCommand> createMessage();
-
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
@@ -633,38 +504,13 @@ public abstract class ReadCommand implements ReadQuery
         return sb.toString();
     }
 
-    public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode)
+    private static class ReadCommandSerializer extends VersionDependent<ReadVersion> implements Serializer<ReadCommand>
     {
-       optionalMonitor = Monitorable.forNormalQuery(toCQLString(), constructionTime, timeout, slowQueryTimeout, isCrossNode);
-    }
+        private ReadCommandSerializer(ReadVersion version)
+        {
+            super(version);
+        }
 
-    public void monitorLocal(long startTime)
-    {
-        optionalMonitor = Monitorable.forLocalQuery(toCQLString(), startTime, DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
-    }
-
-    public boolean complete()
-    {
-        if (optionalMonitor == null)
-            return true;
-
-        return optionalMonitor.complete();
-    }
-
-    @VisibleForTesting
-    void abort()
-    {
-        if (optionalMonitor != null)
-            optionalMonitor.abort();
-    }
-
-    public boolean aborted()
-    {
-        return optionalMonitor == null ? false : optionalMonitor.isAborted();
-    }
-
-    private static class Serializer implements IVersionedSerializer<ReadCommand>
-    {
         private static int digestFlag(boolean isDigest)
         {
             return isDigest ? 0x01 : 0;
@@ -695,24 +541,42 @@ public abstract class ReadCommand implements ReadQuery
             return (flags & 0x04) != 0;
         }
 
-        public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
+        private int digestVersionInt(DigestVersion digestVersion)
+        {
+            return version.compareTo(ReadVersion.DSE_60) < 0
+                   ? MessagingVersion.OSS_30.protocolVersion().handshakeVersion
+                   : digestVersion.ordinal();
+        }
+
+        private DigestVersion fromDigestVersionInt(int digestVersion)
+        {
+            // Before DSE_60, the version is the messagingVersion to use for the digest. After DSE_60, it's directly the
+            // ordinal of the digestVersion.
+            if (version.compareTo(ReadVersion.DSE_60) >= 0)
+                return DigestVersion.values()[digestVersion];
+
+            MessagingVersion ms = MessagingVersion.from(ProtocolVersion.fromHandshakeVersion(digestVersion));
+            return ms.<ReadVersion>groupVersion(Verbs.Group.READS).digestVersion;
+        }
+
+        public void serialize(ReadCommand command, DataOutputPlus out) throws IOException
         {
             out.writeByte(command.kind.ordinal());
             out.writeByte(digestFlag(command.isDigestQuery()) | indexFlag(command.index.isPresent()));
             if (command.isDigestQuery())
-                out.writeUnsignedVInt(command.digestVersion());
+                out.writeUnsignedVInt(digestVersionInt(command.digestVersion()));
             command.metadata.id.serialize(out);
             out.writeInt(command.nowInSec());
-            ColumnFilter.serializer.serialize(command.columnFilter(), out, version);
-            RowFilter.serializer.serialize(command.rowFilter(), out, version);
-            DataLimits.serializer.serialize(command.limits(), out, version, command.metadata.comparator);
+            ColumnFilter.serializers.get(version).serialize(command.columnFilter(), out);
+            RowFilter.serializers.get(version).serialize(command.rowFilter(), out);
+            DataLimits.serializers.get(version).serialize(command.limits(), out, command.metadata.comparator);
             if (command.index.isPresent())
-                IndexMetadata.serializer.serialize(command.index.get(), out, version);
+                IndexMetadata.serializer.serialize(command.index.get(), out);
 
             command.serializeSelection(out, version);
         }
 
-        public ReadCommand deserialize(DataInputPlus in, int version) throws IOException
+        public ReadCommand deserialize(DataInputPlus in) throws IOException
         {
             Kind kind = Kind.values()[in.readByte()];
             int flags = in.readByte();
@@ -726,24 +590,24 @@ public abstract class ReadCommand implements ReadQuery
                                               + "upgrading to 4.0");
 
             boolean hasIndex = hasIndex(flags);
-            int digestVersion = isDigest ? (int)in.readUnsignedVInt() : 0;
+            DigestVersion digestVersion = isDigest ? fromDigestVersionInt((int)in.readUnsignedVInt()) : null;
             TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
             int nowInSec = in.readInt();
-            ColumnFilter columnFilter = ColumnFilter.serializer.deserialize(in, version, metadata);
-            RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata);
-            DataLimits limits = DataLimits.serializer.deserialize(in, version, metadata.comparator);
+            ColumnFilter columnFilter = ColumnFilter.serializers.get(version).deserialize(in, metadata);
+            RowFilter rowFilter = RowFilter.serializers.get(version).deserialize(in, metadata);
+            DataLimits limits = DataLimits.serializers.get(version).deserialize(in, metadata.comparator);
             Optional<IndexMetadata> index = hasIndex
-                                          ? deserializeIndexMetadata(in, version, metadata)
+                                          ? deserializeIndexMetadata(in, metadata)
                                           : Optional.empty();
 
-            return kind.selectionDeserializer.deserialize(in, version, isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+            return kind.selectionDeserializer.deserialize(in, version, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         }
 
-        private Optional<IndexMetadata> deserializeIndexMetadata(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        private Optional<IndexMetadata> deserializeIndexMetadata(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             try
             {
-                return Optional.of(IndexMetadata.serializer.deserialize(in, version, metadata));
+                return Optional.of(IndexMetadata.serializer.deserialize(in, metadata));
             }
             catch (UnknownIndexException e)
             {
@@ -756,17 +620,17 @@ public abstract class ReadCommand implements ReadQuery
             }
         }
 
-        public long serializedSize(ReadCommand command, int version)
+        public long serializedSize(ReadCommand command)
         {
             return 2 // kind + flags
-                   + (command.isDigestQuery() ? TypeSizes.sizeofUnsignedVInt(command.digestVersion()) : 0)
+                   + (command.isDigestQuery() ? TypeSizes.sizeofUnsignedVInt(digestVersionInt(command.digestVersion())) : 0)
                    + command.metadata.id.serializedSize()
                    + TypeSizes.sizeof(command.nowInSec())
-                   + ColumnFilter.serializer.serializedSize(command.columnFilter(), version)
-                   + RowFilter.serializer.serializedSize(command.rowFilter(), version)
-                   + DataLimits.serializer.serializedSize(command.limits(), version, command.metadata.comparator)
+                   + ColumnFilter.serializers.get(version).serializedSize(command.columnFilter())
+                   + RowFilter.serializers.get(version).serializedSize(command.rowFilter())
+                   + DataLimits.serializers.get(version).serializedSize(command.limits(), command.metadata.comparator)
                    + command.selectionSerializedSize(version)
-                   + command.indexSerializedSize(version);
+                   + command.indexSerializedSize();
         }
     }
 }

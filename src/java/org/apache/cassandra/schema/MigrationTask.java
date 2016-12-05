@@ -18,7 +18,6 @@
 package org.apache.cassandra.schema;
 
 import java.net.InetAddress;
-import java.util.Collection;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -27,15 +26,16 @@ import java.util.concurrent.CountDownLatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspace.BootstrapState;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.FailureDetector;
-import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.WrappedRunnable;
 
 final class MigrationTask extends WrappedRunnable
@@ -75,18 +75,16 @@ final class MigrationTask extends WrappedRunnable
             return;
         }
 
-        MessageOut message = new MessageOut<>(MessagingService.Verb.MIGRATION_REQUEST, null, MigrationManager.MigrationsSerializer.instance);
-
         final CountDownLatch completionLatch = new CountDownLatch(1);
 
-        IAsyncCallback<Collection<Mutation>> cb = new IAsyncCallback<Collection<Mutation>>()
+        MessageCallback<SchemaMigration> cb = new MessageCallback<SchemaMigration>()
         {
             @Override
-            public void response(MessageIn<Collection<Mutation>> message)
+            public void onResponse(Response<SchemaMigration> message)
             {
                 try
                 {
-                    Schema.instance.mergeAndAnnounceVersion(message.payload);
+                    Schema.instance.mergeAndAnnounceVersion(message.payload());
                 }
                 catch (ConfigurationException e)
                 {
@@ -98,9 +96,8 @@ final class MigrationTask extends WrappedRunnable
                 }
             }
 
-            public boolean isLatencyForSnitch()
+            public void onFailure(FailureResponse response)
             {
-                return false;
             }
         };
 
@@ -108,6 +105,6 @@ final class MigrationTask extends WrappedRunnable
         if (monitoringBootstrapStates.contains(SystemKeyspace.getBootstrapState()))
             inflightTasks.offer(completionLatch);
 
-        MessagingService.instance().sendRR(message, endpoint, cb);
+        MessagingService.instance().send(Verbs.SCHEMA.PULL.newRequest(endpoint, EmptyPayload.instance), cb);
     }
 }

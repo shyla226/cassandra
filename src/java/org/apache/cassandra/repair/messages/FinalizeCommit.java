@@ -23,15 +23,37 @@ import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class FinalizeCommit extends RepairMessage
+public class FinalizeCommit extends RepairMessage<FinalizeCommit>
 {
+    public static Versioned<RepairVersion, MessageSerializer<FinalizeCommit>> serializers = RepairVersion.versioned(v -> new MessageSerializer<FinalizeCommit>(v)
+    {
+        public void serialize(FinalizeCommit msg, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(msg.sessionID, out);
+        }
+
+        public FinalizeCommit deserialize(DataInputPlus in) throws IOException
+        {
+            return new FinalizeCommit(UUIDSerializer.serializer.deserialize(in));
+        }
+
+        public long serializedSize(FinalizeCommit msg)
+        {
+            return UUIDSerializer.serializer.serializedSize(msg.sessionID);
+        }
+    });
+
     public final UUID sessionID;
 
     public FinalizeCommit(UUID sessionID)
     {
-        super(Type.FINALIZE_COMMIT, null);
+        super(null);
         assert sessionID != null;
         this.sessionID = sessionID;
     }
@@ -58,21 +80,13 @@ public class FinalizeCommit extends RepairMessage
                '}';
     }
 
-    public static MessageSerializer serializer = new MessageSerializer<FinalizeCommit>()
+    public MessageSerializer<FinalizeCommit> serializer(RepairVersion version)
     {
-        public void serialize(FinalizeCommit msg, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(msg.sessionID, out, version);
-        }
+        return serializers.get(version);
+    }
 
-        public FinalizeCommit deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return new FinalizeCommit(UUIDSerializer.serializer.deserialize(in, version));
-        }
-
-        public long serializedSize(FinalizeCommit msg, int version)
-        {
-            return UUIDSerializer.serializer.serializedSize(msg.sessionID, version);
-        }
-    };
+    public Verb<FinalizeCommit, ?> verb()
+    {
+        return Verbs.REPAIR.FINALIZE_COMMIT;
+    }
 }

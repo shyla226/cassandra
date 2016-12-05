@@ -24,16 +24,43 @@ import java.util.Objects;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.NodePair;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  *
  * @since 2.0
  */
-public class SyncComplete extends RepairMessage
+public class SyncComplete extends RepairMessage<SyncComplete>
 {
-    public static final MessageSerializer serializer = new SyncCompleteSerializer();
+    public static final Versioned<RepairVersion, MessageSerializer<SyncComplete>> serializers = RepairVersion.versioned(v -> new MessageSerializer<SyncComplete>(v)
+    {
+        public void serialize(SyncComplete message, DataOutputPlus out) throws IOException
+        {
+            RepairJobDesc.serializers.get(version).serialize(message.desc, out);
+            NodePair.serializer.serialize(message.nodes, out);
+            out.writeBoolean(message.success);
+        }
+
+        public SyncComplete deserialize(DataInputPlus in) throws IOException
+        {
+            RepairJobDesc desc = RepairJobDesc.serializers.get(version).deserialize(in);
+            NodePair nodes = NodePair.serializer.deserialize(in);
+            return new SyncComplete(desc, nodes, in.readBoolean());
+        }
+
+        public long serializedSize(SyncComplete message)
+        {
+            long size = RepairJobDesc.serializers.get(version).serializedSize(message.desc);
+            size += NodePair.serializer.serializedSize(message.nodes);
+            size += TypeSizes.sizeof(message.success);
+            return size;
+        }
+    });
 
     /** nodes that involved in this sync */
     public final NodePair nodes;
@@ -42,14 +69,14 @@ public class SyncComplete extends RepairMessage
 
     public SyncComplete(RepairJobDesc desc, NodePair nodes, boolean success)
     {
-        super(Type.SYNC_COMPLETE, desc);
+        super(desc);
         this.nodes = nodes;
         this.success = success;
     }
 
     public SyncComplete(RepairJobDesc desc, InetAddress endpoint1, InetAddress endpoint2, boolean success)
     {
-        super(Type.SYNC_COMPLETE, desc);
+        super(desc);
         this.nodes = new NodePair(endpoint1, endpoint2);
         this.success = success;
     }
@@ -60,8 +87,7 @@ public class SyncComplete extends RepairMessage
         if (!(o instanceof SyncComplete))
             return false;
         SyncComplete other = (SyncComplete)o;
-        return messageType == other.messageType &&
-               desc.equals(other.desc) &&
+        return desc.equals(other.desc) &&
                success == other.success &&
                nodes.equals(other.nodes);
     }
@@ -69,31 +95,16 @@ public class SyncComplete extends RepairMessage
     @Override
     public int hashCode()
     {
-        return Objects.hash(messageType, desc, success, nodes);
+        return Objects.hash(desc, success, nodes);
     }
 
-    private static class SyncCompleteSerializer implements MessageSerializer<SyncComplete>
+    public MessageSerializer<SyncComplete> serializer(RepairVersion version)
     {
-        public void serialize(SyncComplete message, DataOutputPlus out, int version) throws IOException
-        {
-            RepairJobDesc.serializer.serialize(message.desc, out, version);
-            NodePair.serializer.serialize(message.nodes, out, version);
-            out.writeBoolean(message.success);
-        }
+        return serializers.get(version);
+    }
 
-        public SyncComplete deserialize(DataInputPlus in, int version) throws IOException
-        {
-            RepairJobDesc desc = RepairJobDesc.serializer.deserialize(in, version);
-            NodePair nodes = NodePair.serializer.deserialize(in, version);
-            return new SyncComplete(desc, nodes, in.readBoolean());
-        }
-
-        public long serializedSize(SyncComplete message, int version)
-        {
-            long size = RepairJobDesc.serializer.serializedSize(message.desc, version);
-            size += NodePair.serializer.serializedSize(message.nodes, version);
-            size += TypeSizes.sizeof(message.success);
-            return size;
-        }
+    public Verb<SyncComplete, ?> verb()
+    {
+        return Verbs.REPAIR.SYNC_COMPLETE;
     }
 }

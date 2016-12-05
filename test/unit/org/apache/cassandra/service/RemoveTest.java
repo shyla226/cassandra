@@ -42,9 +42,9 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue.VersionedValueFactory;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -164,10 +164,7 @@ public class RemoveTest
         assertEquals(1, tmd.getSizeOfLeavingEndpoints());
 
         for (InetAddress host : hosts)
-        {
-            MessageOut msg = new MessageOut(host, MessagingService.Verb.REPLICATION_FINISHED, null, null, Collections.<String, byte[]>emptyMap());
-            MessagingService.instance().sendRR(msg, FBUtilities.getBroadcastAddress());
-        }
+            MessagingService.instance().sendSingleTarget(Verbs.OPERATIONS.REPLICATION_FINISHED.newRequest(host, EmptyPayload.instance));
 
         remover.join();
 

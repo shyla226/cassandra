@@ -39,6 +39,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Stores updates made on a partition.
@@ -58,7 +60,7 @@ public class PartitionUpdate extends AbstractBTreePartition
 {
     protected static final Logger logger = LoggerFactory.getLogger(PartitionUpdate.class);
 
-    public static final PartitionUpdateSerializer serializer = new PartitionUpdateSerializer();
+    public static final Versioned<EncodingVersion, PartitionUpdateSerializer> serializers = EncodingVersion.versioned(PartitionUpdateSerializer::new);
 
     private final int createdAtInSec = FBUtilities.nowInSeconds();
 
@@ -246,16 +248,15 @@ public class PartitionUpdate extends AbstractBTreePartition
      *
      * @return the deserialized update or {@code null} if {@code bytes == null}.
      */
-    public static PartitionUpdate fromBytes(ByteBuffer bytes, int version)
+    public static PartitionUpdate fromBytes(ByteBuffer bytes, EncodingVersion version)
     {
         if (bytes == null)
             return null;
 
         try
         {
-            return serializer.deserialize(new DataInputBuffer(bytes, true),
-                                          version,
-                                          SerializationHelper.Flag.LOCAL);
+            return serializers.get(version).deserialize(new DataInputBuffer(bytes, true),
+                                                        SerializationHelper.Flag.LOCAL);
         }
         catch (IOException e)
         {
@@ -271,11 +272,11 @@ public class PartitionUpdate extends AbstractBTreePartition
      *
      * @return a newly allocated byte buffer containing the serialized update.
      */
-    public static ByteBuffer toBytes(PartitionUpdate update, int version)
+    public static ByteBuffer toBytes(PartitionUpdate update, EncodingVersion version)
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            serializer.serialize(update, out, version);
+            serializers.get(version).serialize(update, out);
             return out.asNewBuffer();
         }
         catch (IOException e)
@@ -778,23 +779,28 @@ public class PartitionUpdate extends AbstractBTreePartition
         }
     }
 
-    public static class PartitionUpdateSerializer
+    public static class PartitionUpdateSerializer extends VersionDependent<EncodingVersion>
     {
-        public void serialize(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
+        private PartitionUpdateSerializer(EncodingVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(PartitionUpdate update, DataOutputPlus out) throws IOException
         {
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
                 assert !iter.isReverseOrder();
 
                 update.metadata.id.serialize(out);
-                UnfilteredRowIteratorSerializer.serializer.serialize(iter, null, out, version, update.rowCount());
+                UnfilteredRowIteratorSerializer.serializers.get(version).serialize(iter, null, out, update.rowCount());
             }
         }
 
-        public PartitionUpdate deserialize(DataInputPlus in, int version, SerializationHelper.Flag flag) throws IOException
+        public PartitionUpdate deserialize(DataInputPlus in, SerializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
-            UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, flag);
+            UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializers.get(version).deserializeHeader(metadata, null, in, flag);
             if (header.isEmpty)
                 return emptyUpdate(metadata, header.key);
 
@@ -805,7 +811,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             BTree.Builder<Row> rows = BTree.builder(metadata.comparator, header.rowEstimate);
             rows.auto(false);
 
-            try (UnfilteredRowIterator partition = UnfilteredRowIteratorSerializer.serializer.deserialize(in, version, metadata, flag, header))
+            try (UnfilteredRowIterator partition = UnfilteredRowIteratorSerializer.serializers.get(version).deserialize(in, metadata, flag, header))
             {
                 while (partition.hasNext())
                 {
@@ -825,12 +831,12 @@ public class PartitionUpdate extends AbstractBTreePartition
                                        false);
         }
 
-        public long serializedSize(PartitionUpdate update, int version)
+        public long serializedSize(PartitionUpdate update)
         {
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
                 return update.metadata.id.serializedSize()
-                     + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, version, update.rowCount());
+                     + UnfilteredRowIteratorSerializer.serializers.get(version).serializedSize(iter, null, update.rowCount());
             }
         }
     }

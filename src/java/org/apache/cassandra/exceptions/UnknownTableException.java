@@ -25,6 +25,11 @@ public class UnknownTableException extends IOException
 {
     public final TableId id;
 
+    public UnknownTableException(TableId id)
+    {
+        this("Cannot find table with ID " + id, id);
+    }
+
     public UnknownTableException(String msg, TableId id)
     {
         super(msg);

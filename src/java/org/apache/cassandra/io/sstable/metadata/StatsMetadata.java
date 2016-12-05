@@ -290,7 +290,7 @@ public class StatsMetadata extends MetadataComponent
             {
                 size += 1;
                 if (component.pendingRepair != null)
-                    size += UUIDSerializer.serializer.serializedSize(component.pendingRepair, 0);
+                    size += UUIDSerializer.serializer.serializedSize(component.pendingRepair);
             }
             return size;
         }
@@ -331,7 +331,7 @@ public class StatsMetadata extends MetadataComponent
                 if (component.pendingRepair != null)
                 {
                     out.writeByte(1);
-                    UUIDSerializer.serializer.serialize(component.pendingRepair, out, 0);
+                    UUIDSerializer.serializer.serialize(component.pendingRepair, out);
                 }
                 else
                 {
@@ -383,7 +383,7 @@ public class StatsMetadata extends MetadataComponent
             UUID pendingRepair = null;
             if (version.hasPendingRepair() && in.readByte() != 0)
             {
-                pendingRepair = UUIDSerializer.serializer.deserialize(in, 0);
+                pendingRepair = UUIDSerializer.serializer.deserialize(in);
             }
 
             return new StatsMetadata(partitionSizes,

@@ -28,17 +28,19 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.compress.CompressionInfo;
+import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * StreamingFileHeader is appended before sending actual data to describe what it's sending.
  */
 public class FileMessageHeader
 {
-    public static FileMessageHeaderSerializer serializer = new FileMessageHeaderSerializer();
+    public static Versioned<StreamVersion, FileMessageHeaderSerializer> serializers = StreamVersion.versioned(FileMessageHeaderSerializer::new);
 
     public final TableId tableId;
     public final int sequenceNumber;
@@ -181,9 +183,14 @@ public class FileMessageHeader
         return result;
     }
 
-    static class FileMessageHeaderSerializer
+    static class FileMessageHeaderSerializer extends VersionDependent<StreamVersion>
     {
-        public CompressionInfo serialize(FileMessageHeader header, DataOutputPlus out, int version) throws IOException
+        FileMessageHeaderSerializer(StreamVersion version)
+        {
+            super(version);
+        }
+
+        public CompressionInfo serialize(FileMessageHeader header, DataOutputPlus out) throws IOException
         {
             header.tableId.serialize(out);
             out.writeInt(header.sequenceNumber);
@@ -201,7 +208,7 @@ public class FileMessageHeader
             CompressionInfo compressionInfo = null;
             if (header.compressionMetadata != null)
                 compressionInfo = new CompressionInfo(header.compressionMetadata.getChunksForSections(header.sections), header.compressionMetadata.parameters);
-            CompressionInfo.serializer.serialize(compressionInfo, out, version);
+            CompressionInfo.serializers.get(version).serialize(compressionInfo, out);
             out.writeLong(header.repairedAt);
             out.writeInt(header.sstableLevel);
 
@@ -209,7 +216,7 @@ public class FileMessageHeader
             return compressionInfo;
         }
 
-        public FileMessageHeader deserialize(DataInputPlus in, int version) throws IOException
+        public FileMessageHeader deserialize(DataInputPlus in) throws IOException
         {
             TableId tableId = TableId.deserialize(in);
             int sequenceNumber = in.readInt();
@@ -221,7 +228,7 @@ public class FileMessageHeader
             List<Pair<Long, Long>> sections = new ArrayList<>(count);
             for (int k = 0; k < count; k++)
                 sections.add(Pair.create(in.readLong(), in.readLong()));
-            CompressionInfo compressionInfo = CompressionInfo.serializer.deserialize(in, version);
+            CompressionInfo compressionInfo = CompressionInfo.serializers.get(version).deserialize(in);
             long repairedAt = in.readLong();
             int sstableLevel = in.readInt();
             SerializationHeader.Component header =  SerializationHeader.serializer.deserialize(sstableVersion, in);
@@ -229,7 +236,7 @@ public class FileMessageHeader
             return new FileMessageHeader(tableId, sequenceNumber, sstableVersion, format, estimatedKeys, sections, compressionInfo, repairedAt, sstableLevel, header);
         }
 
-        public long serializedSize(FileMessageHeader header, int version)
+        public long serializedSize(FileMessageHeader header)
         {
             long size = header.tableId.serializedSize();
             size += TypeSizes.sizeof(header.sequenceNumber);
@@ -243,7 +250,7 @@ public class FileMessageHeader
                 size += TypeSizes.sizeof(section.left);
                 size += TypeSizes.sizeof(section.right);
             }
-            size += CompressionInfo.serializer.serializedSize(header.compressionInfo, version);
+            size += CompressionInfo.serializers.get(version).serializedSize(header.compressionInfo);
             size += TypeSizes.sizeof(header.sstableLevel);
 
             size += SerializationHeader.serializer.serializedSize(header.version, header.header);

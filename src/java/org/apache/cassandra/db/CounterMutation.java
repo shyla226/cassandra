@@ -30,25 +30,25 @@ import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Striped;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 public class CounterMutation implements IMutation
 {
-    public static final CounterMutationSerializer serializer = new CounterMutationSerializer();
+    public static final Versioned<WriteVersion, Serializer<CounterMutation>> serializers = WriteVersion.versioned(CounterMutationSerializer::new);
 
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentCounterWriters() * 1024);
 
@@ -89,11 +89,6 @@ public class CounterMutation implements IMutation
     public ConsistencyLevel consistency()
     {
         return consistency;
-    }
-
-    public MessageOut<CounterMutation> makeMutationMessage()
-    {
-        return new MessageOut<>(MessagingService.Verb.COUNTER_MUTATION, this, serializer);
     }
 
     /**
@@ -322,24 +317,29 @@ public class CounterMutation implements IMutation
         return String.format("CounterMutation(%s, %s)", mutation.toString(shallow), consistency);
     }
 
-    public static class CounterMutationSerializer implements IVersionedSerializer<CounterMutation>
+    private static class CounterMutationSerializer extends VersionDependent<WriteVersion> implements Serializer<CounterMutation>
     {
-        public void serialize(CounterMutation cm, DataOutputPlus out, int version) throws IOException
+        private CounterMutationSerializer(WriteVersion version)
         {
-            Mutation.serializer.serialize(cm.mutation, out, version);
+            super(version);
+        }
+
+        public void serialize(CounterMutation cm, DataOutputPlus out) throws IOException
+        {
+            Mutation.serializers.get(version).serialize(cm.mutation, out);
             out.writeUTF(cm.consistency.name());
         }
 
-        public CounterMutation deserialize(DataInputPlus in, int version) throws IOException
+        public CounterMutation deserialize(DataInputPlus in) throws IOException
         {
-            Mutation m = Mutation.serializer.deserialize(in, version);
+            Mutation m = Mutation.serializers.get(version).deserialize(in);
             ConsistencyLevel consistency = Enum.valueOf(ConsistencyLevel.class, in.readUTF());
             return new CounterMutation(m, consistency);
         }
 
-        public long serializedSize(CounterMutation cm, int version)
+        public long serializedSize(CounterMutation cm)
         {
-            return Mutation.serializer.serializedSize(cm.mutation, version)
+            return Mutation.serializers.get(version).serializedSize(cm.mutation)
                  + TypeSizes.sizeof(cm.consistency.name());
         }
     }

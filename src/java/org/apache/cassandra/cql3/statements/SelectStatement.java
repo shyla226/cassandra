@@ -30,6 +30,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -665,6 +666,14 @@ public class SelectStatement implements CQLStatement
 
                 maybeReschedule(builder);
             }
+            catch (AbortedOperationException e)
+            {
+                // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
+                // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
+                // don't hold OpOrder for too long).
+                if (!builder.isCompleted())
+                    schedule(pager.state(false), builder);
+            }
             catch (ClientWriteException e)
             {
                 logger.debug("Continuous paging client did not keep up: {}", e.getMessage());
@@ -705,11 +714,9 @@ public class SelectStatement implements CQLStatement
          * If the pager is exhausted, then we've run out of data, in this case we check
          * if we need to complete the builder and then we are done.
          *
-         * Otherwise, if there is still data, either the iteration was interrupted by the iterator (maximum
-         * time constraint in the local case or a single page in the distributed case), or
-         * by the builder itself (continuous paging was cancelled or has reached the maximum
-         * number of pages). In the first case, builder not completed, we reschedule, in the second case
-         * we're done.
+         * Otherwise, if there is still data, either we're in the distributed case and have read a full page of data
+         * or the builder has interrupted iteration (continuous paging was cancelled or has reached the maximum
+         * number of pages). In the first case, builder not completed, we reschedule, in the second case we're done.
          *
          * @param builder - the result builder
          */

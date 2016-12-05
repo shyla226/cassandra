@@ -17,22 +17,13 @@
  */
 package org.apache.cassandra.utils;
 
-import java.io.IOException;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 
 import com.google.common.base.Joiner;
-import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.io.ISerializer;
-import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.AsymmetricOrdering.Op;
 
 public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval<C, D>> implements Iterable<I>
@@ -57,11 +48,6 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
             return emptyTree();
 
         return new IntervalTree<C, D, I>(intervals);
-    }
-
-    public static <C extends Comparable<? super C>, D, I extends Interval<C, D>> Serializer<C, D, I> serializer(ISerializer<C> pointSerializer, ISerializer<D> dataSerializer, Constructor<I> constructor)
-    {
-        return new Serializer<>(pointSerializer, dataSerializer, constructor);
     }
 
     @SuppressWarnings("unchecked")
@@ -297,75 +283,6 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
                 node = node.left;
             }
 
-        }
-    }
-
-    public static class Serializer<C extends Comparable<? super C>, D, I extends Interval<C, D>> implements IVersionedSerializer<IntervalTree<C, D, I>>
-    {
-        private final ISerializer<C> pointSerializer;
-        private final ISerializer<D> dataSerializer;
-        private final Constructor<I> constructor;
-
-        private Serializer(ISerializer<C> pointSerializer, ISerializer<D> dataSerializer, Constructor<I> constructor)
-        {
-            this.pointSerializer = pointSerializer;
-            this.dataSerializer = dataSerializer;
-            this.constructor = constructor;
-        }
-
-        public void serialize(IntervalTree<C, D, I> it, DataOutputPlus out, int version) throws IOException
-        {
-            out.writeInt(it.count);
-            for (Interval<C, D> interval : it)
-            {
-                pointSerializer.serialize(interval.min, out);
-                pointSerializer.serialize(interval.max, out);
-                dataSerializer.serialize(interval.data, out);
-            }
-        }
-
-        /**
-         * Deserialize an IntervalTree whose keys use the natural ordering.
-         * Use deserialize(DataInput, int, Comparator) instead if the interval
-         * tree is to use a custom comparator, as the comparator is *not*
-         * serialized.
-         */
-        public IntervalTree<C, D, I> deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return deserialize(in, version, null);
-        }
-
-        public IntervalTree<C, D, I> deserialize(DataInputPlus in, int version, Comparator<C> comparator) throws IOException
-        {
-            try
-            {
-                int count = in.readInt();
-                List<I> intervals = new ArrayList<I>(count);
-                for (int i = 0; i < count; i++)
-                {
-                    C min = pointSerializer.deserialize(in);
-                    C max = pointSerializer.deserialize(in);
-                    D data = dataSerializer.deserialize(in);
-                    intervals.add(constructor.newInstance(min, max, data));
-                }
-                return new IntervalTree<C, D, I>(intervals);
-            }
-            catch (InstantiationException | InvocationTargetException | IllegalAccessException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        public long serializedSize(IntervalTree<C, D, I> it, int version)
-        {
-            long size = TypeSizes.sizeof(0);
-            for (Interval<C, D> interval : it)
-            {
-                size += pointSerializer.serializedSize(interval.min);
-                size += pointSerializer.serializedSize(interval.max);
-                size += dataSerializer.serializedSize(interval.data);
-            }
-            return size;
         }
     }
 }

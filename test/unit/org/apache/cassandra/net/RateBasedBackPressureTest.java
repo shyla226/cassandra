@@ -95,7 +95,7 @@ public class RateBasedBackPressureTest
         RateBasedBackPressure strategy = new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "FAST"), timeSource, windowSize);
 
         RateBasedBackPressureState state = strategy.newState(InetAddress.getLoopbackAddress());
-        state.onMessageSent(null);
+        state.onRequestSent(null);
         assertEquals(0, state.incomingRate.size());
         assertEquals(0, state.outgoingRate.size());
 

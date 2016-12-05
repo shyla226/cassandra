@@ -32,17 +32,20 @@ import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.MerkleTree.Hashable;
 import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTree.TreeRange;
 import org.apache.cassandra.utils.MerkleTrees.TreeRangeIterator;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static org.junit.Assert.*;
 
 public class MerkleTreesTest
 {
+    private static final RepairVersion CURRENT_VERSION = Version.last(RepairVersion.class);
+
     public static byte[] DUMMY = "blah".getBytes();
 
     /**
@@ -430,15 +433,15 @@ public class MerkleTreesTest
 
         byte[] initialhash = mts.hash(first);
 
-        long serializedSize = MerkleTrees.serializer.serializedSize(mts, MessagingService.current_version);
+        long serializedSize = MerkleTrees.serializers.get(CURRENT_VERSION).serializedSize(mts);
         DataOutputBuffer out = new DataOutputBuffer();
-        MerkleTrees.serializer.serialize(mts, out, MessagingService.current_version);
+        MerkleTrees.serializers.get(CURRENT_VERSION).serialize(mts, out);
         byte[] serialized = out.toByteArray();
 
         assertEquals(serializedSize, serialized.length);
 
         DataInputBuffer in = new DataInputBuffer(serialized);
-        MerkleTrees restored = MerkleTrees.serializer.deserialize(in, MessagingService.current_version);
+        MerkleTrees restored = MerkleTrees.serializers.get(CURRENT_VERSION).deserialize(in);
 
         assertHashEquals(initialhash, restored.hash(first));
     }

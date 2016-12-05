@@ -21,20 +21,23 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 
 public final class Batch
 {
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<WriteVersion, Serializer<Batch>> serializers = WriteVersion.versioned(BatchSerializer::new);
 
     public final UUID id;
     public final long creationTime; // time of batch creation (in microseconds)
@@ -78,19 +81,27 @@ public final class Batch
         return decodedMutations.size() + encodedMutations.size();
     }
 
-    static final class Serializer implements IVersionedSerializer<Batch>
+    static final class BatchSerializer extends VersionDependent<WriteVersion> implements Serializer<Batch>
     {
-        public long serializedSize(Batch batch, int version)
+        private final Serializer<Mutation> mutationSerializer;
+
+        private BatchSerializer(WriteVersion version)
+        {
+            super(version);
+            this.mutationSerializer = Mutation.serializers.get(version);
+        }
+
+        public long serializedSize(Batch batch)
         {
             assert batch.encodedMutations.isEmpty() : "attempted to serialize a 'remote' batch";
 
-            long size = UUIDSerializer.serializer.serializedSize(batch.id, version);
+            long size = UUIDSerializer.serializer.serializedSize(batch.id);
             size += sizeof(batch.creationTime);
 
             size += sizeofUnsignedVInt(batch.decodedMutations.size());
             for (Mutation mutation : batch.decodedMutations)
             {
-                int mutationSize = (int) Mutation.serializer.serializedSize(mutation, version);
+                long mutationSize = mutationSerializer.serializedSize(mutation);
                 size += sizeofUnsignedVInt(mutationSize);
                 size += mutationSize;
             }
@@ -98,36 +109,36 @@ public final class Batch
             return size;
         }
 
-        public void serialize(Batch batch, DataOutputPlus out, int version) throws IOException
+        public void serialize(Batch batch, DataOutputPlus out) throws IOException
         {
             assert batch.encodedMutations.isEmpty() : "attempted to serialize a 'remote' batch";
 
-            UUIDSerializer.serializer.serialize(batch.id, out, version);
+            UUIDSerializer.serializer.serialize(batch.id, out);
             out.writeLong(batch.creationTime);
 
             out.writeUnsignedVInt(batch.decodedMutations.size());
             for (Mutation mutation : batch.decodedMutations)
             {
-                out.writeUnsignedVInt(Mutation.serializer.serializedSize(mutation, version));
-                Mutation.serializer.serialize(mutation, out, version);
+                out.writeUnsignedVInt(mutationSerializer.serializedSize(mutation));
+                mutationSerializer.serialize(mutation, out);
             }
         }
 
-        public Batch deserialize(DataInputPlus in, int version) throws IOException
+        public Batch deserialize(DataInputPlus in) throws IOException
         {
-            UUID id = UUIDSerializer.serializer.deserialize(in, version);
+            UUID id = UUIDSerializer.serializer.deserialize(in);
             long creationTime = in.readLong();
 
             /*
              * If version doesn't match the current one, we cannot not just read the encoded mutations verbatim,
              * so we decode them instead, to deal with compatibility.
              */
-            return version == MessagingService.current_version
+            return version.encodingVersion == EncodingVersion.last()
                  ? createRemote(id, creationTime, readEncodedMutations(in))
-                 : createLocal(id, creationTime, decodeMutations(in, version));
+                 : createLocal(id, creationTime, decodeMutations(in));
         }
 
-        private static Collection<ByteBuffer> readEncodedMutations(DataInputPlus in) throws IOException
+        private Collection<ByteBuffer> readEncodedMutations(DataInputPlus in) throws IOException
         {
             int count = (int) in.readUnsignedVInt();
 
@@ -138,7 +149,7 @@ public final class Batch
             return mutations;
         }
 
-        private static Collection<Mutation> decodeMutations(DataInputPlus in, int version) throws IOException
+        private Collection<Mutation> decodeMutations(DataInputPlus in) throws IOException
         {
             int count = (int) in.readUnsignedVInt();
 
@@ -146,7 +157,7 @@ public final class Batch
             for (int i = 0; i < count; i++)
             {
                 in.readUnsignedVInt(); // skip mutation size
-                mutations.add(Mutation.serializer.deserialize(in, version));
+                mutations.add(mutationSerializer.deserialize(in));
             }
 
             return mutations;

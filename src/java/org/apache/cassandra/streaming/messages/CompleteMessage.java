@@ -26,12 +26,12 @@ public class CompleteMessage extends StreamMessage
 {
     public static Serializer<CompleteMessage> serializer = new Serializer<CompleteMessage>()
     {
-        public CompleteMessage deserialize(ReadableByteChannel in, int version, StreamSession session)
+        public CompleteMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session)
         {
             return new CompleteMessage();
         }
 
-        public void serialize(CompleteMessage message, DataOutputStreamPlus out, int version, StreamSession session) {}
+        public void serialize(CompleteMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) {}
     };
 
     public CompleteMessage()

@@ -17,105 +17,88 @@
  */
 package org.apache.cassandra.net;
 
-import java.io.IOException;
-import java.util.EnumSet;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.index.IndexNotAvailableException;
-import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.ExpiringMap;
 
-public class MessageDeliveryTask implements Runnable
+class MessageDeliveryTask implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(MessageDeliveryTask.class);
 
-    private final MessageIn message;
-    private final int id;
+    private final Message message;
     private final long enqueueTime;
 
-    public MessageDeliveryTask(MessageIn message, int id)
+    MessageDeliveryTask(Message message)
     {
         assert message != null;
         this.message = message;
-        this.id = id;
         this.enqueueTime = ApproximateTime.currentTimeMillis();
     }
 
     public void run()
     {
-        MessagingService.Verb verb = message.verb;
-        MessagingService.instance().metrics.addQueueWaitTime(verb.toString(),
+        MessagingService.instance().metrics.addQueueWaitTime(message.verb().toString(),
                                                              ApproximateTime.currentTimeMillis() - enqueueTime);
 
-        long timeTaken = message.getLifetimeInMS();
-        if (MessagingService.DROPPABLE_VERBS.contains(verb)
-            && timeTaken > message.getTimeout())
+        if (message.isTimedOut())
         {
-            MessagingService.instance().incrementDroppedMessages(message, timeTaken);
+            Tracing.trace("Discarding unhandled but timed out message from {}", message.from());
+            MessagingService.instance().incrementDroppedMessages(message);
             return;
         }
 
-        IVerbHandler verbHandler = MessagingService.instance().getVerbHandler(verb);
-        if (verbHandler == null)
+        if (message.isRequest())
         {
-            logger.trace("Unknown verb {}", verb);
-            return;
-        }
+            Request<?, ?> request = (Request)message;
+            // First, deal with forwards if we have any
+            for (ForwardRequest<?, ?> forward : request.forwardRequests())
+                MessagingService.instance().forward(forward);
 
-        try
-        {
-            verbHandler.doVerb(message, id);
+            if (request.verb().isOneWay())
+                ((OneWayRequest<?>)request).execute();
+            else
+                request.execute(MessagingService.instance()::reply, onAborted(request));
         }
-        catch (IOException ioe)
+        else
         {
-            handleFailure(ioe);
-            throw new RuntimeException(ioe);
+            handleResponse((Response<?>) message);
         }
-        catch (TombstoneOverwhelmingException | IndexNotAvailableException e)
-        {
-            handleFailure(e);
-            logger.error(e.getMessage());
-        }
-        catch (Throwable t)
-        {
-            handleFailure(t);
-            throw t;
-        }
-
-        if (GOSSIP_VERBS.contains(message.verb))
-            Gossiper.instance.setLastProcessedMessageAt(message.constructionTime);
     }
 
-    private void handleFailure(Throwable t)
+    private Runnable onAborted(Request<?, ?> request)
     {
-        if (message.doCallbackOnFailure())
+        return () ->
         {
-            MessageOut response = new MessageOut(MessagingService.Verb.INTERNAL_RESPONSE)
-                                                .withParameter(MessagingService.FAILURE_RESPONSE_PARAM, MessagingService.ONE_BYTE);
-
-            if (t instanceof TombstoneOverwhelmingException)
-            {
-                try (DataOutputBuffer out = new DataOutputBuffer())
-                {
-                    out.writeShort(RequestFailureReason.READ_TOO_MANY_TOMBSTONES.code);
-                    response = response.withParameter(MessagingService.FAILURE_REASON_PARAM, out.getData());
-                }
-                catch (IOException ex)
-                {
-                    throw new RuntimeException(ex);
-                }
-            }
-
-            MessagingService.instance().sendReply(response, id, message.from);
-        }
+            Tracing.trace("Discarding partial response to {} (timed out)", request.from());
+            MessagingService.instance().incrementDroppedMessages(request);
+        };
     }
 
-    private static final EnumSet<MessagingService.Verb> GOSSIP_VERBS = EnumSet.of(MessagingService.Verb.GOSSIP_DIGEST_ACK,
-                                                                                  MessagingService.Verb.GOSSIP_DIGEST_ACK2,
-                                                                                  MessagingService.Verb.GOSSIP_DIGEST_SYN);
+    private static <Q> void handleResponse(Response<Q> response)
+    {
+        Tracing.trace("Processing response from {}", response.from());
+
+        ExpiringMap.CacheableObject<CallbackInfo<?>> cObj = MessagingService.instance().removeRegisteredCallback(response);
+        if (cObj == null)
+        {
+            String msg = "Callback already removed for message {} from {}, ignoring response";
+            logger.trace(msg, response.id(), response.from());
+            Tracing.trace(msg, response.id(), response.from());
+            return;
+        }
+
+        @SuppressWarnings("unchecked")
+        MessageCallback<Q> callback = (MessageCallback<Q>)cObj.get().callback;
+        // TODO: should we maybe add the latency on failure too?
+        if (!response.isFailure())
+            MessagingService.instance().addLatency(response.verb(), response.from(), cObj.lifetime(TimeUnit.MILLISECONDS));
+
+        response.deliverTo(callback);
+        MessagingService.instance().updateBackPressureOnReceive(response.from(), response.verb(), false);
+    }
 }

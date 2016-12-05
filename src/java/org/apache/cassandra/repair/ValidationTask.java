@@ -22,6 +22,7 @@ import java.net.InetAddress;
 import com.google.common.util.concurrent.AbstractFuture;
 
 import org.apache.cassandra.exceptions.RepairException;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.ValidationRequest;
 import org.apache.cassandra.utils.MerkleTrees;
@@ -49,7 +50,7 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
     public void run()
     {
         ValidationRequest request = new ValidationRequest(desc, gcBefore);
-        MessagingService.instance().sendOneWay(request.createMessage(), endpoint);
+        MessagingService.instance().send(Verbs.REPAIR.VALIDATION_REQUEST.newRequest(endpoint, request));
     }
 
     /**

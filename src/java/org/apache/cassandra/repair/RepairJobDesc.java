@@ -28,11 +28,14 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * RepairJobDesc is used from various repair processes to distinguish one RepairJob to another.
@@ -41,7 +44,7 @@ import org.apache.cassandra.utils.UUIDSerializer;
  */
 public class RepairJobDesc
 {
-    public static final IVersionedSerializer<RepairJobDesc> serializer = new RepairJobDescSerializer();
+    public static final Versioned<RepairVersion, Serializer<RepairJobDesc>> serializers = RepairVersion.versioned(RepairJobDescSerializer::new);
 
     public final UUID parentSessionId;
     /** RepairSession id */
@@ -89,29 +92,34 @@ public class RepairJobDesc
         return Objects.hashCode(sessionId, keyspace, columnFamily, ranges);
     }
 
-    private static class RepairJobDescSerializer implements IVersionedSerializer<RepairJobDesc>
+    private static class RepairJobDescSerializer extends VersionDependent<RepairVersion> implements Serializer<RepairJobDesc>
     {
-        public void serialize(RepairJobDesc desc, DataOutputPlus out, int version) throws IOException
+        private RepairJobDescSerializer(RepairVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(RepairJobDesc desc, DataOutputPlus out) throws IOException
         {
             out.writeBoolean(desc.parentSessionId != null);
             if (desc.parentSessionId != null)
-                UUIDSerializer.serializer.serialize(desc.parentSessionId, out, version);
+                UUIDSerializer.serializer.serialize(desc.parentSessionId, out);
 
-            UUIDSerializer.serializer.serialize(desc.sessionId, out, version);
+            UUIDSerializer.serializer.serialize(desc.sessionId, out);
             out.writeUTF(desc.keyspace);
             out.writeUTF(desc.columnFamily);
             MessagingService.validatePartitioner(desc.ranges);
             out.writeInt(desc.ranges.size());
             for (Range<Token> rt : desc.ranges)
-                AbstractBounds.tokenSerializer.serialize(rt, out, version);
+                AbstractBounds.tokenSerializer.serialize(rt, out, version.boundsVersion);
         }
 
-        public RepairJobDesc deserialize(DataInputPlus in, int version) throws IOException
+        public RepairJobDesc deserialize(DataInputPlus in) throws IOException
         {
             UUID parentSessionId = null;
             if (in.readBoolean())
-                parentSessionId = UUIDSerializer.serializer.deserialize(in, version);
-            UUID sessionId = UUIDSerializer.serializer.deserialize(in, version);
+                parentSessionId = UUIDSerializer.serializer.deserialize(in);
+            UUID sessionId = UUIDSerializer.serializer.deserialize(in);
             String keyspace = in.readUTF();
             String columnFamily = in.readUTF();
 
@@ -122,26 +130,24 @@ public class RepairJobDesc
             for (int i = 0; i < nRanges; i++)
             {
                 range = (Range<Token>) AbstractBounds.tokenSerializer.deserialize(in,
-                        MessagingService.globalPartitioner(), version);
+                        MessagingService.globalPartitioner(), version.boundsVersion);
                 ranges.add(range);
             }
 
             return new RepairJobDesc(parentSessionId, sessionId, keyspace, columnFamily, ranges);
         }
 
-        public long serializedSize(RepairJobDesc desc, int version)
+        public long serializedSize(RepairJobDesc desc)
         {
-            int size = TypeSizes.sizeof(desc.parentSessionId != null);
+            long size = TypeSizes.sizeof(desc.parentSessionId != null);
             if (desc.parentSessionId != null)
-                size += UUIDSerializer.serializer.serializedSize(desc.parentSessionId, version);
-            size += UUIDSerializer.serializer.serializedSize(desc.sessionId, version);
+                size += UUIDSerializer.serializer.serializedSize(desc.parentSessionId);
+            size += UUIDSerializer.serializer.serializedSize(desc.sessionId);
             size += TypeSizes.sizeof(desc.keyspace);
             size += TypeSizes.sizeof(desc.columnFamily);
             size += TypeSizes.sizeof(desc.ranges.size());
             for (Range<Token> rt : desc.ranges)
-            {
-                size += AbstractBounds.tokenSerializer.serializedSize(rt, version);
-            }
+                size += AbstractBounds.tokenSerializer.serializedSize(rt, version.boundsVersion);
             return size;
         }
     }

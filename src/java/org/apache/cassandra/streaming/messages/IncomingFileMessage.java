@@ -40,10 +40,10 @@ public class IncomingFileMessage extends StreamMessage
     public static Serializer<IncomingFileMessage> serializer = new Serializer<IncomingFileMessage>()
     {
         @SuppressWarnings("resource")
-        public IncomingFileMessage deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException
+        public IncomingFileMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException
         {
             DataInputPlus input = new DataInputStreamPlus(Channels.newInputStream(in));
-            FileMessageHeader header = FileMessageHeader.serializer.deserialize(input, version);
+            FileMessageHeader header = FileMessageHeader.serializers.get(version).deserialize(input);
             StreamReader reader = !header.isCompressed() ? new StreamReader(header, session)
                     : new CompressedStreamReader(header, session);
 
@@ -58,7 +58,7 @@ public class IncomingFileMessage extends StreamMessage
             }
         }
 
-        public void serialize(IncomingFileMessage message, DataOutputStreamPlus out, int version, StreamSession session)
+        public void serialize(IncomingFileMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session)
         {
             throw new UnsupportedOperationException("Not allowed to call serialize on an incoming file");
         }

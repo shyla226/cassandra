@@ -21,6 +21,7 @@ import java.io.DataInput;
 import java.io.IOException;
 
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.versioning.Version;
 
 /**
  * Versioned serializer where the serialization depends on partitioner.
@@ -28,34 +29,34 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  * On serialization the partitioner is given by the entity being serialized. To deserialize the partitioner used must
  * be known to the calling method.
  */
-public interface IPartitionerDependentSerializer<T>
+public interface IPartitionerDependentSerializer<T, V extends Enum<V> & Version<V>>
 {
     /**
      * Serialize the specified type into the specified DataOutputStream instance.
      *
      * @param t type that needs to be serialized
      * @param out DataOutput into which serialization needs to happen.
-     * @param version protocol version
+     * @param version the version used
      * @throws java.io.IOException if serialization fails
      */
-    public void serialize(T t, DataOutputPlus out, int version) throws IOException;
+    public void serialize(T t, DataOutputPlus out, V version) throws IOException;
 
     /**
      * Deserialize into the specified DataInputStream instance.
      * @param in DataInput from which deserialization needs to happen.
      * @param p Partitioner that will be used to construct tokens. Needs to match the partitioner that was used to
      *     serialize the token.
-     * @param version protocol version
+     * @param version the version used
      * @return the type that was deserialized
      * @throws IOException if deserialization fails
      */
-    public T deserialize(DataInput in, IPartitioner p, int version) throws IOException;
+    public T deserialize(DataInput in, IPartitioner p, V version) throws IOException;
 
     /**
      * Calculate serialized size of object without actually serializing.
      * @param t object to calculate serialized size
-     * @param version protocol version
+     * @param version the version used
      * @return serialized size of object t
      */
-    public long serializedSize(T t, int version);
+    public int serializedSize(T t, V version);
 }

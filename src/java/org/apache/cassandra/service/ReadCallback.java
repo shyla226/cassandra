@@ -18,12 +18,11 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -39,32 +38,31 @@ import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
-public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
+public class ReadCallback implements MessageCallback<ReadResponse>
 {
-    protected static final Logger logger = LoggerFactory.getLogger( ReadCallback.class );
+    protected static final Logger logger = LoggerFactory.getLogger(ReadCallback.class);
 
-    public final ResponseResolver resolver;
+    final ResponseResolver resolver;
+    final List<InetAddress> endpoints;
+
     private final SimpleCondition condition = new SimpleCondition();
     private final long queryStartNanoTime;
-    final int blockfor;
-    final List<InetAddress> endpoints;
+    private final int blockfor;
     private final ReadCommand command;
     private final ConsistencyLevel consistencyLevel;
-    private static final AtomicIntegerFieldUpdater<ReadCallback> recievedUpdater
-            = AtomicIntegerFieldUpdater.newUpdater(ReadCallback.class, "received");
-    private volatile int received = 0;
-    private static final AtomicIntegerFieldUpdater<ReadCallback> failuresUpdater
-            = AtomicIntegerFieldUpdater.newUpdater(ReadCallback.class, "failures");
-    private volatile int failures = 0;
+
+    private final AtomicInteger received = new AtomicInteger(0);
+    private final AtomicInteger failures = new AtomicInteger(0);
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
 
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
@@ -116,25 +114,27 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     public void awaitResults() throws ReadFailureException, ReadTimeoutException
     {
         boolean signaled = await(command.getTimeout(), TimeUnit.MILLISECONDS);
-        boolean failed = blockfor + failures > endpoints.size();
+        boolean failed = blockfor + failures.get() > endpoints.size();
         if (signaled && !failed)
             return;
+
+        int received = this.received.get();
 
         if (Tracing.isTracing())
         {
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            Tracing.trace("{}; received {} of {} responses{}", new Object[]{ (failed ? "Failed" : "Timed out"), received, blockfor, gotData });
+            Tracing.trace("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
         }
         else if (logger.isDebugEnabled())
         {
             String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            logger.debug("{}; received {} of {} responses{}", new Object[]{ (failed ? "Failed" : "Timed out"), received, blockfor, gotData });
+            logger.debug("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
         }
 
-        // Same as for writes, see AbstractWriteResponseHandler
+        // Same as for writes, see WriteHandler
         throw failed
-            ? new ReadFailureException(consistencyLevel, received, blockfor, resolver.isDataPresent(), failureReasonByEndpoint)
-            : new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent());
+              ? new ReadFailureException(consistencyLevel, received, blockfor, resolver.isDataPresent(), failureReasonByEndpoint)
+              : new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent());
     }
 
     public PartitionIterator get() throws ReadFailureException, ReadTimeoutException, DigestMismatchException
@@ -152,12 +152,10 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         return blockfor;
     }
 
-    public void response(MessageIn<ReadResponse> message)
+    public void onResponse(Response<ReadResponse> message)
     {
         resolver.preprocess(message);
-        int n = waitingFor(message.from)
-              ? recievedUpdater.incrementAndGet(this)
-              : received;
+        int n = waitingFor(message.from()) ? received.incrementAndGet() : received.get();
         if (n >= blockfor && resolver.isDataPresent())
         {
             condition.signalAll();
@@ -179,36 +177,13 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     private boolean waitingFor(InetAddress from)
     {
         return consistencyLevel.isDatacenterLocal()
-             ? DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from))
-             : true;
-    }
-
-    /**
-     * @return the current number of received responses
-     */
-    public int getReceivedCount()
-    {
-        return received;
-    }
-
-    public void response(ReadResponse result)
-    {
-        MessageIn<ReadResponse> message = MessageIn.create(FBUtilities.getBroadcastAddress(),
-                                                           result,
-                                                           Collections.<String, byte[]>emptyMap(),
-                                                           MessagingService.Verb.INTERNAL_RESPONSE,
-                                                           MessagingService.current_version);
-        response(message);
+               ? DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from))
+               : true;
     }
 
     public void assureSufficientLiveNodes() throws UnavailableException
     {
         consistencyLevel.assureSufficientLiveNodes(keyspace, endpoints);
-    }
-
-    public boolean isLatencyForSnitch()
-    {
-        return true;
     }
 
     private class AsyncRepairRunner implements Runnable
@@ -244,21 +219,17 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
                 final DataResolver repairResolver = new DataResolver(keyspace, command, consistencyLevel, endpoints.size(), queryStartNanoTime);
                 AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
-
-                for (InetAddress endpoint : endpoints)
-                    MessagingService.instance().sendRR(command.createMessage(), endpoint, repairHandler);
+                MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
             }
         }
     }
 
     @Override
-    public void onFailure(InetAddress from, RequestFailureReason failureReason)
+    public void onFailure(FailureResponse<ReadResponse> failureResponse)
     {
-        int n = waitingFor(from)
-              ? failuresUpdater.incrementAndGet(this)
-              : failures;
+        int n = waitingFor(failureResponse.from()) ? failures.incrementAndGet() : failures.get();
 
-        failureReasonByEndpoint.put(from, failureReason);
+        failureReasonByEndpoint.put(failureResponse.from(), failureResponse.reason());
 
         if (blockfor + n > endpoints.size())
             condition.signalAll();

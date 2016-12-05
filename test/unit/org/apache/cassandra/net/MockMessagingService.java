@@ -19,13 +19,16 @@ package org.apache.cassandra.net;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.function.Predicate;
+
+import com.google.common.collect.Iterables;
 
 /**
  * Starting point for mocking {@link MessagingService} interactions. Outgoing messages can be
  * intercepted by first creating a {@link MatcherResponse} by calling {@link MockMessagingService#when(Matcher)}.
  * Alternatively {@link Matcher}s can be created by using helper methods such as {@link #to(InetAddress)},
- * {@link #verb(MessagingService.Verb)} or {@link #payload(Predicate)} and may also be
+ * {@link #verb(Verb)} or {@link #payload(Predicate)} and may also be
  * nested using {@link MockMessagingService#all(Matcher[])} or {@link MockMessagingService#any(Matcher[])}.
  * After each test, {@link MockMessagingService#cleanup()} must be called for free listeners registered
  * in {@link MessagingService}.
@@ -58,7 +61,7 @@ public class MockMessagingService
      * Creates a matcher that will indicate if the target address of the outgoing message equals the
      * provided address.
      */
-    public static Matcher<InetAddress> to(String address)
+    public static Matcher to(String address)
     {
         try
         {
@@ -74,71 +77,58 @@ public class MockMessagingService
      * Creates a matcher that will indicate if the target address of the outgoing message equals the
      * provided address.
      */
-    public static Matcher<InetAddress> to(InetAddress address)
+    public static Matcher to(InetAddress address)
     {
-        return (in, to) -> to == address || to.equals(address);
+        return in -> in.to().equals(address);
     }
 
     /**
-     * Creates a matcher that will indicate if the verb of the outgoing message equals the
+     * Creates a matcher that will indicate if the definition of the outgoing message equals the
      * provided value.
      */
-    public static Matcher<MessagingService.Verb> verb(MessagingService.Verb verb)
+    public static Matcher verb(Verb<?, ?> definition)
     {
-        return (in, to) -> in.verb == verb;
+        return in -> in.verb().equals(definition);
     }
 
     /**
      * Creates a matcher based on the result of the provided predicate called with the outgoing message.
      */
-    public static <T> Matcher<T> message(Predicate<MessageOut<T>> fn)
+    public static Matcher message(Predicate<Request<?, ?>> fn)
     {
-        return (msg, to) -> fn.test(msg);
+        return fn::test;
     }
 
     /**
      * Creates a matcher based on the result of the provided predicate called with the outgoing message's payload.
      */
-    public static <T> Matcher<T> payload(Predicate<T> fn)
+    @SuppressWarnings("unchecked")
+    public static <T> Matcher payload(Predicate<T> fn)
     {
-        return (msg, to) -> fn.test(msg.payload);
+        return msg -> fn.test((T)msg.payload());
     }
 
     /**
      * Inverts boolean result of wrapped matcher.
      */
-    public static <T> Matcher<T> not(Matcher<T> matcher)
+    public static Matcher not(Matcher matcher)
     {
-        return (o, to) -> !matcher.matches(o, to);
+        return o -> !matcher.matches(o);
     }
 
     /**
      * Indicates true in case all provided matchers returned true.
      */
-    public static <T> Matcher<?> all(Matcher<?>... matchers)
+    public static Matcher all(Matcher... matchers)
     {
-        return (MessageOut<T> out, InetAddress to) -> {
-            for (Matcher matcher : matchers)
-            {
-                if (!matcher.matches(out, to))
-                    return false;
-            }
-            return true;
-        };
+        return r -> Iterables.all(Arrays.asList(matchers), m -> m.matches(r));
     }
 
     /**
      * Indicates true in case at least a single provided matcher returned true.
      */
-    public static <T> Matcher<?> any(Matcher<?>... matchers)
+    public static Matcher any(Matcher... matchers)
     {
-        return (MessageOut<T> out, InetAddress to) -> {
-            for (Matcher matcher : matchers)
-            {
-                if (matcher.matches(out, to))
-                    return true;
-            }
-            return false;
-        };
+        return r -> Iterables.any(Arrays.asList(matchers), m -> m.matches(r));
     }
 }

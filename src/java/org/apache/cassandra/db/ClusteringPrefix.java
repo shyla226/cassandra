@@ -268,7 +268,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
 
     public static class Serializer
     {
-        public void serialize(ClusteringPrefix clustering, DataOutputPlus out, int version, List<AbstractType<?>> types) throws IOException
+        public void serialize(ClusteringPrefix clustering, DataOutputPlus out, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             // We shouldn't serialize static clusterings
             assert clustering.kind() != Kind.STATIC_CLUSTERING;
@@ -283,7 +283,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             }
         }
 
-        public void skip(DataInputPlus in, int version, List<AbstractType<?>> types) throws IOException
+        public void skip(DataInputPlus in, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             Kind kind = Kind.values()[in.readByte()];
             // We shouldn't serialize static clusterings
@@ -294,7 +294,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
                 ClusteringBoundOrBoundary.serializer.skipValues(in, kind, version, types);
         }
 
-        public ClusteringPrefix deserialize(DataInputPlus in, int version, List<AbstractType<?>> types) throws IOException
+        public ClusteringPrefix deserialize(DataInputPlus in, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             Kind kind = Kind.values()[in.readByte()];
             // We shouldn't serialize static clusterings
@@ -305,7 +305,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
                 return ClusteringBoundOrBoundary.serializer.deserializeValues(in, kind, version, types);
         }
 
-        public long serializedSize(ClusteringPrefix clustering, int version, List<AbstractType<?>> types)
+        public long serializedSize(ClusteringPrefix clustering, ClusteringVersion version, List<AbstractType<?>> types)
         {
             // We shouldn't serialize static clusterings
             assert clustering.kind() != Kind.STATIC_CLUSTERING;
@@ -315,7 +315,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
                 return ClusteringBoundOrBoundary.serializer.serializedSize((ClusteringBoundOrBoundary)clustering, version, types);
         }
 
-        void serializeValuesWithoutSize(ClusteringPrefix clustering, DataOutputPlus out, int version, List<AbstractType<?>> types) throws IOException
+        void serializeValuesWithoutSize(ClusteringPrefix clustering, DataOutputPlus out, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             int offset = 0;
             int clusteringSize = clustering.size();
@@ -338,7 +338,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             }
         }
 
-        long valuesWithoutSizeSerializedSize(ClusteringPrefix clustering, int version, List<AbstractType<?>> types)
+        long valuesWithoutSizeSerializedSize(ClusteringPrefix clustering, ClusteringVersion version, List<AbstractType<?>> types)
         {
             long result = 0;
             int offset = 0;
@@ -360,7 +360,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             return result;
         }
 
-        ByteBuffer[] deserializeValuesWithoutSize(DataInputPlus in, int size, int version, List<AbstractType<?>> types) throws IOException
+        ByteBuffer[] deserializeValuesWithoutSize(DataInputPlus in, int size, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             // Callers of this method should handle the case where size = 0 (in all case we want to return a special value anyway).
             assert size > 0;
@@ -381,7 +381,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             return values;
         }
 
-        void skipValuesWithoutSize(DataInputPlus in, int size, int version, List<AbstractType<?>> types) throws IOException
+        void skipValuesWithoutSize(DataInputPlus in, int size, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             // Callers of this method should handle the case where size = 0 (in all case we want to return a special value anyway).
             assert size > 0;

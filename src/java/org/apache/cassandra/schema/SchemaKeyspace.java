@@ -343,14 +343,14 @@ public final class SchemaKeyspace
         return PartitionRangeReadCommand.allDataRead(cfs.metadata(), FBUtilities.nowInSeconds());
     }
 
-    static Collection<Mutation> convertSchemaToMutations()
+    static SchemaMigration convertSchemaToMutations()
     {
         Map<DecoratedKey, Mutation> mutationMap = new HashMap<>();
 
         for (String table : ALL)
             convertSchemaToMutations(mutationMap, table);
 
-        return mutationMap.values();
+        return new SchemaMigration(mutationMap.values());
     }
 
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)

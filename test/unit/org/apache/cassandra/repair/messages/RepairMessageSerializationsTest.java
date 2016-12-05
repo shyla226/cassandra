@@ -36,21 +36,22 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.NodePair;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.MerkleTrees;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.Version;
 
 public class RepairMessageSerializationsTest
 {
-    private static final int PROTOCOL_VERSION = MessagingService.current_version;
+    private static final RepairVersion CURRENT_VERSION = Version.last(RepairVersion.class);
     private static final int GC_BEFORE = 1000000;
 
     private static IPartitioner originalPartitioner;
@@ -73,7 +74,7 @@ public class RepairMessageSerializationsTest
     {
         RepairJobDesc jobDesc = buildRepairJobDesc();
         ValidationRequest msg = new ValidationRequest(jobDesc, GC_BEFORE);
-        ValidationRequest deserialized = serializeRoundTrip(msg, ValidationRequest.serializer);
+        ValidationRequest deserialized = serializeRoundTrip(msg, ValidationRequest.serializers.get(CURRENT_VERSION));
         Assert.assertEquals(jobDesc, deserialized.desc);
     }
 
@@ -93,18 +94,18 @@ public class RepairMessageSerializationsTest
         return tokenRanges;
     }
 
-    private <T extends RepairMessage> T serializeRoundTrip(T msg, IVersionedSerializer<T> serializer) throws IOException
+    private <T extends RepairMessage> T serializeRoundTrip(T msg, Serializer<T> serializer) throws IOException
     {
-        long size = serializer.serializedSize(msg, PROTOCOL_VERSION);
+        long size = serializer.serializedSize(msg);
 
         ByteBuffer buf = ByteBuffer.allocate((int)size);
         DataOutputPlus out = new DataOutputBufferFixed(buf);
-        serializer.serialize(msg, out, PROTOCOL_VERSION);
+        serializer.serialize(msg, out);
         Assert.assertEquals(size, buf.position());
 
         buf.flip();
         DataInputPlus in = new DataInputBuffer(buf, false);
-        T deserialized = serializer.deserialize(in, PROTOCOL_VERSION);
+        T deserialized = serializer.deserialize(in);
         Assert.assertEquals(msg, deserialized);
         Assert.assertEquals(msg.hashCode(), deserialized.hashCode());
         return deserialized;
@@ -134,7 +135,7 @@ public class RepairMessageSerializationsTest
         ValidationComplete msg = trees == null ?
                                  new ValidationComplete(jobDesc) :
                                  new ValidationComplete(jobDesc, trees);
-        ValidationComplete deserialized = serializeRoundTrip(msg, ValidationComplete.serializer);
+        ValidationComplete deserialized = serializeRoundTrip(msg, ValidationComplete.serializers.get(CURRENT_VERSION));
         return deserialized;
     }
 
@@ -146,7 +147,7 @@ public class RepairMessageSerializationsTest
         InetAddress dst = InetAddress.getByName("127.0.0.3");
 
         SyncRequest msg = new SyncRequest(buildRepairJobDesc(), initiator, src, dst, buildTokenRanges());
-        serializeRoundTrip(msg, SyncRequest.serializer);
+        serializeRoundTrip(msg, SyncRequest.serializers.get(CURRENT_VERSION));
     }
 
     @Test
@@ -155,7 +156,7 @@ public class RepairMessageSerializationsTest
         InetAddress src = InetAddress.getByName("127.0.0.2");
         InetAddress dst = InetAddress.getByName("127.0.0.3");
         SyncComplete msg = new SyncComplete(buildRepairJobDesc(), new NodePair(src, dst), true);
-        serializeRoundTrip(msg, SyncComplete.serializer);
+        serializeRoundTrip(msg, SyncComplete.serializers.get(CURRENT_VERSION));
     }
 
     @Test
@@ -163,20 +164,20 @@ public class RepairMessageSerializationsTest
     {
         PrepareMessage msg = new PrepareMessage(UUID.randomUUID(), new ArrayList<TableId>() {{add(TableId.generate());}},
                                                 buildTokenRanges(), true, 100000L, false);
-        serializeRoundTrip(msg, PrepareMessage.serializer);
+        serializeRoundTrip(msg, PrepareMessage.serializers.get(CURRENT_VERSION));
     }
 
     @Test
     public void snapshotMessage() throws IOException
     {
         SnapshotMessage msg = new SnapshotMessage(buildRepairJobDesc());
-        serializeRoundTrip(msg, SnapshotMessage.serializer);
+        serializeRoundTrip(msg, SnapshotMessage.serializers.get(CURRENT_VERSION));
     }
 
     @Test
     public void cleanupMessage() throws IOException
     {
         CleanupMessage msg = new CleanupMessage(UUID.randomUUID());
-        serializeRoundTrip(msg, CleanupMessage.serializer);
+        serializeRoundTrip(msg, CleanupMessage.serializers.get(CURRENT_VERSION));
     }
 }

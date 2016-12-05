@@ -22,10 +22,10 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.channels.SocketChannel;
+import java.util.EnumMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -36,15 +36,13 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class OutboundTcpConnectionPool
 {
-    public static final long LARGE_MESSAGE_THRESHOLD =
-            Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
+    static final long LARGE_MESSAGE_THRESHOLD = Long.getLong(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
 
     // pointer for the real Address.
     private final InetAddress id;
     private final CountDownLatch started;
-    public final OutboundTcpConnection smallMessages;
-    public final OutboundTcpConnection largeMessages;
-    public final OutboundTcpConnection gossipMessages;
+
+    private final EnumMap<Message.Kind, OutboundTcpConnection> connectionByKind;
 
     // pointer to the reset Address.
     private InetAddress resetEndpoint;
@@ -59,9 +57,9 @@ public class OutboundTcpConnectionPool
         resetEndpoint = SystemKeyspace.getPreferredIP(remoteEp);
         started = new CountDownLatch(1);
 
-        smallMessages = new OutboundTcpConnection(this, "Small");
-        largeMessages = new OutboundTcpConnection(this, "Large");
-        gossipMessages = new OutboundTcpConnection(this, "Gossip");
+        connectionByKind = new EnumMap<>(Message.Kind.class);
+        for (Message.Kind kind : Message.Kind.values())
+            connectionByKind.put(kind, new OutboundTcpConnection(this, kind.toString()));
 
         this.backPressureState = backPressureState;
     }
@@ -70,13 +68,9 @@ public class OutboundTcpConnectionPool
      * returns the appropriate connection based on message type.
      * returns null if a connection could not be established.
      */
-    OutboundTcpConnection getConnection(MessageOut msg)
+    OutboundTcpConnection getConnection(Message msg)
     {
-        if (Stage.GOSSIP == msg.getStage())
-            return gossipMessages;
-        return msg.payloadSize(smallMessages.getTargetVersion()) > LARGE_MESSAGE_THRESHOLD
-               ? largeMessages
-               : smallMessages;
+        return connectionByKind.get(msg.kind());
     }
 
     public BackPressureState getBackPressureState()
@@ -84,19 +78,25 @@ public class OutboundTcpConnectionPool
         return backPressureState;
     }
 
-    void reset()
+    public OutboundTcpConnection large()
     {
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
-            conn.closeSocket(false);
+        return connectionByKind.get(Message.Kind.LARGE);
     }
 
-    public void resetToNewerVersion(int version)
+    public OutboundTcpConnection small()
     {
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
-        {
-            if (version > conn.getTargetVersion())
-                conn.softCloseSocket();
-        }
+        return connectionByKind.get(Message.Kind.SMALL);
+    }
+
+    public OutboundTcpConnection gossip()
+    {
+        return connectionByKind.get(Message.Kind.GOSSIP);
+    }
+
+    void reset()
+    {
+        for (OutboundTcpConnection conn : connectionByKind.values())
+            conn.closeSocket(false);
     }
 
     /**
@@ -108,7 +108,7 @@ public class OutboundTcpConnectionPool
     {
         SystemKeyspace.updatePreferredIP(id, remoteEP);
         resetEndpoint = remoteEP;
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
+        for (OutboundTcpConnection conn : connectionByKind.values())
             conn.softCloseSocket();
 
         // release previous metrics and create new one with reset address
@@ -180,9 +180,8 @@ public class OutboundTcpConnectionPool
 
     public void start()
     {
-        smallMessages.start();
-        largeMessages.start();
-        gossipMessages.start();
+        for (OutboundTcpConnection connection : connectionByKind.values())
+            connection.start();
 
         metrics = new ConnectionMetrics(id, this);
 
@@ -211,13 +210,8 @@ public class OutboundTcpConnectionPool
 
     public void close()
     {
-        // these null guards are simply for tests
-        if (largeMessages != null)
-            largeMessages.closeSocket(true);
-        if (smallMessages != null)
-            smallMessages.closeSocket(true);
-        if (gossipMessages != null)
-            gossipMessages.closeSocket(true);
+        for (OutboundTcpConnection connection : connectionByKind.values())
+            connection.closeSocket(true);
 
         metrics.release();
     }

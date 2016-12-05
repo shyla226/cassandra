@@ -71,12 +71,12 @@ public enum ConsistencyLevel
         }
     }
 
-    private ConsistencyLevel(int code)
+    ConsistencyLevel(int code)
     {
         this(code, false);
     }
 
-    private ConsistencyLevel(int code, boolean isDCLocal)
+    ConsistencyLevel(int code, boolean isDCLocal)
     {
         this.code = code;
         this.isDCLocal = isDCLocal;
@@ -173,7 +173,7 @@ public enum ConsistencyLevel
     {
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
 
-        Map<String, Integer> dcEndpoints = new HashMap<String, Integer>();
+        Map<String, Integer> dcEndpoints = new HashMap<>();
         for (String dc: strategy.getDatacenters())
             dcEndpoints.put(dc, 0);
 
@@ -405,5 +405,22 @@ public enum ConsistencyLevel
         AbstractReplicationStrategy strategy = Keyspace.open(keyspaceName).getReplicationStrategy();
         if (!(strategy instanceof NetworkTopologyStrategy))
             throw new InvalidRequestException(String.format("consistency level %s not compatible with replication strategy (%s)", this, strategy.getClass().getName()));
+    }
+
+    /**
+     * Whether this consistency is at least as strong as QUORUM (in any setting), that is always require at least as
+     * many nodes as QUORUM would.
+     */
+    public boolean isAtLeastQuorum()
+    {
+        switch (this)
+        {
+            case QUORUM:
+            case ALL:
+            case EACH_QUORUM:
+                return true;
+            default:
+                return false;
+        }
     }
 }

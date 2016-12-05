@@ -34,13 +34,14 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.WriteVerbs.WriteVersion;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
@@ -48,14 +49,17 @@ import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.WriteResponseHandler;
+import org.apache.cassandra.service.WrappingWriteHandler;
+import org.apache.cassandra.service.WriteEndpoints;
+import org.apache.cassandra.service.WriteHandler;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static com.google.common.collect.Iterables.transform;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
@@ -63,6 +67,8 @@ import static org.apache.cassandra.cql3.QueryProcessor.executeInternalWithPaging
 
 public class BatchlogManager implements BatchlogManagerMBean
 {
+    private static final WriteVersion CURRENT_VERSION = Version.last(WriteVersion.class);
+
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=BatchlogManager";
     private static final long REPLAY_INTERVAL = 10 * 1000; // milliseconds
     static final int DEFAULT_PAGE_SIZE = 128;
@@ -130,7 +136,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             try (DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                Mutation.serializer.serialize(mutation, buffer, MessagingService.current_version);
+                Mutation.serializers.get(CURRENT_VERSION).serialize(mutation, buffer);
                 mutations.add(buffer.buffer());
             }
             catch (IOException e)
@@ -143,7 +149,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(SystemKeyspace.Batches, batch.id);
         builder.row()
                .timestamp(batch.creationTime)
-               .add("version", MessagingService.current_version)
+               .add("version", MessagingService.current_version.protocolVersion().handshakeVersion)
                .appendAll("mutations", mutations);
 
         builder.buildAsMutation().apply(durableWrites);
@@ -297,7 +303,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         private final List<Mutation> mutations;
         private final int replayedBytes;
 
-        private List<ReplayWriteResponseHandler<Mutation>> replayHandlers;
+        private List<ReplayWriteHandler> replayHandlers;
 
         ReplayingBatch(UUID id, int version, List<ByteBuffer> serializedMutations) throws IOException
         {
@@ -329,7 +335,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         {
             for (int i = 0; i < replayHandlers.size(); i++)
             {
-                ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
+                ReplayWriteHandler handler = replayHandlers.get(i);
                 try
                 {
                     handler.get();
@@ -353,7 +359,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 ret += serializedMutation.remaining();
                 try (DataInputBuffer in = new DataInputBuffer(serializedMutation, true))
                 {
-                    addMutation(Mutation.serializer.deserialize(in, version));
+                    addMutation(Mutation.serializers.get(CURRENT_VERSION).deserialize(in));
                 }
             }
 
@@ -383,7 +389,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             for (int i = startFrom; i < replayHandlers.size(); i++)
             {
-                ReplayWriteResponseHandler<Mutation> handler = replayHandlers.get(i);
+                ReplayWriteHandler handler = replayHandlers.get(i);
                 Mutation undeliveredMutation = mutations.get(i);
 
                 if (handler != null)
@@ -395,59 +401,48 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
         }
 
-        private static List<ReplayWriteResponseHandler<Mutation>> sendReplays(List<Mutation> mutations,
-                                                                              long writtenAt,
-                                                                              Set<InetAddress> hintedNodes)
+        private static List<ReplayWriteHandler> sendReplays(List<Mutation> mutations,
+                                                            long writtenAt,
+                                                            Set<InetAddress> hintedNodes)
         {
-            List<ReplayWriteResponseHandler<Mutation>> handlers = new ArrayList<>(mutations.size());
+            List<ReplayWriteHandler> handlers = new ArrayList<>(mutations.size());
             for (Mutation mutation : mutations)
             {
-                ReplayWriteResponseHandler<Mutation> handler = sendSingleReplayMutation(mutation, writtenAt, hintedNodes);
+                ReplayWriteHandler handler = sendSingleReplayMutation(mutation, writtenAt, hintedNodes);
                 if (handler != null)
                     handlers.add(handler);
             }
             return handlers;
         }
 
-        /**
-         * We try to deliver the mutations to the replicas ourselves if they are alive and only resort to writing hints
-         * when a replica is down or a write request times out.
-         *
-         * @return direct delivery handler to wait on or null, if no live nodes found
-         */
-        private static ReplayWriteResponseHandler<Mutation> sendSingleReplayMutation(final Mutation mutation,
-                                                                                     long writtenAt,
-                                                                                     Set<InetAddress> hintedNodes)
+        private static ReplayWriteHandler sendSingleReplayMutation(final Mutation mutation,
+                                                                   long writtenAt,
+                                                                   Set<InetAddress> hintedNodes)
         {
-            Set<InetAddress> liveEndpoints = new HashSet<>();
-            String ks = mutation.getKeyspaceName();
-            Token tk = mutation.key().getToken();
-
-            for (InetAddress endpoint : StorageService.instance.getNaturalAndPendingEndpoints(ks, tk))
+            WriteEndpoints endpoints = WriteEndpoints.compute(mutation);
+            for (InetAddress dead : endpoints.dead())
             {
-                if (endpoint.equals(FBUtilities.getBroadcastAddress()))
+                hintedNodes.add(dead);
+                HintsService.instance.write(StorageService.instance.getHostIdForEndpoint(dead),
+                                            Hint.create(mutation, writtenAt));
+            }
+
+            if (endpoints.liveCount() == 0)
+                return null;
+
+            ReplayWriteHandler handler = ReplayWriteHandler.create(endpoints, System.nanoTime());
+            for (InetAddress live : endpoints.live())
+            {
+                if (live.equals(FBUtilities.getBroadcastAddress()))
                 {
                     mutation.apply();
-                }
-                else if (FailureDetector.instance.isAlive(endpoint))
-                {
-                    liveEndpoints.add(endpoint); // will try delivering directly instead of writing a hint.
+                    handler.onLocalResponse();
                 }
                 else
                 {
-                    hintedNodes.add(endpoint);
-                    HintsService.instance.write(StorageService.instance.getHostIdForEndpoint(endpoint),
-                                                Hint.create(mutation, writtenAt));
+                    MessagingService.instance().send(Verbs.WRITES.WRITE.newRequest(live, mutation), handler);
                 }
             }
-
-            if (liveEndpoints.isEmpty())
-                return null;
-
-            ReplayWriteResponseHandler<Mutation> handler = new ReplayWriteResponseHandler<>(liveEndpoints, System.nanoTime());
-            MessageOut<Mutation> message = mutation.createMessage();
-            for (InetAddress endpoint : liveEndpoints)
-                MessagingService.instance().sendRR(message, endpoint, handler, false);
             return handler;
         }
 
@@ -460,31 +455,34 @@ public class BatchlogManager implements BatchlogManagerMBean
         }
 
         /**
-         * A wrapper of WriteResponseHandler that stores the addresses of the endpoints from
+         * A WriteHandler that stores the addresses of the endpoints from
          * which we did not receive a successful reply.
          */
-        private static class ReplayWriteResponseHandler<T> extends WriteResponseHandler<T>
+        private static class ReplayWriteHandler extends WrappingWriteHandler
         {
             private final Set<InetAddress> undelivered = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-            ReplayWriteResponseHandler(Collection<InetAddress> writeEndpoints, long queryStartNanoTime)
+            private ReplayWriteHandler(WriteHandler handler)
             {
-                super(writeEndpoints, Collections.<InetAddress>emptySet(), null, null, null, WriteType.UNLOGGED_BATCH, queryStartNanoTime);
-                undelivered.addAll(writeEndpoints);
+                super(handler);
+                Iterables.addAll(undelivered, handler.endpoints());
+            }
+
+            static ReplayWriteHandler create(WriteEndpoints endpoints, long queryStartNanos)
+            {
+                WriteHandler handler = WriteHandler.create(endpoints,
+                                                           ConsistencyLevel.ALL,
+                                                           WriteType.UNLOGGED_BATCH,
+                                                           queryStartNanos);
+                return new ReplayWriteHandler(handler);
             }
 
             @Override
-            protected int totalBlockFor()
+            public void onResponse(Response<EmptyPayload> m)
             {
-                return this.naturalEndpoints.size();
-            }
-
-            @Override
-            public void response(MessageIn<T> m)
-            {
-                boolean removed = undelivered.remove(m == null ? FBUtilities.getBroadcastAddress() : m.from);
+                boolean removed = undelivered.remove(m.from());
                 assert removed;
-                super.response(m);
+                super.onResponse(m);
             }
         }
     }

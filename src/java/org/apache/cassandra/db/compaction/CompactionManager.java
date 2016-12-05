@@ -39,6 +39,7 @@ import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -70,8 +71,8 @@ import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static java.util.Collections.singleton;
 
@@ -584,7 +585,7 @@ public class CompactionManager implements CompactionManagerMBean
         ListenableFutureTask<?> task = ListenableFutureTask.create(runnable, null);
         try
         {
-            executor.submitIfRunning(task, "pending anticompaction");
+            antiCompactionExecutor.submitIfRunning(task, "pending anticompaction");
             return task;
         }
         finally
@@ -1419,7 +1420,7 @@ public class CompactionManager implements CompactionManagerMBean
         if (logger.isDebugEnabled())
         {
             // MT serialize may take time
-            logger.debug("Created {} merkle trees with merkle trees size {}, {} partitions, {} bytes", tree.ranges().size(), tree.size(), allPartitions, MerkleTrees.serializer.serializedSize(tree, 0));
+            logger.debug("Created {} merkle trees with merkle trees size {}, {} partitions, {} bytes", tree.ranges().size(), tree.size(), allPartitions, MerkleTrees.serializers.get(Version.last(RepairVersion.class)).serializedSize(tree));
         }
 
         return tree;
@@ -1792,13 +1793,13 @@ public class CompactionManager implements CompactionManagerMBean
             SnapshotDeletingTask.rescheduleFailedTasks();
         }
 
-        public ListenableFuture<?> submitIfRunning(Runnable task, String name)
+        private ListenableFuture<?> submitIfRunning(Runnable task, String name)
         {
             return submitIfRunning(Executors.callable(task, null), name);
         }
 
         /**
-         * Submit the task but only if the executor has not been shutdown.If the executor has
+         * Submit the task but only if the executor has not been shutdown. If the executor has
          * been shutdown, or in case of a rejected execution exception return a cancelled future.
          *
          * @param task - the task to submit
@@ -1807,7 +1808,7 @@ public class CompactionManager implements CompactionManagerMBean
          * @return the future that will deliver the task result, or a future that has already been
          *         cancelled if the task could not be submitted.
          */
-        public ListenableFuture<?> submitIfRunning(Callable<?> task, String name)
+        private ListenableFuture<?> submitIfRunning(Callable<?> task, String name)
         {
             if (isShutdown())
             {

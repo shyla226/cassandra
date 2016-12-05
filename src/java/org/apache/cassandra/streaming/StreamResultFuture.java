@@ -28,6 +28,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.IncomingStreamingConnection;
+import org.apache.cassandra.streaming.messages.StreamMessage;
+import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
@@ -107,7 +109,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
                                                                     InetAddress from,
                                                                     IncomingStreamingConnection connection,
                                                                     boolean isForOutgoing,
-                                                                    int version,
+                                                                    StreamVersion version,
                                                                     boolean keepSSTableLevel,
                                                                     boolean isIncremental,
                                                                     UUID pendingRepair) throws IOException
@@ -133,7 +135,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
         return future;
     }
 
-    private void attachConnection(InetAddress from, int sessionIndex, IncomingStreamingConnection connection, boolean isForOutgoing, int version) throws IOException
+    private void attachConnection(InetAddress from, int sessionIndex, IncomingStreamingConnection connection, boolean isForOutgoing, StreamVersion version) throws IOException
     {
         StreamSession session = coordinator.getOrCreateSessionById(from, sessionIndex, connection.socket.getInetAddress());
         session.init(this, !isRepairSession()); //Avoid flush storm during repair (APOLLO-466)

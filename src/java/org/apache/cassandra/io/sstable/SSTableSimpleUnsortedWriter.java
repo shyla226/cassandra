@@ -76,7 +76,7 @@ class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
         if (previous == null)
         {
             previous = createPartitionUpdate(key);
-            currentSize += PartitionUpdate.serializer.serializedSize(previous, formatType.info.getLatestVersion().correspondingMessagingVersion());
+            currentSize += PartitionUpdate.serializers.get(formatType.info.getLatestVersion().encodingVersion()).serializedSize(previous);
             previous.allowNewUpdates();
             buffer.put(key, previous);
         }
@@ -90,7 +90,7 @@ class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
         // improve that. In particular, what we count is closer to the serialized value, but it's debatable that it's the right thing
         // to count since it will take a lot more space in memory and the bufferSize if first and foremost used to avoid OOM when
         // using this writer.
-        currentSize += UnfilteredSerializer.serializer.serializedSize(row, header, 0, formatType.info.getLatestVersion().correspondingMessagingVersion());
+        currentSize += UnfilteredSerializer.serializers.get(formatType.info.getLatestVersion().encodingVersion()).serializedSize(row, header, 0);
     }
 
     private void maybeSync() throws SyncException

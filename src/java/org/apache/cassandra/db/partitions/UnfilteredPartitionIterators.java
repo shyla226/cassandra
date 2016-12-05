@@ -31,6 +31,8 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.MergeIterator;
 
 /**
@@ -38,7 +40,7 @@ import org.apache.cassandra.utils.MergeIterator;
  */
 public abstract class UnfilteredPartitionIterators
 {
-    private static final Serializer serializer = new Serializer();
+    private static final Versioned<EncodingVersion, Serializer> serializers = EncodingVersion.versioned(Serializer::new);
 
     private static final Comparator<UnfilteredRowIterator> partitionComparator = (p1, p2) -> p1.partitionKey().compareTo(p2.partitionKey());
 
@@ -270,9 +272,9 @@ public abstract class UnfilteredPartitionIterators
      *
      * @param iterator the iterator to digest.
      * @param digest the {@code MessageDigest} to use for the digest.
-     * @param version the messaging protocol to use when producing the digest.
+     * @param version the version to use when producing the digest.
      */
-    public static void digest(UnfilteredPartitionIterator iterator, MessageDigest digest, int version)
+    public static void digest(UnfilteredPartitionIterator iterator, MessageDigest digest, DigestVersion version)
     {
         try (UnfilteredPartitionIterator iter = iterator)
         {
@@ -286,9 +288,9 @@ public abstract class UnfilteredPartitionIterators
         }
     }
 
-    public static Serializer serializerForIntraNode()
+    public static Serializer serializerForIntraNode(EncodingVersion version)
     {
-        return serializer;
+        return serializers.get(version);
     }
 
     /**
@@ -313,9 +315,14 @@ public abstract class UnfilteredPartitionIterators
      * Serialize each UnfilteredSerializer one after the other, with an initial byte that indicates whether
      * we're done or not.
      */
-    public static class Serializer
+    public static class Serializer extends VersionDependent<EncodingVersion>
     {
-        public void serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out, int version) throws IOException
+        private Serializer(EncodingVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out) throws IOException
         {
             // Previously, a boolean indicating if this was for a thrift query.
             // Unused since 4.0 but kept on wire for compatibility.
@@ -325,13 +332,13 @@ public abstract class UnfilteredPartitionIterators
                 out.writeBoolean(true);
                 try (UnfilteredRowIterator partition = iter.next())
                 {
-                    UnfilteredRowIteratorSerializer.serializer.serialize(partition, selection, out, version);
+                    UnfilteredRowIteratorSerializer.serializers.get(version).serialize(partition, selection, out);
                 }
             }
             out.writeBoolean(false);
         }
 
-        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final TableMetadata metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
+        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final TableMetadata metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
         {
             // Skip now unused isForThrift boolean
             in.readBoolean();
@@ -377,7 +384,7 @@ public abstract class UnfilteredPartitionIterators
                     try
                     {
                         nextReturned = true;
-                        next = UnfilteredRowIteratorSerializer.serializer.deserialize(in, version, metadata, selection, flag);
+                        next = UnfilteredRowIteratorSerializer.serializers.get(version).deserialize(in, metadata, selection, flag);
                         return next;
                     }
                     catch (IOException e)

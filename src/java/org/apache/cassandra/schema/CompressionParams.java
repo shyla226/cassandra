@@ -36,11 +36,13 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.streaming.messages.StreamMessage;
+import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 import static java.lang.String.format;
 
@@ -55,7 +57,7 @@ public final class CompressionParams
 
     public static final int DEFAULT_CHUNK_LENGTH = 65536;
     public static final double DEFAULT_MIN_COMPRESS_RATIO = 1.1;
-    public static final IVersionedSerializer<CompressionParams> serializer = new Serializer();
+    public static final Versioned<StreamVersion, Serializer<CompressionParams>> serializers = StreamVersion.versioned(CompressionParmsSerializer::new);
 
     public static final String CLASS = "class";
     public static final String CHUNK_LENGTH_IN_KB = "chunk_length_in_kb";
@@ -555,9 +557,14 @@ public final class CompressionParams
             .toHashCode();
     }
 
-    static class Serializer implements IVersionedSerializer<CompressionParams>
+    static class CompressionParmsSerializer extends VersionDependent<StreamVersion> implements Serializer<CompressionParams>
     {
-        public void serialize(CompressionParams parameters, DataOutputPlus out, int version) throws IOException
+        CompressionParmsSerializer(StreamVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(CompressionParams parameters, DataOutputPlus out) throws IOException
         {
             out.writeUTF(parameters.sstableCompressor.getClass().getSimpleName());
             out.writeInt(parameters.otherOptions.size());
@@ -567,14 +574,14 @@ public final class CompressionParams
                 out.writeUTF(entry.getValue());
             }
             out.writeInt(parameters.chunkLength());
-            if (version >= StreamMessage.VERSION_40)
+            if (version.compareTo(StreamVersion.OSS_40) >= 0)
                 out.writeInt(parameters.maxCompressedLength);
             else
                 if (parameters.maxCompressedLength != Integer.MAX_VALUE)
                     throw new UnsupportedOperationException("Cannot stream SSTables with uncompressed chunks to pre-4.0 nodes.");
         }
 
-        public CompressionParams deserialize(DataInputPlus in, int version) throws IOException
+        public CompressionParams deserialize(DataInputPlus in) throws IOException
         {
             String compressorName = in.readUTF();
             int optionCount = in.readInt();
@@ -587,7 +594,7 @@ public final class CompressionParams
             }
             int chunkLength = in.readInt();
             int minCompressRatio = Integer.MAX_VALUE;   // Earlier Cassandra cannot use uncompressed chunks.
-            if (version >= StreamMessage.VERSION_40)
+            if (version.compareTo(StreamVersion.OSS_40) >= 0)
                 minCompressRatio = in.readInt();
 
             CompressionParams parameters;
@@ -602,7 +609,7 @@ public final class CompressionParams
             return parameters;
         }
 
-        public long serializedSize(CompressionParams parameters, int version)
+        public long serializedSize(CompressionParams parameters)
         {
             long size = TypeSizes.sizeof(parameters.sstableCompressor.getClass().getSimpleName());
             size += TypeSizes.sizeof(parameters.otherOptions.size());
@@ -612,7 +619,7 @@ public final class CompressionParams
                 size += TypeSizes.sizeof(entry.getValue());
             }
             size += TypeSizes.sizeof(parameters.chunkLength());
-            if (version >= StreamMessage.VERSION_40)
+            if (version.compareTo(StreamVersion.OSS_40) >= 0)
                 size += TypeSizes.sizeof(parameters.maxCompressedLength());
             return size;
         }

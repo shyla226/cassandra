@@ -57,16 +57,16 @@ public class MessagingMetrics
         crossNodeLatency.update(timeTaken, TimeUnit.MILLISECONDS);
     }
 
-    public void addQueueWaitTime(String verb, long timeTaken)
+    public void addQueueWaitTime(String messageType, long timeTaken)
     {
         if (timeTaken < 0)
             // the measurement is not accurate, ignore the negative timeTaken
             return;
 
-        Timer timer = queueWaitLatency.get(verb);
+        Timer timer = queueWaitLatency.get(messageType);
         if (timer == null)
         {
-            timer = queueWaitLatency.computeIfAbsent(verb, k -> Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
+            timer = queueWaitLatency.computeIfAbsent(messageType, k -> Metrics.timer(factory.createMetricName(messageType + "-WaitLatency")));
         }
         timer.update(timeTaken, TimeUnit.MILLISECONDS);
     }

@@ -27,6 +27,7 @@ import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
 import org.junit.Test;
 
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 
@@ -40,7 +41,7 @@ public class HintsDescriptorTest
     public void testSerializerNormal() throws IOException
     {
         UUID hostId = UUID.randomUUID();
-        int version = HintsDescriptor.CURRENT_VERSION;
+        HintsVersion version = HintsDescriptor.CURRENT_VERSION;
         long timestamp = System.currentTimeMillis();
         ImmutableMap<String, Object> parameters =
                 ImmutableMap.of("compression", (Object) ImmutableMap.of("class_name", LZ4Compressor.class.getName()));
@@ -53,7 +54,7 @@ public class HintsDescriptorTest
     public void testSerializerWithEmptyParameters() throws IOException
     {
         UUID hostId = UUID.randomUUID();
-        int version = HintsDescriptor.CURRENT_VERSION;
+        HintsVersion version = HintsDescriptor.CURRENT_VERSION;
         long timestamp = System.currentTimeMillis();
         ImmutableMap<String, Object> parameters = ImmutableMap.of();
         HintsDescriptor descriptor = new HintsDescriptor(hostId, version, timestamp, parameters);
@@ -65,7 +66,7 @@ public class HintsDescriptorTest
     public void testCorruptedDeserialize() throws IOException
     {
         UUID hostId = UUID.randomUUID();
-        int version = HintsDescriptor.CURRENT_VERSION;
+        HintsVersion version = HintsDescriptor.CURRENT_VERSION;
         long timestamp = System.currentTimeMillis();
         ImmutableMap<String, Object> parameters = ImmutableMap.of();
         HintsDescriptor descriptor = new HintsDescriptor(hostId, version, timestamp, parameters);
@@ -95,7 +96,7 @@ public class HintsDescriptorTest
     public void testReadFromFile() throws IOException
     {
         UUID hostId = UUID.randomUUID();
-        int version = HintsDescriptor.CURRENT_VERSION;
+        HintsVersion version = HintsDescriptor.CURRENT_VERSION;
         long timestamp = System.currentTimeMillis();
         ImmutableMap<String, Object> parameters = ImmutableMap.of();
         HintsDescriptor expected = new HintsDescriptor(hostId, version, timestamp, parameters);

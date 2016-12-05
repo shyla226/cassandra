@@ -34,6 +34,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -43,10 +46,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.IMessageSink;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.ValidationComplete;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -92,7 +92,7 @@ public class ValidatorTest
         Range<Token> range = new Range<>(partitioner.getMinimumToken(), partitioner.getRandomToken());
         final RepairJobDesc desc = new RepairJobDesc(UUID.randomUUID(), UUID.randomUUID(), keyspace, columnFamily, Arrays.asList(range));
 
-        final CompletableFuture<MessageOut> outgoingMessageSink = registerOutgoingMessageSink();
+        final CompletableFuture<Message> outgoingMessageSink = registerOutgoingMessageSink();
 
         InetAddress remote = InetAddress.getByName("127.0.0.2");
 
@@ -115,13 +115,15 @@ public class ValidatorTest
         Token min = tree.partitioner().getMinimumToken();
         assertNotNull(tree.hash(new Range<>(min, min)));
 
-        MessageOut message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
-        assertEquals(MessagingService.Verb.REPAIR_MESSAGE, message.verb);
-        RepairMessage m = (RepairMessage) message.payload;
-        assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
-        assertEquals(desc, m.desc);
-        assertTrue(((ValidationComplete) m).success());
-        assertNotNull(((ValidationComplete) m).trees);
+        Message<ValidationComplete> message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Verbs.REPAIR, message.group());
+        assertEquals(Verbs.REPAIR.VALIDATION_COMPLETE, message.verb());
+
+        ValidationComplete vc = message.payload();
+
+        assertEquals(desc, vc.desc);
+        assertTrue(vc.success());
+        assertNotNull(vc.trees);
     }
 
 
@@ -131,20 +133,20 @@ public class ValidatorTest
         Range<Token> range = new Range<>(partitioner.getMinimumToken(), partitioner.getRandomToken());
         final RepairJobDesc desc = new RepairJobDesc(UUID.randomUUID(), UUID.randomUUID(), keyspace, columnFamily, Arrays.asList(range));
 
-        final CompletableFuture<MessageOut> outgoingMessageSink = registerOutgoingMessageSink();
+        final CompletableFuture<Message> outgoingMessageSink = registerOutgoingMessageSink();
 
         InetAddress remote = InetAddress.getByName("127.0.0.2");
 
         Validator validator = new Validator(desc, remote, 0);
         validator.fail();
 
-        MessageOut message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
-        assertEquals(MessagingService.Verb.REPAIR_MESSAGE, message.verb);
-        RepairMessage m = (RepairMessage) message.payload;
-        assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
-        assertEquals(desc, m.desc);
-        assertFalse(((ValidationComplete) m).success());
-        assertNull(((ValidationComplete) m).trees);
+        Message<ValidationComplete> message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Verbs.REPAIR, message.group());
+        assertEquals(Verbs.REPAIR.VALIDATION_COMPLETE, message.verb());
+        ValidationComplete vc = message.payload();
+        assertEquals(desc, vc.desc);
+        assertFalse(vc.success());
+        assertNull(vc.trees);
     }
 
     @Test
@@ -192,17 +194,17 @@ public class ValidatorTest
                                                                  Collections.singletonList(cfs), desc.ranges, false, ActiveRepairService.UNREPAIRED_SSTABLE,
                                                                  false);
 
-        final CompletableFuture<MessageOut> outgoingMessageSink = registerOutgoingMessageSink();
+        final CompletableFuture<Message> outgoingMessageSink = registerOutgoingMessageSink();
         Validator validator = new Validator(desc, FBUtilities.getBroadcastAddress(), 0, true, false);
         CompactionManager.instance.submitValidation(cfs, validator);
 
-        MessageOut message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
-        assertEquals(MessagingService.Verb.REPAIR_MESSAGE, message.verb);
-        RepairMessage m = (RepairMessage) message.payload;
-        assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
-        assertEquals(desc, m.desc);
-        assertTrue(((ValidationComplete) m).success());
-        MerkleTrees trees = ((ValidationComplete) m).trees;
+        Message<ValidationComplete> message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Verbs.REPAIR, message.group());
+        assertEquals(Verbs.REPAIR.VALIDATION_COMPLETE, message.verb());
+        ValidationComplete vc = message.payload();
+        assertEquals(desc, vc.desc);
+        assertTrue(vc.success());
+        MerkleTrees trees = vc.trees;
 
         Iterator<Map.Entry<Range<Token>, MerkleTree>> iterator = trees.iterator();
         while (iterator.hasNext())
@@ -212,18 +214,18 @@ public class ValidatorTest
         assertEquals(trees.rowCount(), n);
     }
 
-    private CompletableFuture<MessageOut> registerOutgoingMessageSink()
+    private CompletableFuture<Message> registerOutgoingMessageSink()
     {
-        final CompletableFuture<MessageOut> future = new CompletableFuture<>();
+        final CompletableFuture<Message> future = new CompletableFuture<>();
         MessagingService.instance().addMessageSink(new IMessageSink()
         {
-            public boolean allowOutgoingMessage(MessageOut message, int id, InetAddress to)
+            public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
             {
                 future.complete(message);
                 return false;
             }
 
-            public boolean allowIncomingMessage(MessageIn message, int id)
+            public boolean allowIncomingMessage(Message message)
             {
                 return false;
             }

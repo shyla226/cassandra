@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.List;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -152,21 +153,21 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         return Kind.SLICE;
     }
 
-    protected void serializeInternal(DataOutputPlus out, int version) throws IOException
+    protected void serializeInternal(DataOutputPlus out, ReadVersion version) throws IOException
     {
-        Slices.serializer.serialize(slices, out, version);
+        Slices.serializer.serialize(slices, out, version.encodingVersion.clusteringVersion);
     }
 
-    protected long serializedSizeInternal(int version)
+    protected long serializedSizeInternal(ReadVersion version)
     {
-        return Slices.serializer.serializedSize(slices, version);
+        return Slices.serializer.serializedSize(slices, version.encodingVersion.clusteringVersion);
     }
 
     private static class SliceDeserializer implements InternalDeserializer
     {
-        public ClusteringIndexFilter deserialize(DataInputPlus in, int version, TableMetadata metadata, boolean reversed) throws IOException
+        public ClusteringIndexFilter deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata, boolean reversed) throws IOException
         {
-            Slices slices = Slices.serializer.deserialize(in, version, metadata);
+            Slices slices = Slices.serializer.deserialize(in, version.encodingVersion.clusteringVersion, metadata);
             return new ClusteringIndexSliceFilter(slices, reversed);
         }
     }

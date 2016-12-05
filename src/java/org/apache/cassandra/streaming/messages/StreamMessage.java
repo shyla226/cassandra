@@ -21,9 +21,14 @@ import java.io.IOException;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
+import java.util.function.Function;
 
+import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.net.ProtocolVersion;
 import org.apache.cassandra.streaming.StreamSession;
+import org.apache.cassandra.utils.versioning.Version;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * StreamMessage is an abstract base class that every messages in streaming protocol inherit.
@@ -33,12 +38,41 @@ import org.apache.cassandra.streaming.StreamSession;
 public abstract class StreamMessage
 {
     /** Streaming protocol version */
-    public static final int VERSION_40 = 5;
-    public static final int CURRENT_VERSION = VERSION_40;
+    public enum StreamVersion implements Version<StreamVersion>
+    {
+        OSS_30(4, BoundsVersion.OSS_30),
+        OSS_40(5, BoundsVersion.OSS_30); // Adds maxCompressionLength to CompressionParams serialization
+
+        public final int handshakeVersion;
+        public final BoundsVersion boundsVersion;
+
+        StreamVersion(int handshakeVersion, BoundsVersion boundsVersion)
+        {
+            this.handshakeVersion = handshakeVersion;
+            this.boundsVersion = boundsVersion;
+        }
+
+        public static StreamVersion of(ProtocolVersion protocolVersion)
+        {
+            for (StreamVersion version : values())
+            {
+                if (version.handshakeVersion == protocolVersion.handshakeVersion)
+                    return version;
+            }
+            return null;
+        }
+
+        public static <T> Versioned<StreamVersion, T> versioned(Function<StreamVersion, ? extends T> function)
+        {
+            return new Versioned<>(StreamVersion.class, function);
+        }
+    }
+
+    public static final StreamVersion CURRENT_VERSION = Version.last(StreamVersion.class);
 
     private transient volatile boolean sent = false;
 
-    public static void serialize(StreamMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+    public static void serialize(StreamMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException
     {
         ByteBuffer buff = ByteBuffer.allocate(1);
         // message type
@@ -48,7 +82,7 @@ public abstract class StreamMessage
         message.type.outSerializer.serialize(message, out, version, session);
     }
 
-    public static StreamMessage deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException
+    public static StreamMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException
     {
         ByteBuffer buff = ByteBuffer.allocate(1);
         int readBytes = in.read(buff);
@@ -83,12 +117,12 @@ public abstract class StreamMessage
     /** StreamMessage serializer */
     public static interface Serializer<V extends StreamMessage>
     {
-        V deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException;
-        void serialize(V message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException;
+        V deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException;
+        void serialize(V message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException;
     }
 
     /** StreamMessage types */
-    public static enum Type
+    public enum Type
     {
         PREPARE(1, 5, PrepareMessage.serializer),
         FILE(2, 0, IncomingFileMessage.serializer, OutgoingFileMessage.serializer),

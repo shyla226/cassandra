@@ -21,10 +21,10 @@ import java.io.*;
 import java.net.InetAddress;
 
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.CompactEndpointSerializationHelper;
+import org.apache.cassandra.utils.Serializer;
 
 /**
  * Contains information about a specified list of Endpoints and the largest version
@@ -32,7 +32,7 @@ import org.apache.cassandra.net.CompactEndpointSerializationHelper;
  */
 public class GossipDigest implements Comparable<GossipDigest>
 {
-    public static final IVersionedSerializer<GossipDigest> serializer = new GossipDigestSerializer();
+    public static final Serializer<GossipDigest> serializer = new GossipDigestSerializer();
 
     final InetAddress endpoint;
     final int generation;
@@ -79,16 +79,16 @@ public class GossipDigest implements Comparable<GossipDigest>
     }
 }
 
-class GossipDigestSerializer implements IVersionedSerializer<GossipDigest>
+class GossipDigestSerializer implements Serializer<GossipDigest>
 {
-    public void serialize(GossipDigest gDigest, DataOutputPlus out, int version) throws IOException
+    public void serialize(GossipDigest gDigest, DataOutputPlus out) throws IOException
     {
         CompactEndpointSerializationHelper.serialize(gDigest.endpoint, out);
         out.writeInt(gDigest.generation);
         out.writeInt(gDigest.maxVersion);
     }
 
-    public GossipDigest deserialize(DataInputPlus in, int version) throws IOException
+    public GossipDigest deserialize(DataInputPlus in) throws IOException
     {
         InetAddress endpoint = CompactEndpointSerializationHelper.deserialize(in);
         int generation = in.readInt();
@@ -96,7 +96,7 @@ class GossipDigestSerializer implements IVersionedSerializer<GossipDigest>
         return new GossipDigest(endpoint, generation, maxVersion);
     }
 
-    public long serializedSize(GossipDigest gDigest, int version)
+    public long serializedSize(GossipDigest gDigest)
     {
         long size = CompactEndpointSerializationHelper.serializedSize(gDigest.endpoint);
         size += TypeSizes.sizeof(gDigest.generation);

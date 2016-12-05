@@ -20,7 +20,6 @@ package org.apache.cassandra.utils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.AbstractIterator;
@@ -31,9 +30,11 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 
 /**
@@ -43,7 +44,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  */
 public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>>
 {
-    public static final MerkleTreesSerializer serializer = new MerkleTreesSerializer();
+    public static final Versioned<RepairVersion, MerkleTreesSerializer> serializers = RepairVersion.versioned(MerkleTreesSerializer::new);
 
     private Map<Range<Token>, MerkleTree> merkleTrees = new TreeMap<>(new TokenRangeComparator());
 
@@ -395,18 +396,23 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
         return differences;
     }
 
-    public static class MerkleTreesSerializer implements IVersionedSerializer<MerkleTrees>
+    public static class MerkleTreesSerializer extends VersionDependent<RepairVersion> implements Serializer<MerkleTrees>
     {
-        public void serialize(MerkleTrees trees, DataOutputPlus out, int version) throws IOException
+        private MerkleTreesSerializer(RepairVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(MerkleTrees trees, DataOutputPlus out) throws IOException
         {
             out.writeInt(trees.merkleTrees.size());
             for (MerkleTree tree : trees.merkleTrees.values())
             {
-                MerkleTree.serializer.serialize(tree, out, version);
+                MerkleTree.serializers.get(version).serialize(tree, out);
             }
         }
 
-        public MerkleTrees deserialize(DataInputPlus in, int version) throws IOException
+        public MerkleTrees deserialize(DataInputPlus in) throws IOException
         {
             IPartitioner partitioner = null;
             int nTrees = in.readInt();
@@ -415,7 +421,7 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
             {
                 for (int i = 0; i < nTrees; i++)
                 {
-                    MerkleTree tree = MerkleTree.serializer.deserialize(in, version);
+                    MerkleTree tree = MerkleTree.serializers.get(version).deserialize(in);
                     trees.add(tree);
 
                     if (partitioner == null)
@@ -428,18 +434,17 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
             return new MerkleTrees(partitioner, trees);
         }
 
-        public long serializedSize(MerkleTrees trees, int version)
+        public long serializedSize(MerkleTrees trees)
         {
             assert trees != null;
 
             long size = TypeSizes.sizeof(trees.merkleTrees.size());
             for (MerkleTree tree : trees.merkleTrees.values())
             {
-                size += MerkleTree.serializer.serializedSize(tree, version);
+                size += MerkleTree.serializers.get(version).serializedSize(tree);
             }
             return size;
         }
-
     }
 
     private static class TokenRangeComparator implements Comparator<Range<Token>>

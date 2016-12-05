@@ -1,6 +1,6 @@
 RULE mutation_limiter
-CLASS org.apache.cassandra.db.MutationVerbHandler
-METHOD doVerb
+CLASS org.apache.cassandra.db.WriteVerbs.WRITE_HANDLER
+METHOD handle2
 HELPER org.apache.cassandra.utils.TestRateLimiter
 AT ENTRY
 IF TRUE

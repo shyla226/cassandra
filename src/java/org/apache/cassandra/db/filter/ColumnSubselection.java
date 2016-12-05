@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Comparator;
 
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -31,6 +32,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Handles the selection of a subpart of a column.
@@ -40,7 +43,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 public abstract class ColumnSubselection implements Comparable<ColumnSubselection>
 {
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     private enum Kind { SLICE, ELEMENT }
 
@@ -162,9 +165,14 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
         }
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
-        public void serialize(ColumnSubselection subSel, DataOutputPlus out, int version) throws IOException
+        private Serializer(ReadVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(ColumnSubselection subSel, DataOutputPlus out) throws IOException
         {
             ColumnMetadata column = subSel.column();
             ByteBufferUtil.writeWithShortLength(column.name.bytes, out);
@@ -185,7 +193,7 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
             }
         }
 
-        public ColumnSubselection deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        public ColumnSubselection deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             ByteBuffer name = ByteBufferUtil.readWithShortLength(in);
             ColumnMetadata column = metadata.getColumn(name);
@@ -213,7 +221,7 @@ public abstract class ColumnSubselection implements Comparable<ColumnSubselectio
             throw new AssertionError();
         }
 
-        public long serializedSize(ColumnSubselection subSel, int version)
+        public long serializedSize(ColumnSubselection subSel)
         {
             long size = 0;
 

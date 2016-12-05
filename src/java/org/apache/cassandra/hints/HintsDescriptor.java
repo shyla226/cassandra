@@ -38,13 +38,14 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.utils.Hex;
+import org.apache.cassandra.utils.versioning.Version;
 import org.json.simple.JSONValue;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
@@ -59,8 +60,7 @@ final class HintsDescriptor
 {
     private static final Logger logger = LoggerFactory.getLogger(HintsDescriptor.class);
 
-    static final int VERSION_30 = 1;
-    static final int CURRENT_VERSION = VERSION_30;
+    static final HintsVersion CURRENT_VERSION = Version.last(HintsVersion.class);
 
     static final String COMPRESSION = "compression";
     static final String ENCRYPTION = "encryption";
@@ -69,7 +69,7 @@ final class HintsDescriptor
         Pattern.compile("^[a-fA-F0-9]{8}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{4}\\-[a-fA-F0-9]{12}\\-(\\d+)\\-(\\d+)\\.hints$");
 
     final UUID hostId;
-    final int version;
+    final HintsVersion version;
     final long timestamp;
 
     final ImmutableMap<String, Object> parameters;
@@ -78,7 +78,7 @@ final class HintsDescriptor
     private final Cipher cipher;
     private final ICompressor compressor;
 
-    HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)
+    HintsDescriptor(UUID hostId, HintsVersion version, long timestamp, ImmutableMap<String, Object> parameters)
     {
         this.hostId = hostId;
         this.version = version;
@@ -195,28 +195,12 @@ final class HintsDescriptor
 
     String fileName()
     {
-        return String.format("%s-%s-%s.hints", hostId, timestamp, version);
+        return String.format("%s-%s-%s.hints", hostId, timestamp, version.code());
     }
 
     String checksumFileName()
     {
-        return String.format("%s-%s-%s.crc32", hostId, timestamp, version);
-    }
-
-    int messagingVersion()
-    {
-        return messagingVersion(version);
-    }
-
-    static int messagingVersion(int hintsVersion)
-    {
-        switch (hintsVersion)
-        {
-            case VERSION_30:
-                return MessagingService.VERSION_30;
-            default:
-                throw new AssertionError();
-        }
+        return String.format("%s-%s-%s.crc32", hostId, timestamp, version.code());
     }
 
     static boolean isHintFileName(Path path)
@@ -298,8 +282,8 @@ final class HintsDescriptor
     {
         CRC32 crc = new CRC32();
 
-        out.writeInt(version);
-        updateChecksumInt(crc, version);
+        out.writeInt(version.code());
+        updateChecksumInt(crc, version.code());
 
         out.writeLong(timestamp);
         updateChecksumLong(crc, timestamp);
@@ -322,7 +306,7 @@ final class HintsDescriptor
 
     int serializedSize()
     {
-        int size = TypeSizes.sizeof(version);
+        int size = TypeSizes.sizeof(version.code());
         size += TypeSizes.sizeof(timestamp);
 
         size += TypeSizes.sizeof(hostId.getMostSignificantBits());
@@ -363,7 +347,7 @@ final class HintsDescriptor
         crc.update(paramsBytes, 0, paramsLength);
         validateCRC(in.readInt(), (int) crc.getValue());
 
-        return new HintsDescriptor(hostId, version, timestamp, decodeJSONBytes(paramsBytes));
+        return new HintsDescriptor(hostId, HintsVersion.fromCode(version), timestamp, decodeJSONBytes(paramsBytes));
     }
 
     @SuppressWarnings("unchecked")

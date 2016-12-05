@@ -138,12 +138,8 @@ public class DataResolverTest
      */
     private void assertRepairFuture(DataResolver resolver, int expectedRepairs)
     {
-        assertEquals(expectedRepairs, resolver.repairResults.size());
-
-        // Signal all future. We pass a completely fake response message, but it doesn't matter as we just want
-        // AsyncOneResponse to signal success, and it only cares about a non-null MessageIn (it collects the payload).
-        for (AsyncOneResponse<?> future : resolver.repairResults)
-            future.response(MessageIn.create(null, null, null, null, -1));
+        assertEquals(expectedRepairs, resolver.repairResults.outstandingRepairs());
+        resolver.repairResults.releaseUnsafe();
     }
 
     @Test
@@ -172,7 +168,7 @@ public class DataResolverTest
 
         assertEquals(1, messageRecorder.sent.size());
         // peer 1 just needs to repair with the row from peer 2
-        MessageOut msg = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsNoDeletions(msg);
         assertRepairContainsColumn(msg, "1", "c1", "v2", 1);
@@ -206,7 +202,7 @@ public class DataResolverTest
 
         assertEquals(2, messageRecorder.sent.size());
         // each peer needs to repair with each other's column
-        MessageOut msg = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsColumn(msg, "1", "c2", "v2", 1);
 
@@ -252,7 +248,7 @@ public class DataResolverTest
 
         assertEquals(2, messageRecorder.sent.size());
         // each peer needs to repair the row from the other
-        MessageOut msg = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsNoDeletions(msg);
         assertRepairContainsColumn(msg, "2", "c2", "v2", 1);
@@ -318,7 +314,7 @@ public class DataResolverTest
 
         assertEquals(4, messageRecorder.sent.size());
         // peer1 needs the rows from peers 2 and 4
-        MessageOut msg = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsNoDeletions(msg);
         assertRepairContainsColumn(msg, "0", "c1", "v0", 0);
@@ -368,7 +364,7 @@ public class DataResolverTest
 
         assertEquals(1, messageRecorder.sent.size());
         // peer 2 needs the row from peer 1
-        MessageOut msg = getSentMessage(peer2);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer2);
         assertRepairMetadata(msg);
         assertRepairContainsNoDeletions(msg);
         assertRepairContainsColumn(msg, "1", "c2", "v2", 1);
@@ -410,7 +406,7 @@ public class DataResolverTest
 
         // peer1 should get the deletion from peer2
         assertEquals(1, messageRecorder.sent.size());
-        MessageOut msg = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsDeletions(msg, new DeletionTime(1, nowInSec));
         assertRepairContainsNoColumns(msg);
@@ -450,7 +446,7 @@ public class DataResolverTest
 
         // peer 1 needs to get the partition delete from peer 4 and the row from peer 3
         assertEquals(4, messageRecorder.sent.size());
-        MessageOut msg = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsDeletions(msg, new DeletionTime(2, nowInSec));
         assertRepairContainsColumn(msg, "1", "two", "B", 3);
@@ -536,11 +532,11 @@ public class DataResolverTest
 
         assertEquals(2, messageRecorder.sent.size());
 
-        MessageOut msg1 = getSentMessage(peer1);
+        Request<Mutation, EmptyPayload> msg1 = getSentMessage(peer1);
         assertRepairMetadata(msg1);
         assertRepairContainsNoColumns(msg1);
 
-        MessageOut msg2 = getSentMessage(peer2);
+        Request<Mutation, EmptyPayload> msg2 = getSentMessage(peer2);
         assertRepairMetadata(msg2);
         assertRepairContainsNoColumns(msg2);
 
@@ -611,7 +607,7 @@ public class DataResolverTest
         if (!shouldHaveRepair)
             return;
 
-        MessageOut msg = getSentMessage(peer2);
+        Request<Mutation, EmptyPayload> msg = getSentMessage(peer2);
         assertRepairMetadata(msg);
         assertRepairContainsNoColumns(msg);
 
@@ -696,9 +692,9 @@ public class DataResolverTest
             assertRepairFuture(resolver, 1);
         }
 
-        MessageOut<Mutation> msg;
+        Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer1);
-        Iterator<Row> rowIter = msg.payload.getPartitionUpdate(cfm2).iterator();
+        Iterator<Row> rowIter = msg.payload().getPartitionUpdate(cfm2).iterator();
         assertTrue(rowIter.hasNext());
         Row row = rowIter.next();
         assertFalse(rowIter.hasNext());
@@ -741,9 +737,9 @@ public class DataResolverTest
             assertRepairFuture(resolver, 1);
         }
 
-        MessageOut<Mutation> msg;
+        Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer1);
-        Iterator<Row> rowIter = msg.payload.getPartitionUpdate(cfm2).iterator();
+        Iterator<Row> rowIter = msg.payload().getPartitionUpdate(cfm2).iterator();
         assertTrue(rowIter.hasNext());
         Row row = rowIter.next();
         assertFalse(rowIter.hasNext());
@@ -793,9 +789,9 @@ public class DataResolverTest
 
         Assert.assertNull(messageRecorder.sent.get(peer1));
 
-        MessageOut<Mutation> msg;
+        Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer2);
-        Iterator<Row> rowIter = msg.payload.getPartitionUpdate(cfm2).iterator();
+        Iterator<Row> rowIter = msg.payload().getPartitionUpdate(cfm2).iterator();
         assertTrue(rowIter.hasNext());
         Row row = rowIter.next();
         assertFalse(rowIter.hasNext());
@@ -844,9 +840,9 @@ public class DataResolverTest
             assertRepairFuture(resolver, 1);
         }
 
-        MessageOut<Mutation> msg;
+        Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer1);
-        Row row = Iterators.getOnlyElement(msg.payload.getPartitionUpdate(cfm2).iterator());
+        Row row = Iterators.getOnlyElement(msg.payload().getPartitionUpdate(cfm2).iterator());
 
         ComplexColumnData cd = row.getComplexColumnData(m);
 
@@ -868,18 +864,18 @@ public class DataResolverTest
         }
     }
 
-    private MessageOut<Mutation> getSentMessage(InetAddress target)
+    private Request<Mutation, EmptyPayload> getSentMessage(InetAddress target)
     {
-        MessageOut<Mutation> message = messageRecorder.sent.get(target);
+        Request<Mutation, EmptyPayload> message = messageRecorder.sent.get(target);
         assertNotNull(String.format("No repair message was sent to %s", target), message);
         return message;
     }
 
-    private void assertRepairContainsDeletions(MessageOut<Mutation> message,
+    private void assertRepairContainsDeletions(Request<Mutation, EmptyPayload> message,
                                                DeletionTime deletionTime,
                                                RangeTombstone...rangeTombstones)
     {
-        PartitionUpdate update = ((Mutation)message.payload).getPartitionUpdates().iterator().next();
+        PartitionUpdate update = message.payload().getPartitionUpdates().iterator().next();
         DeletionInfo deletionInfo = update.deletionInfo();
         if (deletionTime != null)
             assertEquals(deletionTime, deletionInfo.getPartitionDeletion());
@@ -896,51 +892,51 @@ public class DataResolverTest
         }
     }
 
-    private void assertRepairContainsNoDeletions(MessageOut<Mutation> message)
+    private void assertRepairContainsNoDeletions(Request<Mutation, EmptyPayload> message)
     {
-        PartitionUpdate update = ((Mutation)message.payload).getPartitionUpdates().iterator().next();
+        PartitionUpdate update = message.payload().getPartitionUpdates().iterator().next();
         assertTrue(update.deletionInfo().isLive());
     }
 
-    private void assertRepairContainsColumn(MessageOut<Mutation> message,
+    private void assertRepairContainsColumn(Request<Mutation, EmptyPayload> message,
                                             String clustering,
                                             String columnName,
                                             String value,
                                             long timestamp)
     {
-        PartitionUpdate update = ((Mutation)message.payload).getPartitionUpdates().iterator().next();
+        PartitionUpdate update = message.payload().getPartitionUpdates().iterator().next();
         Row row = update.getRow(update.metadata().comparator.make(clustering));
         assertNotNull(row);
         assertColumn(cfm, row, columnName, value, timestamp);
     }
 
-    private void assertRepairContainsNoColumns(MessageOut<Mutation> message)
+    private void assertRepairContainsNoColumns(Request<Mutation, EmptyPayload> message)
     {
-        PartitionUpdate update = ((Mutation)message.payload).getPartitionUpdates().iterator().next();
+        PartitionUpdate update = message.payload().getPartitionUpdates().iterator().next();
         assertFalse(update.iterator().hasNext());
     }
 
-    private void assertRepairMetadata(MessageOut<Mutation> message)
+    private void assertRepairMetadata(Request<Mutation, EmptyPayload> message)
     {
-        assertEquals(MessagingService.Verb.READ_REPAIR, message.verb);
-        PartitionUpdate update = ((Mutation)message.payload).getPartitionUpdates().iterator().next();
+        assertEquals(Verbs.WRITES.READ_REPAIR, message.verb());
+        PartitionUpdate update = message.payload().getPartitionUpdates().iterator().next();
         assertEquals(update.metadata().keyspace, cfm.keyspace);
         assertEquals(update.metadata().name, cfm.name);
     }
 
 
-    public MessageIn<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator)
+    public Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator)
     {
         return readResponseMessage(from, partitionIterator, command);
 
     }
-    public MessageIn<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
+
+    public Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
     {
-        return MessageIn.create(from,
-                                ReadResponse.createRemoteDataResponse(partitionIterator, cmd),
-                                Collections.EMPTY_MAP,
-                                MessagingService.Verb.REQUEST_RESPONSE,
-                                MessagingService.current_version);
+        return Response.testResponse(from,
+                                     FBUtilities.getBroadcastAddress(),
+                                     Verbs.READS.READ,
+                                     ReadResponse.createRemoteDataResponse(partitionIterator, cmd));
     }
 
     private RangeTombstone tombstone(Object start, Object end, long markedForDeleteAt, int localDeletionTime)
@@ -991,14 +987,17 @@ public class DataResolverTest
 
     private static class MessageRecorder implements IMessageSink
     {
-        Map<InetAddress, MessageOut> sent = new HashMap<>();
-        public boolean allowOutgoingMessage(MessageOut message, int id, InetAddress to)
+        Map<InetAddress, Request<Mutation, EmptyPayload>> sent = new HashMap<>();
+
+        @SuppressWarnings("unchecked")
+        public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
         {
-            sent.put(to, message);
+            if (message.isRequest())
+                sent.put(message.to(), (Request<Mutation, EmptyPayload>)message);
             return false;
         }
 
-        public boolean allowIncomingMessage(MessageIn message, int id)
+        public boolean allowIncomingMessage(Message message)
         {
             return false;
         }

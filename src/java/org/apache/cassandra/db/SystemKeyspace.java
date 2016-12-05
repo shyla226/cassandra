@@ -43,6 +43,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionHistoryTabularData;
 import org.apache.cassandra.db.marshal.*;
@@ -53,7 +54,9 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.metrics.RestorableMeter;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
@@ -68,6 +71,7 @@ import static java.util.Collections.singletonMap;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
+import static org.apache.cassandra.net.ProtocolVersion.fromHandshakeVersion;
 
 public final class SystemKeyspace
 {
@@ -1027,14 +1031,21 @@ public final class SystemKeyspace
         // either we have both a recently accepted ballot and update or we have neither
         Commit accepted = row.has("proposal_version") && row.has("proposal")
                         ? new Commit(row.getUUID("proposal_ballot"),
-                                     PartitionUpdate.fromBytes(row.getBytes("proposal"), row.getInt("proposal_version")))
+                                     PartitionUpdate.fromBytes(row.getBytes("proposal"), getVersion(row, "proposal_version")))
                         : Commit.emptyCommit(key, metadata);
         // either most_recent_commit and most_recent_commit_at will both be set, or neither
         Commit mostRecent = row.has("most_recent_commit_version") && row.has("most_recent_commit")
                           ? new Commit(row.getUUID("most_recent_commit_at"),
-                                       PartitionUpdate.fromBytes(row.getBytes("most_recent_commit"), row.getInt("most_recent_commit_version")))
+                                       PartitionUpdate.fromBytes(row.getBytes("most_recent_commit"), getVersion(row, "most_recent_commit_version")))
                           : Commit.emptyCommit(key, metadata);
         return new PaxosState(promised, accepted, mostRecent);
+    }
+
+    private static EncodingVersion getVersion(UntypedResultSet.Row row, String name)
+    {
+        int messagingVersion = row.getInt(name);
+        MessagingVersion version = MessagingVersion.from(fromHandshakeVersion(messagingVersion));
+        return version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion;
     }
 
     public static void savePaxosPromise(Commit promise)
@@ -1054,8 +1065,8 @@ public final class SystemKeyspace
                         UUIDGen.microsTimestamp(proposal.ballot),
                         paxosTtlSec(proposal.update.metadata()),
                         proposal.ballot,
-                        PartitionUpdate.toBytes(proposal.update, MessagingService.current_version),
-                        MessagingService.current_version,
+                        PartitionUpdate.toBytes(proposal.update, MessagingService.current_version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion),
+                        MessagingService.current_version.protocolVersion().handshakeVersion,
                         proposal.update.partitionKey().getKey(),
                         proposal.update.metadata().id.asUUID());
     }
@@ -1075,8 +1086,8 @@ public final class SystemKeyspace
                         UUIDGen.microsTimestamp(commit.ballot),
                         paxosTtlSec(commit.update.metadata()),
                         commit.ballot,
-                        PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
-                        MessagingService.current_version,
+                        PartitionUpdate.toBytes(commit.update, MessagingService.current_version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion),
+                        MessagingService.current_version.protocolVersion().handshakeVersion,
                         commit.update.partitionKey().getKey(),
                         commit.update.metadata().id.asUUID());
     }
@@ -1299,12 +1310,10 @@ public final class SystemKeyspace
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             // The format with which token ranges are serialized in the system tables is the pre-3.0 serialization
-            // formot for ranges, so we should maintain that for now. And while we don't really support pre-3.0
-            // messaging versions, we know AbstractBounds.Serializer still support it _exactly_ for this use case, so we
-            // pass 0 as the version to trigger that legacy code.
+            // format for ranges.
             // In the future, it might be worth switching to a stable text format for the ranges to 1) save that and 2)
             // be more user friendly (the serialization format we currently use is pretty custom).
-            Range.tokenSerializer.serialize(range, out, 0);
+            Range.tokenSerializer.serialize(range, out, BoundsVersion.LEGACY);
             return out.buffer();
         }
         catch (IOException e)
@@ -1321,7 +1330,7 @@ public final class SystemKeyspace
             // See rangeToBytes above for why version is 0.
             return (Range<Token>) Range.tokenSerializer.deserialize(ByteStreams.newDataInput(ByteBufferUtil.getArray(rawRange)),
                                                                     partitioner,
-                                                                    0);
+                                                                    BoundsVersion.LEGACY);
         }
         catch (IOException e)
         {

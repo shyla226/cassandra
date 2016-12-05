@@ -143,7 +143,7 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
         InstrumentedCoordinatorSession session = sessions.registerSession(sessionID, PARTICIPANTS);
         Assert.assertEquals(0, session.prepareResponseCalls);
 
-        sessions.handlePrepareResponse(new PrepareConsistentResponse(sessionID, PARTICIPANT1, true));
+        sessions.handlePrepareResponse(null, new PrepareConsistentResponse(sessionID, PARTICIPANT1, true));
         Assert.assertEquals(1, session.prepareResponseCalls);
         Assert.assertEquals(PARTICIPANT1, session.preparePeer);
         Assert.assertEquals(true, session.prepareSuccess);
@@ -155,7 +155,7 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
         InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
         UUID fakeID = UUIDGen.getTimeUUID();
 
-        sessions.handlePrepareResponse(new PrepareConsistentResponse(fakeID, PARTICIPANT1, true));
+        sessions.handlePrepareResponse(null, new PrepareConsistentResponse(fakeID, PARTICIPANT1, true));
         Assert.assertNull(sessions.getSession(fakeID));
     }
 
@@ -168,7 +168,7 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
         InstrumentedCoordinatorSession session = sessions.registerSession(sessionID, PARTICIPANTS);
         Assert.assertEquals(0, session.finalizePromiseCalls);
 
-        sessions.handleFinalizePromiseMessage(new FinalizePromise(sessionID, PARTICIPANT1, true));
+        sessions.handleFinalizePromiseMessage(null, new FinalizePromise(sessionID, PARTICIPANT1, true));
         Assert.assertEquals(1, session.finalizePromiseCalls);
         Assert.assertEquals(PARTICIPANT1, session.promisePeer);
         Assert.assertEquals(true, session.promiseSuccess);
@@ -180,7 +180,7 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
         InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
         UUID fakeID = UUIDGen.getTimeUUID();
 
-        sessions.handleFinalizePromiseMessage(new FinalizePromise(fakeID, PARTICIPANT1, true));
+        sessions.handleFinalizePromiseMessage(null, new FinalizePromise(fakeID, PARTICIPANT1, true));
         Assert.assertNull(sessions.getSession(fakeID));
     }
 

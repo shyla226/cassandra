@@ -55,7 +55,7 @@ public class ColumnIndex
     private int[] indexOffsets;
 
     private final SerializationHeader header;
-    private final int version;
+    private final EncodingVersion version;
     private final SequentialWriter writer;
     private long initialPosition;
     private final  ISerializer<IndexInfo> idxSerializer;
@@ -80,7 +80,7 @@ public class ColumnIndex
     {
         this.header = header;
         this.writer = writer;
-        this.version = version.correspondingMessagingVersion();
+        this.version = version.encodingVersion();
         this.observers = observers;
         this.idxSerializer = indexInfoSerializer;
         this.columnIndexCacheSize = DatabaseDescriptor.getColumnIndexCacheSize();
@@ -124,7 +124,7 @@ public class ColumnIndex
         {
             Row staticRow = iterator.staticRow();
 
-            UnfilteredSerializer.serializer.serializeStaticRow(staticRow, header, writer, version);
+            UnfilteredSerializer.serializers.get(version).serializeStaticRow(staticRow, header, writer);
             if (!observers.isEmpty())
                 observers.forEach((o) -> o.nextUnfilteredCluster(staticRow));
         }
@@ -246,7 +246,7 @@ public class ColumnIndex
             startPosition = pos;
         }
 
-        UnfilteredSerializer.serializer.serialize(unfiltered, header, writer, pos - previousRowStart, version);
+        UnfilteredSerializer.serializers.get(version).serialize(unfiltered, header, writer, pos - previousRowStart);
 
         // notify observers about each new row
         if (!observers.isEmpty())
@@ -269,7 +269,7 @@ public class ColumnIndex
 
     private void finish() throws IOException
     {
-        UnfilteredSerializer.serializer.writeEndOfPartition(writer);
+        UnfilteredSerializer.serializers.get(version).writeEndOfPartition(writer);
 
         // It's possible we add no rows, just a top level deletion
         if (written == 0)

@@ -208,10 +208,9 @@ public class CommitLogReader
      */
     private boolean shouldSkipSegmentId(File file, CommitLogDescriptor desc, CommitLogPosition minPosition)
     {
-        logger.debug("Reading {} (CL version {}, messaging version {}, compression {})",
+        logger.debug("Reading {} (CL version {}, compression {})",
             file.getPath(),
             desc.version,
-            desc.getMessagingVersion(),
             desc.compression);
 
         if (minPosition.segmentId > desc.id)
@@ -291,9 +290,9 @@ public class CommitLogReader
                     return;
                 }
 
-                long claimedSizeChecksum = CommitLogFormat.calculateClaimedChecksum(reader, desc.version);
+                long claimedSizeChecksum = CommitLogFormat.calculateClaimedChecksum(reader);
                 checksum.reset();
-                CommitLogFormat.updateChecksum(checksum, serializedSize, desc.version);
+                CommitLogFormat.updateChecksum(checksum, serializedSize);
 
                 if (checksum.getValue() != claimedSizeChecksum)
                 {
@@ -311,7 +310,7 @@ public class CommitLogReader
                     buffer = new byte[(int) (1.2 * serializedSize)];
                 reader.readFully(buffer, 0, serializedSize);
 
-                claimedCRC32 = CommitLogFormat.calculateClaimedCRC32(reader, desc.version);
+                claimedCRC32 = CommitLogFormat.calculateClaimedCRC32(reader);
             }
             catch (EOFException eof)
             {
@@ -373,9 +372,8 @@ public class CommitLogReader
         final Mutation mutation;
         try (RebufferingInputStream bufIn = new DataInputBuffer(inputBuffer, 0, size))
         {
-            mutation = Mutation.serializer.deserialize(bufIn,
-                                                       desc.getMessagingVersion(),
-                                                       SerializationHelper.Flag.LOCAL);
+            mutation = Mutation.rawSerializers.get(desc.version.encodingVersion).deserialize(bufIn,
+                                                                                             SerializationHelper.Flag.LOCAL);
             // doublecheck that what we read is still] valid for the current schema
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
                 upd.validate();
@@ -428,17 +426,17 @@ public class CommitLogReader
      */
     private static class CommitLogFormat
     {
-        public static long calculateClaimedChecksum(FileDataInput input, int commitLogVersion) throws IOException
+        static long calculateClaimedChecksum(FileDataInput input) throws IOException
         {
             return input.readInt() & 0xffffffffL;
         }
 
-        public static void updateChecksum(CRC32 checksum, int serializedSize, int commitLogVersion)
+        static void updateChecksum(CRC32 checksum, int serializedSize)
         {
             updateChecksumInt(checksum, serializedSize);
         }
 
-        public static long calculateClaimedCRC32(FileDataInput input, int commitLogVersion) throws IOException
+        static long calculateClaimedCRC32(FileDataInput input) throws IOException
         {
             return input.readInt() & 0xffffffffL;
         }

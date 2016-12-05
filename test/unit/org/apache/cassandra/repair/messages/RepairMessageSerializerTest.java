@@ -27,26 +27,28 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.versioning.Version;
 
 /**
  * verifies repair message serializers are working as advertised
  */
 public class RepairMessageSerializerTest
 {
-    private static int MS_VERSION = MessagingService.current_version;
+    private static final RepairVersion CURRENT_VERSION = Version.last(RepairVersion.class);
 
     static RepairMessage serdes(RepairMessage message)
     {
-        int expectedSize = (int) RepairMessage.serializer.serializedSize(message, MS_VERSION);
+        RepairMessage.MessageSerializer<RepairMessage> serializer = message.serializer(CURRENT_VERSION);
+        int expectedSize = Math.toIntExact(serializer.serializedSize(message));
         try (DataOutputBuffer out = new DataOutputBuffer(expectedSize))
         {
-            RepairMessage.serializer.serialize(message, out, MS_VERSION);
+            serializer.serialize(message, out);
             Assert.assertEquals(expectedSize, out.buffer().limit());
             try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
             {
-                return RepairMessage.serializer.deserialize(in, MS_VERSION);
+                return serializer.deserialize(in);
             }
         }
         catch (IOException e)
@@ -84,7 +86,7 @@ public class RepairMessageSerializerTest
     {
         RepairMessage expected = new FailSession(UUIDGen.getTimeUUID());
         RepairMessage actual = serdes(expected);
-        Assert.assertEquals(expected, actual);;
+        Assert.assertEquals(expected, actual);
     }
 
     @Test
@@ -92,7 +94,7 @@ public class RepairMessageSerializerTest
     {
         RepairMessage expected = new FinalizeCommit(UUIDGen.getTimeUUID());
         RepairMessage actual = serdes(expected);
-        Assert.assertEquals(expected, actual);;
+        Assert.assertEquals(expected, actual);
     }
 
     @Test
@@ -110,6 +112,6 @@ public class RepairMessageSerializerTest
     {
         RepairMessage expected = new FinalizePropose(UUIDGen.getTimeUUID());
         RepairMessage actual = serdes(expected);
-        Assert.assertEquals(expected, actual);;
+        Assert.assertEquals(expected, actual);
     }
 }

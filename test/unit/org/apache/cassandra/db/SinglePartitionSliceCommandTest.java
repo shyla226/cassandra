@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -52,10 +53,10 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.versioning.Version;
 
 public class SinglePartitionSliceCommandTest
 {
@@ -117,13 +118,13 @@ public class SinglePartitionSliceCommandTest
 
         ColumnFilter columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(s));
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.NONE, false);
-        ReadCommand cmd = new SinglePartitionReadCommand(false, MessagingService.VERSION_30, metadata,
-                                                         FBUtilities.nowInSeconds(),
-                                                         columnFilter,
-                                                         RowFilter.NONE,
-                                                         DataLimits.NONE,
-                                                         key,
-                                                         sliceFilter);
+        ReadCommand cmd = SinglePartitionReadCommand.create(metadata,
+                                                            FBUtilities.nowInSeconds(),
+                                                            columnFilter,
+                                                            RowFilter.NONE,
+                                                            DataLimits.NONE,
+                                                            key,
+                                                            sliceFilter);
 
         // check raw iterator for static cell
         try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController))
@@ -142,10 +143,12 @@ public class SinglePartitionSliceCommandTest
             response = ReadResponse.createDataResponse(pi, cmd);
         }
 
-        out = new DataOutputBuffer((int) ReadResponse.serializer.serializedSize(response, MessagingService.VERSION_30));
-        ReadResponse.serializer.serialize(response, out, MessagingService.VERSION_30);
+        ReadVersion version = Version.last(ReadVersion.class);
+
+        out = new DataOutputBuffer(Math.toIntExact(ReadResponse.serializers.get(version).serializedSize(response)));
+        ReadResponse.serializers.get(version).serialize(response, out);
         in = new DataInputBuffer(out.buffer(), true);
-        dst = ReadResponse.serializer.deserialize(in, MessagingService.VERSION_30);
+        dst = ReadResponse.serializers.get(version).deserialize(in);
         try (UnfilteredPartitionIterator pi = dst.makeIterator(cmd))
         {
             checkForS(pi);
@@ -157,10 +160,10 @@ public class SinglePartitionSliceCommandTest
         {
             response = ReadResponse.createDataResponse(pi, cmd);
         }
-        out = new DataOutputBuffer((int) ReadResponse.serializer.serializedSize(response, MessagingService.VERSION_30));
-        ReadResponse.serializer.serialize(response, out, MessagingService.VERSION_30);
+        out = new DataOutputBuffer(Math.toIntExact(ReadResponse.serializers.get(version).serializedSize(response)));
+        ReadResponse.serializers.get(version).serialize(response, out);
         in = new DataInputBuffer(out.buffer(), true);
-        dst = ReadResponse.serializer.deserialize(in, MessagingService.VERSION_30);
+        dst = ReadResponse.serializers.get(version).deserialize(in);
         try (UnfilteredPartitionIterator pi = dst.makeIterator(cmd))
         {
             checkForS(pi);
@@ -175,13 +178,13 @@ public class SinglePartitionSliceCommandTest
         ColumnFilter columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(s));
         Slice slice = Slice.make(ClusteringBound.BOTTOM, ClusteringBound.inclusiveEndOf(ByteBufferUtil.bytes("i1")));
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.with(metadata.comparator, slice), false);
-        ReadCommand cmd = new SinglePartitionReadCommand(false, MessagingService.VERSION_30, metadata,
-                                                         FBUtilities.nowInSeconds(),
-                                                         columnFilter,
-                                                         RowFilter.NONE,
-                                                         DataLimits.NONE,
-                                                         key,
-                                                         sliceFilter);
+        ReadCommand cmd = SinglePartitionReadCommand.create(metadata,
+                                                            FBUtilities.nowInSeconds(),
+                                                            columnFilter,
+                                                            RowFilter.NONE,
+                                                            DataLimits.NONE,
+                                                            key,
+                                                            sliceFilter);
 
         String ret = cmd.toCQLString();
         Assert.assertNotNull(ret);

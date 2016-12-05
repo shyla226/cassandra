@@ -18,7 +18,6 @@
 package org.apache.cassandra.hints;
 
 import java.net.InetAddress;
-import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +33,9 @@ import org.junit.Test;
 
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.DecoratedKey;
@@ -41,18 +43,16 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.gms.IFailureDetectionEventListener;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.metrics.StorageMetrics;
-import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.Util.dk;
-import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.apache.cassandra.net.MockMessagingService.verb;
 
 public class HintsServiceTest
 {
@@ -107,7 +107,7 @@ public class HintsServiceTest
         assertEquals(cnt + 100, StorageMetrics.totalHints.getCount());
 
         // wait until hints have been send
-        spy.interceptMessageOut(100).get();
+        spy.interceptRequests(100).get();
         spy.interceptNoMsg(500, TimeUnit.MILLISECONDS).get();
     }
 
@@ -131,7 +131,7 @@ public class HintsServiceTest
 
         Futures.allAsList(
                 noMessagesWhilePaused,
-                spy.interceptMessageOut(100),
+                spy.interceptRequests(100),
                 spy.interceptNoMsg(200, TimeUnit.MILLISECONDS)
         ).get();
     }
@@ -145,11 +145,11 @@ public class HintsServiceTest
         Futures.allAsList(
                 // the dispatcher will always send all hints within the current page
                 // and only wait for the acks before going to the next page
-                spy.interceptMessageOut(20),
+                spy.interceptRequests(20),
                 spy.interceptNoMsg(200, TimeUnit.MILLISECONDS),
 
                 // next tick will trigger a retry of the same page as we only replied with 5/20 acks
-                spy.interceptMessageOut(20)
+                spy.interceptRequests(20)
         ).get();
 
         // marking the destination node as dead should stop sending hints
@@ -166,7 +166,7 @@ public class HintsServiceTest
         // At this point the dispatcher will constantly retry the page we stopped acking,
         // thus we receive the same hints from the page multiple times and in total more than
         // all written hints. Lets just consume them for a while and then pause the dispatcher.
-        spy.interceptMessageOut(22000).get();
+        spy.interceptRequests(22000).get();
         HintsService.instance.pauseDispatch();
         Thread.sleep(1000);
 
@@ -182,20 +182,16 @@ public class HintsServiceTest
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
     {
         // create spy for hint messages, but only create responses for noOfResponses hints
-        MessageIn<HintResponse> messageIn = MessageIn.create(FBUtilities.getBroadcastAddress(),
-                HintResponse.instance,
-                Collections.emptyMap(),
-                MessagingService.Verb.REQUEST_RESPONSE,
-                MessagingService.current_version);
+        Response<EmptyPayload> response = Response.testLocalAck(Verbs.HINTS.HINT);
 
         MockMessagingSpy spy;
         if (noOfResponses != -1)
         {
-            spy = MockMessagingService.when(verb(MessagingService.Verb.HINT)).respondN(messageIn, noOfResponses);
+            spy = MockMessagingService.when(verb(Verbs.HINTS.HINT)).respondN(response, noOfResponses);
         }
         else
         {
-            spy = MockMessagingService.when(verb(MessagingService.Verb.HINT)).respond(messageIn);
+            spy = MockMessagingService.when(verb(Verbs.HINTS.HINT)).respond(response);
         }
 
         // create and write noOfHints using service

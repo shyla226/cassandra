@@ -21,6 +21,7 @@ package org.apache.cassandra.service.paxos;
  */
 
 
+import java.net.InetAddress;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -28,9 +29,10 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
 
-public abstract class AbstractPaxosCallback<T> implements IAsyncCallback<T>
+public abstract class AbstractPaxosCallback<Q> implements MessageCallback<Q>
 {
     protected final CountDownLatch latch;
     protected final int targets;
@@ -45,9 +47,14 @@ public abstract class AbstractPaxosCallback<T> implements IAsyncCallback<T>
         this.queryStartNanoTime = queryStartNanoTime;
     }
 
-    public boolean isLatencyForSnitch()
+    public void onFailure(FailureResponse<Q> response)
     {
-        return false;
+        // Ignore, let the whole query timeout
+    }
+
+    public void onTimeout(InetAddress host)
+    {
+        // Ignore, let the whole query timeout
     }
 
     public int getResponseCount()

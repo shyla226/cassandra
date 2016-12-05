@@ -39,12 +39,12 @@ public class OutgoingFileMessage extends StreamMessage
 {
     public static Serializer<OutgoingFileMessage> serializer = new Serializer<OutgoingFileMessage>()
     {
-        public OutgoingFileMessage deserialize(ReadableByteChannel in, int version, StreamSession session)
+        public OutgoingFileMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session)
         {
             throw new UnsupportedOperationException("Not allowed to call deserialize on an outgoing file");
         }
 
-        public void serialize(OutgoingFileMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+        public void serialize(OutgoingFileMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException
         {
             message.startTransfer();
             try
@@ -84,14 +84,14 @@ public class OutgoingFileMessage extends StreamMessage
                                             sstable.header.toComponent());
     }
 
-    public synchronized void serialize(DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+    public synchronized void serialize(DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException
     {
         if (completed)
         {
             return;
         }
 
-        CompressionInfo compressionInfo = FileMessageHeader.serializer.serialize(header, out, version);
+        CompressionInfo compressionInfo = FileMessageHeader.serializers.get(version).serialize(header, out);
 
         final SSTableReader reader = ref.get();
         StreamWriter writer = compressionInfo == null ?

@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Response;
 
 public class DigestResolver extends ResponseResolver
 {
@@ -35,11 +35,11 @@ public class DigestResolver extends ResponseResolver
     }
 
     @Override
-    public void preprocess(MessageIn<ReadResponse> message)
+    public void preprocess(Response<ReadResponse> message)
     {
         super.preprocess(message);
-        if (dataResponse == null && !message.payload.isDigestResponse())
-            dataResponse = message.payload;
+        if (dataResponse == null && !message.payload().isDigestResponse())
+            dataResponse = message.payload();
     }
 
     /**
@@ -80,9 +80,9 @@ public class DigestResolver extends ResponseResolver
 
         // validate digests against each other; throw immediately on mismatch.
         ByteBuffer digest = null;
-        for (MessageIn<ReadResponse> message : responses)
+        for (Response<ReadResponse> message : responses)
         {
-            ReadResponse response = message.payload;
+            ReadResponse response = message.payload();
 
             ByteBuffer newDigest = response.digest(command);
             if (digest == null)

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.db.ClusteringVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.CompactTables;
@@ -33,7 +34,6 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -242,7 +242,7 @@ public class PagingState
             {
                 // We froze the serialization version to 3.0 as we need to make this this doesn't change (that is, it has to be
                 // fix for a given version of the protocol).
-                mark = Clustering.serializer.serialize(row.clustering(), MessagingService.VERSION_30, makeClusteringTypes(metadata));
+                mark = Clustering.serializer.serialize(row.clustering(), ClusteringVersion.OSS_30, makeClusteringTypes(metadata));
             }
             return new RowMark(mark, protocolVersion);
         }
@@ -254,7 +254,7 @@ public class PagingState
 
             return protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3)
                  ? decodeClustering(metadata, mark)
-                 : Clustering.serializer.deserialize(mark, MessagingService.VERSION_30, makeClusteringTypes(metadata));
+                 : Clustering.serializer.deserialize(mark, ClusteringVersion.OSS_30, makeClusteringTypes(metadata));
         }
 
         // Old (pre-3.0) encoding of cells. We need that for the protocol v3 as that is how things where encoded

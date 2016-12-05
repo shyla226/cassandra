@@ -30,15 +30,18 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.service.paxos.LWTVerbs.LWTVersion;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 public class Commit
 {
-    public static final CommitSerializer serializer = new CommitSerializer();
+    public static final Versioned<LWTVersion, CommitSerializer> serializers = LWTVersion.versioned(CommitSerializer::new);
 
     public final UUID ballot;
     public final PartitionUpdate update;
@@ -106,25 +109,31 @@ public class Commit
         return String.format("Commit(%s, %s)", ballot, update);
     }
 
-    public static class CommitSerializer implements IVersionedSerializer<Commit>
+    public static class CommitSerializer extends VersionDependent<LWTVersion> implements Serializer<Commit>
     {
-        public void serialize(Commit commit, DataOutputPlus out, int version) throws IOException
+        private CommitSerializer(LWTVersion version)
         {
-            UUIDSerializer.serializer.serialize(commit.ballot, out, version);
-            PartitionUpdate.serializer.serialize(commit.update, out, version);
+            super(version);
         }
 
-        public Commit deserialize(DataInputPlus in, int version) throws IOException
+        public void serialize(Commit commit, DataOutputPlus out) throws IOException
         {
-            UUID ballot = UUIDSerializer.serializer.deserialize(in, version);
-            PartitionUpdate update = PartitionUpdate.serializer.deserialize(in, version, SerializationHelper.Flag.LOCAL);
+            UUIDSerializer.serializer.serialize(commit.ballot, out);
+            PartitionUpdate.serializers.get(version.encodingVersion).serialize(commit.update, out);
+        }
+
+        public Commit deserialize(DataInputPlus in) throws IOException
+        {
+            UUID ballot = UUIDSerializer.serializer.deserialize(in);
+            PartitionUpdate update = PartitionUpdate.serializers.get(version.encodingVersion)
+                                                                .deserialize(in, SerializationHelper.Flag.LOCAL);
             return new Commit(ballot, update);
         }
 
-        public long serializedSize(Commit commit, int version)
+        public long serializedSize(Commit commit)
         {
-            return UUIDSerializer.serializer.serializedSize(commit.ballot, version)
-                 + PartitionUpdate.serializer.serializedSize(commit.update, version);
+            return UUIDSerializer.serializer.serializedSize(commit.ballot)
+                 + PartitionUpdate.serializers.get(version.encodingVersion).serializedSize(commit.update);
         }
     }
 }

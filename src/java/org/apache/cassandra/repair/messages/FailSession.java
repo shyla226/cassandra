@@ -23,15 +23,37 @@ import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class FailSession extends RepairMessage
+public class FailSession extends RepairMessage<FailSession>
 {
+    public static final Versioned<RepairVersion, MessageSerializer<FailSession>> serializers = RepairVersion.versioned(v -> new MessageSerializer<FailSession>(v)
+    {
+        public void serialize(FailSession msg, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(msg.sessionID, out);
+        }
+
+        public FailSession deserialize(DataInputPlus in) throws IOException
+        {
+            return new FailSession(UUIDSerializer.serializer.deserialize(in));
+        }
+
+        public long serializedSize(FailSession msg)
+        {
+            return UUIDSerializer.serializer.serializedSize(msg.sessionID);
+        }
+    });
+
     public final UUID sessionID;
 
     public FailSession(UUID sessionID)
     {
-        super(Type.FAILED_SESSION, null);
+        super(null);
         assert sessionID != null;
         this.sessionID = sessionID;
     }
@@ -51,21 +73,13 @@ public class FailSession extends RepairMessage
         return sessionID.hashCode();
     }
 
-    public static final MessageSerializer serializer = new MessageSerializer<FailSession>()
+    public MessageSerializer<FailSession> serializer(RepairVersion version)
     {
-        public void serialize(FailSession msg, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(msg.sessionID, out, version);
-        }
+        return serializers.get(version);
+    }
 
-        public FailSession deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return new FailSession(UUIDSerializer.serializer.deserialize(in, version));
-        }
-
-        public long serializedSize(FailSession msg, int version)
-        {
-            return UUIDSerializer.serializer.serializedSize(msg.sessionID, version);
-        }
-    };
+    public Verb<FailSession, ?> verb()
+    {
+        return Verbs.REPAIR.FAILED_SESSION;
+    }
 }

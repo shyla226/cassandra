@@ -23,17 +23,20 @@ import java.io.Serializable;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Summary of streaming.
  */
 public class StreamSummary implements Serializable
 {
-    public static final IVersionedSerializer<StreamSummary> serializer = new StreamSummarySerializer();
+    public static final Versioned<StreamVersion, Serializer<StreamSummary>> serializers = StreamVersion.versioned(StreamSummarySerializer::new);
 
     public final TableId tableId;
 
@@ -76,16 +79,21 @@ public class StreamSummary implements Serializable
         return sb.toString();
     }
 
-    public static class StreamSummarySerializer implements IVersionedSerializer<StreamSummary>
+    public static class StreamSummarySerializer extends VersionDependent<StreamVersion> implements Serializer<StreamSummary>
     {
-        public void serialize(StreamSummary summary, DataOutputPlus out, int version) throws IOException
+        protected StreamSummarySerializer(StreamVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(StreamSummary summary, DataOutputPlus out) throws IOException
         {
             summary.tableId.serialize(out);
             out.writeInt(summary.files);
             out.writeLong(summary.totalSize);
         }
 
-        public StreamSummary deserialize(DataInputPlus in, int version) throws IOException
+        public StreamSummary deserialize(DataInputPlus in) throws IOException
         {
             TableId tableId = TableId.deserialize(in);
             int files = in.readInt();
@@ -93,7 +101,7 @@ public class StreamSummary implements Serializable
             return new StreamSummary(tableId, files, totalSize);
         }
 
-        public long serializedSize(StreamSummary summary, int version)
+        public long serializedSize(StreamSummary summary)
         {
             long size = summary.tableId.serializedSize();
             size += TypeSizes.sizeof(summary.files);

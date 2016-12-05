@@ -38,16 +38,42 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.EncryptionContext;
+import org.apache.cassandra.utils.versioning.Version;
 import org.json.simple.JSONValue;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
 public class CommitLogDescriptor
 {
+    public enum CommitLogVersion implements Version<CommitLogVersion>
+    {
+        OSS_30(6, EncodingVersion.OSS_30),
+        OSS_40(7, EncodingVersion.OSS_30);
+
+        final int code;
+        final EncodingVersion encodingVersion;
+
+        CommitLogVersion(int code, EncodingVersion encodingVersion)
+        {
+            this.code = code;
+            this.encodingVersion = encodingVersion;
+        }
+
+        static CommitLogVersion fromCode(int code)
+        {
+            for (CommitLogVersion version : values())
+            {
+                if (version.code == code)
+                    return version;
+            }
+            throw new IllegalArgumentException(String.format("Unsupported commit log version %d found; cannot read.", code));
+        }
+    }
+
     private static final String SEPARATOR = "-";
     private static final String FILENAME_PREFIX = "CommitLog" + SEPARATOR;
     private static final String FILENAME_EXTENSION = ".log";
@@ -57,23 +83,18 @@ public class CommitLogDescriptor
     static final String COMPRESSION_PARAMETERS_KEY = "compressionParameters";
     static final String COMPRESSION_CLASS_KEY = "compressionClass";
 
-    // We don't support anything pre-3.0
-    public static final int VERSION_30 = 6;
-    public static final int VERSION_40 = 7;
-
     /**
-     * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
-     * Note: make sure to handle {@link #getMessagingVersion()}
+     * Increment this number if there is a changes in the commit log disc layout or {@link EncodingVersion} changes.
      */
     @VisibleForTesting
-    public static final int current_version = VERSION_40;
+    public static final CommitLogVersion current_version = CommitLogVersion.OSS_40;
 
-    final int version;
+    final CommitLogVersion version;
     public final long id;
     public final ParameterizedClass compression;
     private final EncryptionContext encryptionContext;
 
-    public CommitLogDescriptor(int version, long id, ParameterizedClass compression, EncryptionContext encryptionContext)
+    public CommitLogDescriptor(CommitLogVersion version, long id, ParameterizedClass compression, EncryptionContext encryptionContext)
     {
         this.version = version;
         this.id = id;
@@ -97,8 +118,8 @@ public class CommitLogDescriptor
     public static void writeHeader(ByteBuffer out, CommitLogDescriptor descriptor, Map<String, String> additionalHeaders)
     {
         CRC32 crc = new CRC32();
-        out.putInt(descriptor.version);
-        updateChecksumInt(crc, descriptor.version);
+        out.putInt(descriptor.version.code);
+        updateChecksumInt(crc, descriptor.version.code);
         out.putLong(descriptor.id);
         updateChecksumInt(crc, (int) (descriptor.id & 0xFFFFFFFFL));
         updateChecksumInt(crc, (int) (descriptor.id >>> 32));
@@ -149,11 +170,9 @@ public class CommitLogDescriptor
     public static CommitLogDescriptor readHeader(DataInput input, EncryptionContext encryptionContext) throws IOException
     {
         CRC32 checkcrc = new CRC32();
-        int version = input.readInt();
-        if (version < VERSION_30)
-            throw new IllegalArgumentException("Unsupported pre-3.0 commit log found; cannot read.");
-
-        updateChecksumInt(checkcrc, version);
+        int rawVersion = input.readInt();
+        CommitLogVersion version = CommitLogVersion.fromCode(rawVersion);
+        updateChecksumInt(checkcrc, rawVersion);
         long id = input.readLong();
         updateChecksumInt(checkcrc, (int) (id & 0xFFFFFFFFL));
         updateChecksumInt(checkcrc, (int) (id >>> 32));
@@ -198,25 +217,12 @@ public class CommitLogDescriptor
             throw new UnsupportedOperationException("Commitlog segment is too old to open; upgrade to 1.2.5+ first");
 
         long id = Long.parseLong(matcher.group(3).split(SEPARATOR)[1]);
-        return new CommitLogDescriptor(Integer.parseInt(matcher.group(2)), id, null, new EncryptionContext());
-    }
-
-    public int getMessagingVersion()
-    {
-        switch (version)
-        {
-            case VERSION_30:
-                return MessagingService.VERSION_30;
-            case VERSION_40:
-                return MessagingService.VERSION_40;
-            default:
-                throw new IllegalStateException("Unknown commitlog version " + version);
-        }
+        return new CommitLogDescriptor(CommitLogVersion.fromCode(Integer.parseInt(matcher.group(2))), id, null, new EncryptionContext());
     }
 
     public String fileName()
     {
-        return FILENAME_PREFIX + version + SEPARATOR + id + FILENAME_EXTENSION;
+        return FILENAME_PREFIX + version.code + SEPARATOR + id + FILENAME_EXTENSION;
     }
 
     /**

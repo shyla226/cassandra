@@ -24,17 +24,42 @@ import java.util.UUID;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.consistent.ConsistentSession;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class StatusResponse extends RepairMessage
+public class StatusResponse extends RepairMessage<StatusResponse>
 {
+    public static final Versioned<RepairVersion, MessageSerializer<StatusResponse>> serializers = RepairVersion.versioned(v -> new MessageSerializer<StatusResponse>(v)
+    {
+        public void serialize(StatusResponse msg, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(msg.sessionID, out);
+            out.writeInt(msg.state.ordinal());
+        }
+
+        public StatusResponse deserialize(DataInputPlus in) throws IOException
+        {
+            return new StatusResponse(UUIDSerializer.serializer.deserialize(in),
+                                      ConsistentSession.State.valueOf(in.readInt()));
+        }
+
+        public long serializedSize(StatusResponse msg)
+        {
+            return UUIDSerializer.serializer.serializedSize(msg.sessionID)
+                   + TypeSizes.sizeof(msg.state.ordinal());
+        }
+    });
+
     public final UUID sessionID;
     public final ConsistentSession.State state;
 
     public StatusResponse(UUID sessionID, ConsistentSession.State state)
     {
-        super(Type.STATUS_RESPONSE, null);
+        super(null);
         assert sessionID != null;
         assert state != null;
         this.sessionID = sessionID;
@@ -48,8 +73,7 @@ public class StatusResponse extends RepairMessage
 
         StatusResponse that = (StatusResponse) o;
 
-        if (!sessionID.equals(that.sessionID)) return false;
-        return state == that.state;
+        return sessionID.equals(that.sessionID) && state == that.state;
     }
 
     public int hashCode()
@@ -67,24 +91,13 @@ public class StatusResponse extends RepairMessage
                '}';
     }
 
-    public static final MessageSerializer serializer = new MessageSerializer<StatusResponse>()
+    public MessageSerializer<StatusResponse> serializer(RepairVersion version)
     {
-        public void serialize(StatusResponse msg, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(msg.sessionID, out, version);
-            out.writeInt(msg.state.ordinal());
-        }
+        return serializers.get(version);
+    }
 
-        public StatusResponse deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return new StatusResponse(UUIDSerializer.serializer.deserialize(in, version),
-                                      ConsistentSession.State.valueOf(in.readInt()));
-        }
-
-        public long serializedSize(StatusResponse msg, int version)
-        {
-            return UUIDSerializer.serializer.serializedSize(msg.sessionID, version)
-                   + TypeSizes.sizeof(msg.state.ordinal());
-        }
-    };
+    public Verb<StatusResponse, ?> verb()
+    {
+        return Verbs.REPAIR.STATUS_RESPONSE;
+    }
 }

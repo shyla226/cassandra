@@ -35,7 +35,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileSegmentInputStream;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 
@@ -74,16 +73,16 @@ public class CommitLogDescriptorTest
     public void testVersions()
     {
         Assert.assertTrue(CommitLogDescriptor.isValid("CommitLog-1340512736956320000.log"));
-        Assert.assertTrue(CommitLogDescriptor.isValid("CommitLog-2-1340512736956320000.log"));
+        Assert.assertTrue(CommitLogDescriptor.isValid("CommitLog-" + CommitLogDescriptor.current_version.code + "-1340512736956320000.log"));
         Assert.assertFalse(CommitLogDescriptor.isValid("CommitLog--1340512736956320000.log"));
-        Assert.assertFalse(CommitLogDescriptor.isValid("CommitLog--2-1340512736956320000.log"));
-        Assert.assertFalse(CommitLogDescriptor.isValid("CommitLog-2-1340512736956320000-123.log"));
+        Assert.assertFalse(CommitLogDescriptor.isValid("CommitLog--" + CommitLogDescriptor.current_version.code + "-1340512736956320000.log"));
+        Assert.assertFalse(CommitLogDescriptor.isValid("CommitLog-" + CommitLogDescriptor.current_version.code + "-1340512736956320000-123.log"));
 
-        Assert.assertEquals(1340512736956320000L, CommitLogDescriptor.fromFileName("CommitLog-2-1340512736956320000.log").id);
+        Assert.assertEquals(1340512736956320000L, CommitLogDescriptor.fromFileName("CommitLog-" + CommitLogDescriptor.current_version.code + "-1340512736956320000.log").id);
 
-        Assert.assertEquals(MessagingService.current_version, new CommitLogDescriptor(1340512736956320000L, null, neverEnabledEncryption).getMessagingVersion());
-        String newCLName = "CommitLog-" + CommitLogDescriptor.current_version + "-1340512736956320000.log";
-        Assert.assertEquals(MessagingService.current_version, CommitLogDescriptor.fromFileName(newCLName).getMessagingVersion());
+        Assert.assertEquals(CommitLogDescriptor.current_version, new CommitLogDescriptor(1340512736956320000L, null, neverEnabledEncryption).version);
+        String newCLName = "CommitLog-" + CommitLogDescriptor.current_version.code + "-1340512736956320000.log";
+        Assert.assertEquals(CommitLogDescriptor.current_version, CommitLogDescriptor.fromFileName(newCLName).version);
     }
 
     // migrated from CommitLogTest

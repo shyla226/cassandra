@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
@@ -209,32 +210,32 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         return Kind.NAMES;
     }
 
-    protected void serializeInternal(DataOutputPlus out, int version) throws IOException
+    protected void serializeInternal(DataOutputPlus out, ReadVersion version) throws IOException
     {
         ClusteringComparator comparator = (ClusteringComparator)clusterings.comparator();
         out.writeUnsignedVInt(clusterings.size());
         for (Clustering clustering : clusterings)
-            Clustering.serializer.serialize(clustering, out, version, comparator.subtypes());
+            Clustering.serializer.serialize(clustering, out, version.encodingVersion.clusteringVersion, comparator.subtypes());
     }
 
-    protected long serializedSizeInternal(int version)
+    protected long serializedSizeInternal(ReadVersion version)
     {
         ClusteringComparator comparator = (ClusteringComparator)clusterings.comparator();
         long size = TypeSizes.sizeofUnsignedVInt(clusterings.size());
         for (Clustering clustering : clusterings)
-            size += Clustering.serializer.serializedSize(clustering, version, comparator.subtypes());
+            size += Clustering.serializer.serializedSize(clustering, version.encodingVersion.clusteringVersion, comparator.subtypes());
         return size;
     }
 
     private static class NamesDeserializer implements InternalDeserializer
     {
-        public ClusteringIndexFilter deserialize(DataInputPlus in, int version, TableMetadata metadata, boolean reversed) throws IOException
+        public ClusteringIndexFilter deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata, boolean reversed) throws IOException
         {
             ClusteringComparator comparator = metadata.comparator;
             BTreeSet.Builder<Clustering> clusterings = BTreeSet.builder(comparator);
             int size = (int)in.readUnsignedVInt();
             for (int i = 0; i < size; i++)
-                clusterings.add(Clustering.serializer.deserialize(in, version, comparator.subtypes()));
+                clusterings.add(Clustering.serializer.deserialize(in, version.encodingVersion.clusteringVersion, comparator.subtypes()));
 
             return new ClusteringIndexNamesFilter(clusterings.build(), reversed);
         }

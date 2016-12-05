@@ -25,11 +25,11 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
+import org.apache.cassandra.utils.versioning.Version;
 
 public class CachedBTreePartition extends ImmutableBTreePartition implements CachedPartition
 {
@@ -142,10 +142,11 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
 
     static class Serializer implements ISerializer<CachedPartition>
     {
+        private final EncodingVersion version = Version.last(EncodingVersion.class);
+
+
         public void serialize(CachedPartition partition, DataOutputPlus out) throws IOException
         {
-            int version = MessagingService.current_version;
-
             assert partition instanceof CachedBTreePartition;
             CachedBTreePartition p = (CachedBTreePartition)partition;
 
@@ -155,14 +156,12 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
             partition.metadata().id.serialize(out);
             try (UnfilteredRowIterator iter = p.unfilteredIterator())
             {
-                UnfilteredRowIteratorSerializer.serializer.serialize(iter, null, out, version, p.rowCount());
+                UnfilteredRowIteratorSerializer.serializers.get(version).serialize(iter, null, out, p.rowCount());
             }
         }
 
         public CachedPartition deserialize(DataInputPlus in) throws IOException
         {
-            int version = MessagingService.current_version;
-
             // Note that it would be slightly simpler to just do
             //   ArrayBackedCachedPiartition.create(UnfilteredRowIteratorSerializer.serializer.deserialize(...));
             // However deserializing the header separatly is not a lot harder and allows us to:
@@ -176,11 +175,11 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
 
 
             TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
-            UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, SerializationHelper.Flag.LOCAL);
+            UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializers.get(version).deserializeHeader(metadata, null, in, SerializationHelper.Flag.LOCAL);
             assert !header.isReversed && header.rowEstimate >= 0;
 
             Holder holder;
-            try (UnfilteredRowIterator partition = UnfilteredRowIteratorSerializer.serializer.deserialize(in, version, metadata, SerializationHelper.Flag.LOCAL, header))
+            try (UnfilteredRowIterator partition = UnfilteredRowIteratorSerializer.serializers.get(version).deserialize(in, metadata, SerializationHelper.Flag.LOCAL, header))
             {
                 holder = ImmutableBTreePartition.build(partition, header.rowEstimate);
             }
@@ -196,8 +195,6 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
 
         public long serializedSize(CachedPartition partition)
         {
-            int version = MessagingService.current_version;
-
             assert partition instanceof CachedBTreePartition;
             CachedBTreePartition p = (CachedBTreePartition)partition;
 
@@ -207,7 +204,7 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
                      + TypeSizes.sizeof(p.cachedLiveRows)
                      + TypeSizes.sizeof(p.rowsWithNonExpiringCells)
                      + partition.metadata().id.serializedSize()
-                     + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, null, MessagingService.current_version, p.rowCount());
+                     + UnfilteredRowIteratorSerializer.serializers.get(version).serializedSize(iter, null, p.rowCount());
             }
         }
     }

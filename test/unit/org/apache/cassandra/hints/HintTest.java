@@ -19,7 +19,6 @@ package org.apache.cassandra.hints;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.util.Collections;
 import java.util.UUID;
 
 import com.google.common.collect.ImmutableList;
@@ -36,13 +35,13 @@ import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.BootStrapper;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.StorageMetrics;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
@@ -52,6 +51,7 @@ import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static junit.framework.Assert.*;
 
@@ -61,6 +61,8 @@ import static org.apache.cassandra.hints.HintsTestUtil.assertPartitionsEqual;
 
 public class HintTest
 {
+    private static final HintsVersion CURRENT_VERSION = Version.last(HintsVersion.class);
+
     private static final String KEYSPACE = "hint_test";
     private static final String TABLE0 = "table_0";
     private static final String TABLE1 = "table_1";
@@ -98,14 +100,14 @@ public class HintTest
         Hint hint = Hint.create(mutation, now / 1000);
 
         // serialize
-        int serializedSize = (int) Hint.serializer.serializedSize(hint, MessagingService.current_version);
+        int serializedSize = Math.toIntExact(Hint.serializers.get(CURRENT_VERSION).serializedSize(hint));
         DataOutputBuffer dob = new DataOutputBuffer();
-        Hint.serializer.serialize(hint, dob, MessagingService.current_version);
+        Hint.serializers.get(CURRENT_VERSION).serialize(hint, dob);
         assertEquals(serializedSize, dob.getLength());
 
         // deserialize
         DataInputPlus di = new DataInputBuffer(dob.buffer(), true);
-        Hint deserializedHint = Hint.serializer.deserialize(di, MessagingService.current_version);
+        Hint deserializedHint = Hint.serializers.get(CURRENT_VERSION).deserialize(di);
 
         // compare before/after
         assertHintsEqual(hint, deserializedHint);
@@ -245,10 +247,8 @@ public class HintTest
         assert StorageProxy.instance.getHintsInProgress() == 0;
         long totalHintCount = StorageProxy.instance.getTotalHints();
         // Process hint message.
-        HintMessage message = new HintMessage(localId, hint);
-        MessagingService.instance().getVerbHandler(MessagingService.Verb.HINT).doVerb(
-                MessageIn.create(local, message, Collections.emptyMap(), MessagingService.Verb.HINT, MessagingService.current_version),
-                -1);
+        HintMessage message = HintMessage.create(localId, hint);
+        Verbs.HINTS.HINT.newRequest(local, message).execute(x -> {}, () -> {});
 
         // hint should not be applied as we no longer are a replica
         assertNoPartitions(key, TABLE0);
@@ -290,10 +290,8 @@ public class HintTest
             assert StorageMetrics.totalHintsInProgress.getCount() == 0;
             long totalHintCount = StorageMetrics.totalHints.getCount();
             // Process hint message.
-            HintMessage message = new HintMessage(localId, hint);
-            MessagingService.instance().getVerbHandler(MessagingService.Verb.HINT).doVerb(
-                    MessageIn.create(local, message, Collections.emptyMap(), MessagingService.Verb.HINT, MessagingService.current_version),
-                    -1);
+            HintMessage message = HintMessage.create(localId, hint);
+            Verbs.HINTS.HINT.newRequest(local, message).execute(x -> {}, () -> {});
 
             // hint should not be applied as we no longer are a replica
             assertNoPartitions(key, TABLE0);

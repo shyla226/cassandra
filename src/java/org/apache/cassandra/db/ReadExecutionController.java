@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -31,7 +32,13 @@ public class ReadExecutionController implements AutoCloseable
     private final ReadExecutionController indexController;
     private final OpOrder.Group writeOp;
 
-    private ReadExecutionController(OpOrder.Group baseOp, TableMetadata baseMetadata, ReadExecutionController indexController, OpOrder.Group writeOp)
+    private final Monitor monitor;
+
+    private ReadExecutionController(OpOrder.Group baseOp,
+                                    TableMetadata baseMetadata,
+                                    ReadExecutionController indexController,
+                                    OpOrder.Group writeOp,
+                                    Monitor monitor)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -40,6 +47,7 @@ public class ReadExecutionController implements AutoCloseable
         this.baseMetadata = baseMetadata;
         this.indexController = indexController;
         this.writeOp = writeOp;
+        this.monitor = monitor;
     }
 
     public ReadExecutionController indexReadController()
@@ -59,7 +67,7 @@ public class ReadExecutionController implements AutoCloseable
 
     public static ReadExecutionController empty()
     {
-        return new ReadExecutionController(null, null, null, null);
+        return new ReadExecutionController(null, null, null, null, null);
     }
 
     /**
@@ -74,12 +82,28 @@ public class ReadExecutionController implements AutoCloseable
     @SuppressWarnings("resource") // ops closed during controller close
     static ReadExecutionController forCommand(ReadCommand command)
     {
+        return forCommand(command, null);
+    }
+
+    /**
+     * Creates an execution controller for the provided command.
+     * <p>
+     * Note: no code should use this method outside of {@link ReadCommand#executionController} (for
+     * consistency sake) and you should use that latter method if you need an execution controller.
+     *
+     * @param command the command for which to create a controller.
+     * @param monitor the {@link Monitor} to use to monitor the query. Can be {@code null} if no monitor is desired.
+     * @return the created execution controller, which must always be closed.
+     */
+    @SuppressWarnings("resource") // ops closed during controller close
+    static ReadExecutionController forCommand(ReadCommand command, Monitor monitor)
+    {
         ColumnFamilyStore baseCfs = Keyspace.openAndGetStore(command.metadata());
         ColumnFamilyStore indexCfs = maybeGetIndexCfs(baseCfs, command);
 
         if (indexCfs == null)
         {
-            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata(), null, null);
+            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata(), null, null, monitor);
         }
         else
         {
@@ -89,11 +113,11 @@ public class ReadExecutionController implements AutoCloseable
             try
             {
                 baseOp = baseCfs.readOrdering.start();
-                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata(), null, null);
+                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata(), null, null, monitor);
                 // TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try* to delete stale entries, without blocking if there's no room
                 // as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
                 writeOp = Keyspace.writeOrder.start();
-                return new ReadExecutionController(baseOp, baseCfs.metadata(), indexController, writeOp);
+                return new ReadExecutionController(baseOp, baseCfs.metadata(), indexController, writeOp, monitor);
             }
             catch (RuntimeException e)
             {
@@ -123,6 +147,16 @@ public class ReadExecutionController implements AutoCloseable
     public TableMetadata metadata()
     {
         return baseMetadata;
+    }
+
+    /**
+     * The monitor used to monitor the read query execution, if any.
+     *
+     * @return the monitor used to monitor the read operation if it is monitored, {@code null} otherwise.
+     */
+    public Monitor monitor()
+    {
+        return monitor;
     }
 
     public void close()

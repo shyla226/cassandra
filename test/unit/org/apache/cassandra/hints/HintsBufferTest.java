@@ -33,12 +33,13 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static junit.framework.Assert.*;
 
@@ -47,6 +48,8 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
 
 public class HintsBufferTest
 {
+    private static final HintsVersion CURRENT_VERSION = Version.last(HintsVersion.class);
+
     private static final String KEYSPACE = "hints_buffer_test";
     private static final String TABLE = "table";
 
@@ -102,7 +105,7 @@ public class HintsBufferTest
             load[i] = hostIds[random.nextInt(HOST_ID_COUNT)];
 
         // calculate the size of a single hint (they will all have an equal size in this test)
-        int hintSize = (int) Hint.serializer.serializedSize(createHint(0, System.currentTimeMillis()), MessagingService.current_version);
+        int hintSize = Math.toIntExact(Hint.serializers.get(CURRENT_VERSION).serializedSize(createHint(0, System.currentTimeMillis())));
         int entrySize = hintSize + HintsBuffer.ENTRY_OVERHEAD_SIZE;
 
         // allocate a slab to fit *precisely* HINTS_COUNT hints
@@ -170,9 +173,9 @@ public class HintsBufferTest
         assertEquals((int) crc.getValue(), di.readInt());
 
         // read the hint and update/validate overall crc
-        Hint hint = Hint.serializer.deserialize(di, MessagingService.current_version);
+        Hint hint = Hint.serializers.get(CURRENT_VERSION).deserialize(di);
         updateChecksum(crc, buffer, buffer.position() + 8, hintSize);
-        assertEquals((int) crc.getValue(), di.readInt());
+        assertEquals((int)crc.getValue(), di.readInt());
 
         // further validate hint correctness
         int idx = (int) (hint.creationTime - baseTimestamp);

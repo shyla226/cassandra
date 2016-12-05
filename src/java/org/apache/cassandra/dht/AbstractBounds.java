@@ -28,16 +28,15 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.Pair;
 
 public abstract class AbstractBounds<T extends RingPosition<T>> implements Serializable
 {
     private static final long serialVersionUID = 1L;
-    public static final IPartitionerDependentSerializer<AbstractBounds<Token>> tokenSerializer =
-            new AbstractBoundsSerializer<Token>(Token.serializer);
-    public static final IPartitionerDependentSerializer<AbstractBounds<PartitionPosition>> rowPositionSerializer =
-            new AbstractBoundsSerializer<PartitionPosition>(PartitionPosition.serializer);
+    public static final IPartitionerDependentSerializer<AbstractBounds<Token>, BoundsVersion> tokenSerializer =
+            new AbstractBoundsSerializer<>(Token.serializer);
+    public static final IPartitionerDependentSerializer<AbstractBounds<PartitionPosition>, BoundsVersion> rowPositionSerializer =
+            new AbstractBoundsSerializer<>(PartitionPosition.serializer);
 
     private enum Type
     {
@@ -143,13 +142,13 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
 
     public abstract AbstractBounds<T> withNewRight(T newRight);
 
-    public static class AbstractBoundsSerializer<T extends RingPosition<T>> implements IPartitionerDependentSerializer<AbstractBounds<T>>
+    public static class AbstractBoundsSerializer<T extends RingPosition<T>> implements IPartitionerDependentSerializer<AbstractBounds<T>, BoundsVersion>
     {
         private static final int IS_TOKEN_FLAG        = 0x01;
         private static final int START_INCLUSIVE_FLAG = 0x02;
         private static final int END_INCLUSIVE_FLAG   = 0x04;
 
-        IPartitionerDependentSerializer<T> serializer;
+        IPartitionerDependentSerializer<T, BoundsVersion> serializer;
 
         // Use for pre-3.0 protocol
         private static int kindInt(AbstractBounds<?> ab)
@@ -173,12 +172,12 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
             return flags;
         }
 
-        public AbstractBoundsSerializer(IPartitionerDependentSerializer<T> serializer)
+        public AbstractBoundsSerializer(IPartitionerDependentSerializer<T, BoundsVersion> serializer)
         {
             this.serializer = serializer;
         }
 
-        public void serialize(AbstractBounds<T> range, DataOutputPlus out, int version) throws IOException
+        public void serialize(AbstractBounds<T> range, DataOutputPlus out, BoundsVersion version) throws IOException
         {
             /*
              * The first int tells us if it's a range or bounds (depending on the value) _and_ if it's tokens or keys (depending on the
@@ -187,7 +186,7 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
             // !WARNING! While we don't support the pre-3.0 messaging protocol, we serialize the token range in the
             // system table (see SystemKeypsace.rangeToBytes) using the old/pre-3.0 format and until we deal with that
             // problem, we have to preserve this code.
-            if (version < MessagingService.VERSION_30)
+            if (version == BoundsVersion.LEGACY)
                 out.writeInt(kindInt(range));
             else
                 out.writeByte(kindFlags(range));
@@ -195,11 +194,11 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
             serializer.serialize(range.right, out, version);
         }
 
-        public AbstractBounds<T> deserialize(DataInput in, IPartitioner p, int version) throws IOException
+        public AbstractBounds<T> deserialize(DataInput in, IPartitioner p, BoundsVersion version) throws IOException
         {
             boolean isToken, startInclusive, endInclusive;
             // !WARNING! See serialize method above for why we still need to have that condition.
-            if (version < MessagingService.VERSION_30)
+            if (version == BoundsVersion.LEGACY)
             {
                 int kind = in.readInt();
                 isToken = kind >= 0;
@@ -228,12 +227,10 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
                 return endInclusive ? new Range<T>(left, right) : new ExcludingBounds<T>(left, right);
         }
 
-        public long serializedSize(AbstractBounds<T> ab, int version)
+        public int serializedSize(AbstractBounds<T> ab, BoundsVersion version)
         {
             // !WARNING! See serialize method above for why we still need to have that condition.
-            int size = version < MessagingService.VERSION_30
-                     ? TypeSizes.sizeof(kindInt(ab))
-                     : 1;
+            int size = version == BoundsVersion.LEGACY ? TypeSizes.sizeof(kindInt(ab)) : 1;
             size += serializer.serializedSize(ab.left, version);
             size += serializer.serializedSize(ab.right, version);
             return size;

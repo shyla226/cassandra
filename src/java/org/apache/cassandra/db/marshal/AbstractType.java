@@ -404,7 +404,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             ByteBufferUtil.writeWithVIntLength(value, out);
     }
 
-    public long writtenLength(ByteBuffer value)
+    public int writtenLength(ByteBuffer value)
     {
         assert value.hasRemaining();
         return valueLengthIfFixed() >= 0

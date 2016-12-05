@@ -102,5 +102,6 @@ public interface MessagingServiceMBean
      */
     public boolean isBackPressureEnabled();
 
+    @Deprecated
     public int getVersion(String address) throws UnknownHostException;
 }

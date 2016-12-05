@@ -33,10 +33,10 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.PropertyFileSnitch;
-import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.net.MockMessagingService.verb;
@@ -71,8 +71,8 @@ public class ShadowRoundTest
         int noOfSeeds = Gossiper.instance.seeds.size();
 
         final AtomicBoolean ackSend = new AtomicBoolean(false);
-        MockMessagingSpy spySyn = MockMessagingService.when(verb(MessagingService.Verb.GOSSIP_DIGEST_SYN))
-                .respondN((msgOut, to) ->
+        MockMessagingSpy spySyn = MockMessagingService.when(verb(Verbs.GOSSIP.SYN))
+                .respondN(req ->
                 {
                     // ACK once to finish shadow round, then busy-spin until gossiper has been enabled
                     // and then reply with remaining ACKs from other seeds
@@ -84,18 +84,19 @@ public class ShadowRoundTest
                     HeartBeatState hb = new HeartBeatState(123, 456);
                     EndpointState state = new EndpointState(hb);
                     GossipDigestAck payload = new GossipDigestAck(
-                            Collections.singletonList(new GossipDigest(to, hb.getGeneration(), hb.getHeartBeatVersion())),
-                            Collections.singletonMap(to, state));
+                            Collections.singletonList(new GossipDigest(req.to(), hb.getGeneration(), hb.getHeartBeatVersion())),
+                            Collections.singletonMap(req.to(), state));
 
                     logger.debug("Simulating digest ACK reply");
-                    return MessageIn.create(to, payload, Collections.emptyMap(), MessagingService.Verb.GOSSIP_DIGEST_ACK, MessagingService.current_version);
+                    MessagingService.instance().receive(Verbs.GOSSIP.ACK.newRequest(req.to(), payload));
+                    return null;
                 }, noOfSeeds);
 
         // GossipDigestAckVerbHandler will send ack2 for each ack received (after the shadow round)
-        MockMessagingSpy spyAck2 = MockMessagingService.when(verb(MessagingService.Verb.GOSSIP_DIGEST_ACK2)).dontReply();
+        MockMessagingSpy spyAck2 = MockMessagingService.when(verb(Verbs.GOSSIP.ACK2)).dontReply();
 
         // Migration request messages should not be emitted during shadow round
-        MockMessagingSpy spyMigrationReq = MockMessagingService.when(verb(MessagingService.Verb.MIGRATION_REQUEST)).dontReply();
+        MockMessagingSpy spyMigrationReq = MockMessagingService.when(verb(Verbs.SCHEMA.PULL)).dontReply();
 
         try
         {

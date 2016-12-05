@@ -33,13 +33,13 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static junit.framework.Assert.assertTrue;
 import static org.junit.Assert.assertEquals;
@@ -116,10 +116,10 @@ public class PartitionTest
     @Test
     public void testDigest() throws NoSuchAlgorithmException
     {
-        testDigest(MessagingService.current_version);
+        testDigest(Version.last(DigestVersion.class));
     }
 
-    public void testDigest(int version) throws NoSuchAlgorithmException
+    public void testDigest(DigestVersion version) throws NoSuchAlgorithmException
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_TENCOL);
 

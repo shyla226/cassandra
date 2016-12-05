@@ -17,14 +17,11 @@
  */
 package org.apache.cassandra.net;
 
-import java.net.InetAddress;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -34,13 +31,13 @@ import java.util.function.Function;
  */
 public class MatcherResponse
 {
-    private final Matcher<?> matcher;
+    private final Matcher matcher;
     private final Set<Integer> sendResponses = new HashSet<>();
     private final MockMessagingSpy spy = new MockMessagingSpy();
     private final AtomicInteger limitCounter = new AtomicInteger(Integer.MAX_VALUE);
     private IMessageSink sink;
 
-    MatcherResponse(Matcher<?> matcher)
+    MatcherResponse(Matcher matcher)
     {
         this.matcher = matcher;
     }
@@ -50,14 +47,14 @@ public class MatcherResponse
      */
     public MockMessagingSpy dontReply()
     {
-        return respond((MessageIn<?>)null);
+        return respond((Response<?>)null);
     }
 
     /**
      * Respond with provided message in reply to each intercepted outbound message.
      * @param message   the message to use as mock reply from the cluster
      */
-    public MockMessagingSpy respond(MessageIn<?> message)
+    public MockMessagingSpy respond(Response<?> message)
     {
         return respondN(message, Integer.MAX_VALUE);
     }
@@ -67,16 +64,16 @@ public class MatcherResponse
      * @param response  the message to use as mock reply from the cluster
      * @param limit     number of times to respond with message
      */
-    public MockMessagingSpy respondN(final MessageIn<?> response, int limit)
+    public MockMessagingSpy respondN(final Response<?> response, int limit)
     {
-        return respondN((in, to) -> response, limit);
+        return respondN(in -> (Response)response, limit);
     }
 
     /**
      * Respond with the message created by the provided function that will be called with each intercepted outbound message.
      * @param fnResponse    function to call for creating reply based on intercepted message and target address
      */
-    public <T, S> MockMessagingSpy respond(BiFunction<MessageOut<T>, InetAddress, MessageIn<S>> fnResponse)
+    public <T, S> MockMessagingSpy respond(Function<Request<T, S>, Response<S>> fnResponse)
     {
         return respondN(fnResponse, Integer.MAX_VALUE);
     }
@@ -85,11 +82,10 @@ public class MatcherResponse
      * Respond with message wrapping the payload object created by provided function called for each intercepted outbound message.
      * The target address from the intercepted message will automatically be used as the created message's sender address.
      * @param fnResponse    function to call for creating payload object based on intercepted message and target address
-     * @param verb          verb to use for reply message
      */
-    public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(Function<MessageOut<T>, S> fnResponse, MessagingService.Verb verb)
+    public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(Function<Request<T, S>, S> fnResponse)
     {
-        return respondNWithPayloadForEachReceiver(fnResponse, verb, Integer.MAX_VALUE);
+        return respondNWithPayloadForEachReceiver(fnResponse, Integer.MAX_VALUE);
     }
 
     /**
@@ -97,16 +93,15 @@ public class MatcherResponse
      * each intercepted outbound message. The target address from the intercepted message will automatically be used as the
      * created message's sender address.
      * @param fnResponse    function to call for creating payload object based on intercepted message and target address
-     * @param verb          verb to use for reply message
      */
-    public <T, S> MockMessagingSpy respondNWithPayloadForEachReceiver(Function<MessageOut<T>, S> fnResponse, MessagingService.Verb verb, int limit)
+    public <T, S> MockMessagingSpy respondNWithPayloadForEachReceiver(Function<Request<T, S>, S> fnResponse, int limit)
     {
-        return respondN((MessageOut<T> msg, InetAddress to) -> {
-                    S payload = fnResponse.apply(msg);
+        return respondN((Request<T, S> r) -> {
+                    S payload = fnResponse.apply(r);
                     if (payload == null)
                         return null;
                     else
-                        return MessageIn.create(to, payload, Collections.emptyMap(), verb, MessagingService.current_version);
+                        return r.respond(payload);
                 },
                 limit);
     }
@@ -115,22 +110,20 @@ public class MatcherResponse
      * Responds to each intercepted outbound message by creating a response message wrapping the next element consumed
      * from the provided queue. No reply will be send when the queue has been exhausted.
      * @param cannedResponses   prepared payload messages to use for responses
-     * @param verb              verb to use for reply message
      */
-    public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(Queue<S> cannedResponses, MessagingService.Verb verb)
+    public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(Queue<S> cannedResponses)
     {
-        return respondWithPayloadForEachReceiver((MessageOut<T> msg) -> cannedResponses.poll(), verb);
+        return respondWithPayloadForEachReceiver((Request<T, S> msg) -> cannedResponses.poll());
     }
 
     /**
      * Responds to each intercepted outbound message by creating a response message wrapping the next element consumed
      * from the provided queue. This method will block until queue elements are available.
      * @param cannedResponses   prepared payload messages to use for responses
-     * @param verb              verb to use for reply message
      */
-    public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(BlockingQueue<S> cannedResponses, MessagingService.Verb verb)
+    public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(BlockingQueue<S> cannedResponses)
     {
-        return respondWithPayloadForEachReceiver((MessageOut<T> msg) -> {
+        return respondWithPayloadForEachReceiver((Request<T, S> msg) -> {
             try
             {
                 return cannedResponses.take();
@@ -139,7 +132,7 @@ public class MatcherResponse
             {
                 return null;
             }
-        }, verb);
+        });
     }
 
     /**
@@ -147,7 +140,7 @@ public class MatcherResponse
      * each intercepted outbound message.
      * @param fnResponse    function to call for creating reply based on intercepted message and target address
      */
-    public <T, S> MockMessagingSpy respondN(BiFunction<MessageOut<T>, InetAddress, MessageIn<S>> fnResponse, int limit)
+    public <T, S> MockMessagingSpy respondN(Function<Request<T, S>, Response<S>> fnResponse, int limit)
     {
         limitCounter.set(limit);
 
@@ -155,13 +148,21 @@ public class MatcherResponse
 
         sink = new IMessageSink()
         {
-            public boolean allowOutgoingMessage(MessageOut message, int id, InetAddress to)
+            @SuppressWarnings("unchecked")
+            public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
             {
+                System.out.println("Caught " + message);
+
+                if (!message.isRequest())
+                    return true;
+
+                Request<T, S> request = (Request<T, S>)message;
+
                 // prevent outgoing message from being send in case matcher indicates a match
                 // and instead send the mocked response
-                if (matcher.matches(message, to))
+                if (matcher.matches(request))
                 {
-                    spy.matchingMessage(message);
+                    spy.matchingRequest(request);
 
                     if (limitCounter.decrementAndGet() < 0)
                         return false;
@@ -170,21 +171,19 @@ public class MatcherResponse
                     {
                         // I'm not sure about retry semantics regarding message/ID relationships, but I assume
                         // sending a message multiple times using the same ID shouldn't happen..
-                        assert !sendResponses.contains(id) : "ID re-use for outgoing message";
-                        sendResponses.add(id);
+                        assert message.id() == -1 || !sendResponses.contains(message.id()) : "ID re-use for outgoing message";
+                        sendResponses.add(message.id());
                     }
 
                     // create response asynchronously to match request/response communication execution behavior
-                    new Thread(() ->
-                    {
-                        MessageIn<?> response = fnResponse.apply(message, to);
+                    new Thread(() -> {
+                        Response<S> response = fnResponse.apply(request);
                         if (response != null)
                         {
-                            CallbackInfo cb = MessagingService.instance().getRegisteredCallback(id);
-                            if (cb != null)
-                                cb.callback.response(response);
+                            if (callback != null)
+                                ((MessageCallback<S>)callback).onResponse(response);
                             else
-                                MessagingService.instance().receive(response, id);
+                                MessagingService.instance().receive(response);
                             spy.matchingResponse(response);
                         }
                     }).start();
@@ -194,7 +193,7 @@ public class MatcherResponse
                 return true;
             }
 
-            public boolean allowIncomingMessage(MessageIn message, int id)
+            public boolean allowIncomingMessage(Message message)
             {
                 return true;
             }

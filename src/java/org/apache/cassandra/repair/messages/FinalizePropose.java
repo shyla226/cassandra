@@ -23,15 +23,37 @@ import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class FinalizePropose extends RepairMessage
+public class FinalizePropose extends RepairMessage<FinalizePropose>
 {
+    public static Versioned<RepairVersion, MessageSerializer<FinalizePropose>> serializers = RepairVersion.versioned(v -> new MessageSerializer<FinalizePropose>(v)
+    {
+        public void serialize(FinalizePropose msg, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(msg.sessionID, out);
+        }
+
+        public FinalizePropose deserialize(DataInputPlus in) throws IOException
+        {
+            return new FinalizePropose(UUIDSerializer.serializer.deserialize(in));
+        }
+
+        public long serializedSize(FinalizePropose msg)
+        {
+            return UUIDSerializer.serializer.serializedSize(msg.sessionID);
+        }
+    });
+
     public final UUID sessionID;
 
     public FinalizePropose(UUID sessionID)
     {
-        super(Type.FINALIZE_PROPOSE, null);
+        super(null);
         assert sessionID != null;
         this.sessionID = sessionID;
     }
@@ -58,21 +80,13 @@ public class FinalizePropose extends RepairMessage
                '}';
     }
 
-    public static MessageSerializer serializer = new MessageSerializer<FinalizePropose>()
+    public MessageSerializer<FinalizePropose> serializer(RepairVersion version)
     {
-        public void serialize(FinalizePropose msg, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(msg.sessionID, out, version);
-        }
+        return serializers.get(version);
+    }
 
-        public FinalizePropose deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return new FinalizePropose(UUIDSerializer.serializer.deserialize(in, version));
-        }
-
-        public long serializedSize(FinalizePropose msg, int version)
-        {
-            return UUIDSerializer.serializer.serializedSize(msg.sessionID, version);
-        }
-    };
+    public Verb<FinalizePropose, ?> verb()
+    {
+        return Verbs.REPAIR.FINALIZE_PROPOSE;
+    }
 }

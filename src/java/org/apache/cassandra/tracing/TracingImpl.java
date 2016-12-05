@@ -26,7 +26,6 @@ import java.util.UUID;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 
 /**
@@ -106,7 +105,7 @@ class TracingImpl extends Tracing
     {
         final String threadName = Thread.currentThread().getName();
 
-        StageManager.getStage(Stage.TRACING).execute(new WrappedRunnable()
+        StageManager.getStage(Stage.TRACING).execute(new TracingRunnable()
         {
             public void runMayThrow()
             {

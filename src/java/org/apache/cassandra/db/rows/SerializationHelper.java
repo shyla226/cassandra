@@ -46,7 +46,7 @@ public class SerializationHelper
     }
 
     private final Flag flag;
-    public final int version;
+    public final EncodingVersion version;
 
     private final ColumnFilter columnsToFetch;
     private ColumnFilter.Tester tester;
@@ -55,7 +55,7 @@ public class SerializationHelper
     private DroppedColumn currentDroppedComplex;
 
 
-    public SerializationHelper(TableMetadata metadata, int version, Flag flag, ColumnFilter columnsToFetch)
+    public SerializationHelper(TableMetadata metadata, EncodingVersion version, Flag flag, ColumnFilter columnsToFetch)
     {
         this.flag = flag;
         this.version = version;
@@ -63,7 +63,7 @@ public class SerializationHelper
         this.droppedColumns = metadata.droppedColumns;
     }
 
-    public SerializationHelper(TableMetadata metadata, int version, Flag flag)
+    public SerializationHelper(TableMetadata metadata, EncodingVersion version, Flag flag)
     {
         this(metadata, version, flag, null);
     }

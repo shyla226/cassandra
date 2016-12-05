@@ -494,9 +494,8 @@ public class CommitLogStressTest
             Mutation mutation;
             try
             {
-                mutation = Mutation.serializer.deserialize(bufIn,
-                                                           desc.getMessagingVersion(),
-                                                           SerializationHelper.Flag.LOCAL);
+                mutation = Mutation.rawSerializers.get(desc.version.encodingVersion).deserialize(bufIn,
+                                                                                                 SerializationHelper.Flag.LOCAL);
             }
             catch (IOException e)
             {

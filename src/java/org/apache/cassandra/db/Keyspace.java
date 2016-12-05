@@ -38,6 +38,8 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -501,7 +503,7 @@ public class Keyspace
                                                CompletableFuture<?> future)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
-            throw new RuntimeException("Testing write failures");
+            throw new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Testing write failures");
 
         Lock[] locks = null;
 

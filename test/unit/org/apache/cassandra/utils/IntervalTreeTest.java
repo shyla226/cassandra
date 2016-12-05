@@ -21,19 +21,11 @@ package org.apache.cassandra.utils;
  */
 
 
-import java.io.IOException;
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 import org.junit.Test;
-import org.apache.cassandra.io.ISerializer;
-import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.io.util.DataOutputPlus;
 
 import static org.junit.Assert.assertEquals;
 
@@ -122,77 +114,5 @@ public class IntervalTreeTest
             l.add(i);
 
         assertEquals(intervals, l);
-    }
-
-    @Test
-    public void testSerialization() throws Exception
-    {
-        List<Interval<Integer, String>> intervals = new ArrayList<Interval<Integer, String>>();
-
-        intervals.add(Interval.<Integer, String>create(-300, -200, "a"));
-        intervals.add(Interval.<Integer, String>create(-3, -2, "b"));
-        intervals.add(Interval.<Integer, String>create(1, 2, "c"));
-        intervals.add(Interval.<Integer, String>create(1, 3, "d"));
-        intervals.add(Interval.<Integer, String>create(2, 4, "e"));
-        intervals.add(Interval.<Integer, String>create(3, 6, "f"));
-        intervals.add(Interval.<Integer, String>create(4, 6, "g"));
-        intervals.add(Interval.<Integer, String>create(5, 7, "h"));
-        intervals.add(Interval.<Integer, String>create(8, 9, "i"));
-        intervals.add(Interval.<Integer, String>create(15, 20, "j"));
-        intervals.add(Interval.<Integer, String>create(40, 50, "k"));
-        intervals.add(Interval.<Integer, String>create(49, 60, "l"));
-
-        IntervalTree<Integer, String, Interval<Integer, String>> it = IntervalTree.build(intervals);
-
-        IVersionedSerializer<IntervalTree<Integer, String, Interval<Integer, String>>> serializer = IntervalTree.serializer(
-                new ISerializer<Integer>()
-                {
-                    public void serialize(Integer i, DataOutputPlus out) throws IOException
-                    {
-                        out.writeInt(i);
-                    }
-
-                    public Integer deserialize(DataInputPlus in) throws IOException
-                    {
-                        return in.readInt();
-                    }
-
-                    public long serializedSize(Integer i)
-                    {
-                        return 4;
-                    }
-                },
-                new ISerializer<String>()
-                {
-                    public void serialize(String v, DataOutputPlus out) throws IOException
-                    {
-                        out.writeUTF(v);
-                    }
-
-                    public String deserialize(DataInputPlus in) throws IOException
-                    {
-                        return in.readUTF();
-                    }
-
-                    public long serializedSize(String v)
-                    {
-                        return v.length();
-                    }
-                },
-                (Constructor<Interval<Integer, String>>) (Object) Interval.class.getConstructor(Object.class, Object.class, Object.class)
-        );
-
-        DataOutputBuffer out = new DataOutputBuffer();
-
-        serializer.serialize(it, out, 0);
-
-        DataInputPlus in = new DataInputBuffer(out.toByteArray());
-
-        IntervalTree<Integer, String, Interval<Integer, String>> it2 = serializer.deserialize(in, 0);
-        List<Interval<Integer, String>> intervals2 = new ArrayList<Interval<Integer, String>>();
-        for (Interval<Integer, String> i : it2)
-            intervals2.add(i);
-
-        assertEquals(intervals, intervals2);
     }
 }

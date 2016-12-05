@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.cql3.conditions.ColumnCondition;
+import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -44,16 +46,16 @@ public abstract class Token implements RingPosition<Token>, Serializable
         public abstract void validate(String token) throws ConfigurationException;
     }
 
-    public static class TokenSerializer implements IPartitionerDependentSerializer<Token>
+    public static class TokenSerializer implements IPartitionerDependentSerializer<Token, BoundsVersion>
     {
-        public void serialize(Token token, DataOutputPlus out, int version) throws IOException
+        public void serialize(Token token, DataOutputPlus out, BoundsVersion version) throws IOException
         {
             IPartitioner p = token.getPartitioner();
             ByteBuffer b = p.getTokenFactory().toByteArray(token);
             ByteBufferUtil.writeWithLength(b, out);
         }
 
-        public Token deserialize(DataInput in, IPartitioner p, int version) throws IOException
+        public Token deserialize(DataInput in, IPartitioner p, BoundsVersion version) throws IOException
         {
             int size = in.readInt();
             byte[] bytes = new byte[size];
@@ -61,7 +63,7 @@ public abstract class Token implements RingPosition<Token>, Serializable
             return p.getTokenFactory().fromByteArray(ByteBuffer.wrap(bytes));
         }
 
-        public long serializedSize(Token object, int version)
+        public int serializedSize(Token object, BoundsVersion version)
         {
             IPartitioner p = object.getPartitioner();
             ByteBuffer b = p.getTokenFactory().toByteArray(object);

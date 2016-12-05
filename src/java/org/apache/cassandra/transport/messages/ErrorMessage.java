@@ -20,7 +20,7 @@ package org.apache.cassandra.transport.messages;
 import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.CodecException;
@@ -89,7 +89,7 @@ public class ErrorMessage extends Message.Response
                         // The number of failures is also present in protocol v5, but used instead to specify the size of the failure map
                         int failure = body.readInt();
 
-                        Map<InetAddress, RequestFailureReason> failureReasonByEndpoint = new ConcurrentHashMap<>();
+                        Map<InetAddress, RequestFailureReason> failureReasonByEndpoint = new HashMap<>();
                         if (version.isGreaterOrEqualTo(ProtocolVersion.V5))
                         {
                             for (int i = 0; i < failure; i++)
@@ -198,7 +198,7 @@ public class ErrorMessage extends Message.Response
                             for (Map.Entry<InetAddress, RequestFailureReason> entry : rfe.failureReasonByEndpoint.entrySet())
                             {
                                 CBUtil.writeInetAddr(entry.getKey(), dest);
-                                dest.writeShort(entry.getValue().code);
+                                dest.writeShort(entry.getValue().codeForNativeProtocol());
                             }
                         }
 

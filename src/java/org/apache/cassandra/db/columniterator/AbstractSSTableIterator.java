@@ -70,7 +70,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         this.key = key;
         this.columns = columnFilter;
         this.slices = slices;
-        this.helper = new SerializationHelper(metadata, sstable.descriptor.version.correspondingMessagingVersion(), SerializationHelper.Flag.LOCAL, columnFilter);
+        this.helper = new SerializationHelper(metadata, sstable.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, columnFilter);
 
         if (indexEntry == null)
         {
@@ -165,12 +165,12 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
         if (statics.isEmpty())
         {
-            UnfilteredSerializer.serializer.skipStaticRow(file, sstable.header, helper);
+            UnfilteredSerializer.serializers.get(helper.version).skipStaticRow(file, sstable.header, helper);
             return Rows.EMPTY_STATIC_ROW;
         }
         else
         {
-            return UnfilteredSerializer.serializer.deserializeStaticRow(file, sstable.header, helper);
+            return UnfilteredSerializer.serializers.get(helper.version).deserializeStaticRow(file, sstable.header, helper);
         }
     }
 
@@ -180,7 +180,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     {
         return slices.isEmpty() ? new NoRowsReader(file, shouldCloseFile)
                                 : createReaderInternal(indexEntry, file, shouldCloseFile);
-    };
+    }
 
     public TableMetadata metadata()
     {

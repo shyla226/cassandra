@@ -23,6 +23,7 @@ import java.util.UUID;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.Mutation;
@@ -30,9 +31,9 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static junit.framework.Assert.assertEquals;
 
@@ -43,6 +44,8 @@ public class HintMessageTest
 {
     private static final String KEYSPACE = "hint_message_test";
     private static final String TABLE = "table";
+
+    private static final HintsVersion version = Version.last(HintsVersion.class);
 
     @Test
     public void testSerializer() throws IOException
@@ -60,20 +63,20 @@ public class HintMessageTest
                 .add("val", "val" + 1234)
                 .build();
         Hint hint = Hint.create(mutation, now / 1000);
-        HintMessage message = new HintMessage(hostId, hint);
+        HintMessage message = HintMessage.create(hostId, hint);
 
         // serialize
-        int serializedSize = (int) HintMessage.serializer.serializedSize(message, MessagingService.current_version);
+        int serializedSize = Math.toIntExact(HintMessage.serializers.get(version).serializedSize(message));
         DataOutputBuffer dob = new DataOutputBuffer();
-        HintMessage.serializer.serialize(message, dob, MessagingService.current_version);
+        HintMessage.serializers.get(version).serialize(message, dob);
         assertEquals(serializedSize, dob.getLength());
 
         // deserialize
         DataInputPlus di = new DataInputBuffer(dob.buffer(), true);
-        HintMessage deserializedMessage = HintMessage.serializer.deserialize(di, MessagingService.current_version);
+        HintMessage deserializedMessage = HintMessage.serializers.get(version).deserialize(di);
 
         // compare before/after
         assertEquals(hostId, deserializedMessage.hostId);
-        assertHintsEqual(message.hint, deserializedMessage.hint);
+        assertHintsEqual(message.hint(), deserializedMessage.hint());
     }
 }

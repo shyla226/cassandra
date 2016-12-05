@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.db.EncodingVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.db.RowIndexEntry;
@@ -31,7 +32,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.net.MessagingService;
 
 /**
  * Legacy bigtable format
@@ -126,7 +126,7 @@ public class BigFormat implements SSTableFormat
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
         private final boolean isLatestVersion;
-        public final int correspondingMessagingVersion;
+        private final EncodingVersion encodingVersion;
         private final boolean hasCommitLogLowerBound;
         private final boolean hasCommitLogIntervals;
         public final boolean hasMaxCompressedLength;
@@ -137,7 +137,7 @@ public class BigFormat implements SSTableFormat
             super(instance, version);
 
             isLatestVersion = version.compareTo(current_version) == 0;
-            correspondingMessagingVersion = MessagingService.VERSION_30;
+            encodingVersion = EncodingVersion.OSS_30;
 
             hasCommitLogLowerBound = version.compareTo("mb") >= 0;
             hasCommitLogIntervals = version.compareTo("mc") >= 0;
@@ -169,9 +169,9 @@ public class BigFormat implements SSTableFormat
         }
 
         @Override
-        public int correspondingMessagingVersion()
+        public EncodingVersion encodingVersion()
         {
-            return correspondingMessagingVersion;
+            return encodingVersion;
         }
 
         @Override

@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.*;
@@ -27,6 +28,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * A filter that selects a subset of the rows of a given partition by using the "clustering index".
@@ -37,7 +39,7 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public interface ClusteringIndexFilter
 {
-    public static Serializer serializer = AbstractClusteringIndexFilter.serializer;
+    public static Versioned<ReadVersion, Serializer> serializers = AbstractClusteringIndexFilter.serializers;
 
     public enum Kind
     {
@@ -54,7 +56,7 @@ public interface ClusteringIndexFilter
 
     static interface InternalDeserializer
     {
-        public ClusteringIndexFilter deserialize(DataInputPlus in, int version, TableMetadata metadata, boolean reversed) throws IOException;
+        public ClusteringIndexFilter deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata, boolean reversed) throws IOException;
     }
 
     /**
@@ -155,8 +157,8 @@ public interface ClusteringIndexFilter
 
     public interface Serializer
     {
-        public void serialize(ClusteringIndexFilter filter, DataOutputPlus out, int version) throws IOException;
-        public ClusteringIndexFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException;
-        public long serializedSize(ClusteringIndexFilter filter, int version);
+        public void serialize(ClusteringIndexFilter filter, DataOutputPlus out ) throws IOException;
+        public ClusteringIndexFilter deserialize(DataInputPlus in, TableMetadata metadata) throws IOException;
+        public long serializedSize(ClusteringIndexFilter filter);
     }
 }

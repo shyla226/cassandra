@@ -96,7 +96,7 @@ public class ErrorMessageTest
      * so later modifications to the map passed in don't affect the map in the exception.
      *
      * This is to prevent potential issues in serialization if the map created in
-     * ReadCallback/AbstractWriteResponseHandler is modified due to a delayed failure
+     * ReadCallback/WriteHandler is modified due to a delayed failure
      * response after the exception is created.
      */
     @Test

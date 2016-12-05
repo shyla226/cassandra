@@ -222,7 +222,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
             Hint hint;
             try
             {
-                hint = Hint.serializer.deserialize(input, descriptor.messagingVersion());
+                hint = Hint.serializers.get(descriptor.version).deserialize(input);
                 input.checkLimit(0);
             }
             catch (UnknownTableException e)

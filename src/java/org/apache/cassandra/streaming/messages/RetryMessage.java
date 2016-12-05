@@ -38,15 +38,15 @@ public class RetryMessage extends StreamMessage
     public static Serializer<RetryMessage> serializer = new Serializer<RetryMessage>()
     {
         @SuppressWarnings("resource") // Not closing constructed DataInputPlus's as the channel needs to remain open.
-        public RetryMessage deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException
+        public RetryMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException
         {
             DataInputPlus input = new DataInputStreamPlus(Channels.newInputStream(in));
-            return new RetryMessage(UUIDSerializer.serializer.deserialize(input, MessagingService.current_version), input.readInt());
+            return new RetryMessage(UUIDSerializer.serializer.deserialize(input), input.readInt());
         }
 
-        public void serialize(RetryMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+        public void serialize(RetryMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException
         {
-            UUIDSerializer.serializer.serialize(message.cfId, out, MessagingService.current_version);
+            UUIDSerializer.serializer.serialize(message.cfId, out);
             out.writeInt(message.sequenceNumber);
         }
     };

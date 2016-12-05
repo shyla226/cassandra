@@ -194,9 +194,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             remaining = getRemaining();
             remainingInPartition = getRemainingInPartition();
 
-            // if the page command was not aborted and if the counter did not count
-            // up to the page limits, then the iteration must have reached the end
-            exhausted = !pageCommand.aborted() && pageLimits.isExhausted(counter);
+            // if the counter did not count up to the page limits, then the iteration must have reached the end
+            exhausted = pageLimits.isExhausted(counter);
 
             // remove the internal page so that we know that the iteration is finished
             internalPager = null;

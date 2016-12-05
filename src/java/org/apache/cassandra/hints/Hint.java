@@ -25,10 +25,13 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.base.Throwables;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
@@ -50,7 +53,7 @@ import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
  */
 public final class Hint
 {
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<HintsVersion, HintSerializer> serializers = HintsVersion.versioned(HintSerializer::new);
 
     final Mutation mutation;
     final long creationTime;  // time of hint creation (in milliseconds)
@@ -124,31 +127,36 @@ public final class Hint
         return expirationTime > System.currentTimeMillis();
     }
 
-    static final class Serializer implements IVersionedSerializer<Hint>
+    static final class HintSerializer extends VersionDependent<HintsVersion> implements Serializer<Hint>
     {
-        public long serializedSize(Hint hint, int version)
+        private HintSerializer(HintsVersion version)
+        {
+            super(version);
+        }
+
+        public long serializedSize(Hint hint)
         {
             long size = sizeof(hint.creationTime);
             size += sizeofUnsignedVInt(hint.gcgs);
-            size += Mutation.serializer.serializedSize(hint.mutation, version);
+            size += Mutation.rawSerializers.get(version.encodingVersion).serializedSize(hint.mutation);
             return size;
         }
 
-        public void serialize(Hint hint, DataOutputPlus out, int version) throws IOException
+        public void serialize(Hint hint, DataOutputPlus out) throws IOException
         {
             out.writeLong(hint.creationTime);
             out.writeUnsignedVInt(hint.gcgs);
-            Mutation.serializer.serialize(hint.mutation, out, version);
+            Mutation.rawSerializers.get(version.encodingVersion).serialize(hint.mutation, out);
         }
 
-        public Hint deserialize(DataInputPlus in, int version) throws IOException
+        public Hint deserialize(DataInputPlus in) throws IOException
         {
             long creationTime = in.readLong();
             int gcgs = (int) in.readUnsignedVInt();
-            return new Hint(Mutation.serializer.deserialize(in, version), creationTime, gcgs);
+            return new Hint(Mutation.rawSerializers.get(version.encodingVersion).deserialize(in), creationTime, gcgs);
         }
 
-        public long getHintCreationTime(ByteBuffer hintBuffer, int version)
+        long getHintCreationTime(ByteBuffer hintBuffer)
         {
             return hintBuffer.getLong(0);
         }

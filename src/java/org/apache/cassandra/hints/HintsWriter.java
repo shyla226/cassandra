@@ -218,14 +218,14 @@ class HintsWriter implements AutoCloseable
          * Serializes and appends the hint (with CRC included) to this session's aggregation buffer,
          * writes to the underlying channel when the buffer is overflown.
          *
-         * Used mainly by tests and {@link LegacyHintsMigrator}
+         * Used mainly by tests
          *
          * @param hint the unserialized hint
          * @throws IOException
          */
         void append(Hint hint) throws IOException
         {
-            int hintSize = (int) Hint.serializer.serializedSize(hint, descriptor.messagingVersion());
+            int hintSize = (int) Hint.serializers.get(descriptor.version).serializedSize(hint);
             int totalSize = hintSize + HintsBuffer.ENTRY_OVERHEAD_SIZE;
 
             if (totalSize > buffer.remaining())
@@ -242,7 +242,7 @@ class HintsWriter implements AutoCloseable
                 updateChecksumInt(crc, hintSize);
                 out.writeInt((int) crc.getValue());
 
-                Hint.serializer.serialize(hint, out, descriptor.messagingVersion());
+                Hint.serializers.get(descriptor.version).serialize(hint, out);
                 updateChecksum(crc, hintBuffer, hintBuffer.position() - hintSize, hintSize);
                 out.writeInt((int) crc.getValue());
             }
