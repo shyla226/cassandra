@@ -478,6 +478,13 @@ def cf_prop_val_mapkey_completer(ctxt, cass):
             opts.add('max_sstable_age_days')
             opts.add('min_threshold')
             opts.add('max_window_size_seconds')
+        elif csc == 'TimeWindowCompactionStrategy':
+            opts.add('compaction_window_unit')
+            opts.add('compaction_window_size')
+            opts.add('min_threshold')
+            opts.add('max_threshold')
+            opts.add('timestamp_resolution')
+
         return map(escape_value, opts)
     return ()
 

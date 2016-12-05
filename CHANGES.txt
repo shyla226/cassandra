@@ -1,4 +1,5 @@
 DSE backports
+ * Backport TimeWindowCompactionStrategy (APOLLO-15)
  * Fix merkle tree depth calculation (CASSANDRA-12580)
  * Avoid assertion error when IndexSummary > 2G (CASSANDRA-12014)
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
