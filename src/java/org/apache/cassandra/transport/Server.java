@@ -51,6 +51,7 @@ import io.netty.util.Version;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
+import org.apache.cassandra.concurrent.OuterEventExecutorGroup;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -322,8 +323,9 @@ public class Server implements CassandraDaemon.Server
             }
 
             //pipeline.addLast("debug", new LoggingHandler());
+            //OuterEventExecutorGroup e = new OuterEventExecutorGroup(channel.eventLoop());
 
-            pipeline.addLast(pipeline.channel().eventLoop(), "frameDecoder", new Frame.Decoder(server.connectionFactory));
+            pipeline.addLast("frameDecoder", new Frame.Decoder(server.connectionFactory));
             pipeline.addLast("frameEncoder", frameEncoder);
 
             pipeline.addLast("frameDecompressor", frameDecompressor);

@@ -26,7 +26,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
 
 
@@ -45,9 +44,7 @@ import io.netty.util.concurrent.RejectedExecutionHandlers;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import net.nicoulaj.compilecommand.annotations.Inline;
-import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
-import org.jctools.queues.SpscArrayQueue;
 import sun.misc.Contended;
 
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
@@ -89,18 +86,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         monitorThread = threadFactory.newThread(() -> {
             int length = eventLoops.length;
-            long now = -1;
 
             while (true)
             {
                 for (int i = 0; i < length; i++)
-                {
-                    if (i == 0)
-                        now = eventLoops[i].nanotime();
+                    eventLoops[i].checkQueues();
 
-                    eventLoops[i].checkQueues(now);
-                }
-                
                 LockSupport.parkNanos(1);
             }
         });
@@ -185,6 +176,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private static final int parkExtraSpins = 1024; // 1024 is ~50ms
 
         private volatile int pendingEpollEvents = 0;
+        private volatile long delayedNanosDeadline = -1;
 
         @Contended
         private volatile CoreState state;
@@ -200,9 +192,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject());
 
             this.threadOffset = threadOffset;
-
             this.externalQueue = new MpscArrayQueue<>(1 << 16);
-
             this.internalQueue = new ArrayDeque<>(1 << 16);
 
             this.state = CoreState.WORKING;
@@ -270,11 +260,10 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             LockSupport.unpark(runningThreads[threadOffset]);
         }
 
-        private void checkQueues(long now)
+        private void checkQueues()
         {
             boolean epollReady = hasEpollReady();
-
-            fetchFromDelayedQueue(now);
+            delayedNanosDeadline = nanotime();
 
             if (state == CoreState.PARKED && (epollReady || !isEmpty()))
                 unpark();
@@ -293,7 +282,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 }
                 else
                 {
-                    if (!externalQueue.offer(task))
+                    if (!externalQueue.relaxedOffer(task))
                         throw new RuntimeException("Backpressure");
                 }
             }
@@ -346,6 +335,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             int processed = 0;
 
+            if (delayedNanosDeadline > 0)
+            {
+                fetchFromDelayedQueue(delayedNanosDeadline);
+                delayedNanosDeadline = -1;
+            }
+
             Runnable r;
             while ((r = internalQueue.poll()) != null)
             {
@@ -366,9 +361,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Inline
         protected boolean hasTasks()
         {
-            boolean empty = internalQueue.peek() == null && externalQueue.relaxedPeek() == null;
+            boolean hasTasks = internalQueue.peek() != null || externalQueue.relaxedPeek() != null;
 
-            return !empty;
+            if (!hasTasks && delayedNanosDeadline > 0)
+                hasTasks = hasScheduledTasks(delayedNanosDeadline);
+
+            return hasTasks;
         }
 
         boolean hasEpollReady()
@@ -408,12 +406,13 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Inline
         void fetchFromDelayedQueue(long nanoTime)
         {
-            Runnable scheduledTask  = pollScheduledTask(nanoTime);
+            Runnable scheduledTask = pollScheduledTask(nanoTime);
             while (scheduledTask != null)
             {
                 submit(scheduledTask);
                 scheduledTask = pollScheduledTask(nanoTime);
             }
         }
+
     }
 }
