@@ -9,6 +9,7 @@ Merged from 4.0:
 
 
 DSE 5.1.0
+ * Make SinglePartitionReadCommand::queriesMulticellType() faster (APOLLO-117)
  * Accept internal resource name in GRANT/REVOKE statements (APOLLO-113)
  * Improve StatementRestrictions::getPartitionKeys() execution speed (APOLLO-115)
  * Move responsibility for qualifying ks in authz stmts to IResource (APOLLO-76)
