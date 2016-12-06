@@ -121,6 +121,7 @@ public final class CFMetaData
     // for those tables in practice).
     private volatile ColumnDefinition compactValueColumn;
 
+    public volatile boolean hasMulticellOrCounterColumn;
     public final DataResource resource;
 
     //For hot path serialization it's often easier to store this info here
@@ -320,10 +321,16 @@ public final class CFMetaData
             newColumnMetadata.put(def.name.bytes, def);
             def.type.checkComparable();
         }
+
+        boolean newHasMulticellOrCounterColumn = false;
         for (ColumnDefinition def : partitionColumns)
+        {
             newColumnMetadata.put(def.name.bytes, def);
+            newHasMulticellOrCounterColumn |= def.type.isMultiCell() || def.type.isCounter();
+        }
 
         this.columnMetadata = newColumnMetadata;
+        this.hasMulticellOrCounterColumn = newHasMulticellOrCounterColumn;
 
         List<AbstractType<?>> keyTypes = extractTypes(partitionKeyColumns);
         this.keyValidator = keyTypes.size() == 1 ? keyTypes.get(0) : CompositeType.getInstance(keyTypes);

@@ -532,7 +532,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType())
+        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata))
             return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter)clusteringIndexFilter());
 
         Tracing.trace("Acquiring sstable references");
@@ -707,8 +707,11 @@ public class SinglePartitionReadCommand extends ReadCommand
         return Transformation.apply(merged, new UpdateSstablesIterated());
     }
 
-    private boolean queriesMulticellType()
+    private boolean queriesMulticellType(CFMetaData cfm)
     {
+        if (!cfm.hasMulticellOrCounterColumn)
+            return false;
+
         for (ColumnDefinition column : columnFilter().fetchedColumns())
         {
             if (column.type.isMultiCell() || column.type.isCounter())
