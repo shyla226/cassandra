@@ -37,9 +37,11 @@ import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
@@ -209,6 +211,13 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         {
             kind = IndexMetadata.Kind.CUSTOM;
             indexOptions = properties.getOptions();
+
+            if (properties.customClass.equals(SASIIndex.class.getName()))
+            {
+                String warning = String.format(SASIIndex.USAGE_WARNING, cfm.ksName, cfm.cfName);
+                logger.warn(warning);
+                ClientWarn.instance.warn(warning);
+            }
         }
         else
         {
