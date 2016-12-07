@@ -56,6 +56,8 @@ public class NativeTransportService
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
 
+    public static final int NUM_SOCKETS = 2;
+    public static final int CORES_PER_SOCKET = 24;
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() - 1)));
     public static final int NETTY_CORE_OFFSET = Math.max(0, FBUtilities.getAvailableProcessors() - NUM_NETTY_THREADS);
 
@@ -164,8 +166,9 @@ public class NativeTransportService
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
 
         long cpuMaskTmp = 0L;
-        for (int i = NETTY_CORE_OFFSET; i < FBUtilities.getAvailableProcessors(); i++)
-            cpuMaskTmp |= 1L << i;
+        for (int i = 0; i < FBUtilities.getAvailableProcessors(); i++)
+            if (i % CORES_PER_SOCKET != 0)
+                cpuMaskTmp |= 1L << i;
 
         final long cpuMask = cpuMaskTmp;
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
