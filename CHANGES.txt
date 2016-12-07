@@ -3,9 +3,14 @@ DSE 5.0.4
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
 Merged from 3.0.X
+ * CQL often queries static columns unnecessarily (CASSANDRA-12768)
+ * Make sure sstables only get committed when it's safe to discard commit log records (CASSANDRA-12956)
+ * Reject default_time_to_live option when creating or altering MVs (CASSANDRA-12868)
+ * Nodetool should use a more sane max heap size (CASSANDRA-12739)
  * LocalToken ensures token values are cloned on heap (CASSANDRA-12651)
  * AnticompactionRequestSerializer serializedSize is incorrect (CASSANDRA-12934)
  * Prevent reloading of logback.xml from UDF sandbox (CASSANDRA-12535)
+ * Reenable HeapPool (CASSANDRA-12900)
  * Disallow offheap_buffers memtable allocation (CASSANDRA-11039)
  * Fix CommitLogSegmentManagerTest (CASSANDRA-12283)
  * Pass root cause to CorruptBlockException when uncompression failed (CASSANDRA-12889)
@@ -41,6 +46,7 @@ Merged from 3.0.X
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
+ * Use saved tokens when setting local tokens on StorageService.joinRing (CASSANDRA-12935)
  * cqlsh: fix DESC TYPES errors (CASSANDRA-12914)
  * Fix leak on skipped SSTables in sstableupgrade (CASSANDRA-12899)
  * Avoid blocking gossip during pending range calculation (CASSANDRA-12281)
