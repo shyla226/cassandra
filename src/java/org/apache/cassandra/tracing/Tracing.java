@@ -185,7 +185,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
         TraceState state = get();
         if (state == null) // inline isTracing to avoid implicit two calls to state.get()
         {
-            logger.trace("request complete");
+            //logger.trace("request complete");
         }
         else
         {

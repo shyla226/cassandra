@@ -123,8 +123,8 @@ public class PipelineReadCallback implements IAsyncCallbackWithFailure<ReadRespo
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
-        if (logger.isTraceEnabled())
-            logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
+        //if (logger.isTraceEnabled())
+        //    logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
     }
 
 
@@ -164,8 +164,8 @@ public class PipelineReadCallback implements IAsyncCallbackWithFailure<ReadRespo
             requestContext.result = result;
             localPublishSubject.get().onNext(requestContext);
 
-            if (logger.isTraceEnabled())
-                logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanoTime));
+            //if (logger.isTraceEnabled())
+            //    logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanoTime));
 
             // kick off a background digest comparison if this is a result that (may have) arrived after
             // the original resolve that get() kicks off as soon as the condition is signaled

@@ -106,7 +106,7 @@ public abstract class AbstractPipelineReadExecutor
 
             if (traceState != null)
                 traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            logger.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
+            //logger.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
             MessageOut<ReadCommand> message = readCommand.createMessage(MessagingService.instance().getVersion(endpoint));
             MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
         }
@@ -114,7 +114,7 @@ public abstract class AbstractPipelineReadExecutor
         // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
         if (hasLocalEndpoint)
         {
-            logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
+            //logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
 
             if (command instanceof SinglePartitionReadCommand)
             {
