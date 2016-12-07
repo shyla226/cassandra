@@ -323,16 +323,15 @@ public class Server implements CassandraDaemon.Server
             }
 
             //pipeline.addLast("debug", new LoggingHandler());
-            OuterEventExecutorGroup e = new OuterEventExecutorGroup(channel.eventLoop());
 
-            pipeline.addLast(e, "frameDecoder", new Frame.Decoder(server.connectionFactory));
-            pipeline.addLast(e, "frameEncoder", frameEncoder);
+            pipeline.addLast("frameDecoder", new Frame.Decoder(server.connectionFactory));
+            pipeline.addLast("frameEncoder", frameEncoder);
 
-            pipeline.addLast(e, "frameDecompressor", frameDecompressor);
-            pipeline.addLast(e, "frameCompressor", frameCompressor);
+            pipeline.addLast("frameDecompressor", frameDecompressor);
+            pipeline.addLast("frameCompressor", frameCompressor);
 
-            pipeline.addLast(e, "messageDecoder", messageDecoder);
-            pipeline.addLast(e, "messageEncoder", messageEncoder);
+            pipeline.addLast("messageDecoder", messageDecoder);
+            pipeline.addLast("messageEncoder", messageEncoder);
 
             pipeline.addLast("executor", dispatcher);
         }

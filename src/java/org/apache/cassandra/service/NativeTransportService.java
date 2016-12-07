@@ -104,10 +104,10 @@ public class NativeTransportService
         if (!DatabaseDescriptor.getClientEncryptionOptions().enabled)
         {
             servers = new ArrayList<>(NUM_NETTY_THREADS);
-            for (int i = 0; i < NUM_NETTY_THREADS; i++)
+            for (int i = 0; i < 1; i++)
             {
                 org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                        .withEventLoopGroup(workerGroup.next())
+                        .withEventLoopGroup(workerGroup)
                         .withHost(nativeAddr)
                         .withPort(nativePort + i)
                         .withSSL(false);
