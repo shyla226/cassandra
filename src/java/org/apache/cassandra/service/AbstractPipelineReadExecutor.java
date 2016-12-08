@@ -160,7 +160,7 @@ public abstract class AbstractPipelineReadExecutor
                 handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
             }
 
-            MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+            //MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         }
         catch (Throwable t)
         {
