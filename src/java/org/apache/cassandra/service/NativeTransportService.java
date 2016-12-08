@@ -56,10 +56,7 @@ public class NativeTransportService
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
 
-    public static final int NUM_SOCKETS = 2;
-    public static final int CORES_PER_SOCKET = 24;
-    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors() - 1)));
-    public static final int NETTY_CORE_OFFSET = Math.max(0, FBUtilities.getAvailableProcessors() - NUM_NETTY_THREADS);
+    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
@@ -103,23 +100,19 @@ public class NativeTransportService
 
         if (!DatabaseDescriptor.getClientEncryptionOptions().enabled)
         {
-            servers = new ArrayList<>(NUM_NETTY_THREADS);
-            for (int i = 0; i < 1; i++)
-            {
-                org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                        .withEventLoopGroup(workerGroup)
-                        .withHost(nativeAddr)
-                        .withPort(nativePort + i)
-                        .withSSL(false);
+            servers = new ArrayList<>(1);
 
-                servers.add(builder.build());
-            }
+            org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
+                                                                    .withEventLoopGroup(workerGroup)
+                                                                    .withHost(nativeAddr)
+                                                                    .withPort(nativePort)
+                                                                    .withSSL(false);
+
+            servers.add(builder.build());
         }
         else
         {
-            // TODO TPC/PPC
-            throw new UnsupportedOperationException("SSL isn't supported for PPC yet");
-            /*
+
             org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
                     .withEventLoopGroup(workerGroup)
                     .withHost(nativeAddr);
@@ -128,10 +121,10 @@ public class NativeTransportService
             {
                 // user asked for dedicated ssl port for supporting both non-ssl and ssl connections
                 servers = Collections.unmodifiableList(
-                Arrays.asList(
-                builder.withSSL(false).withPort(nativePort).build(),
-                builder.withSSL(true).withPort(nativePortSSL).build()
-                )
+                    Arrays.asList(
+                        builder.withSSL(false).withPort(nativePort).build(),
+                        builder.withSSL(true).withPort(nativePortSSL).build()
+                    )
                 );
             }
             else
@@ -139,7 +132,6 @@ public class NativeTransportService
                 // ssl only mode using configured native port
                 servers = Collections.singletonList(builder.withSSL(true).withPort(nativePort).build());
             }
-            */
         }
 
 
@@ -164,13 +156,7 @@ public class NativeTransportService
 
         logger.info("Netting ioWork ratio to {}", pIO);
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
-
-        long cpuMaskTmp = 0L;
-        for (int i = 0; i < FBUtilities.getAvailableProcessors(); i++)
-            if (i % CORES_PER_SOCKET != 0)
-                cpuMaskTmp |= 1L << i;
-
-        final long cpuMask = cpuMaskTmp;
+        
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
@@ -183,11 +169,11 @@ public class NativeTransportService
 
                 if (affinity)
                 {
-                    logger.info("Locking {} netty thread to {}, port {}", cpuId, Thread.currentThread().getName(), nativePort + cpuId);
-                    AffinitySupport.setAffinity(cpuMask);
+                    logger.info("Locking {} netty thread to {}", cpuId, Thread.currentThread().getName());
+                    AffinitySupport.setAffinity(1L << cpuId);
                 }
                 {
-                    logger.info("Allocated netty {} thread to {}, port {}", workerGroup, Thread.currentThread().getName(), nativePort + cpuId);
+                    logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
                 }
 
                 ready.countDown();

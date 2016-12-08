@@ -171,8 +171,8 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     {
         private final int threadOffset;
 
-        private static final int busyExtraSpins =  1024 * 8;
-        private static final int yieldExtraSpins = 1024;
+        private static final int busyExtraSpins =  1024 * 16;
+        private static final int yieldExtraSpins = 1024 * 8;
         private static final int parkExtraSpins = 1024; // 1024 is ~50ms
 
         private volatile int pendingEpollEvents = 0;
