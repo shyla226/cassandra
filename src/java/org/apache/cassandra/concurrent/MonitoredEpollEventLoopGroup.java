@@ -20,7 +20,6 @@ package org.apache.cassandra.concurrent;
 
 
 import java.util.ArrayDeque;
-import java.util.Queue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
@@ -262,10 +261,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         private void checkQueues()
         {
-            boolean epollReady = hasEpollReady();
             delayedNanosDeadline = nanotime();
 
-            if (state == CoreState.PARKED && (epollReady || !isEmpty()))
+            if (state == CoreState.PARKED && !isEmpty())
                 unpark();
         }
 
@@ -302,18 +300,38 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             try
             {
-                int t = pendingEpollEvents;
+                int t;
+
+                if (this.pendingEpollEvents > 0)
+                {
+                    t = pendingEpollEvents;
+                    pendingEpollEvents = 0;
+                }
+                else
+                {
+                    t = this.selectStrategy.calculateStrategy(this.selectNowSupplier, hasTasks());
+                    switch (t)
+                    {
+                        case -2:
+                            return 0;
+                        case -1:
+                            t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+                            if (this.wakenUp == 1)
+                            {
+                                Native.eventFdWrite(this.eventFd.intValue(), 1L);
+                            }
+                        default:
+                    }
+                }
 
                 if (t > 0)
                 {
                     this.processReady(this.events, t);
+                }
 
-                    pendingEpollEvents = 0;
-
-                    if (this.allowGrowing && t == this.events.length())
-                    {
-                        this.events.increase();
-                    }
+                if (this.allowGrowing && t == this.events.length())
+                {
+                    this.events.increase();
                 }
 
                 return Math.max(t, 0);
@@ -369,33 +387,34 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             return hasTasks;
         }
 
-        boolean hasEpollReady()
-        {
-            if (pendingEpollEvents > 0)
-                return true;
 
-            try
-            {
-                int t = this.selectNowSupplier.get();
-
-                if (t >= 0)
-                    pendingEpollEvents = t;
-                else
-                    Native.eventFdWrite(this.eventFd.intValue(), 1L);
-
-                return pendingEpollEvents > 0;
-            }
-            catch (Exception e)
-            {
-                logger.error("Error selecting socket ", e);
-                return false;
-            }
-        }
 
         @Inline
         boolean isEmpty()
         {
-            return !hasTasks();
+            boolean empty = !hasTasks();
+
+            try
+            {
+                int t;
+                if (empty)
+                {
+                    t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+
+                    if (t > 0)
+                        pendingEpollEvents = t;
+                    else
+                        Native.eventFdWrite(this.eventFd.intValue(), 1L);
+
+                    return t <= 0;
+                }
+            }
+            catch (Exception e)
+            {
+                logger.error("Error selecting socket ", e);
+            }
+
+            return empty;
         }
 
         long nanotime()
