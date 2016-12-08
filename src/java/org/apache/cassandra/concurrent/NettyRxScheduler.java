@@ -145,18 +145,8 @@ public class NettyRxScheduler extends Scheduler
         {
             PartitionPosition next = keyspaceRanges.get(i);
             if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
-            {
-                Scheduler matchingScheduler = getForCore(i - 1);
-                if (matchingScheduler == localNettyEventLoop.get())
-                {
-                    // already on the correct scheduler, this should be run directly
-                    return null;
-                }
-                else
-                {
-                    return matchingScheduler;
-                }
-            }
+                return getForCore(i - 1);
+
 
             rangeStart = next;
         }
