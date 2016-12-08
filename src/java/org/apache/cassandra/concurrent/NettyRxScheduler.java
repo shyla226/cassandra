@@ -150,31 +150,10 @@ public class NettyRxScheduler extends Scheduler
                 if (matchingScheduler == localNettyEventLoop.get())
                 {
                     // already on the correct scheduler, this should be run directly
-                    return matchingScheduler;
+                    return null;
                 }
                 else
                 {
-                    /*
-                     * Reenable to debug PPC problems with the wrong port being used
-                     */
-                    if (matchingScheduler instanceof NettyRxScheduler)
-                    {
-                        NettyRxScheduler rxScheduler = (NettyRxScheduler) matchingScheduler;
-                        logger.warn("On wrong scheduler ({}, threadId={}, cpuID={}) for {}, currently on ({}, {}, {}); ranges are {}",
-                                rxScheduler.cpuThreadName, rxScheduler.cpuThreadId, rxScheduler.cpuId,
-                                key,
-                                Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
-                                keyspaceRanges);
-                    }
-                    else
-                    {
-                        logger.warn("On wrong scheduler ({}) for {}, currently on ({}, {}, {}); ranges are {}",
-                                matchingScheduler,
-                                key,
-                                Thread.currentThread().getName(), Thread.currentThread().getId(), localNettyEventLoop.get().cpuId,
-                                keyspaceRanges);
-                    }
-
                     return matchingScheduler;
                 }
             }

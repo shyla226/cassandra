@@ -54,7 +54,7 @@ public class NativeTransportService
     private EventLoopGroup workerGroup;
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","true"));
+    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
@@ -156,6 +156,9 @@ public class NativeTransportService
 
         logger.info("Netting ioWork ratio to {}", pIO);
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
+
+        long cpumask = 0;
+        
 
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
