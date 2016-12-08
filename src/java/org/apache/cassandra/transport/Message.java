@@ -117,7 +117,7 @@ public abstract class Message
 
                     ((ServerConnection) request.connection).applyStateTransition(request.type, response.type);
 
-                    logger.trace("Responding: {}, v={} ON {}", response, request.connection.getVersion(), Thread.currentThread().getName());
+                    //logger.trace("Responding: {}, v={} ON {}", response, request.connection.getVersion(), Thread.currentThread().getName());
                     requestContext.dispatcher.flush(requestContext);
                     ClientWarn.instance.resetWarnings();
                 },

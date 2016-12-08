@@ -156,7 +156,7 @@ public class NativeTransportService
 
         logger.info("Netting ioWork ratio to {}", pIO);
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
-        
+
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
