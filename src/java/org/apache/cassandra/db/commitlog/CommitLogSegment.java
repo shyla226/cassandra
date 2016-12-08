@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.Timer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,7 +31,6 @@ import java.util.zip.CRC32;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
-import com.codahale.metrics.Timer;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
@@ -419,7 +419,7 @@ public abstract class CommitLogSegment
         }
     }
 
-    void waitForSync(int position, Timer waitingOnCommit)
+    void waitForSync(int position, org.apache.cassandra.metrics.Timer waitingOnCommit)
     {
         while (lastSyncedOffset < position)
         {
@@ -665,7 +665,7 @@ public abstract class CommitLogSegment
             appendOp.close();
         }
 
-        void awaitDiskSync(Timer waitingOnCommit)
+        void awaitDiskSync(org.apache.cassandra.metrics.Timer waitingOnCommit)
         {
             segment.waitForSync(position, waitingOnCommit);
         }

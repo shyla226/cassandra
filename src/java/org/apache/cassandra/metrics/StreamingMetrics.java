@@ -20,8 +20,6 @@ package org.apache.cassandra.metrics;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentMap;
 
-
-import com.codahale.metrics.Counter;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;

@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
 
-import com.codahale.metrics.Timer;
+import org.apache.cassandra.metrics.Timer;
 
 /**
  * <p>A relatively easy to use utility for general purpose thread signalling.</p>

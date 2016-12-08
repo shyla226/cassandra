@@ -15,19 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.metrics;
 
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
-/**
- * Metrics related to Storage.
- */
-public class StorageMetrics
+public interface Reservoir extends com.codahale.metrics.Reservoir
 {
-    private static final MetricNameFactory factory = new DefaultNameFactory("Storage");
-
-    public static final Counter load = Metrics.counter(factory.createMetricName("Load"));
-    public static final Counter exceptions = Metrics.counter(factory.createMetricName("Exceptions"));
-    public static final Counter totalHintsInProgress  = Metrics.counter(factory.createMetricName("TotalHintsInProgress"));
-    public static final Counter totalHints = Metrics.counter(factory.createMetricName("TotalHints"));
+    long getCount();
 }

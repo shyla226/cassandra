@@ -20,14 +20,10 @@ package org.apache.cassandra.metrics;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.Timer;
-
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
 
 /**
  * Metrics about latencies

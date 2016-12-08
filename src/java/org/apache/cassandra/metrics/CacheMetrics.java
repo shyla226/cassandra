@@ -18,7 +18,6 @@
 package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
 import com.codahale.metrics.RatioGauge;
 import org.apache.cassandra.cache.ICache;
 
