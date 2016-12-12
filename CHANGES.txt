@@ -1,4 +1,5 @@
 DSE 5.1.0
+ * Optimize VIntCoding and BufferedDataOutputStreamPlus (APOLLO-49)
  * Improve metrics and reduce overhead under contention (APOLLO-81)
  * Make SinglePartitionReadCommand::queriesMulticellType() faster (APOLLO-117)
  * Accept internal resource name in GRANT/REVOKE statements (APOLLO-113)
