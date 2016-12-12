@@ -54,8 +54,19 @@ import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 /**
- * Borrows idea from
- * https://developers.google.com/protocol-buffers/docs/encoding#varints
+ * Variable length encoding inspired from Google
+ * <a href='https://developers.google.com/protocol-buffers/docs/encoding#varints'>varints</a>.
+ *
+ *  <p>Cassandra vints are encoded with the most significant group first. The most significant
+ *  byte will contains the information about how many extra bytes need to be read as well as
+ *  the most significant bits of the integer.
+ *  The number of extra bytes to read is encoded as 1 bits on the left side.
+ *  For example, if we need to read 3 more bytes the first byte will start with 1110.
+ *  If the encoded integer is 8 bytes long the vint will be encoded on 9 bytes and the first
+ *  byte will be: 11111111</p>
+ *
+ *  <p>Signed integer are (like protocol buffer varints) encoded using the ZigZag encoding
+ *  so that numbers with a small absolute value have a small vint encoded value too.</p>
  */
 public class VIntCoding
 {
@@ -138,7 +149,7 @@ public class VIntCoding
             encodingSpace[i] = (byte) value;
             value >>= 8;
         }
-        encodingSpace[0] |= VIntCoding.encodeExtraBytesToRead(extraBytes);
+        encodingSpace[0] |= encodeExtraBytesToRead(extraBytes);
         return encodingSpace;
     }
 
@@ -188,6 +199,6 @@ public class VIntCoding
     public static int computeUnsignedVIntSize(final long value)
     {
         int magnitude = Long.numberOfLeadingZeros(value | 1); // | with 1 to ensure magntiude <= 63, so (63 - 1) / 7 <= 8
-        return 9 - ((magnitude - 1) / 7);
+        return (639 - magnitude * 9) >> 6;
     }
 }

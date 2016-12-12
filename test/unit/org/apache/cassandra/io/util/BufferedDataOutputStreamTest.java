@@ -144,6 +144,7 @@ public class BufferedDataOutputStreamTest
     @Test(expected = IndexOutOfBoundsException.class)
     public void testTooBigLength() throws Exception
     {
+        setUp();
         byte type[] = new byte[10];
         fakeStream.write(type, 0, 11);
     }

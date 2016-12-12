@@ -107,31 +107,30 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
     @Override
     public void write(byte[] b, int off, int len) throws IOException
     {
-        if (b == null)
-            throw new NullPointerException();
-
-        // avoid int overflow
-        if (off < 0 || off > b.length || len < 0
-            || len > b.length - off)
-            throw new IndexOutOfBoundsException();
-
         if (len == 0)
             return;
 
-        int copied = 0;
-        while (copied < len)
+        if (buffer.remaining() >= len)
         {
-            if (buffer.hasRemaining())
-            {
-                int toCopy = Math.min(len - copied, buffer.remaining());
-                buffer.put(b, off + copied, toCopy);
-                copied += toCopy;
-            }
-            else
+            buffer.put(b, off, len);
+            return;
+        }
+
+        int copied = 0;
+        do
+        {
+            int remaining = buffer.remaining();
+            if (remaining == 0)
             {
                 doFlush(len - copied);
+                remaining = buffer.remaining();
             }
-        }
+
+            int toCopy = Math.min(len - copied, remaining);
+            buffer.put(b, off + copied, toCopy);
+            copied += toCopy;
+        } while (copied != len);
+
     }
 
     // ByteBuffer to use for defensive copies
@@ -193,7 +192,7 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
     {
         if (!buffer.hasRemaining())
             doFlush(1);
-        buffer.put((byte) (b & 0xFF));
+        buffer.put((byte) b);
     }
 
     @Override
@@ -246,20 +245,13 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
     @Override
     public void writeVInt(long value) throws IOException
     {
-        writeUnsignedVInt(VIntCoding.encodeZigZag64(value));
+        VIntCoding.writeVInt(value, this);
     }
 
     @Override
     public void writeUnsignedVInt(long value) throws IOException
     {
-        int size = VIntCoding.computeUnsignedVIntSize(value);
-        if (size == 1)
-        {
-            write((int) value);
-            return;
-        }
-
-        write(VIntCoding.encodeVInt(value, size), 0, size);
+        VIntCoding.writeUnsignedVInt(value, this);
     }
 
     @Override
