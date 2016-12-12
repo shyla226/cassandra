@@ -29,6 +29,8 @@ import java.util.Map;
 import org.apache.cassandra.stress.util.MultiResultLogger;
 import org.apache.cassandra.stress.util.ResultLogger;
 
+import static org.apache.cassandra.cql3.QueryProcessor.metrics;
+
 public class SettingsLog implements Serializable
 {
     public static enum Level
@@ -38,6 +40,9 @@ public class SettingsLog implements Serializable
 
     public final boolean noSummary;
     public final boolean noSettings;
+    public final boolean noProgress;
+    public final boolean showQueries;
+    public final File queryLogFile;
     public final File file;
     public final File hdrFile;
     public final int intervalMillis;
@@ -48,7 +53,13 @@ public class SettingsLog implements Serializable
 
         noSummary = options.noSummmary.setByUser();
         noSettings = options.noSettings.setByUser();
+        noProgress = options.noProgress.setByUser();
+        showQueries = options.showQueries.setByUser() || options.queryLogFile.setByUser();
 
+        if (options.queryLogFile.setByUser())
+            queryLogFile = new File(options.queryLogFile.value());
+        else
+            queryLogFile = null;
         if (options.outputFile.setByUser())
             file = new File(options.outputFile.value());
         else
@@ -86,6 +97,10 @@ public class SettingsLog implements Serializable
     {
         final OptionSimple noSummmary = new OptionSimple("no-summary", "", null, "Disable printing of aggregate statistics at the end of a test", false);
         final OptionSimple noSettings = new OptionSimple("no-settings", "", null, "Disable printing of settings values at start of test", false);
+        final OptionSimple noProgress = new OptionSimple("no-progress", "", null, "Disable printing of progress (metrics will still be recorded)", false);
+        final OptionSimple showQueries = new OptionSimple("show-queries", "", null, "Print CQL3 queries as they are " +
+            "executed; this is a debugging aid, and works best with no-progress", false);
+        final OptionSimple queryLogFile = new OptionSimple("query-log-file=", ".*", null, "Log CQL3 queries to a file; enables show-queries", false);
         final OptionSimple outputFile = new OptionSimple("file=", ".*", null, "Log to a file", false);
         final OptionSimple hdrOutputFile = new OptionSimple("hdrfile=", ".*", null, "Log to a file", false);
         final OptionSimple interval = new OptionSimple("interval=", "[0-9]+(ms|s|)", "1s", "Log progress every <value> seconds or milliseconds", false);
@@ -94,7 +109,8 @@ public class SettingsLog implements Serializable
         @Override
         public List<? extends Option> options()
         {
-            return Arrays.asList(level, noSummmary, outputFile, hdrOutputFile, interval, noSettings);
+            return Arrays.asList(level, noSummmary, outputFile, hdrOutputFile, interval, noSettings, noProgress,
+                                 showQueries, queryLogFile);
         }
     }
 
@@ -103,6 +119,9 @@ public class SettingsLog implements Serializable
     {
         out.printf("  No Summary: %b%n", noSummary);
         out.printf("  No Settings: %b%n", noSettings);
+        out.printf("  No Progress: %b%n", noProgress);
+        out.printf("  Show Queries: %b%n", showQueries);
+        out.printf("  Query Log File: %s%n", queryLogFile);
         out.printf("  File: %s%n", file);
         out.printf("  Interval Millis: %d%n", intervalMillis);
         out.printf("  Level: %s%n", level);

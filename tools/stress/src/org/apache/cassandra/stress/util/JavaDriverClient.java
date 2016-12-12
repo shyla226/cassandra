@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.stress.util;
 
+import java.io.FileNotFoundException;
+import java.io.PrintStream;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -54,6 +56,9 @@ public class JavaDriverClient
     private Cluster cluster;
     private Session session;
     private final LoadBalancingPolicy loadBalancingPolicy;
+    private final boolean showQueries;
+    private final PrintStream queryLog;
+    private StatementPrinter statementPrinter;
 
     private static final ConcurrentMap<String, PreparedStatement> stmts = new ConcurrentHashMap<>();
 
@@ -85,6 +90,16 @@ public class JavaDriverClient
         int requestsPerConnection = (maxThreadCount / connectionsPerHost) + connectionsPerHost;
 
         maxPendingPerConnection = settings.mode.maxPendingPerConnection == null ? Math.max(128, requestsPerConnection ) : settings.mode.maxPendingPerConnection;
+
+        showQueries = settings.log.showQueries;
+        try
+        {
+            queryLog = settings.log.queryLogFile == null ? System.out : new PrintStream(settings.log.queryLogFile);
+        }
+        catch (FileNotFoundException e)
+        {
+            throw new IllegalArgumentException(e);
+        }
     }
 
     private LoadBalancingPolicy loadBalancingPolicy(StressSettings settings)
@@ -170,6 +185,11 @@ public class JavaDriverClient
         }
 
         session = cluster.connect();
+
+        if (showQueries)
+        {
+            statementPrinter = new StatementPrinter(cluster, queryLog);
+        }
     }
 
     public Cluster getCluster()
@@ -177,23 +197,40 @@ public class JavaDriverClient
         return cluster;
     }
 
-    public Session getSession()
+    private Session getSession()
     {
         return session;
+    }
+
+    public ResultSet execute(Statement statement)
+    {
+        ResultSet result = null;
+        try
+        {
+            result = getSession().execute(statement);
+        }
+        finally
+        {
+            if (statementPrinter != null)
+            {
+                statementPrinter.print(Thread.currentThread().getId(), statement, result);
+            }
+        }
+        return result;
     }
 
     public ResultSet execute(String query, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
         SimpleStatement stmt = new SimpleStatement(query);
         stmt.setConsistencyLevel(from(consistency));
-        return getSession().execute(stmt);
+        return execute(stmt);
     }
 
     public ResultSet executePrepared(PreparedStatement stmt, List<Object> queryParams, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
         stmt.setConsistencyLevel(from(consistency));
         BoundStatement bstmt = stmt.bind((Object[]) queryParams.toArray(new Object[queryParams.size()]));
-        return getSession().execute(bstmt);
+        return execute(bstmt);
     }
 
     /**

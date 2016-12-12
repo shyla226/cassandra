@@ -71,7 +71,7 @@ public class SchemaQuery extends SchemaStatement
 
         public boolean run() throws Exception
         {
-            ResultSet rs = client.getSession().execute(bindArgs());
+            ResultSet rs = client.execute(bindArgs());
             rowCount = rs.all().size();
             partitionCount = Math.min(1, rowCount);
             return true;
