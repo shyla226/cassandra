@@ -26,6 +26,7 @@ Merged from DSE 5.0.4
 
 
 3.12
+ * add method to get size of endpoints to TokenMetadata (CASSANDRA-12999)
  * Fix primary index calculation for SASI (CASSANDRA-12910)
  * Expose time spent waiting in thread pool queue (CASSANDRA-8398)
  * Conditionally update index built status to avoid unnecessary flushes (CASSANDRA-12969)
@@ -36,6 +37,7 @@ Merged from DSE 5.0.4
 
 
 3.10
+ * Remove outboundBindAny configuration property (CASSANDRA-12673)
  * Use correct bounds for all-data range when filtering (CASSANDRA-12666)
  * Remove timing window in test case (CASSANDRA-12875)
  * Resolve unit testing without JCE security libraries installed (CASSANDRA-12945)
@@ -145,6 +147,7 @@ Merged from DSE 5.0.4
  * Restore resumable hints delivery (CASSANDRA-11960)
  * Properly record CAS contention (CASSANDRA-12626)
 Merged from 3.0:
+ * Set RPC_READY to false when draining or if a node is marked as shutdown (CASSANDRA-12781)
  * CQL often queries static columns unnecessarily (CASSANDRA-12768)
  * Make sure sstables only get committed when it's safe to discard commit log records (CASSANDRA-12956)
  * Reject default_time_to_live option when creating or altering MVs (CASSANDRA-12868)
