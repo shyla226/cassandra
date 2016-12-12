@@ -2,6 +2,7 @@ DSE 5.0.5
  * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
  * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
 Merged from 3.0.X
+ * Thread local pools never cleaned up (CASSANDRA-13033)
  * Set RPC_READY to false when draining or if a node is marked as shutdown (CASSANDRA-12781)
  * CQL often queries static columns unnecessarily (CASSANDRA-12768)
  * Make sure sstables only get committed when it's safe to discard commit log records (CASSANDRA-12956)
@@ -11,7 +12,8 @@ Merged from 3.0.X
  * AnticompactionRequestSerializer serializedSize is incorrect (CASSANDRA-12934)
  * Prevent reloading of logback.xml from UDF sandbox (CASSANDRA-12535)
  * Reenable HeapPool (CASSANDRA-12900)
-Merged from 2.2
+Merged from 2.2:
+ * Test bind parameters and unset parameters in InsertUpdateIfConditionTest (CASSANDRA-12980)
  * Do not specify local address on outgoing connection when listen_on_broadcast_address is set (CASSANDRA-12673)
  * Use saved tokens when setting local tokens on StorageService.joinRing (CASSANDRA-12935)
  * cqlsh: fix DESC TYPES errors (CASSANDRA-12914)
