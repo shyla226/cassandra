@@ -10,7 +10,7 @@ DSE 5.1.0
  * Make IResource more easily extensible (APOLLO-26)
  * Add method to IAuthenticator to login by user as well as by role (APOLLO-70)
  * Add private protocol version (APOLLO-2)
-Merged from DSE 5.0.4
+Merged from DSE 5.0.x
  * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
  * Allow the prepared statement cache size to be changed. (APOLLO-50)
