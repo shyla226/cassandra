@@ -114,7 +114,7 @@ public class SchemaInsert extends SchemaStatement
                 stmt = batch;
             }
 
-            client.getSession().execute(stmt);
+            client.execute(stmt);
 
             stmts.clear();
             maxRowsPerBatch = maxRowsPerBatchDistribution.next();
