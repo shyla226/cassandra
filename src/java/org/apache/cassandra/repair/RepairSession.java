@@ -23,7 +23,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
@@ -93,9 +92,6 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public final Set<InetAddress> endpoints;
     public final long repairedAt;
 
-    // number of validations left to be performed
-    private final AtomicInteger validationRemaining;
-
     private final AtomicBoolean isFailed = new AtomicBoolean(false);
 
     // Each validation task waits response from replica in validating ConcurrentMap (keyed by CF name and endpoint address)
@@ -141,7 +137,6 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         this.ranges = ranges;
         this.endpoints = endpoints;
         this.repairedAt = repairedAt;
-        this.validationRemaining = new AtomicInteger(cfnames.length);
         this.pullRepair = pullRepair;
     }
 
@@ -185,14 +180,6 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         logger.info("[repair #{}] {}", getId(), message);
         Tracing.traceRepair(message);
         task.treesReceived(trees);
-
-        // Unregister from FailureDetector once we've completed synchronizing Merkle trees.
-        // After this point, we rely on tcp_keepalive for individual sockets to notify us when a connection is down.
-        // See CASSANDRA-3569
-        if (validationRemaining.decrementAndGet() == 0)
-        {
-            FailureDetector.instance.unregisterFailureDetectionEventListener(this);
-        }
     }
 
     /**
@@ -283,7 +270,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                 logger.info("[repair #{}] {}", getId(), "Session completed successfully");
                 Tracing.traceRepair("Completed sync of range {}", ranges);
                 set(new RepairSessionResult(id, keyspace, ranges, results));
-
+                // only shutdown task executor after setting the callback future
                 taskExecutor.shutdown();
                 // mark this session as terminated
                 terminate();
@@ -295,7 +282,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                 Tracing.traceRepair("Session completed with the following error: {}", t);
                 forceShutdown(t);
             }
-        });
+        }, taskExecutor); // run this on task executor so job executor can be shutdown without errors by RepairRunnable
     }
 
     public void terminate()
@@ -313,8 +300,8 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public void forceShutdown(Throwable reason)
     {
         setException(reason);
-        taskExecutor.shutdownNow();
         terminate();
+        taskExecutor.shutdownNow();
     }
 
     public void onJoin(InetAddress endpoint, EndpointState epState) {}

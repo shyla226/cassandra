@@ -40,7 +40,9 @@ import Parser,Lexer;
     import java.util.Set;
 
     import org.apache.cassandra.auth.*;
+    import org.apache.cassandra.auth.permission.*;
     import org.apache.cassandra.config.ColumnDefinition;
+    import org.apache.cassandra.config.DatabaseDescriptor;
     import org.apache.cassandra.cql3.*;
     import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
     import org.apache.cassandra.cql3.statements.*;
@@ -136,4 +138,8 @@ import Parser,Lexer;
 
 query returns [ParsedStatement stmnt]
     : st=cqlStatement (';')* EOF { $stmnt = st; }
+    ;
+
+resource returns [IResource res]
+    : c=cassandraResource { $res = $c.res; }
     ;

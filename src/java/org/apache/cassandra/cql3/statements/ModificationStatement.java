@@ -37,8 +37,7 @@ import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.ColumnDefinition.Raw;
@@ -237,26 +236,26 @@ public abstract class ModificationStatement implements CQLStatement
 
     public void checkAccess(ClientState state) throws InvalidRequestException, UnauthorizedException
     {
-        state.hasColumnFamilyAccess(cfm, Permission.MODIFY);
+        state.hasColumnFamilyAccess(cfm, CorePermission.MODIFY);
 
         // CAS updates can be used to simulate a SELECT query, so should require Permission.SELECT as well.
         if (hasConditions())
-            state.hasColumnFamilyAccess(cfm, Permission.SELECT);
+            state.hasColumnFamilyAccess(cfm, CorePermission.SELECT);
 
         // MV updates need to get the current state from the table, and might update the views
         // Require Permission.SELECT on the base table, and Permission.MODIFY on the views
         Iterator<ViewDefinition> views = View.findAll(keyspace(), columnFamily()).iterator();
         if (views.hasNext())
         {
-            state.hasColumnFamilyAccess(cfm, Permission.SELECT);
+            state.hasColumnFamilyAccess(cfm, CorePermission.SELECT);
             do
             {
-                state.hasColumnFamilyAccess(views.next().metadata, Permission.MODIFY);
+                state.hasColumnFamilyAccess(views.next().metadata, CorePermission.MODIFY);
             } while (views.hasNext());
         }
 
         for (Function function : getFunctions())
-            state.ensureHasPermission(Permission.EXECUTE, function);
+            state.ensureHasPermission(CorePermission.EXECUTE, function);
     }
 
     public void validate(ClientState state) throws InvalidRequestException

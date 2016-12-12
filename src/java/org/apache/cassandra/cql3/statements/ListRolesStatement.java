@@ -24,11 +24,11 @@ import java.util.Set;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
-import io.reactivex.Observable;
 import io.reactivex.Single;
+
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.IRoleManager;
-import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
@@ -87,7 +87,7 @@ public class ListRolesStatement extends AuthorizationStatement
         // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
         boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
                                                        .authorize(state.getUser(), RoleResource.root())
-                                                       .contains(Permission.DESCRIBE);
+                                                       .contains(CorePermission.DESCRIBE);
         if (hasRootLevelSelect)
         {
             if (grantee == null)

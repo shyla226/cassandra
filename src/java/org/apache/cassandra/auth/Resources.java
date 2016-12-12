@@ -20,10 +20,21 @@ package org.apache.cassandra.auth;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.auth.resource.IResourceFactory;
 import org.apache.cassandra.utils.Hex;
 
 public final class Resources
 {
+    // Responsible for constructing IResource instances from a resource name.
+    private static IResourceFactory factory = new DefaultResourceFactory();
+
+    // Override the default IResource construction, should be called during initialization
+    // to enable custom IResource implementations to be used.
+    public static void setResourceFactory(IResourceFactory f)
+    {
+        factory = f;
+    }
+
     /**
      * Construct a chain of resource parents starting with the resource and ending with the root.
      *
@@ -52,16 +63,7 @@ public final class Resources
      */
     public static IResource fromName(String name)
     {
-        if (name.startsWith(RoleResource.root().getName()))
-            return RoleResource.fromName(name);
-        else if (name.startsWith(DataResource.root().getName()))
-            return DataResource.fromName(name);
-        else if (name.startsWith(FunctionResource.root().getName()))
-            return FunctionResource.fromName(name);
-        else if (name.startsWith(JMXResource.root().getName()))
-            return JMXResource.fromName(name);
-        else
-            throw new IllegalArgumentException(String.format("Name %s is not valid for any resource type", name));
+        return factory.fromName(name);
     }
 
     @Deprecated
@@ -82,5 +84,22 @@ public final class Resources
                 buff.append(component);
         }
         return buff.toString();
+    }
+
+    public static class DefaultResourceFactory implements IResourceFactory
+    {
+        public IResource fromName(String name)
+        {
+            if (name.startsWith(RoleResource.root().getName()))
+                return RoleResource.fromName(name);
+            else if (name.startsWith(DataResource.root().getName()))
+                return DataResource.fromName(name);
+            else if (name.startsWith(FunctionResource.root().getName()))
+                return FunctionResource.fromName(name);
+            else if (name.startsWith(JMXResource.root().getName()))
+                return JMXResource.fromName(name);
+            else
+                throw new IllegalArgumentException(String.format("Name %s is not valid for any resource type", name));
+        }
     }
 }

@@ -1580,6 +1580,7 @@ bc(syntax)..
              | FUNCTION <functionname>
              | ALL MBEANS
              | ( MBEAN | MBEANS ) <objectName>
+             | RESOURCE(<string>)
 p. 
 
 __Sample:__ 
@@ -1609,6 +1610,13 @@ GRANT DESCRIBE ON ALL ROLES TO role_admin;
 
 This grants any user with the @role_admin@ role permission to view any and all roles in the system with a @LIST ROLES@ statement
 
+bc(sample). 
+GRANT SELECT ON RESOURCE('data/keyspace1/table1') TO data_reader;
+
+This form uses the internal string representation of the target resource, normalizing the variant syntax of the specific resource types.
+The string representation is used by the authz subsystem internally, so this syntax enables DDL statements to be generated from extant permissions
+e.g. from the contents of @system_auth.role_permissions@ if using internal authorization.
+
 h4(#grantAll). GRANT ALL 
 
 When the @GRANT ALL@ form is used, the appropriate set of permissions is determined automatically based on the target resource.
@@ -1636,6 +1644,7 @@ bc(syntax)..
              | FUNCTION <functionname>
              | ALL MBEANS
              | ( MBEAN | MBEANS ) <objectName>
+             | RESOURCE(<string>)
 p.
 
 __Sample:__ 
@@ -1646,6 +1655,7 @@ REVOKE MODIFY ON KEYSPACE keyspace1 FROM data_writer;
 REVOKE DROP ON keyspace1.table1 FROM schema_owner;
 REVOKE EXECUTE ON FUNCTION keyspace1.user_function( int ) FROM report_writer;
 REVOKE DESCRIBE ON ALL ROLES FROM role_admin;
+REVOKE EXECUTE ON RESOURCE('function/keyspace1/user_function[org.apache.cassandra.db.marshal.Int32Type]') FROM report_writer;
 p. 
 
 h4(#listPermissionsStmt). LIST PERMISSIONS

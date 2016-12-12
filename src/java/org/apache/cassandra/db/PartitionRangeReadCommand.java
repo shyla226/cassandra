@@ -52,6 +52,7 @@ import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.thrift.ThriftResultsMerger;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.RequestContext;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -196,7 +197,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         throw new UnsupportedOperationException("Can't do pipeline Group ReadQueries yet");
     }
 
-    public QueryPager getPager(PagingState pagingState, int protocolVersion)
+    public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
     {
             return new PartitionRangeQueryPager(this, pagingState, protocolVersion);
     }
@@ -284,11 +285,9 @@ public class PartitionRangeReadCommand extends ReadCommand
         return Transformation.apply(iter, new CacheFilter());
     }
 
-    public MessageOut<ReadCommand> createMessage(int version)
+    public MessageOut<ReadCommand> createMessage()
     {
-        return dataRange().isPaging()
-             ? new MessageOut<>(MessagingService.Verb.PAGED_RANGE, this, pagedRangeSerializer)
-             : new MessageOut<>(MessagingService.Verb.RANGE_SLICE, this, rangeSliceSerializer);
+        return new MessageOut<>(MessagingService.Verb.RANGE_SLICE, this, serializer);
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)

@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
@@ -268,7 +269,7 @@ public class ClientState
         // Login privilege is not inherited via granted roles, so just
         // verify that the role with the credentials that were actually
         // supplied has it
-        if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user.getPrimaryRole()))
+        if (user.isAnonymous() || DatabaseDescriptor.getRoleManager().canLogin(user))
             this.user = user;
         else
             throw new AuthenticationException(String.format("%s is not permitted to log in", user.getName()));
@@ -308,10 +309,10 @@ public class ClientState
             return;
         validateLogin();
         preventSystemKSSchemaModification(keyspace, resource, perm);
-        if ((perm == Permission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
+        if ((perm == CorePermission.SELECT) && READABLE_SYSTEM_RESOURCES.contains(resource))
             return;
         if (PROTECTED_AUTH_RESOURCES.contains(resource))
-            if ((perm == Permission.CREATE) || (perm == Permission.ALTER) || (perm == Permission.DROP))
+            if ((perm == CorePermission.CREATE) || (perm == CorePermission.ALTER) || (perm == CorePermission.DROP))
                 throw new UnauthorizedException(String.format("%s schema is protected", resource));
         ensureHasPermission(perm, resource);
     }
@@ -361,7 +362,7 @@ public class ClientState
     private void preventSystemKSSchemaModification(String keyspace, DataResource resource, Permission perm) throws UnauthorizedException
     {
         // we only care about schema modification.
-        if (!((perm == Permission.ALTER) || (perm == Permission.DROP) || (perm == Permission.CREATE)))
+        if (!((perm == CorePermission.ALTER) || (perm == CorePermission.DROP) || (perm == CorePermission.CREATE)))
             return;
 
         // prevent system keyspace modification
@@ -372,8 +373,8 @@ public class ClientState
         // TRACING_KS, and also to drop legacy tables (users, credentials, permissions) from
         // AUTH_KS
         if (ALTERABLE_SYSTEM_KEYSPACES.contains(resource.getKeyspace().toLowerCase())
-           && ((perm == Permission.ALTER && !resource.isKeyspaceLevel())
-               || (perm == Permission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
+           && ((perm == CorePermission.ALTER && !resource.isKeyspaceLevel())
+               || (perm == CorePermission.DROP && !DROPPABLE_SYSTEM_TABLES.contains(resource))))
         {
             throw new UnauthorizedException(String.format("Cannot %s %s", perm, resource));
         }

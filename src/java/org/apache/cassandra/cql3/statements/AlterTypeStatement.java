@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.*;
@@ -69,7 +69,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(keyspace(), Permission.ALTER);
+        state.hasKeyspaceAccess(keyspace(), CorePermission.ALTER);
     }
 
     public void validate(ClientState state) throws RequestValidationException

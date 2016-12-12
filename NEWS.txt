@@ -21,10 +21,23 @@ New features
 
 Upgrading
 ---------
+    - Cassandra 4.0 removed support for any pre-3.0 format. This means you cannot upgrade from a 2.x version to 4.0
+      directly, you have to upgrade to a 3.0.x/3.x version first (and run upgradesstable). In particular, this mean
+      Cassandra 4.0 cannot load or read pre-3.0 sstables in any way: you will need to upgrade those sstable in 3.0.x/3.x
+      first.
     - Cassandra will no longer allow invalid keyspace replication options, such as invalid datacenter names for
       NetworkTopologyStrategy. Operators MUST add new nodes to a datacenter before they can set set ALTER or 
       CREATE keyspace replication policies using that datacenter. Existing keyspaces will continue to operate, 
       but CREATE and ALTER will validate that all datacenters specified exist in the cluster. 
+
+3.11
+====
+
+Upgrading
+---------
+   - Specifying the default_time_to_live option when creating or altering a
+     materialized view was erroneously accepted (and ignored). It is now
+     properly rejected.
 
 3.10
 ====
@@ -82,6 +95,7 @@ New features
    - Add support to "unset" JSON fields in prepared statements by specifying DEFAULT UNSET.
      See CASSANDRA-11424 for details
    - Allow TTL with null value on insert and update. It will be treated as equivalent to inserting a 0.
+   - Removed outboundBindAny configuration property. See CASSANDRA-12673 for details.
 
 Upgrading
 ---------

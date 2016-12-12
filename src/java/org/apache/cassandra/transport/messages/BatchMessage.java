@@ -42,6 +42,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
@@ -51,7 +52,7 @@ public class BatchMessage extends Message.Request
 {
     public static final Message.Codec<BatchMessage> codec = new Message.Codec<BatchMessage>()
     {
-        public BatchMessage decode(ByteBuf body, int version)
+        public BatchMessage decode(ByteBuf body, ProtocolVersion version)
         {
             byte type = body.readByte();
             int n = body.readUnsignedShort();
@@ -73,7 +74,7 @@ public class BatchMessage extends Message.Request
             return new BatchMessage(toType(type), queryOrIds, variables, options);
         }
 
-        public void encode(BatchMessage msg, ByteBuf dest, int version)
+        public void encode(BatchMessage msg, ByteBuf dest, ProtocolVersion version)
         {
             int queries = msg.queryOrIdList.size();
 
@@ -92,13 +93,13 @@ public class BatchMessage extends Message.Request
                 CBUtil.writeValueList(msg.values.get(i), dest);
             }
 
-            if (version < Server.VERSION_3)
+            if (version.isSmallerThan(ProtocolVersion.V3))
                 CBUtil.writeConsistencyLevel(msg.options.getConsistency(), dest);
             else
                 QueryOptions.codec.encode(msg.options, dest, version);
         }
 
-        public int encodedSize(BatchMessage msg, int version)
+        public int encodedSize(BatchMessage msg, ProtocolVersion version)
         {
             int size = 3; // type + nb queries
             for (int i = 0; i < msg.queryOrIdList.size(); i++)
@@ -110,7 +111,7 @@ public class BatchMessage extends Message.Request
 
                 size += CBUtil.sizeOfValueList(msg.values.get(i));
             }
-            size += version < Server.VERSION_3
+            size += version.isSmallerThan(ProtocolVersion.V3)
                   ? CBUtil.sizeOfConsistencyLevel(msg.options.getConsistency())
                   : QueryOptions.codec.encodedSize(msg.options, version);
             return size;

@@ -29,6 +29,7 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -36,18 +37,18 @@ public class PrepareMessage extends Message.Request
 {
     public static final Message.Codec<PrepareMessage> codec = new Message.Codec<PrepareMessage>()
     {
-        public PrepareMessage decode(ByteBuf body, int version)
+        public PrepareMessage decode(ByteBuf body, ProtocolVersion version)
         {
             String query = CBUtil.readLongString(body);
             return new PrepareMessage(query);
         }
 
-        public void encode(PrepareMessage msg, ByteBuf dest, int version)
+        public void encode(PrepareMessage msg, ByteBuf dest, ProtocolVersion version)
         {
             CBUtil.writeLongString(msg.query, dest);
         }
 
-        public int encodedSize(PrepareMessage msg, int version)
+        public int encodedSize(PrepareMessage msg, ProtocolVersion version)
         {
             return CBUtil.sizeOfLongString(msg.query);
         }

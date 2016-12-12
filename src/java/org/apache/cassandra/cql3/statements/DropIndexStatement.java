@@ -18,7 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.IndexName;
@@ -59,7 +59,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
         if (cfm == null)
             return;
 
-        state.hasColumnFamilyAccess(cfm.ksName, cfm.cfName, Permission.ALTER);
+        state.hasColumnFamilyAccess(cfm.ksName, cfm.cfName, CorePermission.ALTER);
     }
 
     public void validate(ClientState state)

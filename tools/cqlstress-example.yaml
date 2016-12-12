@@ -1,6 +1,23 @@
 #
 # This is an example YAML profile for cassandra-stress
 #
+# The general form of the command line is as follows:
+#
+#   cassandra-stress user profile=<profile.yaml> ops([insert|<read-op>]=<op-ratio>, ...) n=<partition-ops>
+#
+# cassandra-stress will then run multiple parallel consumers (controlled by the
+# -rate threads=<consumers> option):
+#
+# * Each consumer draws an operation at random from the list of ops;
+# * The distribution of the ops is controlled by the <op-ratio> parameter;
+# * Each op will then generate cassandra queries.  When limited by the
+#   <partition-ops> value:
+#   * Each <read-op> will generate a single SELECT query, decrementing
+#     <partition-ops> by 1;
+#   * Each insert will generate multiple UPDATE queries, decrementing
+#     <partition-ops> by the number of unique partitions inserted;
+#   * When <partition-ops> is exhausted, cassandra-stress stops.
+
 # insert data
 # cassandra-stress user profile=/home/jake/stress1.yaml ops(insert=1)
 #
@@ -9,7 +26,6 @@
 #
 # mixed workload (90/10)
 # cassandra-stress user profile=/home/jake/stress1.yaml ops(insert=1,simple1=9)
-
 
 #
 # Keyspace info
@@ -59,7 +75,7 @@ table_definition: |
 #      GAUSSIAN(min..max,mean,stdev)        A gaussian/normal distribution, with explicitly defined mean and stdev
 #      UNIFORM(min..max)                    A uniform distribution over the range [min, max]
 #      FIXED(val)                           A fixed distribution, always returning the same value
-#      SEQ(min..max)                        A fixed sequence, returning values from min to max sequentially, wrapping if necessary.
+#      SEQ(min..max)                        A fixed sequence, returning values in the range min to max sequentially (starting based on seed), wrapping if necessary.
 #      Aliases: extr, gauss, normal, norm, weibull
 #
 #      If preceded by ~, the distribution is inverted
@@ -76,14 +92,29 @@ columnspec:
     population: gaussian(1..1000)
     cluster: uniform(1..4)
 
-insert:
-  partitions: uniform(1..50)       # number of unique partitions to update in a single operation
-                                  # if batchcount > 1, multiple batches will be used but all partitions will
-                                  # occur in all batches (unless they finish early); only the row counts will vary
-  batchtype: LOGGED               # type of batch to use
-  select: uniform(1..10)/10       # uniform chance any single generated CQL row will be visited in a partition;
-                                  # generated for each partition independently, each time we visit it
 
+# The insert operation
+insert:
+  partitions: uniform(1..50)      # Number of unique partitions to update in a single insert op.
+                                  # Defaults to fixed(1)
+  partitions-per-batch: SINGLE    # SINGLE or MULTIPLE partitions per-batch; multiple partitions in a
+                                  # single batch is a pessimization, but it's allowed.  Defaults to SINGLE.
+  max-rows-per-batch: uniform(1..100)
+                                  # Maximum size of a batch.  Rows are inserted in batches of up to
+                                  # max-rows-per-batch, and after each batch is sent max-rows-per-batch
+                                  # is regenerated from this distribution. If the generated value is 0,
+                                  # then each partition (for SINGLE partitions-per-batch) or all partitions
+                                  # (for MULTIPLE partitions-per-batch) is inserted in a single batch (so if you
+                                  # always require this behaviour, use fixed(0)).  Defaults to fixed(100).
+  batchtype: LOGGED               # Type of batch to use: LOGGED, UNLOGGED or COUNTER
+  select: uniform(1..10)/10       # Proportion of rows that will be generated in each partition.  The number of rows
+                                  # per-partition will be determined by <select-value> * <partition-size>, where
+                                  # <partition-size> is the number of possible rows in a partition, as determined by
+                                  # the columns with cluster keys in the columnspec above. This will be
+                                  # generated for each partition in a single insert op.
+                                  # Defaults to fixed(1)/1
+  row-population: fixed(1)/1      # Proportion of populated columns in a row.
+                                  # Defaults to fixed(1)/1
 #
 # A list of queries you wish to run against the schema
 #

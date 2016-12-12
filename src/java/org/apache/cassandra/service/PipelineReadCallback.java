@@ -203,8 +203,7 @@ public class PipelineReadCallback implements IAsyncCallbackWithFailure<ReadRespo
                                                            result,
                                                            Collections.<String, byte[]>emptyMap(),
                                                            MessagingService.Verb.INTERNAL_RESPONSE,
-                                                           MessagingService.current_version,
-                                                           MessageIn.createTimestamp());
+                                                           MessagingService.current_version);
         response(message);
     }
 
@@ -254,7 +253,7 @@ public class PipelineReadCallback implements IAsyncCallbackWithFailure<ReadRespo
 
                 for (InetAddress endpoint : endpoints)
                 {
-                    MessageOut<ReadCommand> message = command.createMessage(MessagingService.instance().getVersion(endpoint));
+                    MessageOut<ReadCommand> message = command.createMessage();
                     MessagingService.instance().sendRR(message, endpoint, repairHandler);
                 }
             }

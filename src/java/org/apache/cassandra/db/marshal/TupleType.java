@@ -32,6 +32,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -98,6 +99,11 @@ public class TupleType extends AbstractType<ByteBuffer>
     public List<AbstractType<?>> allTypes()
     {
         return types;
+    }
+
+    public boolean isTuple()
+    {
+        return true;
     }
 
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
@@ -330,7 +336,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
     {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < types.size(); i++)

@@ -54,7 +54,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event;
-import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.junit.Assert.assertEquals;
@@ -1791,7 +1791,8 @@ public class AggregationTest extends CQLTester
                                                        " STYPE map<text,bigint>\n" +
                                                        " INITCOND { };");
 
-            for (int i = 0; i < 1000; i++)
+            long tEnd = System.currentTimeMillis() + 150;
+            while (System.currentTimeMillis() < tEnd)
             {
                 execute("SELECT " + releasesByCountry + "(country,title) FROM %s WHERE year=1980");
             }
@@ -1814,6 +1815,7 @@ public class AggregationTest extends CQLTester
             if (turboFilter instanceof ReconfigureOnChangeFilter)
             {
                 ReconfigureOnChangeFilter reconfigureFilter = (ReconfigureOnChangeFilter) turboFilter;
+                reconfigureFilter.setContext(ctx);
                 reconfigureFilter.setRefreshPeriod(millis);
                 reconfigureFilter.stop();
                 reconfigureFilter.start(); // start() sets the next check timestammp
@@ -1889,7 +1891,7 @@ public class AggregationTest extends CQLTester
         {
             String type = "DynamicCompositeType(s => UTF8Type, i => Int32Type)";
 
-            executeNet(Server.CURRENT_VERSION,
+            executeNet(ProtocolVersion.CURRENT,
                        "CREATE FUNCTION " + KEYSPACE + ".f11064(i 'DynamicCompositeType(s => UTF8Type, i => Int32Type)')\n" +
                        "RETURNS NULL ON NULL INPUT\n" +
                        "RETURNS '" + type + "'\n" +
@@ -1897,7 +1899,7 @@ public class AggregationTest extends CQLTester
                        "AS 'return i;'");
 
             // create aggregate using the 'composite syntax' for composite types
-            executeNet(Server.CURRENT_VERSION,
+            executeNet(ProtocolVersion.CURRENT,
                        "CREATE AGGREGATE " + KEYSPACE + ".a11064()\n" +
                        "SFUNC f11064 " +
                        "STYPE '" + type + "'\n" +
@@ -1905,7 +1907,7 @@ public class AggregationTest extends CQLTester
 
             AbstractType<?> compositeType = TypeParser.parse(type);
             ByteBuffer compositeTypeValue = compositeType.fromString("s@foo:i@32");
-            String compositeTypeString = compositeType.asCQL3Type().toCQLLiteral(compositeTypeValue, Server.CURRENT_VERSION);
+            String compositeTypeString = compositeType.asCQL3Type().toCQLLiteral(compositeTypeValue, ProtocolVersion.CURRENT);
             // ensure that the composite type is serialized using the 'blob syntax'
             assertTrue(compositeTypeString.startsWith("0x"));
 
@@ -1914,7 +1916,7 @@ public class AggregationTest extends CQLTester
                        row(compositeTypeString));
 
             // create aggregate using the 'blob syntax' for composite types
-            executeNet(Server.CURRENT_VERSION,
+            executeNet(ProtocolVersion.CURRENT,
                        "CREATE AGGREGATE " + KEYSPACE + ".a11064_2()\n" +
                        "SFUNC f11064 " +
                        "STYPE '" + type + "'\n" +

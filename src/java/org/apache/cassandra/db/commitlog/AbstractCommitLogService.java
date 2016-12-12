@@ -27,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
+import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 public abstract class AbstractCommitLogService

@@ -30,7 +30,7 @@ public class AllowAllAuthorizer implements IAuthorizer
 
     public Set<Permission> authorize(AuthenticatedUser user, IResource resource)
     {
-        return resource.applicablePermissions();
+        return applicablePermissions(resource);
     }
 
     public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource to)

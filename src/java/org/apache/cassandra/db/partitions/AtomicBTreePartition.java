@@ -18,7 +18,9 @@
 package org.apache.cassandra.db.partitions;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -190,7 +192,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         long dataSize;
         long heapSize;
         long colUpdateTimeDelta = Long.MAX_VALUE;
-        final MemtableAllocator.DataReclaimer reclaimer;
+        List<Row> inserted; // TODO: replace with walk of aborted BTree
 
         private RowUpdater(AtomicBTreePartition updating, MemtableAllocator allocator, OpOrder.Group writeOp, UpdateTransaction indexer)
         {
@@ -199,7 +201,6 @@ public class AtomicBTreePartition extends AbstractBTreePartition
             this.writeOp = writeOp;
             this.indexer = indexer;
             this.nowInSec = FBUtilities.nowInSeconds();
-            this.reclaimer = allocator.reclaimer();
         }
 
         private Row.Builder builder(Clustering clustering)
@@ -235,11 +236,20 @@ public class AtomicBTreePartition extends AbstractBTreePartition
 
             dataSize += reconciled.dataSize() - existing.dataSize();
             heapSize += reconciled.unsharedHeapSizeExcludingData() - existing.unsharedHeapSizeExcludingData();
-            reclaimer.reclaim(existing);
+            if (inserted == null)
+                inserted = new ArrayList<>();
+            inserted.add(reconciled);
 
             return reconciled;
         }
 
+        protected void reset()
+        {
+            this.dataSize = 0;
+            this.heapSize = 0;
+            if (inserted != null)
+                inserted.clear();
+        }
         public boolean abortEarly()
         {
             return false;
@@ -253,7 +263,6 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         protected void finish()
         {
             allocator.onHeap().adjust(heapSize, writeOp);
-            reclaimer.commit();
         }
     }
 }

@@ -44,10 +44,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Counter counter(MetricName name)
     {
-        Counter counter = counter(name.getMetricName());
-        registerMBean(counter, name.getMBeanName());
-
-        return counter;
+        return register(name, new Counter());
     }
 
     public Counter counter(MetricName name, MetricName alias)
@@ -59,10 +56,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Meter meter(MetricName name)
     {
-        Meter meter = meter(name.getMetricName());
-        registerMBean(meter, name.getMBeanName());
-
-        return meter;
+        return register(name, new Meter());
     }
 
     public Meter meter(MetricName name, MetricName alias)
@@ -74,10 +68,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Histogram histogram(MetricName name, boolean considerZeroes)
     {
-        Histogram histogram = register(name, new ClearableHistogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
-        registerMBean(histogram, name.getMBeanName());
-
-        return histogram;
+        return register(name, new ClearableHistogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
     }
 
     public Histogram histogram(MetricName name, MetricName alias, boolean considerZeroes)
@@ -89,10 +80,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Timer timer(MetricName name)
     {
-        Timer timer = register(name, new Timer(new DecayingEstimatedHistogramReservoir()));
-        registerMBean(timer, name.getMBeanName());
-
-        return timer;
+        return register(name, new Timer(new DecayingEstimatedHistogramReservoir()));
     }
 
     public Timer timer(MetricName name, MetricName alias)

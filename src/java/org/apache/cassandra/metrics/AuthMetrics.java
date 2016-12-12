@@ -1,7 +1,5 @@
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Meter;
-
 /**
  * Metrics about authentication
  */

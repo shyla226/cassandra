@@ -36,8 +36,7 @@ import org.apache.cassandra.transport.messages.RequestContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.CFName;
@@ -77,6 +76,7 @@ import org.apache.cassandra.service.pager.AggregationQueryPager;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.thrift.ThriftValidation;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -182,13 +182,19 @@ public class SelectStatement implements CQLStatement
         if (selection.isWildcard())
             return ColumnFilter.all(cfm);
 
-        ColumnFilter.Builder builder = ColumnFilter.allColumnsBuilder(cfm);
+        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(cfm);
         // Adds all selected columns
         for (ColumnDefinition def : selection.getColumns())
             if (!def.isPrimaryKeyColumn())
                 builder.add(def);
         // as well as any restricted column (so we can actually apply the restriction)
         builder.addAll(restrictions.nonPKRestrictedColumns(true));
+
+        // In a number of cases, we want to distinguish between a partition truly empty and one with only static content
+        // (but no rows). In those cases, we should force querying all static columns (to make the distinction).
+        if (cfm.hasStaticColumns() && returnStaticContentOnPartitionWithNoRows())
+            builder.addAll(cfm.partitionColumns().statics);
+
         return builder.build();
     }
 
@@ -234,15 +240,15 @@ public class SelectStatement implements CQLStatement
         {
             CFMetaData baseTable = View.findBaseTable(keyspace(), columnFamily());
             if (baseTable != null)
-                state.hasColumnFamilyAccess(baseTable, Permission.SELECT);
+                state.hasColumnFamilyAccess(baseTable, CorePermission.SELECT);
         }
         else
         {
-            state.hasColumnFamilyAccess(cfm, Permission.SELECT);
+            state.hasColumnFamilyAccess(cfm, CorePermission.SELECT);
         }
 
         for (Function function : getFunctions())
-            state.ensureHasPermission(Permission.EXECUTE, function);
+            state.ensureHasPermission(CorePermission.EXECUTE, function);
     }
 
     public void validate(ClientState state) throws InvalidRequestException
@@ -846,21 +852,31 @@ public class SelectStatement implements CQLStatement
         }
     }
 
+    // Determines whether, when we have a partition result with not rows, we still return the static content (as a
+    // result set row with null for all other regular columns.)
+    private boolean returnStaticContentOnPartitionWithNoRows()
+    {
+        // The general rational is that if some rows are specifically selected by the query (have a clustering columns
+        // restrictions), we ignore partitions that are empty outside of static content, but if it's a full partition
+        // query, then we include that content.
+        // We make an exception for "static compact" table are from a CQL standpoint we always want to show their static
+        // content for backward compatiblity.
+        return !restrictions.hasClusteringColumnsRestriction() || cfm.isStaticCompactTable();
+    }
+
     // Used by ModificationStatement for CAS operations
     void processPartition(RowIterator partition, QueryOptions options, Selection.ResultSetBuilder result, int nowInSec)
     throws InvalidRequestException
     {
-        int protocolVersion = options.getProtocolVersion();
+        ProtocolVersion protocolVersion = options.getProtocolVersion();
 
         ByteBuffer[] keyComponents = getComponents(cfm, partition.partitionKey());
 
         Row staticRow = partition.staticRow();
-        // If there is no rows, and there's no restriction on clustering/regular columns,
-        // then provided the select was a full partition selection (either by partition key and/or by static column),
-        // we want to include static columns and we're done.
+        // If there is no rows, we include the static content if we should and we're done.
         if (!partition.hasNext())
         {
-            if (!staticRow.isEmpty() && (!restrictions.hasClusteringColumnsRestriction() || cfm.isStaticCompactTable()))
+            if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
             {
                 result.newRow(partition.partitionKey(), staticRow.clustering());
                 for (ColumnDefinition def : selection.getColumns())
@@ -907,7 +923,7 @@ public class SelectStatement implements CQLStatement
         }
     }
 
-    private static void addValue(Selection.ResultSetBuilder result, ColumnDefinition def, Row row, int nowInSec, int protocolVersion)
+    private static void addValue(Selection.ResultSetBuilder result, ColumnDefinition def, Row row, int nowInSec, ProtocolVersion protocolVersion)
     {
         if (def.isComplex())
         {

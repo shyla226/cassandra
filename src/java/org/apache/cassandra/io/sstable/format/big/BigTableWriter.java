@@ -21,7 +21,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Collection;
+import java.util.Map;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,7 +84,7 @@ public class BigTableWriter extends SSTableWriter
         {
             dataFile = new CompressedSequentialWriter(new File(getFilename()),
                                              descriptor.filenameFor(Component.COMPRESSION_INFO),
-                                             new File(descriptor.filenameFor(descriptor.digestComponent)),
+                                             new File(descriptor.filenameFor(Component.DIGEST)),
                                              writerOption,
                                              metadata.params.compression,
                                              metadataCollector);
@@ -91,7 +93,7 @@ public class BigTableWriter extends SSTableWriter
         {
             dataFile = new ChecksummedSequentialWriter(new File(getFilename()),
                     new File(descriptor.filenameFor(Component.CRC)),
-                    new File(descriptor.filenameFor(descriptor.digestComponent)),
+                    new File(descriptor.filenameFor(Component.DIGEST)),
                     writerOption);
         }
         dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(compression)
@@ -161,9 +163,7 @@ public class BigTableWriter extends SSTableWriter
             return null;
 
         long startPosition = beforeAppend(key);
-        observers.forEach((o) -> {
-            o.startPartition(key, iwriter.indexFile.position());
-        });
+        observers.forEach((o) -> o.startPartition(key, iwriter.indexFile.position()));
 
         //Reuse the writer for each row
         columnIndexWriter.reset();
@@ -208,7 +208,7 @@ public class BigTableWriter extends SSTableWriter
         if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())
         {
             String keyString = metadata.getKeyValidator().getString(key.getKey());
-            logger.warn("Writing large partition {}/{}:{} ({})", metadata.ksName, metadata.cfName, keyString, FBUtilities.prettyPrintMemory(rowSize));
+            logger.warn("Writing large partition {}/{}:{} ({}) to sstable {}", metadata.ksName, metadata.cfName, keyString, FBUtilities.prettyPrintMemory(rowSize), getFilename());
         }
     }
 
@@ -442,7 +442,7 @@ public class BigTableWriter extends SSTableWriter
             builder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX)).mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
             chunkCache.ifPresent(builder::withChunkCache);
             summary = new IndexSummaryBuilder(keyCount, metadata.params.minIndexInterval, Downsampling.BASE_SAMPLING_LEVEL);
-            bf = FilterFactory.getFilter(keyCount, metadata.params.bloomFilterFpChance, true, descriptor.version.hasOldBfHashOrder());
+            bf = FilterFactory.getFilter(keyCount, metadata.params.bloomFilterFpChance, true);
             // register listeners to be alerted when the data files are flushed
             indexFile.setPostFlushListener(() -> summary.markIndexSynced(indexFile.getLastFlushOffset()));
             dataFile.setPostFlushListener(() -> summary.markDataSynced(dataFile.getLastFlushOffset()));

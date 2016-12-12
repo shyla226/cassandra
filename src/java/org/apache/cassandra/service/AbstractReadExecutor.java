@@ -28,19 +28,15 @@ import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.db.monitoring.ConstructionTime;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.exceptions.ReadFailureException;
-import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.MessageOut;
@@ -109,7 +105,7 @@ public abstract class AbstractReadExecutor
             if (traceState != null)
                 traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
             logger.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            MessageOut<ReadCommand> message = readCommand.createMessage(MessagingService.instance().getVersion(endpoint));
+            MessageOut<ReadCommand> message = readCommand.createMessage();
             MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
         }
 
@@ -143,7 +139,7 @@ public abstract class AbstractReadExecutor
         MessagingService.Verb verb = MessagingService.Verb.READ;
         try
         {
-            command.setMonitoringTime(new ConstructionTime(constructionTime), verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
+            command.setMonitoringTime(constructionTime, false, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
 
             ReadResponse response;
             try (ReadExecutionController executionController = command.executionController())
@@ -355,8 +351,7 @@ public abstract class AbstractReadExecutor
                 if (traceState != null)
                     traceState.trace("speculating read retry on {}", extraReplica);
                 logger.trace("speculating read retry on {}", extraReplica);
-                int version = MessagingService.instance().getVersion(extraReplica);
-                MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(version), extraReplica, handler);
+                MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), extraReplica, handler);
                 speculated = true;
 
                 cfs.metric.speculativeRetries.inc();

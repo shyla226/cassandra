@@ -36,6 +36,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.UUIDGen;
@@ -44,16 +45,16 @@ public class ExecuteMessage extends Message.Request
 {
     public static final Message.Codec<ExecuteMessage> codec = new Message.Codec<ExecuteMessage>()
     {
-        public ExecuteMessage decode(ByteBuf body, int version)
+        public ExecuteMessage decode(ByteBuf body, ProtocolVersion version)
         {
             byte[] id = CBUtil.readBytes(body);
             return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.codec.decode(body, version));
         }
 
-        public void encode(ExecuteMessage msg, ByteBuf dest, int version)
+        public void encode(ExecuteMessage msg, ByteBuf dest, ProtocolVersion version)
         {
             CBUtil.writeBytes(msg.statementId.bytes, dest);
-            if (version == 1)
+            if (version == ProtocolVersion.V1)
             {
                 CBUtil.writeValueList(msg.options.getValues(), dest);
                 CBUtil.writeConsistencyLevel(msg.options.getConsistency(), dest);
@@ -64,11 +65,11 @@ public class ExecuteMessage extends Message.Request
             }
         }
 
-        public int encodedSize(ExecuteMessage msg, int version)
+        public int encodedSize(ExecuteMessage msg, ProtocolVersion version)
         {
             int size = 0;
             size += CBUtil.sizeOfBytes(msg.statementId.bytes);
-            if (version == 1)
+            if (version == ProtocolVersion.V1)
             {
                 size += CBUtil.sizeOfValueList(msg.options.getValues());
                 size += CBUtil.sizeOfConsistencyLevel(msg.options.getConsistency());

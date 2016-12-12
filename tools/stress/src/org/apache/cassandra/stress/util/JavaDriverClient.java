@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.stress.util;
 
+import java.io.FileNotFoundException;
+import java.io.PrintStream;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -25,6 +27,7 @@ import javax.net.ssl.SSLContext;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
+import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.datastax.driver.core.policies.WhiteListPolicy;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
@@ -53,6 +56,9 @@ public class JavaDriverClient
     private Cluster cluster;
     private Session session;
     private final LoadBalancingPolicy loadBalancingPolicy;
+    private final boolean showQueries;
+    private final PrintStream queryLog;
+    private StatementPrinter statementPrinter;
 
     private static final ConcurrentMap<String, PreparedStatement> stmts = new ConcurrentHashMap<>();
 
@@ -70,19 +76,8 @@ public class JavaDriverClient
         this.password = settings.mode.password;
         this.authProvider = settings.mode.authProvider;
         this.encryptionOptions = encryptionOptions;
-
-        DCAwareRoundRobinPolicy.Builder policyBuilder = DCAwareRoundRobinPolicy.builder();
-        if (settings.node.datacenter != null)
-            policyBuilder.withLocalDc(settings.node.datacenter);
-
-        if (settings.node.isWhiteList)
-            loadBalancingPolicy = new WhiteListPolicy(policyBuilder.build(), settings.node.resolveAll(settings.port.nativePort));
-        else if (settings.node.datacenter != null)
-            loadBalancingPolicy = policyBuilder.build();
-        else
-            loadBalancingPolicy = null;
-
-        connectionsPerHost = settings.mode.connectionsPerHost == null ? 8 : settings.mode.connectionsPerHost;
+        this.loadBalancingPolicy = loadBalancingPolicy(settings);
+        this.connectionsPerHost = settings.mode.connectionsPerHost == null ? 8 : settings.mode.connectionsPerHost;
 
         int maxThreadCount = 0;
         if (settings.rate.auto)
@@ -95,6 +90,32 @@ public class JavaDriverClient
         int requestsPerConnection = (maxThreadCount / connectionsPerHost) + connectionsPerHost;
 
         maxPendingPerConnection = settings.mode.maxPendingPerConnection == null ? Math.max(128, requestsPerConnection ) : settings.mode.maxPendingPerConnection;
+
+        showQueries = settings.log.showQueries;
+        try
+        {
+            queryLog = settings.log.queryLogFile == null ? System.out : new PrintStream(settings.log.queryLogFile);
+        }
+        catch (FileNotFoundException e)
+        {
+            throw new IllegalArgumentException(e);
+        }
+    }
+
+    private LoadBalancingPolicy loadBalancingPolicy(StressSettings settings)
+    {
+        DCAwareRoundRobinPolicy.Builder policyBuilder = DCAwareRoundRobinPolicy.builder();
+        if (settings.node.datacenter != null)
+            policyBuilder.withLocalDc(settings.node.datacenter);
+
+        LoadBalancingPolicy ret = null;
+        if (settings.node.datacenter != null)
+            ret = policyBuilder.build();
+
+        if (settings.node.isWhiteList)
+            ret = new WhiteListPolicy(ret == null ? policyBuilder.build() : ret, settings.node.resolveAll(settings.port.nativePort));
+
+        return new TokenAwarePolicy(ret == null ? policyBuilder.build() : ret);
     }
 
     public PreparedStatement prepare(String query)
@@ -164,6 +185,11 @@ public class JavaDriverClient
         }
 
         session = cluster.connect();
+
+        if (showQueries)
+        {
+            statementPrinter = new StatementPrinter(cluster, queryLog);
+        }
     }
 
     public Cluster getCluster()
@@ -171,23 +197,40 @@ public class JavaDriverClient
         return cluster;
     }
 
-    public Session getSession()
+    private Session getSession()
     {
         return session;
+    }
+
+    public ResultSet execute(Statement statement)
+    {
+        ResultSet result = null;
+        try
+        {
+            result = getSession().execute(statement);
+        }
+        finally
+        {
+            if (statementPrinter != null)
+            {
+                statementPrinter.print(Thread.currentThread().getId(), statement, result);
+            }
+        }
+        return result;
     }
 
     public ResultSet execute(String query, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
         SimpleStatement stmt = new SimpleStatement(query);
         stmt.setConsistencyLevel(from(consistency));
-        return getSession().execute(stmt);
+        return execute(stmt);
     }
 
     public ResultSet executePrepared(PreparedStatement stmt, List<Object> queryParams, org.apache.cassandra.db.ConsistencyLevel consistency)
     {
         stmt.setConsistencyLevel(from(consistency));
         BoundStatement bstmt = stmt.bind((Object[]) queryParams.toArray(new Object[queryParams.size()]));
-        return getSession().execute(bstmt);
+        return execute(bstmt);
     }
 
     /**

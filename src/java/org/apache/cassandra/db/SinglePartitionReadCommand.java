@@ -81,6 +81,7 @@ import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.thrift.ThriftResultsMerger;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
@@ -383,12 +384,12 @@ public class SinglePartitionReadCommand extends ReadCommand
         StorageProxy.readPipeline(Group.one(this), requestContext);
     }
 
-    public SinglePartitionPager getPager(PagingState pagingState, int protocolVersion)
+    public SinglePartitionPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
     {
         return getPager(this, pagingState, protocolVersion);
     }
 
-    private static SinglePartitionPager getPager(SinglePartitionReadCommand command, PagingState pagingState, int protocolVersion)
+    private static SinglePartitionPager getPager(SinglePartitionReadCommand command, PagingState pagingState, ProtocolVersion protocolVersion)
     {
         return new SinglePartitionPager(command, pagingState, protocolVersion);
     }
@@ -565,7 +566,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType())
+        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata))
             return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter)clusteringIndexFilter());
 
         Tracing.trace("Acquiring sstable references");
@@ -622,6 +623,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                         if (skippedSSTablesWithTombstones == null)
                             skippedSSTablesWithTombstones = new ArrayList<>();
                         skippedSSTablesWithTombstones.add(sstable);
+
                     }
                     continue;
                 }
@@ -739,8 +741,11 @@ public class SinglePartitionReadCommand extends ReadCommand
         return Transformation.apply(merged, new UpdateSstablesIterated());
     }
 
-    private boolean queriesMulticellType()
+    private boolean queriesMulticellType(CFMetaData cfm)
     {
+        if (!cfm.hasMulticellOrCounterColumn)
+            return false;
+
         for (ColumnDefinition column : columnFilter().fetchedColumns())
         {
             if (column.type.isMultiCell() || column.type.isCounter())
@@ -812,7 +817,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 //sstable.incrementReadCount();
                 try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), Slices.ALL, columnFilter(), filter.isReversed(), isForThrift()))
                 {
-                    if (iter.partitionLevelDeletion().isLive())
+                    if (!iter.partitionLevelDeletion().isLive())
                     {
                         sstablesIterated++;
                         result = add(UnfilteredRowIterators.noRowsIterator(iter.metadata(), iter.partitionKey(), Rows.EMPTY_STATIC_ROW, iter.partitionLevelDeletion(), filter.isReversed()), result, filter, sstable.isRepaired());
@@ -968,9 +973,9 @@ public class SinglePartitionReadCommand extends ReadCommand
                              nowInSec());
     }
 
-    public MessageOut<ReadCommand> createMessage(int version)
+    public MessageOut<ReadCommand> createMessage()
     {
-        return new MessageOut<>(MessagingService.Verb.READ, this, readSerializer);
+        return new MessageOut<>(MessagingService.Verb.READ, this, serializer);
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)
@@ -1090,7 +1095,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             return UnfilteredPartitionIterators.concat(partitions.stream().map(p -> p.getRight()).collect(Collectors.toList()));
         }
 
-        public QueryPager getPager(PagingState pagingState, int protocolVersion)
+        public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
         {
             if (commands.size() == 1)
                 return SinglePartitionReadCommand.getPager(commands.get(0), pagingState, protocolVersion);

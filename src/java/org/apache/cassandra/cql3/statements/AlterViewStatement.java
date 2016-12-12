@@ -18,7 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.ViewDefinition;
@@ -48,7 +48,7 @@ public class AlterViewStatement extends SchemaAlteringStatement
     {
         CFMetaData baseTable = View.findBaseTable(keyspace(), columnFamily());
         if (baseTable != null)
-            state.hasColumnFamilyAccess(keyspace(), baseTable.cfName, Permission.ALTER);
+            state.hasColumnFamilyAccess(keyspace(), baseTable.cfName, CorePermission.ALTER);
     }
 
     public void validate(ClientState state)
@@ -76,6 +76,14 @@ public class AlterViewStatement extends SchemaAlteringStatement
                          "value is used to TTL undelivered updates. Setting gc_grace_seconds too " +
                          "low might cause undelivered updates to expire before being replayed.");
         }
+
+        if (params.defaultTimeToLive > 0)
+        {
+            throw new InvalidRequestException("Cannot set or alter default_time_to_live for a materialized view. " +
+                                              "Data in a materialized view always expire at the same time than " +
+                                              "the corresponding data in the parent table.");
+        }
+
         viewCopy.metadata.params(params);
 
         return MigrationManager.announceViewUpdate(viewCopy, isLocalOnly)

@@ -20,10 +20,8 @@ package org.apache.cassandra.metrics;
 import java.net.InetAddress;
 
 import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
 
 import org.apache.cassandra.net.OutboundTcpConnectionPool;
 

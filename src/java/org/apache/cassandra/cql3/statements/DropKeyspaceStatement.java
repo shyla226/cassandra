@@ -17,9 +17,9 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Observable;
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Permission;
+
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -43,7 +43,7 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(keyspace, Permission.DROP);
+        state.hasKeyspaceAccess(keyspace, CorePermission.DROP);
     }
 
     public void validate(ClientState state) throws RequestValidationException

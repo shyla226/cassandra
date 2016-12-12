@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -25,6 +24,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.messages.RequestContext;
 
@@ -73,7 +73,7 @@ public interface ReadQuery
             return DataLimits.cqlLimits(0);
         }
 
-        public QueryPager getPager(PagingState state, int protocolVersion)
+        public QueryPager getPager(PagingState state, ProtocolVersion protocolVersion)
         {
             return QueryPager.EMPTY;
         }
@@ -139,7 +139,7 @@ public interface ReadQuery
      *
      * @return a pager for the query.
      */
-    public QueryPager getPager(PagingState pagingState, int protocolVersion);
+    public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion);
 
     /**
      * The limits for the query.

@@ -19,7 +19,6 @@ package org.apache.cassandra.cql3.statements;
 
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -59,12 +58,6 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
 
     public static IResource maybeCorrectResource(IResource resource, ClientState state) throws InvalidRequestException
     {
-        if (DataResource.class.isInstance(resource))
-        {
-            DataResource dataResource = (DataResource) resource;
-            if (dataResource.isTableLevel() && dataResource.getKeyspace() == null)
-                return DataResource.table(state.getKeyspace(), dataResource.getTable());
-        }
-        return resource;
+        return resource.qualifyWithKeyspace(state::getKeyspace);
     }
 }

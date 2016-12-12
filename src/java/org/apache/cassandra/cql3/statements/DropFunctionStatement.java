@@ -25,7 +25,7 @@ import com.google.common.base.Joiner;
 
 import io.reactivex.Single;
 import org.apache.cassandra.auth.FunctionResource;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.*;
@@ -110,9 +110,9 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         }
         else
         {
-            state.ensureHasPermission(Permission.DROP, FunctionResource.function(function.name().keyspace,
-                                                                                 function.name().name,
-                                                                                 function.argTypes()));
+            state.ensureHasPermission(CorePermission.DROP, FunctionResource.function(function.name().keyspace,
+                                                                                     function.name().name,
+                                                                                     function.argTypes()));
         }
     }
 

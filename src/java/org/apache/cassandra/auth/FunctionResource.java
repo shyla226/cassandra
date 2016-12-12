@@ -17,17 +17,15 @@
  */
 package org.apache.cassandra.auth;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.base.Splitter;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.auth.permission.CorePermission;
+import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.Function;
@@ -52,21 +50,21 @@ public class FunctionResource implements IResource
 
     // permissions which may be granted on either a resource representing some collection of functions
     // i.e. the root resource (all functions) or a keyspace level resource (all functions in a given keyspace)
-    private static final Set<Permission> COLLECTION_LEVEL_PERMISSIONS = Sets.immutableEnumSet(Permission.CREATE,
-                                                                                              Permission.ALTER,
-                                                                                              Permission.DROP,
-                                                                                              Permission.AUTHORIZE,
-                                                                                              Permission.EXECUTE);
+    private static final Set<Permission> COLLECTION_LEVEL_PERMISSIONS = Permissions.immutableSetOf(CorePermission.CREATE,
+                                                                                                   CorePermission.ALTER,
+                                                                                                   CorePermission.DROP,
+                                                                                                   CorePermission.AUTHORIZE,
+                                                                                                   CorePermission.EXECUTE);
     // permissions which may be granted on resources representing a specific function
-    private static final Set<Permission> SCALAR_FUNCTION_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                             Permission.DROP,
-                                                                                             Permission.AUTHORIZE,
-                                                                                             Permission.EXECUTE);
+    private static final Set<Permission> SCALAR_FUNCTION_PERMISSIONS = Permissions.immutableSetOf(CorePermission.ALTER,
+                                                                                                  CorePermission.DROP,
+                                                                                                  CorePermission.AUTHORIZE,
+                                                                                                  CorePermission.EXECUTE);
 
-    private static final Set<Permission> AGGREGATE_FUNCTION_PERMISSIONS = Sets.immutableEnumSet(Permission.ALTER,
-                                                                                                Permission.DROP,
-                                                                                                Permission.AUTHORIZE,
-                                                                                                Permission.EXECUTE);
+    private static final Set<Permission> AGGREGATE_FUNCTION_PERMISSIONS = Permissions.immutableSetOf(CorePermission.ALTER,
+                                                                                                     CorePermission.DROP,
+                                                                                                     CorePermission.AUTHORIZE,
+                                                                                                     CorePermission.EXECUTE);
 
     private static final String ROOT_NAME = "functions";
     private static final FunctionResource ROOT_RESOURCE = new FunctionResource();

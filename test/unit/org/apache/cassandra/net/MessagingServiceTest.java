@@ -34,19 +34,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.metrics.Timer;
 
-import com.codahale.metrics.Timer;
-
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
 import org.caffinitas.ohc.histo.EstimatedHistogram;
-
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
-import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.junit.Assert.*;
 
@@ -82,8 +80,8 @@ public class MessagingServiceTest
 
         List<String> logs = messagingService.getDroppedMessagesLogs();
         assertEquals(1, logs.size());
-        assertEquals("READ messages were dropped in last 5000 ms: 2500 for internal timeout and 2500 for cross node timeout. Mean internal dropped latency: 2730 ms and Mean cross-node dropped latency: 2731 ms", logs.get(0));
-        assertEquals(5000, (int)messagingService.getDroppedMessages().get(verb.toString()));
+        assertEquals("READ messages were dropped in last 5000 ms: 2500 internal and 2500 cross node. Mean internal dropped latency: 2730 ms and Mean cross-node dropped latency: 2731 ms", logs.get(0));
+        assertEquals(5000, (int) messagingService.getDroppedMessages().get(verb.toString()));
 
         logs = messagingService.getDroppedMessagesLogs();
         assertEquals(0, logs.size());
@@ -92,21 +90,19 @@ public class MessagingServiceTest
             messagingService.incrementDroppedMessages(verb, i, i % 2 == 0);
 
         logs = messagingService.getDroppedMessagesLogs();
-        assertEquals("READ messages were dropped in last 5000 ms: 1250 for internal timeout and 1250 for cross node timeout. Mean internal dropped latency: 2277 ms and Mean cross-node dropped latency: 2278 ms", logs.get(0));
-        assertEquals(7500, (int)messagingService.getDroppedMessages().get(verb.toString()));
+        assertEquals("READ messages were dropped in last 5000 ms: 1250 internal and 1250 cross node. Mean internal dropped latency: 2277 ms and Mean cross-node dropped latency: 2278 ms", logs.get(0));
+        assertEquals(7500, (int) messagingService.getDroppedMessages().get(verb.toString()));
     }
 
     @Test
     public void testDCLatency() throws Exception
     {
         int latency = 100;
-
         ConcurrentHashMap<String, Timer> dcLatency = MessagingService.instance().metrics.dcLatency;
         dcLatency.clear();
 
-        long now = System.currentTimeMillis();
+        long now = ApproximateTime.currentTimeMillis();
         long sentAt = now - latency;
-
         assertNull(dcLatency.get("datacenter1"));
         addDCLatency(sentAt, now);
         assertNotNull(dcLatency.get("datacenter1"));
@@ -124,12 +120,43 @@ public class MessagingServiceTest
         ConcurrentHashMap<String, Timer> dcLatency = MessagingService.instance().metrics.dcLatency;
         dcLatency.clear();
 
-        long now = System.currentTimeMillis();
+        long now = ApproximateTime.currentTimeMillis();
         long sentAt = now - latency;
 
         assertNull(dcLatency.get("datacenter1"));
         addDCLatency(sentAt, now);
         assertNull(dcLatency.get("datacenter1"));
+    }
+
+    @Test
+    public void testQueueWaitLatency() throws Exception
+    {
+        int latency = 100;
+        String verb = MessagingService.Verb.MUTATION.toString();
+
+        ConcurrentHashMap<String, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
+        queueWaitLatency.clear();
+
+        assertNull(queueWaitLatency.get(verb));
+        MessagingService.instance().metrics.addQueueWaitTime(verb, latency);
+        assertNotNull(queueWaitLatency.get(verb));
+        assertEquals(1, queueWaitLatency.get(verb).getCount());
+        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, TimeUnit.MILLISECONDS.toNanos(latency))) - 1];
+        assertEquals(expectedBucket, queueWaitLatency.get(verb).getSnapshot().getMax());
+    }
+
+    @Test
+    public void testNegativeQueueWaitLatency() throws Exception
+    {
+        int latency = -100;
+        String verb = MessagingService.Verb.MUTATION.toString();
+
+        ConcurrentHashMap<String, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
+        queueWaitLatency.clear();
+
+        assertNull(queueWaitLatency.get(verb));
+        MessagingService.instance().metrics.addQueueWaitTime(verb, latency);
+        assertNull(queueWaitLatency.get(verb));
     }
 
     @Test
@@ -221,7 +248,7 @@ public class MessagingServiceTest
         assertFalse(MockBackPressureStrategy.applied);
     }
 
-    private static void addDCLatency(long sentAt, long now) throws IOException
+    private static void addDCLatency(long sentAt, long nowTime) throws IOException
     {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (DataOutputStreamPlus out = new WrappedDataOutputStreamPlus(baos))
@@ -229,7 +256,7 @@ public class MessagingServiceTest
             out.writeInt((int) sentAt);
         }
         DataInputStreamPlus in = new DataInputStreamPlus(new ByteArrayInputStream(baos.toByteArray()));
-        MessageIn.readTimestamp(InetAddress.getLocalHost(), in, now);
+        MessageIn.readConstructionTime(InetAddress.getLocalHost(), in, nowTime);
     }
 
     public static class MockBackPressureStrategy implements BackPressureStrategy<MockBackPressureStrategy.MockBackPressureState>

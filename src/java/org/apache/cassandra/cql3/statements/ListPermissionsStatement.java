@@ -18,14 +18,12 @@
 package org.apache.cassandra.cql3.statements;
 
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 import io.reactivex.Single;
-import org.apache.cassandra.auth.IResource;
+
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.PermissionDetails;
 import org.apache.cassandra.auth.Resources;
 import org.apache.cassandra.auth.RoleResource;
@@ -66,7 +64,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
         this.permissions = permissions;
         this.resource = resource;
         this.recursive = recursive;
-        this.grantee = grantee.hasName()? RoleResource.role(grantee.getName()) : null;
+        this.grantee = grantee.hasName() ? RoleResource.role(grantee.getName()) : null;
     }
 
     public void validate(ClientState state) throws RequestValidationException
@@ -133,7 +131,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
             result.addColumnValue(UTF8Type.instance.decompose(pd.grantee));
             result.addColumnValue(UTF8Type.instance.decompose(pd.grantee));
             result.addColumnValue(UTF8Type.instance.decompose(pd.resource.toString()));
-            result.addColumnValue(UTF8Type.instance.decompose(pd.permission.toString()));
+            result.addColumnValue(UTF8Type.instance.decompose(pd.permission.getFullName()));
         }
         return new ResultMessage.Rows(result);
     }

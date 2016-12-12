@@ -363,6 +363,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         if (epState == null)
             return;
         epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
+        epState.addApplicationState(ApplicationState.RPC_READY, StorageService.instance.valueFactory.rpcReady(false));
         epState.getHeartBeatState().forceHighestPossibleVersionUnsafe();
         markDead(endpoint, epState);
         FailureDetector.instance.forceConviction(endpoint);
@@ -979,12 +980,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private void markAlive(final InetAddress addr, final EndpointState localState)
     {
-        if (MessagingService.instance().getVersion(addr) < MessagingService.VERSION_20)
-        {
-            realMarkAlive(addr, localState);
-            return;
-        }
-
         localState.markDead();
 
         MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);

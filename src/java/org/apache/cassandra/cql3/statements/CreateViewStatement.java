@@ -24,8 +24,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 import io.reactivex.*;
-import io.reactivex.Observable;
-import org.apache.cassandra.auth.Permission;
+
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
@@ -80,7 +80,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
     {
         if (!baseName.hasKeyspace())
             baseName.setKeyspace(keyspace(), true);
-        state.hasColumnFamilyAccess(keyspace(), baseName.getColumnFamily(), Permission.ALTER);
+        state.hasColumnFamilyAccess(keyspace(), baseName.getColumnFamily(), CorePermission.ALTER);
     }
 
     public void validate(ClientState state) throws RequestValidationException
@@ -272,12 +272,21 @@ public class CreateViewStatement extends SchemaAlteringStatement
         if (targetClusteringColumns.isEmpty())
             return error("No columns are defined for Materialized View other than primary key");
 
+        TableParams params = properties.properties.asNewTableParams();
+
+        if (params.defaultTimeToLive > 0)
+        {
+            throw new InvalidRequestException("Cannot set default_time_to_live for a materialized view. " +
+                                              "Data in a materialized view always expire at the same time than " +
+                                              "the corresponding data in the parent table.");
+        }
+
         CFMetaData.Builder cfmBuilder = CFMetaData.Builder.createView(keyspace(), columnFamily());
         add(cfm, targetPartitionKeys, cfmBuilder::addPartitionKey);
         add(cfm, targetClusteringColumns, cfmBuilder::addClusteringColumn);
         add(cfm, includedColumns, cfmBuilder::addRegularColumn);
         cfmBuilder.withId(properties.properties.getId());
-        TableParams params = properties.properties.asNewTableParams();
+
         CFMetaData viewCfm = cfmBuilder.build().params(params);
         ViewDefinition definition = new ViewDefinition(keyspace(),
                                                        columnFamily(),

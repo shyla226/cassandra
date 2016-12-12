@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import org.apache.cassandra.auth.permission.CorePermission;
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.exceptions.*;
@@ -49,7 +49,7 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasKeyspaceAccess(name, Permission.ALTER);
+        state.hasKeyspaceAccess(name, CorePermission.ALTER);
     }
 
     public void validate(ClientState state) throws RequestValidationException

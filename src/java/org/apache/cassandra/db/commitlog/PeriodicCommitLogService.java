@@ -17,10 +17,9 @@
  */
 package org.apache.cassandra.db.commitlog;
 
-import com.codahale.metrics.Timer;
-import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.metrics.Timer;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
 {

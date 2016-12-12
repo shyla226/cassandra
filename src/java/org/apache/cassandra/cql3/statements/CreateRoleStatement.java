@@ -18,8 +18,10 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
+
+import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthenticatedUser;
-import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.RoleOptions;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -46,7 +48,7 @@ public class CreateRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
-        super.checkPermission(state, Permission.CREATE, RoleResource.root());
+        super.checkPermission(state, CorePermission.CREATE, RoleResource.root());
         if (opts.getSuperuser().isPresent())
         {
             if (opts.getSuperuser().get() && !state.getUser().isSuper())
@@ -95,10 +97,11 @@ public class CreateRoleStatement extends AuthenticationStatement
         {
             try
             {
-                DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                         role.applicablePermissions(),
-                                                         role,
-                                                         RoleResource.role(state.getUser().getName()));
+                IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+                authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                                 authorizer.applicablePermissions(role),
+                                 role,
+                                 RoleResource.role(state.getUser().getName()));
             }
             catch (UnsupportedOperationException e)
             {

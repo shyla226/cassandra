@@ -19,9 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.concurrent.TimeoutException;
 
-import io.reactivex.Observable;
 import io.reactivex.Single;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CFName;
@@ -58,7 +57,7 @@ public class TruncateStatement extends CFStatement implements CQLStatement
 
     public void checkAccess(ClientState state) throws InvalidRequestException, UnauthorizedException
     {
-        state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.MODIFY);
+        state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.MODIFY);
     }
 
     public void validate(ClientState state) throws InvalidRequestException

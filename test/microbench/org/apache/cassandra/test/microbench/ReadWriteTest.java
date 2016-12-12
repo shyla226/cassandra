@@ -41,6 +41,7 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.profile.LinuxPerfAsmProfiler;
@@ -94,9 +95,9 @@ public class ReadWriteTest extends CQLTester
 
         keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
-        executeNet(4, "use "+keyspace+";");
-        writeStatement = prepareNet(4, "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)");
-        readStatement = prepareNet(4, "SELECT * from "+table+" where userid = ? limit 1");
+        executeNet(ProtocolVersion.CURRENT, "use " + keyspace + ";");
+        writeStatement = prepareNet(ProtocolVersion.CURRENT, "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)");
+        readStatement = prepareNet(ProtocolVersion.CURRENT, "SELECT * from "+table+" where userid = ? limit 1");
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
@@ -104,7 +105,7 @@ public class ReadWriteTest extends CQLTester
         //Warm up
         System.err.println("Writing " + numRows);
         for (long i = 0; i < numRows; i++)
-            executeNet(4, writeStatement.bind(i,i,i));
+            executeNet(ProtocolVersion.CURRENT, writeStatement.bind(i,i,i));
 
         futures = new ArrayList<>(INFLIGHT);
     }
@@ -121,7 +122,7 @@ public class ReadWriteTest extends CQLTester
     public Object read() throws Throwable
     {
         for (int i = 0; i < INFLIGHT; i++)
-            futures.add(executeNetAsync(4, readStatement.bind( numReads++ % numRows )));
+            futures.add(executeNetAsync(ProtocolVersion.CURRENT, readStatement.bind( numReads++ % numRows )));
 
         FBUtilities.waitOnFutures(futures);
 

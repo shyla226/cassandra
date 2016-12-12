@@ -27,7 +27,7 @@ import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
@@ -70,7 +70,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.ALTER);
+        state.hasColumnFamilyAccess(keyspace(), columnFamily(), CorePermission.ALTER);
     }
 
     public void validate(ClientState state) throws RequestValidationException

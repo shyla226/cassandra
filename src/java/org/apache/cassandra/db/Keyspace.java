@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.Lock;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
@@ -63,6 +64,7 @@ public class Keyspace
 
     private static final String TEST_FAIL_WRITES_KS = System.getProperty("cassandra.test.fail_writes_ks", "");
     private static final boolean TEST_FAIL_WRITES = !TEST_FAIL_WRITES_KS.isEmpty();
+    private static int TEST_FAIL_MV_LOCKS_COUNT = Integer.getInteger(System.getProperty("cassandra.test.fail_mv_locks_count", "0"), 0);
 
     public final KeyspaceMetrics metric;
 
@@ -427,6 +429,20 @@ public class Keyspace
         return apply(mutation, writeCommitLog, true, false);
     }
 
+    /**
+     * Should be used if caller is blocking and runs in mutation stage.
+     * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
+     * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
+     *
+     * @param mutation
+     * @param writeCommitLog
+     * @return
+     */
+    public Single<Integer> applyNotDeferrable(Mutation mutation, boolean writeCommitLog)
+    {
+        return apply(mutation, writeCommitLog, true, false, false);
+    }
+
     public Single<Integer> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
         return apply(mutation, writeCommitLog, updateIndexes, false);
@@ -437,6 +453,14 @@ public class Keyspace
         return apply(mutation, false, true, true);
     }
 
+    public Single<Integer> apply(final Mutation mutation,
+                                      final boolean writeCommitLog,
+                                      boolean updateIndexes,
+                                      boolean isClReplay)
+    {
+        return apply(mutation, writeCommitLog, updateIndexes, isClReplay, true);
+    }
+
     /**
      * This method appends a row to the global CommitLog, then updates memtables and indexes.
      *
@@ -445,14 +469,18 @@ public class Keyspace
      * @param writeCommitLog false to disable commitlog append entirely
      * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
      * @param isClReplay     true if caller is the commitlog replayer
+     * @param isDeferrable   true if caller is not waiting for future to complete, so that future may be deferred
      */
     public Single<Integer> apply(final Mutation mutation,
                                  final boolean writeCommitLog,
                                  boolean updateIndexes,
-                                 boolean isClReplay)
+                                 boolean isClReplay,
+                                 boolean isDeferrable)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return io.reactivex.Single.error(new RuntimeException("Testing write failures"));
+
+        Lock[] locks = null;
 
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
@@ -470,43 +498,75 @@ public class Keyspace
             // the order of lock acquisition doesn't matter (from a deadlock perspective) because we only use tryLock()
             Collection<UUID> columnFamilyIds = mutation.getColumnFamilyIds();
             Iterator<UUID> idIterator = columnFamilyIds.iterator();
-            locks = new Lock[columnFamilyIds.size()];
 
+            locks = new Lock[columnFamilyIds.size()];
             for (int i = 0; i < columnFamilyIds.size(); i++)
             {
                 UUID cfid = idIterator.next();
                 int lockKey = Objects.hash(mutation.key().getKey(), cfid);
-                Lock lock = ViewManager.acquireLockFor(lockKey);
-                if (lock == null)
+                while (true)
                 {
-                    // we will either time out or retry, so release all acquired locks
-                    for (int j = 0; j < i; j++)
-                        locks[j].unlock();
+                    Lock lock = null;
 
-                    // avoid throwing a WTE during commitlog replay
-                    if (!isClReplay && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
+                    if (TEST_FAIL_MV_LOCKS_COUNT == 0)
+                        lock = ViewManager.acquireLockFor(lockKey);
+                    else
+                        TEST_FAIL_MV_LOCKS_COUNT--;
+
+                    if (lock == null)
                     {
-                        logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(cfid).name);
-                        Tracing.trace("Could not acquire MV lock");
-                        if (future != null)
-                            future.completeExceptionally(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
+                        // avoid throwing a WTE during commitlog replay
+                        if (!isClReplay && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
+                        {
+                            for (int j = 0; j < i; j++)
+                                locks[j].unlock();
+
+                            logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(cfid).name);
+                            Tracing.trace("Could not acquire MV lock");
+                            if (future != null)
+                            {
+                                future.completeExceptionally(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
+                                return mark;
+                            }
+                            else
+                                throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
+                        }
+                        else if (isDeferrable)
+                        {
+                            for (int j = 0; j < i; j++)
+                                locks[j].unlock();
+
+                            // This view update can't happen right now. so rather than keep this thread busy
+                            // we will re-apply ourself to the queue and try again later
+                            StageManager.getStage(Stage.MUTATION).execute(() ->
+                                                                          apply(mutation, writeCommitLog, true, isClReplay, mark)
+                            );
+
+                            return mark;
+                        }
                         else
-                            throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
+                        {
+                            // Retry lock on same thread, if mutation is not deferrable.
+                            // Mutation is not deferrable, if applied from MutationStage and caller is waiting for future to finish
+                            // If blocking caller defers future, this may lead to deadlock situation with all MutationStage workers
+                            // being blocked by waiting for futures which will never be processed as all workers are blocked
+                            try
+                            {
+                                // Wait a little bit before retrying to lock
+                                Thread.sleep(10);
+                            }
+                            catch (InterruptedException e)
+                            {
+                                // Just continue
+                            }
+                            continue;
+                        }
                     }
                     else
                     {
-                        // This view update can't happen right now. so rather than keep this thread busy
-                        // we will re-apply ourself to the queue and try again later
-                        StageManager.getStage(Stage.MUTATION).execute(() ->
-                            apply(mutation, writeCommitLog, true, isClReplay, mark)
-                        );
-
-                        return mark;
+                        locks[i] = lock;
                     }
-                }
-                else
-                {
-                    locks[i] = lock;
+                    break;
                 }
             }
 

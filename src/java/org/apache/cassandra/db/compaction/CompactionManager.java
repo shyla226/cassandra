@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -930,6 +931,7 @@ public class CompactionManager implements CompactionManagerMBean
                 }
                 catch (Throwable e)
                 {
+                    logger.debug("Error during validation", e);
                     // we need to inform the remote end of our failure, otherwise it will hang on repair forever
                     validator.fail();
                     throw e;
@@ -1241,7 +1243,7 @@ public class CompactionManager implements CompactionManagerMBean
             header = SerializationHeader.make(sstable.metadata, Collections.singleton(sstable));
 
         return SSTableWriter.create(cfs.metadata,
-                                    Descriptor.fromFilename(cfs.getSSTablePath(compactionFileLocation)),
+                                    cfs.newSSTableDescriptor(compactionFileLocation),
                                     expectedBloomFilterSize,
                                     repairedAt,
                                     sstable.getSSTableLevel(),
@@ -1273,7 +1275,7 @@ public class CompactionManager implements CompactionManagerMBean
                 break;
             }
         }
-        return SSTableWriter.create(Descriptor.fromFilename(cfs.getSSTablePath(compactionFileLocation)),
+        return SSTableWriter.create(cfs.newSSTableDescriptor(compactionFileLocation),
                                     (long) expectedBloomFilterSize,
                                     repairedAt,
                                     cfs.metadata,
@@ -1668,7 +1670,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
 
         @Override
-        public long maxPurgeableTimestamp(DecoratedKey key)
+        public Predicate<Long> getPurgeEvaluator(DecoratedKey key)
         {
             /*
              * The main reason we always purge is that including gcable tombstone would mean that the
@@ -1681,7 +1683,7 @@ public class CompactionManager implements CompactionManagerMBean
              * a tombstone that could shadow a column in another sstable, but this is doubly not a concern
              * since validation compaction is read-only.
              */
-            return Long.MAX_VALUE;
+            return time -> true;
         }
     }
 

@@ -164,9 +164,8 @@ public class CassandraRoleManager implements IRoleManager
         // to be added.
         if (Schema.instance.getCFMetaData(SchemaConstants.AUTH_KEYSPACE_NAME, "users") != null)
         {
-             legacySelectUserStatement = (SelectStatement) prepare("SELECT * FROM %s.%s WHERE name = ?",
-                                                                   SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                                   LEGACY_USERS_TABLE);
+            legacySelectUserStatement = prepareLegacySelectUserStatement();
+
             scheduleSetupTask(() -> {
                 convertLegacyData();
                 return null;
@@ -377,16 +376,6 @@ public class CassandraRoleManager implements IRoleManager
         {
             public void run()
             {
-                // If not all nodes are on 2.2, we don't want to initialize the role manager as this will confuse 2.1
-                // nodes (see CASSANDRA-9761 for details). So we re-schedule the setup for later, hoping that the upgrade
-                // will be finished by then.
-                if (!MessagingService.instance().areAllNodesAtLeast22())
-                {
-                    logger.trace("Not all nodes are upgraded to a version that supports Roles yet, rescheduling setup task");
-                    scheduleSetupTask(setupTask);
-                    return;
-                }
-
                 isClusterReady = true;
                 try
                 {
@@ -453,6 +442,13 @@ public class CassandraRoleManager implements IRoleManager
         }
     }
 
+    private SelectStatement prepareLegacySelectUserStatement()
+    {
+        return (SelectStatement) prepare("SELECT * FROM %s.%s WHERE name = ?",
+                                         SchemaConstants.AUTH_KEYSPACE_NAME,
+                                         LEGACY_USERS_TABLE);
+    }
+
     private CQLStatement prepare(String template, String keyspace, String table)
     {
         try
@@ -494,9 +490,14 @@ public class CassandraRoleManager implements IRoleManager
             // If it exists, try the legacy users table in case the cluster
             // is in the process of being upgraded and so is running with mixed
             // versions of the authn schema.
-            return (Schema.instance.getCFMetaData(SchemaConstants.AUTH_KEYSPACE_NAME, "users") != null)
-                    ? getRoleFromTable(name, legacySelectUserStatement, LEGACY_ROW_TO_ROLE)
-                    : getRoleFromTable(name, loadRoleStatement, ROW_TO_ROLE);
+            if (Schema.instance.getCFMetaData(SchemaConstants.AUTH_KEYSPACE_NAME, "users") == null)
+                return getRoleFromTable(name, loadRoleStatement, ROW_TO_ROLE);
+            else
+            {
+                if (legacySelectUserStatement == null)
+                    legacySelectUserStatement = prepareLegacySelectUserStatement();
+                return getRoleFromTable(name, legacySelectUserStatement, LEGACY_ROW_TO_ROLE);
+            }
         }
         catch (RequestExecutionException | RequestValidationException e)
         {

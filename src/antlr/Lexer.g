@@ -134,6 +134,7 @@ K_EXECUTE:     E X E C U T E;
 K_NORECURSIVE: N O R E C U R S I V E;
 K_MBEAN:       M B E A N;
 K_MBEANS:      M B E A N S;
+K_RESOURCE:     R E S O U R C E;
 
 K_USER:        U S E R;
 K_USERS:       U S E R S;
@@ -176,8 +177,10 @@ K_EXISTS:      E X I S T S;
 
 K_MAP:         M A P;
 K_LIST:        L I S T;
-K_NAN:         N A N;
-K_INFINITY:    I N F I N I T Y;
+K_POSITIVE_NAN: N A N;
+K_NEGATIVE_NAN: '-' N A N;
+K_POSITIVE_INFINITY:    I N F I N I T Y;
+K_NEGATIVE_INFINITY: '-' I N F I N I T Y;
 K_TUPLE:       T U P L E;
 
 K_TRIGGER:     T R I G G E R;

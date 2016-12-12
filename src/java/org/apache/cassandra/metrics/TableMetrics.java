@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Maps;
 
 import com.codahale.metrics.*;
-import com.codahale.metrics.Timer;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;

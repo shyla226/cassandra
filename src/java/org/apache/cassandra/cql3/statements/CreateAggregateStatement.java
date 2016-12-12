@@ -25,6 +25,7 @@ import java.util.List;
 
 import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.*;
@@ -37,7 +38,7 @@ import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
-import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * A {@code CREATE AGGREGATE} statement parsed from a CQL query.
@@ -130,7 +131,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             }
 
             // Sanity check that converts the initcond to a CQL literal and parse it back to avoid getting in CASSANDRA-11064.
-            String initcondAsCql = stateType.asCQL3Type().toCQLLiteral(initcond, Server.CURRENT_VERSION);
+            String initcondAsCql = stateType.asCQL3Type().toCQLLiteral(initcond, ProtocolVersion.CURRENT);
             assert Objects.equals(initcond, Terms.asBytes(functionName.keyspace, initcondAsCql, stateType));
 
             if (Constants.NULL_LITERAL != ival && UDHelper.isNullOrEmpty(stateType, initcond))
@@ -174,10 +175,11 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         try
         {
             IResource resource = FunctionResource.function(functionName.keyspace, functionName.name, argTypes);
-            DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
-                                                     resource.applicablePermissions(),
-                                                     resource,
-                                                     RoleResource.role(state.getClientState().getUser().getName()));
+            IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+            authorizer.grant(AuthenticatedUser.SYSTEM_USER,
+                             authorizer.applicablePermissions(resource),
+                             resource,
+                             RoleResource.role(state.getClientState().getUser().getName()));
         }
         catch (RequestExecutionException e)
         {
@@ -188,16 +190,16 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         if (Schema.instance.findFunction(functionName, argTypes).isPresent() && orReplace)
-            state.ensureHasPermission(Permission.ALTER, FunctionResource.function(functionName.keyspace,
+            state.ensureHasPermission(CorePermission.ALTER, FunctionResource.function(functionName.keyspace,
                                                                                   functionName.name,
                                                                                   argTypes));
         else
-            state.ensureHasPermission(Permission.CREATE, FunctionResource.keyspace(functionName.keyspace));
+            state.ensureHasPermission(CorePermission.CREATE, FunctionResource.keyspace(functionName.keyspace));
 
-        state.ensureHasPermission(Permission.EXECUTE, stateFunction);
+        state.ensureHasPermission(CorePermission.EXECUTE, stateFunction);
 
         if (finalFunction != null)
-            state.ensureHasPermission(Permission.EXECUTE, finalFunction);
+            state.ensureHasPermission(CorePermission.EXECUTE, finalFunction);
     }
 
     public void validate(ClientState state) throws InvalidRequestException

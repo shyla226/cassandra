@@ -22,8 +22,11 @@ import static org.apache.cassandra.cql3.Constants.UNSET_VALUE;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.functions.Function;
@@ -35,7 +38,7 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.transport.Server;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -53,7 +56,67 @@ public abstract class Lists
 
     public static ColumnSpecification valueSpecOf(ColumnSpecification column)
     {
-        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((ListType)column.type).getElementsType());
+        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((ListType<?>)column.type).getElementsType());
+    }
+
+    /**
+     * Tests that the list with the specified elements can be assigned to the specified column.
+     *
+     * @param receiver the receiving column
+     * @param elements the list elements
+     */
+    public static AssignmentTestable.TestResult testListAssignment(ColumnSpecification receiver,
+                                                                   List<? extends AssignmentTestable> elements)
+    {
+        if (!(receiver.type instanceof ListType))
+            return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+
+        // If there is no elements, we can't say it's an exact match (an empty list if fundamentally polymorphic).
+        if (elements.isEmpty())
+            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+
+        ColumnSpecification valueSpec = valueSpecOf(receiver);
+        return AssignmentTestable.TestResult.testAll(receiver.ksName, valueSpec, elements);
+    }
+
+    /**
+     * Create a <code>String</code> representation of the list containing the specified elements.
+     *
+     * @param elements the list elements
+     * @return a <code>String</code> representation of the list
+     */
+    public static String listToString(List<?> elements)
+    {
+        return listToString(elements, Object::toString);
+    }
+
+    /**
+     * Create a <code>String</code> representation of the list from the specified items associated to
+     * the list elements.
+     *
+     * @param items items associated to the list elements
+     * @param mapper the mapper used to map the items to the <code>String</code> representation of the list elements
+     * @return a <code>String</code> representation of the list
+     */
+    public static <T> String listToString(Iterable<T> items, java.util.function.Function<T, String> mapper)
+    {
+        return StreamSupport.stream(items.spliterator(), false)
+                            .map(e -> mapper.apply(e))
+                            .collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    /**
+     * Returns the exact ListType from the items if it can be known.
+     *
+     * @param items the items mapped to the list elements
+     * @param mapper the mapper used to retrieve the element types from the items
+     * @return the exact ListType from the items if it can be known or <code>null</code>
+     */
+    public static <T> AbstractType<?> getExactListTypeIfKnown(List<T> items,
+                                                              java.util.function.Function<T, AbstractType<?>> mapper)
+    {
+        Optional<AbstractType<?>> type = items.stream().map(mapper).filter(Objects::nonNull).findFirst();
+        return type.isPresent() ? ListType.getInstance(type.get(), false) : null;
     }
 
     public static class Literal extends Term.Raw
@@ -103,32 +166,18 @@ public abstract class Lists
 
         public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
         {
-            if (!(receiver.type instanceof ListType))
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
-
-            // If there is no elements, we can't say it's an exact match (an empty list if fundamentally polymorphic).
-            if (elements.isEmpty())
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-
-            ColumnSpecification valueSpec = Lists.valueSpecOf(receiver);
-            return AssignmentTestable.TestResult.testAll(keyspace, valueSpec, elements);
+            return testListAssignment(receiver, elements);
         }
 
         @Override
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
-            for (Term.Raw term : elements)
-            {
-                AbstractType<?> type = term.getExactTypeIfKnown(keyspace);
-                if (type != null)
-                    return ListType.getInstance(type, false);
-            }
-            return null;
+            return getExactListTypeIfKnown(elements, p -> p.getExactTypeIfKnown(keyspace));
         }
 
         public String getText()
         {
-            return elements.stream().map(Term.Raw::getText).collect(Collectors.joining(", ", "[", "]"));
+            return listToString(elements, Term.Raw::getText);
         }
     }
 
@@ -141,7 +190,7 @@ public abstract class Lists
             this.elements = elements;
         }
 
-        public static Value fromSerialized(ByteBuffer value, ListType type, int version) throws InvalidRequestException
+        public static Value fromSerialized(ByteBuffer value, ListType type, ProtocolVersion version) throws InvalidRequestException
         {
             try
             {
@@ -160,7 +209,7 @@ public abstract class Lists
             }
         }
 
-        public ByteBuffer get(int protocolVersion)
+        public ByteBuffer get(ProtocolVersion protocolVersion)
         {
             return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
         }
@@ -412,7 +461,7 @@ public abstract class Lists
                 if (value == null)
                     params.addTombstone(column);
                 else
-                    params.addCell(column, value.get(Server.CURRENT_VERSION));
+                    params.addCell(column, value.get(ProtocolVersion.CURRENT));
             }
         }
     }

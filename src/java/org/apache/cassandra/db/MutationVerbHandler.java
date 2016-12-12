@@ -21,7 +21,6 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 
-import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.util.FastByteArrayInputStream;
 import org.apache.cassandra.net.*;
@@ -57,33 +56,15 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             replyTo = InetAddress.getByAddress(from);
         }
 
-        if (message.version < MessagingService.VERSION_30 && LegacyBatchlogMigrator.isLegacyBatchlogMutation(message.payload))
-        {
-            try
-            {
-                LegacyBatchlogMigrator.handleLegacyMutation(message.payload);
-                reply(id, replyTo);
-                return;
-            }
-            catch (WriteTimeoutException wto)
-            {
-                failed();
-            }
-        }
-
         message.payload.applyAsync().subscribe(
-                // onNext
-                v -> reply(id, replyTo),
+            // onNext
+            v -> reply(id, replyTo),
 
-                // onError
-                exc -> failed()
+            // onError
+            exc -> failed()
         );
     }
 
-    /**
-     * Older version (< 1.0) will not send this message at all, hence we don't
-     * need to check the version of the data.
-     */
     private static void forwardToLocalNodes(Mutation mutation, MessagingService.Verb verb, byte[] forwardBytes, InetAddress from) throws IOException
     {
         try (DataInputStream in = new DataInputStream(new FastByteArrayInputStream(forwardBytes)))

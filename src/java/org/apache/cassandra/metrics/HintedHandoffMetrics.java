@@ -20,7 +20,6 @@ package org.apache.cassandra.metrics;
 import java.net.InetAddress;
 import java.util.Map.Entry;
 
-import com.codahale.metrics.Counter;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.utils.UUIDGen;
 import org.slf4j.Logger;
