@@ -21,7 +21,6 @@ package org.apache.cassandra.concurrent;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
@@ -46,9 +45,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
-import org.apache.cassandra.service.PipelineReadCallback;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.transport.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,7 +100,6 @@ public class NettyRxScheduler extends Scheduler
             perCoreSchedulers[cpuId] = scheduler;
         }
 
-        PipelineReadCallback.subscribeChain(PipelineReadCallback.localPublishSubject.get());
         return scheduler;
     }
 

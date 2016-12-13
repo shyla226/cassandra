@@ -42,7 +42,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -55,7 +54,6 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.Single;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
 import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
-import org.apache.cassandra.transport.messages.RequestContext;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.StringUtils;
 
@@ -1634,25 +1632,6 @@ public class StorageProxy implements StorageProxyMBean
              : readRegular(group, consistencyLevel, queryStartNanoTime);
     }
 
-    public static void readPipeline(SinglePartitionReadCommand.Group group, RequestContext requestContext)
-    throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
-    {
-        ConsistencyLevel consistencyLevel = requestContext.queryOptions.getConsistency();
-        if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(group.commands))
-        {
-            readMetrics.unavailables.mark();
-            readMetricsMap.get(consistencyLevel).unavailables.mark();
-            throw new IsBootstrappingException();
-        }
-
-        // TODO
-        if (consistencyLevel.isSerialConsistency())
-            throw new UnsupportedOperationException("Serial operations aren't supported for executePipeline yet");
-             // ? Single.just(readWithPaxos(group, consistencyLevel, state, queryStartNanoTime))
-
-        readRegularPipeline(group, requestContext);
-    }
-
     private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
@@ -1772,68 +1751,6 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void readRegularPipeline(SinglePartitionReadCommand.Group group, RequestContext requestContext)
-    throws UnavailableException, ReadFailureException, ReadTimeoutException
-    {
-        final long start = System.nanoTime();
-        requestContext.storageProxyPostProcessor = (partitionIterator -> {
-            // TODO I guess this function is where we should do error handling?
-            PartitionIterator results = group.commands.size() <= 1
-                                      ? partitionIterator
-                                      : group.limits().filter(partitionIterator, group.nowInSec());
-
-            long latency = System.nanoTime() - start;
-            //readMetrics.addNano(latency);
-            //readMetricsMap.get(requestContext.queryOptions.getConsistency()).addNano(latency);
-            // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
-            //for (ReadCommand command : group.commands)
-            //    Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
-
-            return results;
-        });
-
-        fetchRowsPipeline(group.commands, requestContext);
-        /*
-        try
-        {
-            Single<PartitionIterator> resultObs = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
-            if (group.commands.size() <= 1)
-                return resultObs;
-
-            // If we have more than one command, then despite each read command honoring the limit, the total result
-            // might not honor it and so we should enforce it
-            return resultObs.map(result -> group.limits().filter(result, group.nowInSec()));
-        }
-        catch (UnavailableException e)
-        {
-            readMetrics.unavailables.mark();
-            readMetricsMap.get(consistencyLevel).unavailables.mark();
-            throw e;
-        }
-        catch (ReadTimeoutException e)
-        {
-            readMetrics.timeouts.mark();
-            readMetricsMap.get(consistencyLevel).timeouts.mark();
-            throw e;
-        }
-        catch (ReadFailureException e)
-        {
-            readMetrics.failures.mark();
-            readMetricsMap.get(consistencyLevel).failures.mark();
-            throw e;
-        }
-        finally
-        {
-            long latency = System.nanoTime() - start;
-            readMetrics.addNano(latency);
-            readMetricsMap.get(consistencyLevel).addNano(latency);
-            // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
-            for (ReadCommand command : group.commands)
-                Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
-        }
-        */
-    }
-
     /**
      * This function executes local and remote reads, and blocks for the results:
      *
@@ -1856,23 +1773,6 @@ public class StorageProxy implements StorageProxyMBean
                          .flatMap(readLifecycle -> readLifecycle.getPartitionIterator().toObservable())
                          .toList()
                          .map(PartitionIterators::concat);
-    }
-
-    private static void fetchRowsPipeline(List<SinglePartitionReadCommand> commands, RequestContext requestContext)
-    throws UnavailableException, ReadFailureException, ReadTimeoutException
-    {
-        if (commands.size() == 1)
-            new PipelinedSinglePartitionReadLifecycle(commands.get(0), requestContext).executePipeline();
-        else
-            throw new UnsupportedOperationException("Multiple read commands aren't supported by fetchRowsPipeline() yet: " + commands.toString());
-        // TODO multiple commands
-        /*
-        return Observable.fromIterable(commands)
-                         .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime))
-                         .flatMap(readLifecycle -> readLifecycle.getPartitionIterator().toObservable())
-                         .toList()
-                         .map(PartitionIterators::concat);
-        */
     }
 
     private static class SinglePartitionReadLifecycle
@@ -1962,101 +1862,6 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class PipelinedSinglePartitionReadLifecycle
-    {
-        private final SinglePartitionReadCommand command;
-        private final AbstractPipelineReadExecutor executor;
-        private final ConsistencyLevel consistency;
-        private final long queryStartNanoTime;
-
-        private PartitionIterator result;
-        private ReadCallback repairHandler;
-        private RequestContext requestContext;
-
-        PipelinedSinglePartitionReadLifecycle(SinglePartitionReadCommand command, RequestContext requestContext)
-        {
-            this.command = command;
-            this.executor = AbstractPipelineReadExecutor.getReadExecutor(command, requestContext);
-            this.consistency = requestContext.queryOptions.getConsistency();
-            this.queryStartNanoTime = requestContext.queryStartNanoTime;
-            this.requestContext = requestContext;
-        }
-
-        boolean isDone()
-        {
-            return result != null;
-        }
-
-        void doInitialQueries()
-        {
-            executor.executeAsync();
-        }
-
-        void maybeTryAdditionalReplicas()
-        {
-            executor.maybeTryAdditionalReplicas();
-        }
-
-        void executePipeline()
-        {
-            /*
-            TODO handle digest mismatches
-            Single<PartitionIterator> obs = executor.handler.get().onErrorResumeNext(e -> {
-                if (e instanceof DigestMismatchException)
-                    return retryOnDigestMismatch();
-
-                return Single.error(e);
-            });
-            */
-
-            doInitialQueries();
-
-            maybeTryAdditionalReplicas();
-
-            // return obs;
-        }
-
-        /*
-        Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
-        {
-
-            ReadRepairMetrics.repairedBlocking.mark();
-
-            // Do a full data read to resolve the correct response (and repair node that need be)
-            Keyspace keyspace = Keyspace.open(command.metadata().ksName);
-            DataResolver resolver = new DataResolver(keyspace, command, ConsistencyLevel.ALL, executor.handler.endpoints.size(), queryStartNanoTime);
-            repairHandler = new ReadCallback(resolver,
-                                             executor.getContactedReplicas().size(),
-                                             command,
-                                             keyspace,
-                                             executor.handler.endpoints,
-                                             requestContext);
-
-
-            for (InetAddress endpoint : executor.getContactedReplicas())
-            {
-                MessageOut<ReadCommand> message = command.createMessage(MessagingService.instance().getVersion(endpoint));
-                Tracing.trace("Enqueuing full data read to {}", endpoint);
-                MessagingService.instance().sendRRWithFailure(message, endpoint, repairHandler);
-            }
-
-            // TODO error handling equivalent for pipelined execution
-            // return repairHandler.get().onErrorResumeNext(e -> {
-            //     if (e instanceof DigestMismatchException)
-            //         return Single.error(new RuntimeException("Digest mismatch hit on readRepair", e));
-
-            //     return Single.error(e);
-            });
-        }
-        */
-
-        PartitionIterator getResult()
-        {
-            assert result != null;
-            return result;
-        }
-    }
-
     static class LocalReadRunnable extends DroppableRunnable
     {
         private final ReadCommand command;
@@ -2093,62 +1898,7 @@ public class StorageProxy implements StorageProxyMBean
                     handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
 
-                //MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
-            }
-            catch (Throwable t)
-            {
-                if (t instanceof TombstoneOverwhelmingException)
-                {
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
-                    logger.error(t.getMessage());
-                }
-                else
-                {
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                    throw t;
-                }
-            }
-        }
-    }
-
-    static class PipelineLocalReadRunnable extends DroppableRunnable
-    {
-        private final ReadCommand command;
-        private final PipelineReadCallback handler;
-        private final long start = System.nanoTime();
-
-        PipelineLocalReadRunnable(ReadCommand command, PipelineReadCallback handler)
-        {
-            super(MessagingService.Verb.READ);
-            this.command = command;
-            this.handler = handler;
-        }
-
-        protected void runMayThrow()
-        {
-            try
-            {
-                command.setMonitoringTime(constructionTime, false, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
-
-                ReadResponse response;
-                try (ReadExecutionController executionController = command.executionController();
-                     UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
-                {
-                    response = command.createResponse(iterator);
-                }
-
-                if (command.complete())
-                {
-                    handler.response(response);
-                }
-                else
-                {
-                    MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                }
-
-                //MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
-                //MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+                MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
             }
             catch (Throwable t)
             {

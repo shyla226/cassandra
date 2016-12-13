@@ -32,7 +32,6 @@ import java.util.SortedSet;
 
 import com.google.common.base.MoreObjects;
 import io.reactivex.Single;
-import org.apache.cassandra.transport.messages.RequestContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -277,33 +276,6 @@ public class SelectStatement implements CQLStatement
         // return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
     }
 
-    @Override
-    public boolean supportsPipelineExecution()
-    {
-        return true;
-    }
-
-    @Override
-    public void executePipeline(RequestContext requestContext) throws RequestExecutionException, RequestValidationException
-    {
-        QueryOptions options = requestContext.queryOptions;
-        ConsistencyLevel cl = options.getConsistency();
-        checkNotNull(cl, "Invalid empty consistency level");
-
-        cl.validateForRead(keyspace());
-
-        int nowInSec = FBUtilities.nowInSeconds();
-        int userLimit = getLimit(options);
-        int userPerPartitionLimit = getPerPartitionLimit(options);
-        int pageSize = options.getPageSize();
-        ReadQuery readQuery = getQuery(options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
-
-        requestContext.statementPostProcessor = (partitionIterator ->
-                new ResultMessage.Rows(processSync(partitionIterator, options, nowInSec, userLimit)));
-
-        readQuery.executePipeline(requestContext);
-        // TODO paging support
-    }
 
     public ReadQuery getQuery(QueryOptions options, int nowInSec) throws RequestValidationException
     {

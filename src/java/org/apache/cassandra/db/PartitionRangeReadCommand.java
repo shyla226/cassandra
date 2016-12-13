@@ -53,7 +53,6 @@ import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.thrift.ThriftResultsMerger;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.transport.messages.RequestContext;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -190,11 +189,6 @@ public class PartitionRangeReadCommand extends ReadCommand
     public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
     {
         return Single.just(StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime));
-    }
-
-    public void executePipeline(RequestContext requestContext)
-    {
-        throw new UnsupportedOperationException("Can't do pipeline Group ReadQueries yet");
     }
 
     public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
