@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.exceptions.ClientWriteException;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
@@ -159,6 +160,8 @@ public class ErrorMessage extends Message.Response
                     else
                         te = new AlreadyExistsException(ksName, cfName);
                     break;
+                case CLIENT_WRITE_FAILURE:
+                    te = new ClientWriteException(msg);
             }
             return new ErrorMessage(te);
         }

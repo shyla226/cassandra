@@ -34,7 +34,7 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
      * after any currently-processing item is returned, as will any row/unfiltered iterator
      */
     @DontInline
-    protected void stop()
+    public void stop()
     {
         if (stop != null)
             stop.isSignalled = true;

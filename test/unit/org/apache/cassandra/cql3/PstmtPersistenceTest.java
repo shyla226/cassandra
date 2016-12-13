@@ -50,7 +50,7 @@ public class PstmtPersistenceTest extends CQLTester
         execute("CREATE KEYSPACE IF NOT EXISTS foo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
         execute("CREATE TABLE foo.bar (key text PRIMARY KEY, val int)");
 
-        ClientState clientState = ClientState.forExternalCalls(InetSocketAddress.createUnresolved("127.0.0.1", 1234));
+        ClientState clientState = ClientState.forInternalCalls();
 
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
 

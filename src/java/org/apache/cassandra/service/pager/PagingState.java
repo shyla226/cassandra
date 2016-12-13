@@ -43,13 +43,15 @@ public class PagingState
     public final RowMark rowMark;          // Can be null if not needed.
     public final int remaining;
     public final int remainingInPartition;
+    public final boolean inclusive; //set this to true when the last returned row should be included in the next search
 
-    public PagingState(ByteBuffer partitionKey, RowMark rowMark, int remaining, int remainingInPartition)
+    public PagingState(ByteBuffer partitionKey, RowMark rowMark, int remaining, int remainingInPartition, boolean inclusive)
     {
         this.partitionKey = partitionKey;
         this.rowMark = rowMark;
         this.remaining = remaining;
         this.remainingInPartition = remainingInPartition;
+        this.inclusive = inclusive;
     }
 
     public static PagingState deserialize(ByteBuffer bytes, ProtocolVersion protocolVersion)
@@ -62,6 +64,7 @@ public class PagingState
             ByteBuffer pk;
             RowMark mark;
             int remaining, remainingInPartition;
+            boolean inclusive = false;
             if (protocolVersion.isSmallerOrEqualTo(ProtocolVersion.V3))
             {
                 pk = ByteBufferUtil.readWithShortLength(in);
@@ -79,11 +82,15 @@ public class PagingState
                 mark = new RowMark(ByteBufferUtil.readWithVIntLength(in), protocolVersion);
                 remaining = (int)in.readUnsignedVInt();
                 remainingInPartition = (int)in.readUnsignedVInt();
+
+                if (ProtocolVersion.DSE_V1.compareTo(protocolVersion) <= 0)
+                    inclusive = in.readBoolean();
             }
             return new PagingState(pk.hasRemaining() ? pk : null,
                                    mark.mark.hasRemaining() ? mark : null,
                                    remaining,
-                                   remainingInPartition);
+                                   remainingInPartition,
+                                   inclusive);
         }
         catch (IOException e)
         {
@@ -111,6 +118,9 @@ public class PagingState
                 ByteBufferUtil.writeWithVIntLength(mark, out);
                 out.writeUnsignedVInt(remaining);
                 out.writeUnsignedVInt(remainingInPartition);
+
+                if (ProtocolVersion.DSE_V1.compareTo(protocolVersion) <= 0)
+                    out.writeBoolean(inclusive);
             }
             return out.buffer();
         }
@@ -136,14 +146,15 @@ public class PagingState
             return ByteBufferUtil.serializedSizeWithVIntLength(pk)
                  + ByteBufferUtil.serializedSizeWithVIntLength(mark)
                  + TypeSizes.sizeofUnsignedVInt(remaining)
-                 + TypeSizes.sizeofUnsignedVInt(remainingInPartition);
+                 + TypeSizes.sizeofUnsignedVInt(remainingInPartition)
+                 + (ProtocolVersion.DSE_V1.compareTo(protocolVersion) <= 0 ? TypeSizes.sizeof(inclusive) : 0);
         }
     }
 
     @Override
     public final int hashCode()
     {
-        return Objects.hash(partitionKey, rowMark, remaining, remainingInPartition);
+        return Objects.hash(partitionKey, rowMark, remaining, remainingInPartition, inclusive);
     }
 
     @Override
@@ -155,17 +166,19 @@ public class PagingState
         return Objects.equals(this.partitionKey, that.partitionKey)
             && Objects.equals(this.rowMark, that.rowMark)
             && this.remaining == that.remaining
-            && this.remainingInPartition == that.remainingInPartition;
+            && this.remainingInPartition == that.remainingInPartition
+            && this.inclusive == that.inclusive;
     }
 
     @Override
     public String toString()
     {
-        return String.format("PagingState(key=%s, cellname=%s, remaining=%d, remainingInPartition=%d",
+        return String.format("PagingState(key=%s, cellname=%s, remaining=%d, remainingInPartition=%d, inclusive=%b",
                              partitionKey != null ? ByteBufferUtil.bytesToHex(partitionKey) : null,
                              rowMark,
                              remaining,
-                             remainingInPartition);
+                             remainingInPartition,
+                             inclusive);
     }
 
     /**

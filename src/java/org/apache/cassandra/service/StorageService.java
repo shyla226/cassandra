@@ -165,6 +165,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return getRangesForEndpoint(keyspaceName, FBUtilities.getBroadcastAddress());
     }
 
+    public Collection<Range<Token>> getNormalizedLocalRanges(String keyspaceName)
+    {
+        return Keyspace.open(keyspaceName).getReplicationStrategy().getNormalizedLocalRanges();
+    }
+
     public Collection<Range<Token>> getPrimaryRanges(String keyspace)
     {
         return getPrimaryRangesForEndpoint(keyspace, FBUtilities.getBroadcastAddress());
@@ -3727,6 +3732,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         return liveEps;
     }
+
 
     public void setLoggingLevel(String classQualifier, String rawLevel) throws Exception
     {

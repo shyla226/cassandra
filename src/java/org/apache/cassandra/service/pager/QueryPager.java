@@ -54,7 +54,7 @@ public interface QueryPager
             return ReadExecutionController.empty();
         }
 
-        public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+        public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
         {
             return EmptyIterators.partition();
         }
@@ -74,7 +74,7 @@ public interface QueryPager
             return 0;
         }
 
-        public PagingState state()
+        public PagingState state(boolean inclusive)
         {
             return null;
         }
@@ -92,14 +92,25 @@ public interface QueryPager
      * @param consistency the consistency level to achieve for the query.
      * @param clientState the {@code ClientState} for the query. In practice, this can be null unless
      * {@code consistency} is a serial consistency.
+     * @param forContinuousPaging this serves the same purpose (and is delegated to) than the similarly
+     * named argument to {@link ReadQuery#execute}. Most importantly, please not that if this is used
+     * and the query is local, then the returned iterator will hold an {@code ExecutionController} open
+     * until closed, so you must guarantee that iterator is closed on all path (but in general, the
+     * return of this method should always be used in a try-with-resources).
      * @return the page of result.
      */
-    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException;
+    public PartitionIterator fetchPage(int pageSize,
+                                       ConsistencyLevel consistency,
+                                       ClientState clientState,
+                                       long queryStartNanoTime,
+                                       boolean forContinuousPaging)
+    throws RequestValidationException, RequestExecutionException;
 
     /**
      * Starts a new read operation.
      * <p>
-     * This must be called before {@link fetchPageInternal} and passed to it to protect the read.
+     * This must be called before {@link QueryPager#fetchPageInternal(int, ReadExecutionController)} and passed
+     * to these methods in order to protect the read.
      * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
      * use it in a try-with-ressource construction.
      *
@@ -108,13 +119,14 @@ public interface QueryPager
     public ReadExecutionController executionController();
 
     /**
-     * Fetches the next page internally (in other, this does a local query).
+     * Fetches the next page internally (in other words, this does a local query).
      *
      * @param pageSize the maximum number of elements to return in the next page.
      * @param executionController the {@code ReadExecutionController} protecting the read.
      * @return the page of result.
      */
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController) throws RequestValidationException, RequestExecutionException;
+    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    throws RequestValidationException, RequestExecutionException;
 
     /**
      * Whether or not this pager is exhausted, i.e. whether or not a call to
@@ -134,12 +146,14 @@ public interface QueryPager
 
     /**
      * Get the current state of the pager. The state can allow to restart the
-     * paging on another host from where we are at this point.
+     * paging on another host or locally from where we are at this point.
+     *
+     * @param inclusive - whether the next search should include the current row
      *
      * @return the current paging state. Will return null if paging is at the
      * beginning. If the pager is exhausted, the result is undefined.
      */
-    public PagingState state();
+    public PagingState state(boolean inclusive);
 
     /**
      * Creates a new <code>QueryPager</code> that use the new limits.

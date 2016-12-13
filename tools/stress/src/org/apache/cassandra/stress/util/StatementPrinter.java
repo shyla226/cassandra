@@ -2,7 +2,6 @@ package org.apache.cassandra.stress.util;
 
 import com.datastax.driver.core.*;
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 import org.joda.time.format.ISODateTimeFormat;
 
 import java.io.PrintStream;
@@ -29,16 +28,21 @@ class StatementPrinter
 
     public void print(long consumerId, Statement statement, ResultSet result)
     {
-        out.println(statementAndResultAsString(consumerId, statement, result));
+        out.println(statementAndResultAsString(consumerId, statement, getResultString(result)));
     }
 
-    private String statementAndResultAsString(long consumerId, Statement statement, ResultSet result)
+    public void print(long consumerId, Statement statement)
+    {
+        out.println(statementAndResultAsString(consumerId, statement, " -> [result preview unavailable]"));
+    }
+
+    private String statementAndResultAsString(long consumerId, Statement statement, String result)
     {
         StringBuilder sb = new StringBuilder();
         String prefix = String.format("%s [%02d]: ", ISODateTimeFormat.dateTime().print(new DateTime()), consumerId);
         sb.append(prefix);
         append(statement, 0, sb);
-        append(result, sb);
+        sb.append(result);
         return sb.toString().replace("\n", "\n" + prefix);
     }
 
@@ -222,13 +226,14 @@ class StatementPrinter
         }
     }
 
-    private void append(ResultSet result, StringBuilder buffer)
+    private String getResultString(ResultSet result)
     {
         if (result == null)
         {
-            return;
+            return "";
         }
 
+        StringBuilder buffer = new StringBuilder();
         buffer.append(" -> [rows");
         if (result.isFullyFetched())
         {
@@ -241,6 +246,7 @@ class StatementPrinter
             buffer.append(result.getAvailableWithoutFetching());
         }
         buffer.append("]");
+        return buffer.toString();
     }
 
 }

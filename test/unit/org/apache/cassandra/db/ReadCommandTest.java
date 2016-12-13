@@ -56,6 +56,9 @@ import static org.junit.Assert.assertEquals;
 
 public class ReadCommandTest
 {
+    private static final int abortQueryTimeoutMillis = 10;
+    private static final int slowQueryTimeoutMillis = 500;
+
     private static final String KEYSPACE = "ReadCommandTest";
     private static final String CF1 = "Standard1";
     private static final String CF2 = "Standard2";
@@ -114,7 +117,9 @@ public class ReadCommandTest
         ReadCommand readCommand = Util.cmd(cfs).build();
         assertEquals(2, Util.getAll(readCommand).size());
 
+        readCommand.monitor(System.currentTimeMillis(), abortQueryTimeoutMillis, slowQueryTimeoutMillis, false);
         readCommand.abort();
+
         assertEquals(0, Util.getAll(readCommand).size());
     }
 
@@ -145,7 +150,9 @@ public class ReadCommandTest
         assertEquals(1, partitions.size());
         assertEquals(2, partitions.get(0).rowCount());
 
+        readCommand.monitor(System.currentTimeMillis(), abortQueryTimeoutMillis, slowQueryTimeoutMillis, false);
         readCommand.abort();
+
         assertEquals(0, Util.getAll(readCommand).size());
     }
 
@@ -176,7 +183,9 @@ public class ReadCommandTest
         assertEquals(1, partitions.size());
         assertEquals(2, partitions.get(0).rowCount());
 
+        readCommand.monitor(System.currentTimeMillis(), abortQueryTimeoutMillis, slowQueryTimeoutMillis, false);
         readCommand.abort();
+
         assertEquals(0, Util.getAll(readCommand).size());
     }
 

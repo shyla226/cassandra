@@ -29,16 +29,10 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
-import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 public abstract class Selection
 {
@@ -53,12 +47,12 @@ public abstract class Selection
         }
     };
 
-    private final CFMetaData cfm;
-    private final List<ColumnDefinition> columns;
-    private final SelectionColumnMapping columnMapping;
-    private final ResultSet.ResultMetadata metadata;
-    private final boolean collectTimestamps;
-    private final boolean collectTTLs;
+    final CFMetaData cfm;
+    final List<ColumnDefinition> columns;
+    final SelectionColumnMapping columnMapping;
+    final ResultSet.ResultMetadata metadata;
+    final boolean collectTimestamps;
+    final boolean collectTTLs;
 
     protected Selection(CFMetaData cfm,
                         List<ColumnDefinition> columns,
@@ -243,17 +237,6 @@ public abstract class Selection
         return columnMapping;
     }
 
-    public ResultSetBuilder resultSetBuilder(QueryOptions options, boolean isJson)
-    {
-        return new ResultSetBuilder(options, isJson);
-    }
-
-    public ResultSetBuilder resultSetBuilder(QueryOptions options, boolean isJson, AggregationSpecification aggregationSpec)
-    {
-        return aggregationSpec == null ? new ResultSetBuilder(options, isJson)
-                : new ResultSetBuilder(options, isJson, aggregationSpec.newGroupMaker());
-    }
-
     public abstract boolean isAggregate();
 
     @Override
@@ -294,146 +277,8 @@ public abstract class Selection
         return Collections.singletonList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
     }
 
-    public class ResultSetBuilder
-    {
-        private final ResultSet resultSet;
-        private final ProtocolVersion protocolVersion;
 
-        /**
-         * As multiple thread can access a <code>Selection</code> instance each <code>ResultSetBuilder</code> will use
-         * its own <code>Selectors</code> instance.
-         */
-        private final Selectors selectors;
-
-        /**
-         * The <code>GroupMaker</code> used to build the aggregates.
-         */
-        private final GroupMaker groupMaker;
-
-        /*
-         * We'll build CQL3 row one by one.
-         * The currentRow is the values for the (CQL3) columns we've fetched.
-         * We also collect timestamps and ttls for the case where the writetime and
-         * ttl functions are used. Note that we might collect timestamp and/or ttls
-         * we don't care about, but since the array below are allocated just once,
-         * it doesn't matter performance wise.
-         */
-        List<ByteBuffer> current;
-        final long[] timestamps;
-        final int[] ttls;
-
-        private final boolean isJson;
-
-        private ResultSetBuilder(QueryOptions options, boolean isJson)
-        {
-            this(options, isJson, null);
-        }
-
-        private ResultSetBuilder(QueryOptions options, boolean isJson, GroupMaker groupMaker)
-        {
-            this.resultSet = new ResultSet(getResultMetadata(isJson).copy(), new ArrayList<List<ByteBuffer>>());
-            this.protocolVersion = options.getProtocolVersion();
-            this.selectors = newSelectors(options);
-            this.groupMaker = groupMaker;
-            this.timestamps = collectTimestamps ? new long[columns.size()] : null;
-            this.ttls = collectTTLs ? new int[columns.size()] : null;
-            this.isJson = isJson;
-
-            // We use MIN_VALUE to indicate no timestamp and -1 for no ttl
-            if (timestamps != null)
-                Arrays.fill(timestamps, Long.MIN_VALUE);
-            if (ttls != null)
-                Arrays.fill(ttls, -1);
-        }
-
-        public void add(ByteBuffer v)
-        {
-            current.add(v);
-        }
-
-        public void add(Cell c, int nowInSec)
-        {
-            if (c == null)
-            {
-                current.add(null);
-                return;
-            }
-
-            current.add(value(c));
-
-            if (timestamps != null)
-                timestamps[current.size() - 1] = c.timestamp();
-
-            if (ttls != null)
-                ttls[current.size() - 1] = remainingTTL(c, nowInSec);
-        }
-
-        private int remainingTTL(Cell c, int nowInSec)
-        {
-            if (!c.isExpiring())
-                return -1;
-
-            int remaining = c.localDeletionTime() - nowInSec;
-            return remaining >= 0 ? remaining : -1;
-        }
-
-        private ByteBuffer value(Cell c)
-        {
-            return c.isCounterCell()
-                 ? ByteBufferUtil.bytes(CounterContext.instance().total(c.value()))
-                 : c.value();
-        }
-
-        /**
-         * Notifies this <code>Builder</code> that a new row is being processed.
-         *
-         * @param partitionKey the partition key of the new row
-         * @param clustering the clustering of the new row
-         */
-        public void newRow(DecoratedKey partitionKey, Clustering clustering)
-        {
-            // The groupMaker needs to be called for each row
-            boolean isNewAggregate = groupMaker == null || groupMaker.isNewGroup(partitionKey, clustering);
-            if (current != null)
-            {
-                selectors.addInputRow(protocolVersion, this);
-                if (isNewAggregate)
-                {
-                    resultSet.addRow(getOutputRow());
-                    selectors.reset();
-                }
-            }
-            current = new ArrayList<>(columns.size());
-        }
-
-        /**
-         * Builds the <code>ResultSet</code>
-         */
-        public ResultSet build()
-        {
-            if (current != null)
-            {
-                selectors.addInputRow(protocolVersion, this);
-                resultSet.addRow(getOutputRow());
-                selectors.reset();
-                current = null;
-            }
-
-            // For aggregates we need to return a row even it no records have been found
-            if (resultSet.isEmpty() && groupMaker != null && groupMaker.returnAtLeastOneRow())
-                resultSet.addRow(getOutputRow());
-            return resultSet;
-        }
-
-        private List<ByteBuffer> getOutputRow()
-        {
-            List<ByteBuffer> outputRow = selectors.getOutputRow(protocolVersion);
-            return isJson ? rowToJson(outputRow, protocolVersion, metadata)
-                          : outputRow;
-        }
-    }
-
-    private static interface Selectors
+    static interface Selectors
     {
         public boolean isAggregate();
 
@@ -444,7 +289,7 @@ public abstract class Selection
          * @param rs the <code>ResultSetBuilder</code>
          * @throws InvalidRequestException
          */
-        public void addInputRow(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException;
+        public void addInputRow(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException;
 
         public List<ByteBuffer> getOutputRow(ProtocolVersion protocolVersion) throws InvalidRequestException;
 
@@ -502,7 +347,7 @@ public abstract class Selection
                     return current;
                 }
 
-                public void addInputRow(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+                public void addInputRow(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
                 {
                     current = rs.current;
                 }
@@ -594,7 +439,7 @@ public abstract class Selection
                     return outputRow;
                 }
 
-                public void addInputRow(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+                public void addInputRow(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
                 {
                     for (Selector selector : selectors)
                         selector.addInput(protocolVersion, rs);

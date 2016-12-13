@@ -140,6 +140,16 @@ public enum ConsistencyLevel
         }
     }
 
+    /**
+     * @return true if a single node can satisfy this consistency level,
+     *              this means blockFor() == 1 but we don't want to open a keyspace
+     *              so we don't use blockFor()
+     */
+    public boolean isSingleNode()
+    {
+        return this == ONE || this == LOCAL_ONE || this == ANY;
+    }
+
     public boolean isDatacenterLocal()
     {
         return isDCLocal;

@@ -69,9 +69,9 @@ public class PagingQueryTest extends CQLTester
             {
                 for (int c2 = 0; c2 < 100; c2++)
                 {
-                    assertTrue(iter.hasNext());
-                    Row row = iter.next();
                     String msg = "On " + c1 + ',' + c2;
+                    assertTrue(msg, iter.hasNext());
+                    Row row = iter.next();
                     assertEquals(msg, c1, row.getInt(0));
                     assertEquals(msg, c2, row.getInt(1));
                     assertEquals(msg, Integer.toString(c1), row.getString(2));

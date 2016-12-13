@@ -93,7 +93,7 @@ public class CassandraServer implements Cassandra.Iface
             schedule(DatabaseDescriptor.getReadRpcTimeout());
             try
             {
-                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState, queryStartNanoTime);
+                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState, queryStartNanoTime, false);
             }
             finally
             {
@@ -705,9 +705,9 @@ public class CassandraServer implements Cassandra.Iface
 
             int pageSize;
             // request by page if this is a large row
-            if (cfs.getMeanColumns() > 0)
+            if (cfs.getMeanCells() > 0)
             {
-                int averageColumnSize = (int) (cfs.metric.meanPartitionSize.getValue() / cfs.getMeanColumns());
+                int averageColumnSize = (int) (cfs.metric.meanPartitionSize.getValue() / cfs.getMeanCells());
                 pageSize = Math.min(COUNT_PAGE_SIZE, 4 * 1024 * 1024 / averageColumnSize);
                 pageSize = Math.max(2, pageSize);
                 logger.trace("average row column size is {}; using pageSize of {}", averageColumnSize, pageSize);
