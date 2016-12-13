@@ -56,8 +56,8 @@ public class PipelineReadCallback implements IAsyncCallbackWithFailure<ReadRespo
 {
     protected static final Logger logger = LoggerFactory.getLogger( PipelineReadCallback.class );
 
-    public final static FastThreadLocal<PublishSubject<RequestContext>> localPublishSubject = new FastThreadLocal<PublishSubject<RequestContext>>(){
-
+    public final static FastThreadLocal<PublishSubject<RequestContext>> localPublishSubject = new FastThreadLocal<PublishSubject<RequestContext>>()
+    {
         protected PublishSubject<RequestContext> initialValue()
         {
             return PublishSubject.create();

@@ -44,6 +44,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
+
+import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
@@ -193,8 +195,9 @@ public class CassandraDaemon
 
         ThreadAwareSecurityManager.install();
 
+        final Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
-        RxJavaPlugins.initIoScheduler(Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters())));
+        RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 
         logSystemInfo();

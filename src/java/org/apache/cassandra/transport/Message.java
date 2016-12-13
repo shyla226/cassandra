@@ -56,7 +56,6 @@ import io.netty.channel.EventLoop;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -67,39 +66,6 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
-
-    public final static FastThreadLocal<PublishSubject<RequestContext>> localPublishSubject = new FastThreadLocal<PublishSubject<RequestContext>>(){
-
-        protected PublishSubject<RequestContext> initialValue()
-        {
-            return PublishSubject.create();
-        }
-    };
-
-    // TODO we probably don't actually need any of this part of the chain at all, only the response chain...
-    public static void buildChain(Observable<RequestContext> observable)
-    {
-        observable.subscribe(
-                // onNext
-                requestContext -> {
-                    requestContext.request.executePipeline(requestContext);
-                },
-
-                // onError
-                exc -> {
-                    throw new UnsupportedOperationException("Can't handle onError yet");
-                },
-
-                () -> {
-                    throw new UnsupportedOperationException("Can't handle onComplete yet");
-                });
-        /*
-        observable.map(requestContext -> {
-            requestContext.request.executePipeline(requestContext);
-            return requestContext;
-        }).subscribe();
-        */
-    }
 
     public static void subscribeChain(Observable<RequestContext> observable)
     {
@@ -562,11 +528,13 @@ public abstract class Message
             {
                 this.eventLoop = eventLoop;
             }
+
             void start()
             {
                 if (!running.get() && running.compareAndSet(false, true))
                     this.eventLoop.execute(this);
             }
+
             public void run()
             {
 
@@ -645,8 +613,8 @@ public abstract class Message
             {
                 request.execute(qstate, queryStartNanoTime)
 
-                        // TODO evaluate the performance impact of this, we shouldn't need it if the PPC requests are to the correct port
-                        // .observeOn(NettyRxScheduler.instance())
+                        // TODO evaluate the performance impact of this
+                        //.observeOn(NettyRxScheduler.instance())
 
                         .subscribe(
                                 // onSuccess

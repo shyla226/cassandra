@@ -30,8 +30,6 @@ import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
-import org.apache.cassandra.concurrent.MonitoredTPCExecutorService;
-import org.apache.cassandra.concurrent.MonitoredTPCRxScheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -63,28 +61,7 @@ import org.openjdk.jmh.infra.Blackhole;
 //})
 @State(Scope.Thread)
 public class EventLoopBench {
-    @State(Scope.Thread)
-    public static class MonitoredState {
-        @Param({"1", "10", "100", "1000", "10000", "1000000"})
-        public int count;
 
-        Observable<Integer> rxMonitored;
-
-        @Setup
-        public void setup() {
-
-            Integer[] arr = new Integer[count];
-            Arrays.fill(arr, 777);
-
-            rxMonitored = Observable.fromArray(arr)
-                                    .observeOn(MonitoredTPCRxScheduler.forCpu(1))
-                                    .subscribeOn(MonitoredTPCRxScheduler.forCpu(0));
-        }
-        @TearDown
-        public void teardown() {
-            MonitoredTPCExecutorService.instance().shutdown();
-        }
-    }
 
     @State(Scope.Thread)
     public static class NettyExecutorState {
@@ -94,7 +71,6 @@ public class EventLoopBench {
 
         private MultithreadEventExecutorGroup loops;
 
-        Observable<Integer> rx1;
         Observable<Integer> rx2;
 
 
@@ -190,14 +166,13 @@ public class EventLoopBench {
         }
     }
 
-    //@Benchmark
+    @Benchmark
     public void rxDefault(ExecutorState state, Blackhole bh) throws Exception {
         LatchedObserver<Integer> o = new LatchedObserver<>(bh);
         state.rx1.subscribe(o);
 
         await(state.count, o.latch);
     }
-
 
     @Benchmark
     public void rxNettyNew(ExecutorState state, Blackhole bh) throws Exception {
@@ -214,13 +189,6 @@ public class EventLoopBench {
 
         state.rx2.subscribe(o);
 
-        await(state.count, o.latch);
-    }
-
-    //@Benchmark
-    public void rxMonitored(MonitoredState state, Blackhole bh) throws Exception {
-        LatchedObserver<Integer> o = new LatchedObserver<>(bh);
-        state.rxMonitored.subscribe(o);
         await(state.count, o.latch);
     }
 

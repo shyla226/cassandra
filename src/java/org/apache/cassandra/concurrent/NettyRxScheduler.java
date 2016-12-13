@@ -103,7 +103,6 @@ public class NettyRxScheduler extends Scheduler
             perCoreSchedulers[cpuId] = scheduler;
         }
 
-        // Message.buildChain(Message.localPublishSubject.get());
         PipelineReadCallback.subscribeChain(PipelineReadCallback.localPublishSubject.get());
         return scheduler;
     }

@@ -453,6 +453,7 @@
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
 	  <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.2.6" />
 	  <dependency groupId="org.jctools" artifactId="jctools-core" version="2.0"/>
+          <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava" version="2.0.2"/>
         </dependencyManagement>
         <developer id="alakshman" name="Avinash Lakshman"/>
         <developer id="aleksey" name="Aleksey Yeschenko"/>
@@ -622,6 +623,7 @@
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
 	<dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
 	<dependency groupId="org.jctools" artifactId="jctools-core"/>
+        <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava"/>
       </artifact:pom>
       <artifact:pom id="thrift-pom"
                     artifactId="cassandra-thrift"

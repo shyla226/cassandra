@@ -32,6 +32,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Row;
+import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
@@ -85,9 +86,9 @@ public class ReadWriteTest extends CQLTester
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-
+        Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
-        RxJavaPlugins.initIoScheduler(Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters())));
+        RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 
         CQLTester.setUpClass();
