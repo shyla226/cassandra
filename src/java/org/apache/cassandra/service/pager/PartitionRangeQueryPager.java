@@ -30,9 +30,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * Pages a PartitionRangeReadCommand.
- *
- * Note: this only works for CQL3 queries for now (because thrift queries expect
- * a different limit on the rows than on the columns, which complicates it).
  */
 public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeReadCommand>
 {

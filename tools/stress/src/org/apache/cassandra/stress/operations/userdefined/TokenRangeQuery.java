@@ -45,8 +45,6 @@ import org.apache.cassandra.stress.report.Timer;
 import org.apache.cassandra.stress.settings.SettingsTokenRange;
 import org.apache.cassandra.stress.settings.StressSettings;
 import org.apache.cassandra.stress.util.JavaDriverClient;
-import org.apache.cassandra.stress.util.ThriftClient;
-import org.apache.cassandra.thrift.ThriftConversion;
 
 public class TokenRangeQuery extends Operation
 {
@@ -168,7 +166,7 @@ public class TokenRangeQuery extends Operation
             {
                 Statement statement = new SimpleStatement(state.query);
                 statement.setRoutingTokenRange(state.tokenRange);
-                statement.setConsistencyLevel(JavaDriverClient.from(ThriftConversion.fromThrift(settings.command.consistencyLevel)));
+                statement.setConsistencyLevel(JavaDriverClient.from(settings.command.consistencyLevel));
                 state.it = client.execute(statement, ContinuousPagingOptions.create(pageSize, ContinuousPagingOptions.PageUnit.ROWS));
             }
 
@@ -280,32 +278,10 @@ public class TokenRangeQuery extends Operation
         return ret.toString();
     }
 
-    private static class ThriftRun extends Runner
-    {
-        final ThriftClient client;
-
-        private ThriftRun(ThriftClient client)
-        {
-            this.client = client;
-        }
-
-        public boolean run() throws Exception
-        {
-            throw new OperationNotSupportedException("Bulk read over thrift not supported");
-        }
-    }
-
-
     @Override
     public void run(JavaDriverClient client) throws IOException
     {
         timeWithRetry(new JavaDriverRun(client));
-    }
-
-    @Override
-    public void run(ThriftClient client) throws IOException
-    {
-        timeWithRetry(new ThriftRun(client));
     }
 
     public int ready(WorkManager workManager)

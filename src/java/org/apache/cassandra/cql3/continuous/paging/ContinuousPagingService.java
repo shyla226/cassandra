@@ -48,7 +48,6 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.metrics.ContinuousPagingMetrics;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.thrift.CqlResult;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Frame;
 import org.apache.cassandra.transport.Message;
@@ -279,11 +278,6 @@ public class ContinuousPagingService
                 this.metadata = metadata;
                 this.numRows = numRows;
                 this.buff = buff;
-            }
-
-            public CqlResult toThriftResult()
-            {
-                throw new UnsupportedOperationException();
             }
 
             @Override

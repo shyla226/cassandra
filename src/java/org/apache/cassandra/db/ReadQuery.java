@@ -60,7 +60,7 @@ public interface ReadQuery
 
         public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
         {
-            return EmptyIterators.unfilteredPartition(executionController.metaData(), false);
+            return EmptyIterators.unfilteredPartition(executionController.metaData());
         }
 
         public DataLimits limits()
@@ -98,11 +98,6 @@ public interface ReadQuery
         public boolean complete()
         {
             return true;
-        }
-
-        public boolean isForThrift()
-        {
-            return false;
         }
 
         public boolean queriesOnlyLocalData()
@@ -239,13 +234,6 @@ public interface ReadQuery
      * @return true if there was no monitoring, otherwise return {@link Monitorable#complete()}.
      */
     public boolean complete();
-
-    /**
-     * Whether this query is for thrift or not.
-     *
-     * @return whether this query is for thrift.
-     */
-    public boolean isForThrift();
 
     /**
      * Check if this query can be performed with local data only.

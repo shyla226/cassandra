@@ -54,7 +54,6 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.*;
-import org.apache.cassandra.thrift.ThriftResultsMerger;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
@@ -75,7 +74,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public SinglePartitionReadCommand(boolean isDigest,
                                       int digestVersion,
-                                      boolean isForThrift,
                                       CFMetaData metadata,
                                       int nowInSec,
                                       ColumnFilter columnFilter,
@@ -84,12 +82,11 @@ public class SinglePartitionReadCommand extends ReadCommand
                                       DecoratedKey partitionKey,
                                       ClusteringIndexFilter clusteringIndexFilter)
     {
-        this(isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter, null);
+        this(isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter, null);
     }
 
     public SinglePartitionReadCommand(boolean isDigest,
                                       int digestVersion,
-                                      boolean isForThrift,
                                       CFMetaData metadata,
                                       int nowInSec,
                                       ColumnFilter columnFilter,
@@ -99,7 +96,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                       ClusteringIndexFilter clusteringIndexFilter,
                                       Monitorable optionalMonitor)
     {
-        super(Kind.SINGLE_PARTITION, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, optionalMonitor);
+        super(Kind.SINGLE_PARTITION, isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, optionalMonitor);
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
@@ -126,33 +123,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                     DecoratedKey partitionKey,
                                                     ClusteringIndexFilter clusteringIndexFilter)
     {
-        return create(false, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
-    }
-
-    /**
-     * Creates a new read command on a single partition for thrift.
-     *
-     * @param isForThrift whether the query is for thrift or not.
-     * @param metadata the table to query.
-     * @param nowInSec the time in seconds to use are "now" for this query.
-     * @param columnFilter the column filter to use for the query.
-     * @param rowFilter the row filter to use for the query.
-     * @param limits the limits to use for the query.
-     * @param partitionKey the partition key for the partition to query.
-     * @param clusteringIndexFilter the clustering index filter to use for the query.
-     *
-     * @return a newly created read command.
-     */
-    public static SinglePartitionReadCommand create(boolean isForThrift,
-                                                    CFMetaData metadata,
-                                                    int nowInSec,
-                                                    ColumnFilter columnFilter,
-                                                    RowFilter rowFilter,
-                                                    DataLimits limits,
-                                                    DecoratedKey partitionKey,
-                                                    ClusteringIndexFilter clusteringIndexFilter)
-    {
-        return new SinglePartitionReadCommand(false, 0, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
+        return new SinglePartitionReadCommand(false, 0, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
     }
 
     /**
@@ -283,7 +254,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public SinglePartitionReadCommand copy()
     {
-        return new SinglePartitionReadCommand(isDigestQuery(), digestVersion(), isForThrift(), metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), partitionKey(), clusteringIndexFilter());
+        return new SinglePartitionReadCommand(isDigestQuery(), digestVersion(), metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), partitionKey(), clusteringIndexFilter());
     }
 
     public DecoratedKey partitionKey()
@@ -342,7 +313,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert !isDigestQuery();
         return new SinglePartitionReadCommand(false,
                                               0,
-                                              isForThrift(),
                                               metadata(),
                                               nowInSec(),
                                               columnFilter(),
@@ -357,7 +327,6 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         return new SinglePartitionReadCommand(isDigestQuery(),
                                               digestVersion(),
-                                              isForThrift(),
                                               metadata(),
                                               nowInSec(),
                                               columnFilter(),
@@ -393,7 +362,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         UnfilteredRowIterator partition = cfs.isRowCacheEnabled()
                                         ? getThroughCache(cfs, executionController)
                                         : queryMemtableAndDisk(cfs, executionController);
-        return new SingletonUnfilteredPartitionIterator(partition, isForThrift());
+        return new SingletonUnfilteredPartitionIterator(partition);
     }
 
     /**
@@ -574,7 +543,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
                 UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
-                iterators.add(isForThrift() ? ThriftResultsMerger.maybeWrap(iter, nowInSec()) : iter);
+                iterators.add(iter);
             }
 
             /*
@@ -618,7 +587,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                 @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception,
                                               // or through the closing of the final merged iterator
-                UnfilteredRowIteratorWithLowerBound iter = makeIterator(cfs, sstable, true);
+                UnfilteredRowIteratorWithLowerBound iter = makeIterator(cfs, sstable);
                 if (!sstable.isRepaired())
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
@@ -638,7 +607,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                     @SuppressWarnings("resource") // 'iter' is added to iterators which is close on exception,
                                                   // or through the closing of the final merged iterator
-                    UnfilteredRowIteratorWithLowerBound iter = makeIterator(cfs, sstable, false);
+                    UnfilteredRowIteratorWithLowerBound iter = makeIterator(cfs, sstable);
                     if (!sstable.isRepaired())
                         oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
@@ -681,16 +650,13 @@ public class SinglePartitionReadCommand extends ReadCommand
         return clusteringIndexFilter().shouldInclude(sstable);
     }
 
-    private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs, final SSTableReader sstable, boolean applyThriftTransformation)
+    private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs, final SSTableReader sstable)
     {
         return StorageHook.instance.makeRowIteratorWithLowerBound(cfs,
                                                                   partitionKey(),
                                                                   sstable,
                                                                   clusteringIndexFilter(),
-                                                                  columnFilter(),
-                                                                  isForThrift(),
-                                                                  nowInSec(),
-                                                                  applyThriftTransformation);
+                                                                  columnFilter());
 
     }
 
@@ -768,7 +734,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 if (iter.isEmpty())
                     continue;
 
-                result = add(isForThrift() ? ThriftResultsMerger.maybeWrap(iter, nowInSec()) : iter, result, filter, false);
+                result = add(iter, result, filter, false);
             }
         }
 
@@ -801,7 +767,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                 // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
                 sstable.incrementReadCount();
-                try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), Slices.ALL, columnFilter(), filter.isReversed(), isForThrift()))
+                try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), Slices.ALL, columnFilter(), filter.isReversed()))
                 {
                     if (!iter.partitionLevelDeletion().isLive())
                     {
@@ -814,7 +780,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
             Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
             sstable.incrementReadCount();
-            try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed(), isForThrift()))
+            try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed()))
             {
                 if (iter.isEmpty())
                     continue;
@@ -822,7 +788,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 if (sstable.isRepaired())
                     onlyUnrepaired = false;
                 sstablesIterated++;
-                result = add(isForThrift() ? ThriftResultsMerger.maybeWrap(iter, nowInSec()) : iter, result, filter, sstable.isRepaired());
+                result = add(iter, result, filter, sstable.isRepaired());
             }
         }
 
@@ -1148,21 +1114,16 @@ public class SinglePartitionReadCommand extends ReadCommand
 
             return optionalMonitor.complete();
         }
-
-        public boolean isForThrift()
-        {
-            return commands.isEmpty() ? false : commands.get(0).isForThrift();
-        }
     }
 
     private static class Deserializer extends SelectionDeserializer
     {
-        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, boolean isForThrift, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
+        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
         throws IOException
         {
             DecoratedKey key = metadata.decorateKey(metadata.getKeyValidator().readValue(in, DatabaseDescriptor.getMaxValueSize()));
             ClusteringIndexFilter filter = ClusteringIndexFilter.serializer.deserialize(in, version, metadata);
-            return new SinglePartitionReadCommand(isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter);
+            return new SinglePartitionReadCommand(isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter);
         }
     }
 }
