@@ -105,5 +105,4 @@ public class CompactionStats extends NodeToolCmd
             System.out.printf("%25s%10s%n", "Active compaction remaining time : ", remainingTime);
         }
     }
-
 }
