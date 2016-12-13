@@ -122,6 +122,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @Deprecated
     private final LegacyJMXProgressSupport legacyProgressSupport;
 
+    private static final AtomicInteger threadCounter = new AtomicInteger(1);
+
     private static int getRingDelay()
     {
         String newdelay = System.getProperty("cassandra.ring_delay_ms");
@@ -599,7 +601,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         // daemon threads, like our executors', continue to run while shutdown hooks are invoked
-        drainOnShutdown = new Thread(NamedThreadFactory.threadLocalDeallocator(new WrappedRunnable()
+        drainOnShutdown = NamedThreadFactory.createThread(new WrappedRunnable()
         {
             @Override
             public void runMayThrow() throws InterruptedException, ExecutionException, IOException
@@ -614,7 +616,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 logbackHook.setContext((LoggerContext)LoggerFactory.getILoggerFactory());
                 logbackHook.run();
             }
-        }), "StorageServiceShutdownHook");
+        }, "StorageServiceShutdownHook");
         Runtime.getRuntime().addShutdownHook(drainOnShutdown);
 
         replacing = isReplacing();
@@ -3472,7 +3474,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             return 0;
 
         int cmd = nextRepairCommand.incrementAndGet();
-        new Thread(NamedThreadFactory.threadLocalDeallocator(createRepairTask(cmd, keyspace, options, legacy))).start();
+        NamedThreadFactory.createThread(createRepairTask(cmd, keyspace, options, legacy), "Repair-Task-" + threadCounter.incrementAndGet()).start();
         return cmd;
     }
 
