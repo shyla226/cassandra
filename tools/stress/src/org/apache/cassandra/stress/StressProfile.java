@@ -620,11 +620,7 @@ public class StressProfile implements Serializable
             }
         }
 
-<<<<<<< HEAD
-        return new SchemaInsert(timer, settings, generator, seedManager, maxRowsPerBatch.get(), partitionsPerBatch, partitions.get(), selectchance.get(), rowPopulation.get(), thriftInsertId, insertStatement, ThriftConversion.fromThrift(settings.command.consistencyLevel), batchType);
-=======
-        return new SchemaInsert(timer, settings, generator, seedManager, partitions.get(), selectchance.get(), rowPopulation.get(), insertStatement, settings.command.consistencyLevel, batchType);
->>>>>>> oss-cassandra/trunk
+        return new SchemaInsert(timer, settings, generator, seedManager, maxRowsPerBatch.get(), partitionsPerBatch, partitions.get(), selectchance.get(), rowPopulation.get(), insertStatement, settings.command.consistencyLevel, batchType);
     }
 
     public List<ValidatingSchemaQuery> getValidate(Timer timer, PartitionGenerator generator, SeedManager seedManager, StressSettings settings)
