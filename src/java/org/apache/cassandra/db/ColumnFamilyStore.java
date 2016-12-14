@@ -874,7 +874,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             flushExecutor.execute(flush);
             BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
             postFlushExecutor.execute(() -> {
-                publisher.onNext(flush.postFlush.call());
+                flush.postFlushTask.run();
+                try
+                {
+                    publisher.onNext(flush.postFlushTask.get());
+                }
+                catch (InterruptedException|ExecutionException exc)
+                {
+                    logger.error("Unexpected exception running post flush task", exc);
+                    JVMStabilityInspector.inspectThrowable(exc);
+                    throw new RuntimeException(exc);
+                }
                 publisher.onComplete();
             });
             return publisher;
