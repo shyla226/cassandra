@@ -782,6 +782,7 @@ public class SelectStatement implements CQLStatement
                 processPartition(rowIterator, options, result, nowInSec);
                 rowIterator.close();
             });
+            partitionIterator.close();
             return 1;
         }).map(v -> {
             ResultSet cqlRows = result.build();
