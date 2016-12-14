@@ -1,4 +1,5 @@
 DSE 5.1.0
+ * Remove SelectStatement.execute wrapper and return a fake ResultMessage.Rows instead (APOLLO-267)
  * Improve error message for incompatible authn/authz config (APOLLO-226)
  * Continuous paging (APOLLO-3)
  * Added show-queries, query-log-file and no-progress log options to cassandra-stress (APOLLO-41)
