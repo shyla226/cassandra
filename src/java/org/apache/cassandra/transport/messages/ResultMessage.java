@@ -96,31 +96,22 @@ public abstract class ResultMessage extends Message.Response
 
     protected ResultMessage(Kind kind)
     {
-        super(Message.Type.RESULT);
+        this(kind, true);
+    }
+
+    protected ResultMessage(Kind kind, boolean sendToClient)
+    {
+        super(Message.Type.RESULT, sendToClient);
         this.kind = kind;
     }
 
     public static class Void extends ResultMessage
     {
-        /**
-         * Set this to true if the result should not be sent to the client (continuous paging).
-         * The proper way to fix this would be to change all execute() return types to return an
-         * Optional Response, but we want to do this in a separate ticket, at a time convenient for
-         * DSE, since it would be impacted too.
-         */
-        public final boolean sendToClient;
-
         // Even though we have no specific information here, don't make a
         // singleton since as each message it has in fact a streamid and connection.
         public Void()
         {
-            this(true);
-        }
-
-        public Void(boolean sendToClient)
-        {
             super(Kind.VOID);
-            this.sendToClient = sendToClient;
         }
 
         public static final Message.Codec<ResultMessage> subcodec = new Message.Codec<ResultMessage>()
@@ -214,8 +205,20 @@ public abstract class ResultMessage extends Message.Response
 
         public Rows(ResultSet result)
         {
-            super(Kind.ROWS);
+            this(result, true);
+        }
+
+        public Rows(ResultSet result, boolean sendToClient)
+        {
+            super(Kind.ROWS, sendToClient);
             this.result = result;
+
+            /**
+             * If sendToClient is false, then this response will never
+             * reach the client, this is only true for continuous paging
+             * and in this case the result set should be empty.
+             */
+            assert sendToClient || result.isEmpty();
         }
 
         @Override

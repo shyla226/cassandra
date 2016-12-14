@@ -242,19 +242,7 @@ public class SelectStatement implements CQLStatement
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
-    /**
-     * A wrapper of {@link SelectStatement#execute(QueryState, QueryOptions, long)} called internally
-     * for queries that must be executed in the cluster rather than locally.
-     *
-     * @param options - the query options
-     * @return - the query result
-     */
-    public ResultMessage.Rows executeInternal(QueryOptions options) throws RequestExecutionException, RequestValidationException
-    {
-        return (ResultMessage.Rows)execute(QueryState.forInternalCalls(), options, System.nanoTime());
-    }
-
-    public ResultMessage execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -531,7 +519,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private ResultMessage executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private ResultMessage.Rows executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ContinuousPagingService.metrics.requests.mark();
@@ -549,7 +537,7 @@ public class SelectStatement implements CQLStatement
         ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
 
         executor.schedule(options.getPagingOptions().state(), builder);
-        return new ResultMessage.Void(false);
+        return new ResultMessage.Rows(new ResultSet(getResultMetadata(), Collections.emptyList()), false);
     }
 
     /**

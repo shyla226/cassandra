@@ -232,12 +232,28 @@ public abstract class Message
         protected UUID tracingId;
         protected List<String> warnings;
 
+        /**
+         * Set this to false if the response should not be sent to the client.
+         * This is a temporary workaround for APOLLO-3, see also APOLLO-267 for more details.
+         * The correct way to fix this would be to change all execute() methods to return an
+         * optional response or null, but we want to do this in a separate ticket, at a time
+         * convenient for DSE, since it would be impacted too, see APOLLO-237.
+         */
+        public final boolean sendToClient;
+
         protected Response(Type type)
+        {
+            this(type, true);
+        }
+
+        protected Response(Type type, boolean sendToClient)
         {
             super(type);
 
             if (type.direction != Direction.RESPONSE)
                 throw new IllegalArgumentException();
+
+            this.sendToClient = sendToClient;
         }
 
         public Message setTracingId(UUID tracingId)
@@ -530,7 +546,7 @@ public abstract class Message
                 logger.trace("Received: {}, v={}", request, connection.getVersion());
                 response = request.execute(qstate, queryStartNanoTime);
 
-                if (response instanceof ResultMessage.Void && !((ResultMessage.Void)response).sendToClient)
+                if (!response.sendToClient)
                 {
                     request.getSourceFrame().release();
                     return;
