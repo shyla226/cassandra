@@ -2,6 +2,7 @@ DSE 5.0.5
  * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
  * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
 Merged from 3.0.X
+ * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
  * Estimated TS drop-time histogram updated with Cell.NO_DELETION_TIME (CASSANDRA-13040)
  * Nodetool compactionstats fails with NullPointerException (CASSANDRA-13021)
  * Thread local pools never cleaned up (CASSANDRA-13033)
@@ -15,6 +16,7 @@ Merged from 3.0.X
  * Prevent reloading of logback.xml from UDF sandbox (CASSANDRA-12535)
  * Reenable HeapPool (CASSANDRA-12900)
 Merged from 2.2:
+ * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
  * Reduce granuality of OpOrder.Group during index build (CASSANDRA-12796)
  * Test bind parameters and unset parameters in InsertUpdateIfConditionTest (CASSANDRA-12980)
  * Do not specify local address on outgoing connection when listen_on_broadcast_address is set (CASSANDRA-12673)
