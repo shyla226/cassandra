@@ -543,6 +543,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
     class TrackOpOrder extends Transformation<UnfilteredRowIterator>
     {
         final OpOrder.Group group;
+        boolean closed = false;
 
         TrackOpOrder(OpOrder.Group group)
         {
@@ -551,7 +552,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
 
         protected void onClose()
         {
+            if (closed)
+                return;
+
             group.close();
+            closed = true;
         }
     }
 
