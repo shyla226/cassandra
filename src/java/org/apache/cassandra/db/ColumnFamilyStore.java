@@ -39,6 +39,7 @@ import com.google.common.util.concurrent.*;
 
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -887,7 +888,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 }
                 publisher.onComplete();
             });
-            return publisher;
+            return publisher.observeOn(Schedulers.io());
         }
     }
 
@@ -972,7 +973,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             publisher.onNext(current.getCommitLogLowerBound());
             publisher.onComplete();
         });
-        return publisher;
+        return publisher.observeOn(Schedulers.io());
     }
 
     public CommitLogPosition forceBlockingFlush()

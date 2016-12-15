@@ -35,6 +35,8 @@ public class PagingQueryTest extends CQLTester
     @Test
     public void pagingOnRegularColumn() throws Throwable
     {
+        sessionNet();
+
         createTable("CREATE TABLE %s (" +
                     " k1 int," +
                     " c1 int," +

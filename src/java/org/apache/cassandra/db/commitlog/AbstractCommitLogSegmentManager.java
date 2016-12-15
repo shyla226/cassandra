@@ -287,10 +287,10 @@ public abstract class AbstractCommitLogSegmentManager
         Keyspace.writeOrder.awaitNewBarrier();
 
         // flush and wait for all CFs that are dirty in segments up-to and including 'last'
-        Observable<?> observable = flushDataFrom(segmentsToRecycle, true);
+        Observable<CommitLogPosition> observable = flushDataFrom(segmentsToRecycle, true);
         try
         {
-            observable.blockingFirst();
+            observable.blockingFirst(CommitLogPosition.NONE);
 
             for (CommitLogSegment segment : activeSegments)
                 for (UUID cfId : droppedCfs)
@@ -361,10 +361,10 @@ public abstract class AbstractCommitLogSegmentManager
      *
      * @return a Future that will finish when all the flushes are complete.
      */
-    private Observable<?> flushDataFrom(List<CommitLogSegment> segments, boolean force)
+    private Observable<CommitLogPosition> flushDataFrom(List<CommitLogSegment> segments, boolean force)
     {
         if (segments.isEmpty())
-            return Observable.just(0);
+            return Observable.just(CommitLogPosition.NONE);
 
         final CommitLogPosition maxCommitLogPosition = segments.get(segments.size() - 1).getCurrentCommitLogPosition();
 
