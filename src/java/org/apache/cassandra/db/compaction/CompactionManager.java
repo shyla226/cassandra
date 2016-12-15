@@ -364,7 +364,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
 
             @Override
-            public void execute(LifecycleTransaction input) throws IOException
+            public void execute(LifecycleTransaction input)
             {
                 scrubOne(cfs, input, skipCorrupted, checkData);
             }
@@ -954,7 +954,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
-    private void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData) throws IOException
+    private void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData)
     {
         CompactionInfo.Holder scrubInfo = null;
 
