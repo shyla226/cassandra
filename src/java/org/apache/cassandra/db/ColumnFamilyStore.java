@@ -1055,6 +1055,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
             catch (Throwable e)
             {
+                logger.error("Flushing {} failed with error", memtables, e);
                 JVMStabilityInspector.inspectThrowable(e);
                 // If we weren't killed, try to continue work but do not allow CommitLog to be discarded.
                 postFlush.flushFailure = e;
