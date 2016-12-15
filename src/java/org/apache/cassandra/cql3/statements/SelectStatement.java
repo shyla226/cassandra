@@ -281,6 +281,8 @@ public class SelectStatement implements CQLStatement
             return -1;
 
         PageSize size = pagingOptions.pageSize();
+        if (size == null)
+            return -1;
         // We know the size can only be in rows currently if continuous paging
         // is not used, so don't bother computing the average row size.
         return pagingOptions.isContinuous()
