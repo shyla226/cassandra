@@ -100,7 +100,7 @@ public class QueryMessage extends Message.Request
 
                 ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
                 builder.put("query", query);
-                if (options.getPagingOptions() != null)
+                if (options.getPagingOptions() != null && options.getPagingOptions().pageSize() != null)
                     builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
                 if(options.getConsistency() != null)
                     builder.put("consistency_level", options.getConsistency().name());

@@ -29,7 +29,7 @@ import org.apache.cassandra.service.pager.PagingState;
  */
 public final class PagingResult
 {
-    static PagingResult NONE = new PagingResult(null);
+    public static final PagingResult NONE = new PagingResult(null);
 
     /** The paging state contains information opaque to the client that is needed by the
      * server in order to resume the query from the last row in this page. */
