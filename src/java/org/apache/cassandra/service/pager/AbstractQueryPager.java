@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.pager;
 
+import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -63,26 +64,27 @@ abstract class AbstractQueryPager implements QueryPager
         return command.executionController();
     }
 
-    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime)
+    public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime)
     {
         if (isExhausted())
-            return EmptyIterators.partition();
+            return Single.just(EmptyIterators.partition());
 
         pageSize = Math.min(pageSize, remaining);
         Pager pager = new Pager(limits.forPaging(pageSize), command.nowInSec());
 
-        return Transformation.apply(nextPageReadCommand(pageSize).execute(consistency, clientState, queryStartNanoTime).blockingGet(), pager);
+        return nextPageReadCommand(pageSize).execute(consistency, clientState, queryStartNanoTime)
+               .map(p -> Transformation.apply(p, pager));
     }
 
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
     {
         if (isExhausted())
-            return EmptyIterators.partition();
+            return Single.just(EmptyIterators.partition());
 
         pageSize = Math.min(pageSize, remaining);
         Pager pager = new Pager(limits.forPaging(pageSize), command.nowInSec());
 
-        return Transformation.apply(nextPageReadCommand(pageSize).executeInternal(executionController), pager);
+        return Single.just(Transformation.apply(nextPageReadCommand(pageSize).executeInternal(executionController), pager));
     }
 
     private class Pager extends Transformation<RowIterator>

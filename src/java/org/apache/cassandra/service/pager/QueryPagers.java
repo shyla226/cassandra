@@ -54,7 +54,7 @@ public class QueryPagers
         int count = 0;
         while (!pager.isExhausted())
         {
-            try (PartitionIterator iter = pager.fetchPage(pageSize, consistencyLevel, state, queryStartNanoTime))
+            try (PartitionIterator iter = pager.fetchPage(pageSize, consistencyLevel, state, queryStartNanoTime).blockingGet())
             {
                 DataLimits.Counter counter = limits.newCounter(nowInSec, true);
                 PartitionIterators.consume(counter.applyTo(iter));

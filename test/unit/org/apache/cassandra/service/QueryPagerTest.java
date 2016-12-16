@@ -123,7 +123,7 @@ public class QueryPagerTest
         List<FilteredPartition> partitionList = new ArrayList<>();
         int rows = 0;
         try (ReadExecutionController executionController = pager.executionController();
-             PartitionIterator iterator = pager.fetchPageInternal(toQuery, executionController))
+             PartitionIterator iterator = pager.fetchPageInternal(toQuery, executionController).blockingGet())
         {
             while (iterator.hasNext())
             {

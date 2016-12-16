@@ -190,7 +190,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                             return endOfData();
 
                         try (ReadExecutionController executionController = pager.executionController();
-                             PartitionIterator iter = pager.fetchPageInternal(pageSize, executionController))
+                             PartitionIterator iter = pager.fetchPageInternal(pageSize, executionController).blockingGet())
                         {
                             currentPage = select.process(iter, nowInSec).rows.iterator();
                         }

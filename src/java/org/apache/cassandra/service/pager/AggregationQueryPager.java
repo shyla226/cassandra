@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
 
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -52,15 +53,15 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public PartitionIterator fetchPage(int pageSize,
+    public Single<PartitionIterator> fetchPage(int pageSize,
                                        ConsistencyLevel consistency,
                                        ClientState clientState,
                                        long queryStartNanoTime)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime);
+            return Single.just(new GroupByPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime));
 
-        return new AggregationPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime);
+        return Single.just(new AggregationPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime));
     }
 
     @Override
@@ -70,12 +71,12 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitionIterator(pageSize, executionController, System.nanoTime());
+            return Single.just(new GroupByPartitionIterator(pageSize, executionController, System.nanoTime()));
 
-        return new AggregationPartitionIterator(pageSize, executionController, System.nanoTime());
+        return Single.just(new AggregationPartitionIterator(pageSize, executionController, System.nanoTime()));
     }
 
     @Override
@@ -289,8 +290,8 @@ public final class AggregationQueryPager implements QueryPager
          */
         private final PartitionIterator fetchSubPage(int subPageSize)
         {
-            return consistency != null ? subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime)
-                                       : subPager.fetchPageInternal(subPageSize, executionController);
+            return consistency != null ? subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime).blockingGet()
+                                       : subPager.fetchPageInternal(subPageSize, executionController).blockingGet();
         }
 
         public final RowIterator next()

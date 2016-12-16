@@ -269,11 +269,11 @@ public class SelectStatement implements CQLStatement
         ReadQuery query = getQuery(options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
         // TODO paging support
-        // if (pageSize <= 0 || query.limits().count() <= pageSize)
-        return execute(query, options, state, nowInSec, userLimit, queryStartNanoTime);
+         if (pageSize <= 0 || query.limits().count() <= pageSize)
+            return execute(query, options, state, nowInSec, userLimit, queryStartNanoTime);
 
-        // QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
-        // return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
+        QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
+        return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
     }
 
 
@@ -334,7 +334,7 @@ public class SelectStatement implements CQLStatement
             return pager.state();
         }
 
-        public abstract PartitionIterator fetchPage(int pageSize, long queryStartNanoTime);
+        public abstract Single<PartitionIterator> fetchPage(int pageSize, long queryStartNanoTime);
 
         public static class NormalPager extends Pager
         {
@@ -348,7 +348,7 @@ public class SelectStatement implements CQLStatement
                 this.clientState = clientState;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            public Single<PartitionIterator> fetchPage(int pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime);
             }
@@ -364,14 +364,14 @@ public class SelectStatement implements CQLStatement
                 this.executionController = executionController;
             }
 
-            public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
+            public Single<PartitionIterator> fetchPage(int pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPageInternal(pageSize, executionController);
             }
         }
     }
 
-    private ResultMessage.Rows execute(Pager pager,
+    private Single<ResultMessage.Rows> execute(Pager pager,
                                        QueryOptions options,
                                        int pageSize,
                                        int nowInSec,
@@ -396,16 +396,20 @@ public class SelectStatement implements CQLStatement
                   "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
                   + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
-        ResultMessage.Rows msg;
-        try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
-        {
-            msg = processResults(Single.just(page), options, nowInSec, userLimit).blockingGet();
-        }
+        Single<ResultMessage.Rows> msg;
+        Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStartNanoTime);
+
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
-        if (!pager.isExhausted())
-            msg.result.metadata.setHasMorePages(pager.state());
+
+        msg = processResults(page, options, nowInSec, userLimit).map(r -> {
+            if (!pager.isExhausted())
+                r.result.metadata.setHasMorePages(pager.state());
+
+            return r;
+        });
+
 
         return msg;
     }
@@ -448,9 +452,7 @@ public class SelectStatement implements CQLStatement
             else
             {
                 QueryPager pager = getPager(query, options);
-
-                // TODO rx-ify
-                return Single.just(execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime));
+                return execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
             }
         }
     }

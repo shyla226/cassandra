@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.pager;
 
+import io.reactivex.Single;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 
@@ -143,17 +144,17 @@ public class MultiPartitionPager implements QueryPager
     }
 
     @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
-        return new PagersIterator(toQuery, consistency, clientState, null, queryStartNanoTime);
+        return Single.just(new PagersIterator(toQuery, consistency, clientState, null, queryStartNanoTime));
     }
 
     @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPageInternal(int pageSize, ReadExecutionController executionController) throws RequestValidationException, RequestExecutionException
+    public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController) throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
-        return new PagersIterator(toQuery, null, null, executionController, System.nanoTime());
+        return Single.just(new PagersIterator(toQuery, null, null, executionController, System.nanoTime()));
     }
 
     private class PagersIterator extends AbstractIterator<RowIterator> implements PartitionIterator
@@ -207,8 +208,8 @@ public class MultiPartitionPager implements QueryPager
                 pagerMaxRemaining = pagers[current].maxRemaining();
                 int toQuery = pageSize - counted;
                 result = consistency == null
-                       ? pagers[current].fetchPageInternal(toQuery, executionController)
-                       : pagers[current].fetchPage(toQuery, consistency, clientState, queryStartNanoTime);
+                       ? pagers[current].fetchPageInternal(toQuery, executionController).blockingGet()
+                       : pagers[current].fetchPage(toQuery, consistency, clientState, queryStartNanoTime).blockingGet();
             }
             return result.next();
         }
