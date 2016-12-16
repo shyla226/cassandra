@@ -69,7 +69,17 @@ public abstract class QueryOptions
 
     public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, int pageSize, PagingState pagingState, ConsistencyLevel serialConsistency, ProtocolVersion version)
     {
-        return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(new PagingOptions(PageSize.rowsSize(pageSize), PagingOptions.Mechanism.SINGLE, pagingState), serialConsistency, -1L), version);
+        // paging state is ignored if pageSize <= 0
+        assert pageSize > 0 || pagingState == null;
+        PagingOptions pagingOptions = pageSize > 0
+                                      ? new PagingOptions(PageSize.rowsSize(pageSize), PagingOptions.Mechanism.SINGLE, pagingState)
+                                      : null;
+        return create(consistency, values, skipMetadata, pagingOptions, serialConsistency, version);
+    }
+
+    public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, PagingOptions pagingOptions, ConsistencyLevel serialConsistency, ProtocolVersion version)
+    {
+        return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(pagingOptions, serialConsistency, -1L), version);
     }
 
     public static QueryOptions addColumnSpecifications(QueryOptions options, List<ColumnSpecification> columnSpecs)
@@ -397,6 +407,8 @@ public abstract class QueryOptions
 
         private PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState, int maxPages, int maxPagesPerSecond)
         {
+            assert pageSize != null : "pageSize cannot be null";
+
             this.pageSize = pageSize;
             this.mechanism = mechanism;
             this.pagingState = pagingState;
@@ -561,22 +573,31 @@ public abstract class QueryOptions
                     timestamp = ts;
                 }
 
+                PagingOptions pagingOptions = null;
                 boolean hasContinuousPaging = flags.contains(Flag.CONTINUOUS_PAGING);
-                if (hasContinuousPaging)
+
+                if (pageSize == null)
+                {
+                    // Not paging, so check no other paging option had been set
+                    if (hasContinuousPaging)
+                        throw new ProtocolException("Cannot use continuous paging without indicating a positive page size");
+                    if (pagingState != null)
+                        throw new ProtocolException("Paging state requires a page size");
+                }
+                else if (hasContinuousPaging)
                 {
                     if (version.isSmallerThan(ProtocolVersion.DSE_V1))
                         throw new ProtocolException("Continuous paging requires DSE_V1 or higher");
-                    if (pageSize == null)
-                        throw new ProtocolException("Cannot use continuous paging without indicating a page size");
-                }
-                else if (pageSize != null && !pageSize.isInRows())
-                {
-                    throw new ProtocolException("Page size in bytes is only supported with continuous paging");
-                }
 
-                PagingOptions pagingOptions = hasContinuousPaging
-                    ? new PagingOptions(pageSize, PagingOptions.Mechanism.CONTINUOUS, pagingState, body.readInt(), body.readInt())
-                    : new PagingOptions(pageSize, PagingOptions.Mechanism.SINGLE, pagingState);
+                    pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.CONTINUOUS, pagingState, body.readInt(), body.readInt());
+                }
+                else
+                {
+                    if (!pageSize.isInRows())
+                        throw new ProtocolException("Page size in bytes is only supported with continuous paging");
+
+                    pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.SINGLE, pagingState);
+                }
 
                 options = new SpecificOptions(pagingOptions, serialConsistency, timestamp);
             }

@@ -337,14 +337,16 @@ Table of Contents
         0x00000002: Skip_metadata. If set, the Result Set returned as a response
               to the query (if any) will have the NO_METADATA flag (see
               Section 4.2.5.2).
-        0x00000004: Page_size. If set, <result_page_size> is an [int]
+        0x00000004: Page_size. If set, <result_page_size> is a positive [int]
               controlling the desired page size of the result in CQL3 rows or
               in bytes, if Page_size_bytes is set.
               See the section on paging (Section 8) for more details.
         0x00000008: With_paging_state. If set, <paging_state> should be present.
               <paging_state> is a [bytes] value that should have been returned
               in a result set (Section 4.2.5.2). The query will be
-              executed but starting from a given paging state. This is also to
+              executed but starting from a given paging state. An error will be
+              returned if the paging_state is present but no page_size has been
+              specified. The paging state can also be used to
               continue paging on a different node than the one where it
               started (See Section 8 for more details).
         0x00000010: With serial consistency. If set, <serial_consistency> should be
