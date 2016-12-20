@@ -1,16 +1,17 @@
 DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
-
-
-DSE 5.0.5
- * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
- * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
 Merged from 3.0.X
  * Fix deserialization of 2.x DeletedCells (CASSANDRA-12620)
  * Add parent repair session id to anticompaction log message (CASSANDRA-12186)
  * Improve contention handling on failure to acquire MV lock for streaming and hints (CASSANDRA-12905)
  * Fix DELETE and UPDATE queries with empty IN restrictions (CASSANDRA-12829)
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
+
+
+DSE 5.0.5
+ * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
+ * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
+Merged from 3.0.X
  * Estimated TS drop-time histogram updated with Cell.NO_DELETION_TIME (CASSANDRA-13040)
  * Nodetool compactionstats fails with NullPointerException (CASSANDRA-13021)
  * Thread local pools never cleaned up (CASSANDRA-13033)
