@@ -6,6 +6,8 @@ Merged from 3.0.X
  * Improve contention handling on failure to acquire MV lock for streaming and hints (CASSANDRA-12905)
  * Fix DELETE and UPDATE queries with empty IN restrictions (CASSANDRA-12829)
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
+Merged from 2.2:
+ * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
 
 
 DSE 5.0.5
@@ -25,7 +27,6 @@ Merged from 3.0.X
  * Prevent reloading of logback.xml from UDF sandbox (CASSANDRA-12535)
  * Reenable HeapPool (CASSANDRA-12900)
 Merged from 2.2:
- * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
  * Reduce granuality of OpOrder.Group during index build (CASSANDRA-12796)
  * Test bind parameters and unset parameters in InsertUpdateIfConditionTest (CASSANDRA-12980)
  * Do not specify local address on outgoing connection when listen_on_broadcast_address is set (CASSANDRA-12673)
