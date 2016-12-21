@@ -1,4 +1,5 @@
 DSE backports
+ * Fix DynamicEndpointSnitch noop in multi-datacenter situations (CASSANDRA-13074)
  * Backport TimeWindowCompactionStrategy (APOLLO-15)
  * Fix merkle tree depth calculation (CASSANDRA-12580)
  * Avoid assertion error when IndexSummary > 2G (CASSANDRA-12014)
