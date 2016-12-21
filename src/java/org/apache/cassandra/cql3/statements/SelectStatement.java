@@ -538,7 +538,7 @@ public class SelectStatement implements CQLStatement
         ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
 
         executor.schedule(options.getPagingOptions().state(), builder);
-        return new ResultMessage.Rows(new ResultSet(getResultMetadata(), Collections.emptyList()), false);
+        return new ResultMessage.Rows(new ResultSet(getResultMetadata().copy(), Collections.emptyList()), false);
     }
 
     /**
