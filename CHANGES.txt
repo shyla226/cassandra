@@ -7,6 +7,7 @@ Merged from 3.0.X
  * Fix DELETE and UPDATE queries with empty IN restrictions (CASSANDRA-12829)
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
 Merged from 2.2:
+ * cqlsh copy-from: encode column names to avoid primary key parsing errors (CASSANDRA-12909)
  * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
 Merged from 2.1:
  * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
