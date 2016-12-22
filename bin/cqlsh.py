@@ -1631,6 +1631,11 @@ class Shell(cmd.Cmd):
                                     this will result in a faster import but for smaller clusters it may generate
                                     timeouts.
           TTL=3600                - the time to live in seconds, by default data will not expire
+          INSERTNULLFORMISSINGVALUES=True
+                                  - by default, CSV null values are inserted as null via tombstones, set this to false
+                                    in order to leave them unchanged. This option is ignored when prepared statements
+                                    are not used, which includes counters. For counters missing values will be inserted
+                                    as zero, which will not change the value of a counter.
 
         Available COPY TO options and defaults:
 

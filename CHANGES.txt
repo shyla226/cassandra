@@ -10,6 +10,7 @@ Merged from 4.0:
 
 
 DSE 5.1.0
+ * Cqlsh copy-from: add support for UNSET values (APOLLO-4)
  * Improve error message for incompatible authn/authz config (APOLLO-226)
  * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291)
  * Added show-queries, query-log-file and no-progress log options to cassandra-stress (APOLLO-41)
