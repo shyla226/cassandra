@@ -8,7 +8,8 @@ Merged from 3.0.X
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
 Merged from 2.2:
  * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
-
+Merged from 2.1:
+ * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
 
 DSE 5.0.5
  * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
