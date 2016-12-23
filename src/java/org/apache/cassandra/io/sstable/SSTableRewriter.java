@@ -24,6 +24,8 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.cache.MutableKeyCacheKey;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -54,6 +56,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 {
     @VisibleForTesting
     public static boolean disableEarlyOpeningForTests = false;
+    private static boolean disableIncrementalKeyCacheMigration = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_incremental_keycache_migration");
 
     private final long preemptiveOpenInterval;
     private final long maxAge;
@@ -66,6 +69,8 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 
     private final List<SSTableWriter> writers = new ArrayList<>();
     private final boolean keepOriginals; // true if we do not want to obsolete the originals
+    private MutableKeyCacheKey tmpKey;
+    private final SSTableReader originals[];
 
     private SSTableWriter writer;
     private Map<DecoratedKey, RowIndexEntry> cachedKeys = new HashMap<>();
@@ -91,6 +96,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         this.maxAge = maxAge;
         this.keepOriginals = keepOriginals;
         this.preemptiveOpenInterval = preemptiveOpenInterval;
+        this.originals = transaction.originals().toArray(new SSTableReader[]{});
     }
 
     @Deprecated
@@ -133,11 +139,22 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         DecoratedKey key = partition.partitionKey();
         maybeReopenEarly(key);
         RowIndexEntry index = writer.append(partition);
-        if (!transaction.isOffline() && index != null)
+        if (!transaction.isOffline() && index != null && preemptiveOpenInterval != Long.MAX_VALUE && !disableIncrementalKeyCacheMigration)
         {
-            for (SSTableReader reader : transaction.originals())
+            for (SSTableReader reader : originals)
             {
-                if (reader.getCachedPosition(key, false) != null)
+                /*
+                 * Skip whole sstables if possible
+                 */
+                if (key.getToken().compareTo(reader.first.getToken()) < 0 || key.getToken().compareTo(reader.last.getToken()) > 0)
+                    continue;
+
+                if (tmpKey == null)
+                    tmpKey = new MutableKeyCacheKey(reader.metadata.ksAndCFName, reader.descriptor, key.getKey());
+                else
+                    tmpKey.mutate(reader.descriptor, key.getKey());
+
+                if (reader.getCachedPosition(tmpKey, false) != null)
                 {
                     cachedKeys.put(key, index);
                     break;

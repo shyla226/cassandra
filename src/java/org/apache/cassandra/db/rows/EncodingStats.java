@@ -24,6 +24,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.MergeIterator;
 
 /**
  * Stats used for the encoding of the rows and tombstones of a given source.
@@ -130,6 +131,40 @@ public class EncodingStats
     public String toString()
     {
         return String.format("EncodingStats(ts=%d, ldt=%d, ttl=%d)", minTimestamp, minLocalDeletionTime, minTTL);
+    }
+
+    public static class Merger
+    {
+        private long minTimestamp;
+        private int minLocalDeletionTime;
+        private int minTTL;
+
+        public Merger(EncodingStats stats)
+        {
+            minTimestamp = stats.minTimestamp;
+            minLocalDeletionTime = stats.minLocalDeletionTime;
+            minTTL = stats.minTTL;
+        }
+
+        public void mergeWith(EncodingStats that)
+        {
+             minTimestamp = this.minTimestamp == TIMESTAMP_EPOCH
+                                ? that.minTimestamp
+                                : (that.minTimestamp == TIMESTAMP_EPOCH ? this.minTimestamp : Math.min(this.minTimestamp, that.minTimestamp));
+
+             minLocalDeletionTime = this.minLocalDeletionTime == DELETION_TIME_EPOCH
+                             ? that.minLocalDeletionTime
+                             : (that.minLocalDeletionTime == DELETION_TIME_EPOCH ? this.minLocalDeletionTime : Math.min(this.minLocalDeletionTime, that.minLocalDeletionTime));
+
+             minTTL = this.minTTL == TTL_EPOCH
+                         ? that.minTTL
+                         : (that.minTTL == TTL_EPOCH ? this.minTTL : Math.min(this.minTTL, that.minTTL));
+        }
+
+        public EncodingStats get()
+        {
+            return new EncodingStats(minTimestamp, minLocalDeletionTime, minTTL);
+        }
     }
 
     public static class Collector implements PartitionStatisticsCollector

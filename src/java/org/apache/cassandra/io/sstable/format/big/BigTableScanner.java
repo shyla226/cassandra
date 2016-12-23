@@ -123,7 +123,7 @@ public class BigTableScanner implements ISSTableScanner
 
     private static AbstractBounds<PartitionPosition> fullRange(SSTableReader sstable)
     {
-        return new Bounds<PartitionPosition>(sstable.first, sstable.last);
+        return new Bounds<>(sstable.first, sstable.last);
     }
 
     private static void addRange(SSTableReader sstable, AbstractBounds<PartitionPosition> requested, List<AbstractBounds<PartitionPosition>> boundsList)
@@ -272,6 +272,7 @@ public class BigTableScanner implements ISSTableScanner
         private RowIndexEntry nextEntry;
         private DecoratedKey currentKey;
         private RowIndexEntry currentEntry;
+        private SSTableIdentityIterator reuseableIterator = null;
 
         protected UnfilteredRowIterator computeNext()
         {
@@ -344,7 +345,17 @@ public class BigTableScanner implements ISSTableScanner
                                 dfile.seek(currentEntry.position);
                                 startScan = dfile.getFilePointer();
                                 ByteBufferUtil.skipShortLength(dfile); // key
-                                return SSTableIdentityIterator.create(sstable, dfile, partitionKey());
+
+                                if (reuseableIterator == null)
+                                {
+                                    reuseableIterator = SSTableIdentityIterator.create(sstable, dfile, partitionKey());
+                                }
+                                else
+                                {
+                                    reuseableIterator = reuseableIterator.reuse(partitionKey());
+                                }
+
+                                return reuseableIterator;
                             }
                             else
                             {

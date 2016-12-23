@@ -78,8 +78,8 @@ public class EmptyIterators
     {
         final PartitionColumns columns;
         final CFMetaData metadata;
-        final DecoratedKey partitionKey;
-        final boolean isReverseOrder;
+        DecoratedKey partitionKey;
+        boolean isReverseOrder;
         final Row staticRow;
 
         EmptyBaseRowIterator(PartitionColumns columns, CFMetaData metadata, DecoratedKey partitionKey, boolean isReverseOrder, Row staticRow)
@@ -136,9 +136,9 @@ public class EmptyIterators
         }
     }
 
-    private static class EmptyUnfilteredRowIterator extends EmptyBaseRowIterator<Unfiltered> implements UnfilteredRowIterator
+    public static class EmptyUnfilteredRowIterator extends EmptyBaseRowIterator<Unfiltered> implements UnfilteredRowIterator
     {
-        final DeletionTime partitionLevelDeletion;
+        DeletionTime partitionLevelDeletion;
         public EmptyUnfilteredRowIterator(PartitionColumns columns, CFMetaData metadata, DecoratedKey partitionKey,
                                           boolean isReverseOrder, Row staticRow, DeletionTime partitionLevelDeletion)
         {
@@ -159,6 +159,17 @@ public class EmptyIterators
         public EncodingStats stats()
         {
             return EncodingStats.NO_STATS;
+        }
+
+        /**
+         * Allow empty iterator to be reused across partitions.
+         * Can only be reused on the same table not across tables.
+         */
+        public void reuse(DecoratedKey partitionKey, boolean isReverseOrder, DeletionTime partitionLevelDeletion)
+        {
+            this.partitionKey = partitionKey;
+            this.isReverseOrder = isReverseOrder;
+            this.partitionLevelDeletion = partitionLevelDeletion;
         }
     }
 

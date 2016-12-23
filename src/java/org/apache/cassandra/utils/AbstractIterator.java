@@ -76,6 +76,14 @@ public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterato
         return next;
     }
 
+    /**
+     * Can be used to re-initialize a iterator object
+     */
+    public void setDefaultState()
+    {
+        state = State.MUST_FETCH;
+    }
+
     public void remove()
     {
         throw new UnsupportedOperationException();
