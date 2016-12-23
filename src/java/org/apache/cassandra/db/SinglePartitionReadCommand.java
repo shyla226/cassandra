@@ -654,7 +654,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 return EmptyIterators.unfilteredRow(cfs.metadata, partitionKey(), filter.isReversed());
 
             StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
-            return withStateTracking(withSSTablesIterated(iterators, cfs.metric));
+            return withSSTablesIterated(iterators, cfs.metric);
         }
         catch (RuntimeException | Error e)
         {
@@ -855,7 +855,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        return withStateTracking(result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()));
+        return result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed());
     }
 
     private ImmutableBTreePartition add(UnfilteredRowIterator iter, ImmutableBTreePartition result, ClusteringIndexNamesFilter filter, boolean isRepaired)
