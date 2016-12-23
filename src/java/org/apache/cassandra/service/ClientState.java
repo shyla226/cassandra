@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,6 +90,8 @@ public class ClientState
     // Current user for the session
     private volatile AuthenticatedUser user;
     private volatile String keyspace;
+    // Whether or not a once-per-connection warning about SASI stability is issued
+    private volatile boolean sasiWarningIssued = false;
 
     private static final QueryHandler cqlQueryHandler;
     static
@@ -424,5 +427,15 @@ public class ClientState
     private Set<Permission> authorize(IResource resource)
     {
         return user.getPermissions(resource);
+    }
+
+    public boolean isSASIWarningIssued()
+    {
+        return sasiWarningIssued;
+    }
+
+    public void setSASIWarningIssued()
+    {
+        sasiWarningIssued = true;
     }
 }
