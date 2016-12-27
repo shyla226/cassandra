@@ -61,7 +61,7 @@ class MemtableCleanerThread<P extends MemtablePool> extends Thread
         {
             while (!needsCleaning())
             {
-                final WaitQueue.Signal signal = wait.register();
+                final WaitQueue.Signal signal = wait.register(Thread.currentThread());
                 if (!needsCleaning())
                     signal.awaitUninterruptibly();
                 else

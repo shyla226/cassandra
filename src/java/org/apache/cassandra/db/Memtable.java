@@ -27,6 +27,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
 import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -237,7 +238,7 @@ public class Memtable implements Comparable<Memtable>
     }
 
     // decide if this memtable should take the write, or if it should go to the next memtable
-    public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public boolean accepts(TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         // if the barrier hasn't been set yet, then this memtable is still taking ALL writes
         OpOrder.Barrier barrier = this.writeBarrier;
@@ -311,7 +312,7 @@ public class Memtable implements Comparable<Memtable>
      *
      * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
      */
-    long put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
+    long put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
         HashMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
@@ -687,7 +688,7 @@ public class Memtable implements Comparable<Memtable>
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead
-        try (final OpOrder.Group group = new OpOrder().start())
+        try (final TPCOpOrder.Group group = new OpOrder().start())
         {
             int rowOverhead;
             MemtableAllocator allocator = MEMORY_POOL.newAllocator();

@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
@@ -150,7 +151,7 @@ public class KeysSearcher extends CassandraIndexSearcher
     private UnfilteredRowIterator filterIfStale(UnfilteredRowIterator iterator,
                                                 Row indexHit,
                                                 ByteBuffer indexedValue,
-                                                OpOrder.Group writeOp,
+                                                TPCOpOrder.Group writeOp,
                                                 boolean isForThrift,
                                                 int nowInSec)
     {

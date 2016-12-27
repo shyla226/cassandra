@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -580,7 +581,7 @@ public class Keyspace
         */
 
         int nowInSec = FBUtilities.nowInSeconds();
-        OpOrder.Group opGroup = writeOrder.start();
+        TPCOpOrder.Group opGroup = writeOrder.start();
 
         // write the mutation to the commitlog
         Single<CommitLogPosition> commitLogPositionObservable;
@@ -667,7 +668,7 @@ public class Keyspace
 
         try (ReadExecutionController controller = cmd.executionController();
              UnfilteredRowIterator partition = cmd.queryMemtableAndDisk(cfs, controller);
-             OpOrder.Group writeGroup = cfs.keyspace.writeOrder.start())
+             TPCOpOrder.Group writeGroup = cfs.keyspace.writeOrder.start())
         {
             cfs.indexManager.indexPartition(partition, writeGroup, indexes, cmd.nowInSec());
         }

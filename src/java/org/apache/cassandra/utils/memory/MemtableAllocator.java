@@ -20,6 +20,7 @@ package org.apache.cassandra.utils.memory;
 
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -58,8 +59,8 @@ public abstract class MemtableAllocator
         this.offHeap = offHeap;
     }
 
-    public abstract Row.Builder rowBuilder(OpOrder.Group opGroup);
-    public abstract DecoratedKey clone(DecoratedKey key, OpOrder.Group opGroup);
+    public abstract Row.Builder rowBuilder(TPCOpOrder.Group opGroup);
+    public abstract DecoratedKey clone(DecoratedKey key, TPCOpOrder.Group opGroup);
     public abstract EnsureOnHeap ensureOnHeap();
 
     public SubAllocator onHeap()
@@ -127,7 +128,7 @@ public abstract class MemtableAllocator
         }
 
         // like allocate, but permits allocations to be negative
-        public void adjust(long size, OpOrder.Group opGroup)
+        public void adjust(long size, TPCOpOrder.Group opGroup)
         {
             if (size <= 0)
                 released(-size);
@@ -136,7 +137,7 @@ public abstract class MemtableAllocator
         }
 
         // allocate memory in the tracker, and mark ourselves as owning it
-        public void allocate(long size, OpOrder.Group opGroup)
+        public void allocate(long size, TPCOpOrder.Group opGroup)
         {
             assert size >= 0;
 
@@ -147,7 +148,7 @@ public abstract class MemtableAllocator
                     acquired(size);
                     return;
                 }
-                WaitQueue.Signal signal = opGroup.isBlockingSignal(parent.hasRoom().register(parent.blockedTimerContext()));
+                WaitQueue.Signal signal = opGroup.isBlockingSignal(parent.hasRoom().register(Thread.currentThread(), parent.blockedTimerContext()));
                 boolean allocated = parent.tryAllocate(size);
                 if (allocated || opGroup.isBlocking())
                 {

@@ -20,6 +20,7 @@ package org.apache.cassandra.db.rows;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -46,7 +47,7 @@ public class NativeCell extends AbstractCell
     }
 
     public NativeCell(NativeAllocator allocator,
-                      OpOrder.Group writeOp,
+                      TPCOpOrder.Group writeOp,
                       Cell cell)
     {
         this(allocator,
@@ -60,7 +61,7 @@ public class NativeCell extends AbstractCell
     }
 
     public NativeCell(NativeAllocator allocator,
-                      OpOrder.Group writeOp,
+                      TPCOpOrder.Group writeOp,
                       ColumnDefinition column,
                       long timestamp,
                       int ttl,

@@ -25,6 +25,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class NativeAllocatorTest
@@ -36,7 +37,7 @@ public class NativeAllocatorTest
         {
             final ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
             final OpOrder order = new OpOrder();
-            final OpOrder.Group group = order.start();
+            final TPCOpOrder.Group group = order.start();
             final CountDownLatch canClean = new CountDownLatch(1);
             final CountDownLatch isClean = new CountDownLatch(1);
             final AtomicReference<NativeAllocator> allocatorRef = new AtomicReference<>();

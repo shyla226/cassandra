@@ -21,6 +21,7 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemoryUtil;
@@ -34,7 +35,7 @@ public class NativeClustering extends AbstractClusteringPrefix implements Cluste
 
     private NativeClustering() { peer = 0; }
 
-    public NativeClustering(NativeAllocator allocator, OpOrder.Group writeOp, Clustering clustering)
+    public NativeClustering(NativeAllocator allocator, TPCOpOrder.Group writeOp, Clustering clustering)
     {
         int count = clustering.size();
         int metadataSize = (count * 2) + 4;

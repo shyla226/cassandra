@@ -31,6 +31,7 @@ import java.util.zip.CRC32;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
@@ -200,7 +201,7 @@ public abstract class CommitLogSegment
     @SuppressWarnings("resource") //we pass the op order around
     Allocation allocate(Mutation mutation, int size)
     {
-        final OpOrder.Group opGroup = appendOrder.start();
+        final TPCOpOrder.Group opGroup = appendOrder.start();
         try
         {
             int position = allocate(size);
@@ -257,7 +258,7 @@ public abstract class CommitLogSegment
         // This actually isn't strictly necessary, as currently all calls to discardUnusedTail are executed either by the thread
         // running sync or within a mutation already protected by this OpOrdering, but to prevent future potential mistakes,
         // we duplicate the protection here so that the contract between discardUnusedTail() and sync() is more explicit.
-        try (OpOrder.Group group = appendOrder.start())
+        try (TPCOpOrder.Group group = appendOrder.start())
         {
             while (true)
             {
@@ -406,7 +407,7 @@ public abstract class CommitLogSegment
     {
         while (true)
         {
-            WaitQueue.Signal signal = syncComplete.register();
+            WaitQueue.Signal signal = syncComplete.register(Thread.currentThread());
             if (lastSyncedOffset < endOfBuffer)
             {
                 signal.awaitUninterruptibly();
@@ -424,8 +425,8 @@ public abstract class CommitLogSegment
         while (lastSyncedOffset < position)
         {
             WaitQueue.Signal signal = waitingOnCommit != null ?
-                                      syncComplete.register(waitingOnCommit.time()) :
-                                      syncComplete.register();
+                                      syncComplete.register(Thread.currentThread(), waitingOnCommit.time()) :
+                                      syncComplete.register(Thread.currentThread());
             if (lastSyncedOffset < position)
                 signal.awaitUninterruptibly();
             else
@@ -636,11 +637,11 @@ public abstract class CommitLogSegment
     protected static class Allocation
     {
         private final CommitLogSegment segment;
-        private final OpOrder.Group appendOp;
+        private final TPCOpOrder.Group appendOp;
         private final int position;
         private final ByteBuffer buffer;
 
-        Allocation(CommitLogSegment segment, OpOrder.Group appendOp, int position, ByteBuffer buffer)
+        Allocation(CommitLogSegment segment, TPCOpOrder.Group appendOp, int position, ByteBuffer buffer)
         {
             this.segment = segment;
             this.appendOp = appendOp;

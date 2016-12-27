@@ -20,6 +20,7 @@ package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class HeapPool extends MemtablePool
@@ -42,7 +43,7 @@ public class HeapPool extends MemtablePool
             super(pool.onHeap.newAllocator(), pool.offHeap.newAllocator());
         }
 
-        public ByteBuffer allocate(int size, OpOrder.Group opGroup)
+        public ByteBuffer allocate(int size, TPCOpOrder.Group opGroup)
         {
             super.onHeap().allocate(size, opGroup);
             return ByteBuffer.allocate(size);

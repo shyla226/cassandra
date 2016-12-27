@@ -24,6 +24,7 @@ import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
@@ -371,7 +372,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
         }
 
-        OpOrder.Group group = null;
+        TPCOpOrder.Group group = null;
         UnfilteredPartitionIterator resultIterator = null;
         try
         {
@@ -542,10 +543,10 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
 
     class TrackOpOrder extends Transformation<UnfilteredRowIterator>
     {
-        final OpOrder.Group group;
+        final TPCOpOrder.Group group;
         boolean closed = false;
 
-        TrackOpOrder(OpOrder.Group group)
+        TrackOpOrder(TPCOpOrder.Group group)
         {
             this.group = group;
         }
@@ -560,7 +561,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         }
     }
 
-    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, OpOrder.Group group)
+    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
     {
         return Transformation.apply(iter, new TrackOpOrder(group));
     }

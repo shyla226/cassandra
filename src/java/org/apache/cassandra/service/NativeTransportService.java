@@ -30,18 +30,18 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Epoll;
-import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 
 import net.openhft.affinity.AffinitySupport;
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.concurrent.NettyRxScheduler.NUM_NETTY_THREADS;
 
 /**
  * Handles native transport server lifecycle and associated resources. Lazily initialized.
@@ -55,8 +55,6 @@ public class NativeTransportService
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
-
-    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
@@ -134,7 +132,6 @@ public class NativeTransportService
             }
         }
 
-
         // register metrics
         ClientMetrics.instance.addCounter("connectedNativeClients", () ->
         {
@@ -157,9 +154,6 @@ public class NativeTransportService
         logger.info("Netting ioWork ratio to {}", pIO);
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
 
-        long cpumask = 0;
-        
-
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
             final int cpuId = i;
@@ -168,7 +162,7 @@ public class NativeTransportService
 
             EventLoop loop = workerGroup.next();
             loop.schedule(() -> {
-                NettyRxScheduler.instance(loop, cpuId);
+                NettyRxScheduler.register(loop, cpuId);
 
                 if (affinity)
                 {

@@ -360,16 +360,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             }
 
             Runnable r;
-            while ((r = internalQueue.poll()) != null)
+            while ((r = internalQueue.poll()) != null && processed < Short.MAX_VALUE)
             {
                 r.run();
-                processed++;
+                ++processed;
             }
 
-            while ((r = externalQueue.relaxedPoll()) != null)
+            while ((r = externalQueue.relaxedPoll()) != null && processed < Short.MAX_VALUE * 2)
             {
                 r.run();
-                processed++;
+                ++processed;
             }
 
             return processed;

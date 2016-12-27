@@ -34,6 +34,13 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.service.NativeTransportService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.junit.Assert.assertTrue;
@@ -46,7 +53,7 @@ public class LongOpOrderTest
     private static final Logger logger = LoggerFactory.getLogger(LongOpOrderTest.class);
 
     static final int CONSUMERS = 4;
-    static final int PRODUCERS = 32;
+    static final int PRODUCERS = NettyRxScheduler.NUM_NETTY_THREADS;
 
     static final long RUNTIME = TimeUnit.MINUTES.toMillis(5);
     static final long REPORT_INTERVAL = TimeUnit.MINUTES.toMillis(1);
@@ -66,19 +73,23 @@ public class LongOpOrderTest
 
     class TestOrdering implements Runnable
     {
-
         final int[] waitNanos = new int[1 << 16];
         volatile State state = new State();
         final ScheduledExecutorService sched;
 
-        TestOrdering(ExecutorService exec, ScheduledExecutorService sched)
+        TestOrdering(ExecutorService exec, ScheduledExecutorService sched, int startOffset)
         {
             this.sched = sched;
             final ThreadLocalRandom rnd = ThreadLocalRandom.current();
             for (int i = 0 ; i < waitNanos.length ; i++)
                 waitNanos[i] = rnd.nextInt(5000);
-            for (int i = 0 ; i < PRODUCERS / CONSUMERS ; i++)
-                exec.execute(new Producer());
+
+            int producers = PRODUCERS / CONSUMERS;
+
+            for (int i = startOffset * producers ; i < (startOffset * producers) + producers ; i++)
+            {
+                NettyRxScheduler.getForCore(i).scheduleDirect(new Producer());
+            }
             exec.execute(this);
         }
 
@@ -133,10 +144,10 @@ public class LongOpOrderTest
 
             volatile OpOrder.Barrier barrier;
             volatile State replacement;
-            final NonBlockingHashMap<OpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
+            final NonBlockingHashMap<TPCOpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
             int checkCount = -1;
 
-            boolean accept(OpOrder.Group opGroup)
+            boolean accept(TPCOpOrder.Group opGroup)
             {
                 if (barrier != null && !barrier.isAfter(opGroup))
                     return false;
@@ -175,9 +186,10 @@ public class LongOpOrderTest
                     checkCount = totalCount();
                     delete = false;
                 }
-                for (Map.Entry<OpOrder.Group, AtomicInteger> e : count.entrySet())
+                for (Map.Entry<TPCOpOrder.Group, AtomicInteger> e : count.entrySet())
                 {
-                    if (e.getKey().compareTo(barrier.getSyncPoint()) > 0)
+                    TPCOpOrder.Group group = e.getKey();
+                    if (group.compareTo(barrier.getSyncPoint(group.coreId)) > 0)
                     {
                         errors.incrementAndGet();
                         logger.error("Received an operation that was created after the barrier was issued.");
@@ -194,16 +206,17 @@ public class LongOpOrderTest
 
         }
 
-        final NonBlockingHashMap<OpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
+        final NonBlockingHashMap<TPCOpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
 
         class Producer implements Runnable
         {
             public void run()
             {
-                while (true)
+
+                //for (int i = 0; i < 8192; i++)
                 {
                     AtomicInteger c;
-                    try (OpOrder.Group opGroup = order.start())
+                    try (TPCOpOrder.Group opGroup = order.start())
                     {
                         if (null == (c = count.get(opGroup)))
                         {
@@ -216,6 +229,9 @@ public class LongOpOrderTest
                             s = s.replacement;
                     }
                 }
+
+                //Reschedule
+                NettyRxScheduler.instance().scheduleDirect(this);
             }
         }
 
@@ -224,15 +240,21 @@ public class LongOpOrderTest
     @Test
     public void testOrdering() throws InterruptedException
     {
+        DatabaseDescriptor.daemonInitialization();
+        NativeTransportService server = new NativeTransportService();
+        server.start();
+
         errors.set(0);
         Thread.setDefaultUncaughtExceptionHandler(handler);
+
         final ExecutorService exec = Executors.newCachedThreadPool(new NamedThreadFactory("checker"));
         final ScheduledExecutorService checker = Executors.newScheduledThreadPool(1, new NamedThreadFactory("checker"));
         for (int i = 0 ; i < CONSUMERS ; i++)
-            new TestOrdering(exec, checker);
+            new TestOrdering(exec, checker, i);
         exec.shutdown();
         exec.awaitTermination((long) (RUNTIME * 1.1), TimeUnit.MILLISECONDS);
         assertTrue(exec.isShutdown());
+
         assertTrue(errors.get() == 0);
     }
 

@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
@@ -154,7 +155,7 @@ final class HintsBuffer
                                                              slab.capacity() / 2));
         }
 
-        OpOrder.Group opGroup = appendOrder.start(); // will eventually be closed by the receiver of the allocation
+        TPCOpOrder.Group opGroup = appendOrder.start(); // will eventually be closed by the receiver of the allocation
         try
         {
             return allocate(totalSize, opGroup);
@@ -166,7 +167,7 @@ final class HintsBuffer
         }
     }
 
-    private Allocation allocate(int totalSize, OpOrder.Group opGroup)
+    private Allocation allocate(int totalSize, TPCOpOrder.Group opGroup)
     {
         int offset = allocateBytes(totalSize);
         if (offset < 0)
@@ -215,9 +216,9 @@ final class HintsBuffer
     {
         private final Integer offset;
         private final int totalSize;
-        private final OpOrder.Group opGroup;
+        private final TPCOpOrder.Group opGroup;
 
-        Allocation(int offset, int totalSize, OpOrder.Group opGroup)
+        Allocation(int offset, int totalSize, TPCOpOrder.Group opGroup)
         {
             this.offset = offset;
             this.totalSize = totalSize;

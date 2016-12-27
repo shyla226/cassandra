@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
@@ -387,7 +388,7 @@ public interface Index
     public Indexer indexerFor(DecoratedKey key,
                               PartitionColumns columns,
                               int nowInSec,
-                              OpOrder.Group opGroup,
+                              TPCOpOrder.Group opGroup,
                               IndexTransaction.Type transactionType);
 
     /**

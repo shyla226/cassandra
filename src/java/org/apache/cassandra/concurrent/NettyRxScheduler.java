@@ -19,6 +19,7 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -37,6 +38,7 @@ import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.internal.disposables.EmptyDisposable;
+import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -46,6 +48,8 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,8 +80,19 @@ public class NettyRxScheduler extends Scheduler
 
     final static Map<String, List<PartitionPosition>> keyspaceToRangeMapping = new HashMap<>();
 
-    //Each array entry maps to a cpuId. We assume there will be < 1024 CPUs
-    final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[1024];
+    final static IdentityHashMap<Thread, Integer> eventLoopThreads = new IdentityHashMap<>();
+
+    public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
+
+    //Each array entry maps to a cpuId.
+    final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
+    static
+    {
+        perCoreSchedulers[0] = new NettyRxScheduler(GlobalEventExecutor.INSTANCE.next(), 0);
+    }
+
+    private static volatile boolean isStartup = true;
+
 
     final EventExecutorGroup eventLoop;
     public final int cpuId;
@@ -89,7 +104,7 @@ public class NettyRxScheduler extends Scheduler
         return localNettyEventLoop.get();
     }
 
-    public static NettyRxScheduler instance(EventExecutor loop, int cpuId)
+    public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
     {
         NettyRxScheduler scheduler = localNettyEventLoop.get();
         if (scheduler == null || scheduler.eventLoop != loop)
@@ -98,9 +113,30 @@ public class NettyRxScheduler extends Scheduler
             scheduler = new NettyRxScheduler(loop, cpuId);
             localNettyEventLoop.set(scheduler);
             perCoreSchedulers[cpuId] = scheduler;
+            eventLoopThreads.put(Thread.currentThread(), cpuId);
+            logger.info("Putting {} on core {}", Thread.currentThread().getName(), cpuId);
+            isStartup = false;
         }
 
         return scheduler;
+    }
+
+    public static boolean inEventLoop()
+    {
+        return isStartup || eventLoopThreads.containsKey(Thread.currentThread());
+    }
+
+    public static Integer getCoreId()
+    {
+        if (isStartup)
+            return 0;
+
+        return eventLoopThreads.get(Thread.currentThread());
+    }
+
+    public static int getNumNettyThreads()
+    {
+        return isStartup ? 1 : NUM_NETTY_THREADS;
     }
 
     private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
@@ -117,6 +153,9 @@ public class NettyRxScheduler extends Scheduler
     {
         NettyRxScheduler scheduler = perCoreSchedulers[core];
         assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
+
+        if (isStartup)
+            return ImmediateThinScheduler.INSTANCE;
 
         return scheduler;
     }
@@ -162,7 +201,7 @@ public class NettyRxScheduler extends Scheduler
             return ranges;
 
         List<Range<Token>> localRanges = StorageService.getLocalRanges(cfs);
-        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, cfs.getPartitioner(), NativeTransportService.NUM_NETTY_THREADS);
+        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, cfs.getPartitioner(), NUM_NETTY_THREADS);
 
         if (persist)
         {

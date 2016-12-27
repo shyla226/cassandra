@@ -23,6 +23,7 @@ import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
@@ -98,7 +99,7 @@ public class StubIndex implements Index
     public Indexer indexerFor(final DecoratedKey key,
                               PartitionColumns columns,
                               int nowInSec,
-                              OpOrder.Group opGroup,
+                              TPCOpOrder.Group opGroup,
                               IndexTransaction.Type transactionType)
     {
         return new Indexer()

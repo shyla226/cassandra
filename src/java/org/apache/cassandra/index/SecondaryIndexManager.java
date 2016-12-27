@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.*;
@@ -536,7 +537,7 @@ public class SecondaryIndexManager implements IndexRegistry
     /**
      * When building an index against existing data in sstables, add the given partition to the index
      */
-    public void indexPartition(UnfilteredRowIterator partition, OpOrder.Group opGroup, Set<Index> indexes, int nowInSec)
+    public void indexPartition(UnfilteredRowIterator partition, TPCOpOrder.Group opGroup, Set<Index> indexes, int nowInSec)
     {
         if (!indexes.isEmpty())
         {
@@ -739,7 +740,7 @@ public class SecondaryIndexManager implements IndexRegistry
     /**
      * Transaction for updates on the write path.
      */
-    public UpdateTransaction newUpdateTransaction(PartitionUpdate update, OpOrder.Group opGroup, int nowInSec)
+    public UpdateTransaction newUpdateTransaction(PartitionUpdate update, TPCOpOrder.Group opGroup, int nowInSec)
     {
         if (!hasIndexes())
             return UpdateTransaction.NO_OP;
@@ -967,7 +968,7 @@ public class SecondaryIndexManager implements IndexRegistry
             if (rows == null)
                 return;
 
-            try (OpOrder.Group opGroup = Keyspace.writeOrder.start())
+            try (TPCOpOrder.Group opGroup = Keyspace.writeOrder.start())
             {
                 for (Index index : indexes)
                 {
@@ -1031,7 +1032,7 @@ public class SecondaryIndexManager implements IndexRegistry
             if (row == null && partitionDelete == null)
                 return;
 
-            try (OpOrder.Group opGroup = Keyspace.writeOrder.start())
+            try (TPCOpOrder.Group opGroup = Keyspace.writeOrder.start())
             {
                 for (Index index : indexes)
                 {

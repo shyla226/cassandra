@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
@@ -196,7 +197,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
         };
     }
 
-    private void deleteAllEntries(final List<IndexEntry> entries, final OpOrder.Group writeOp, final int nowInSec)
+    private void deleteAllEntries(final List<IndexEntry> entries, final TPCOpOrder.Group writeOp, final int nowInSec)
     {
         entries.forEach(entry ->
             index.deleteStaleEntry(entry.indexValue,
@@ -209,7 +210,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
     private UnfilteredRowIterator filterStaleEntries(UnfilteredRowIterator dataIter,
                                                      final ByteBuffer indexValue,
                                                      final List<IndexEntry> entries,
-                                                     final OpOrder.Group writeOp,
+                                                     final TPCOpOrder.Group writeOp,
                                                      final int nowInSec)
     {
         // collect stale index entries and delete them when we close this iterator

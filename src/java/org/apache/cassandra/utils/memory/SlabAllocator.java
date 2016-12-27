@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import sun.nio.ch.DirectBuffer;
@@ -80,7 +81,7 @@ public class SlabAllocator extends MemtableBufferAllocator
         return allocate(size, null);
     }
 
-    public ByteBuffer allocate(int size, OpOrder.Group opGroup)
+    public ByteBuffer allocate(int size, TPCOpOrder.Group opGroup)
     {
         assert size >= 0;
         if (size == 0)
@@ -152,7 +153,7 @@ public class SlabAllocator extends MemtableBufferAllocator
         }
     }
 
-    protected AbstractAllocator allocator(OpOrder.Group writeOp)
+    protected AbstractAllocator allocator(TPCOpOrder.Group writeOp)
     {
         return new ContextAllocator(writeOp, this);
     }

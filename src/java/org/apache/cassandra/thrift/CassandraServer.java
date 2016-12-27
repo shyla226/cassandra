@@ -1557,7 +1557,7 @@ public class CassandraServer implements Cassandra.Iface
                                                                               limits,
                                                                               new DataRange(bounds, filter),
                                                                               Optional.empty());
-                try (PartitionIterator results = StorageProxy.getRangeSlice(cmd, consistencyLevel, queryStartNanoTime))
+                try (PartitionIterator results = StorageProxy.getRangeSlice(cmd, consistencyLevel, queryStartNanoTime).blockingGet())
                 {
                     assert results != null;
                     return thriftifyKeySlices(results, column_parent, limits.perPartitionCount());
@@ -1652,7 +1652,7 @@ public class CassandraServer implements Cassandra.Iface
                                                                               limits,
                                                                               new DataRange(bounds, filter).forPaging(bounds, metadata.comparator, pageFrom, true),
                                                                               Optional.empty());
-                try (PartitionIterator results = StorageProxy.getRangeSlice(cmd, consistencyLevel, queryStartNanoTime))
+                try (PartitionIterator results = StorageProxy.getRangeSlice(cmd, consistencyLevel, queryStartNanoTime).blockingGet())
                 {
                     return thriftifyKeySlices(results, new ColumnParent(column_family), limits.perPartitionCount());
                 }
@@ -1752,7 +1752,7 @@ public class CassandraServer implements Cassandra.Iface
             // further lookups.
             cmd.maybeValidateIndex();
 
-            try (PartitionIterator results = StorageProxy.getRangeSlice(cmd, consistencyLevel, queryStartNanoTime))
+            try (PartitionIterator results = StorageProxy.getRangeSlice(cmd, consistencyLevel, queryStartNanoTime).blockingGet())
             {
                 return thriftifyKeySlices(results, column_parent, limits.perPartitionCount());
             }

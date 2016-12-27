@@ -34,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
@@ -51,7 +52,11 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
+
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
 import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -2256,28 +2261,34 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("resource")
-    public static PartitionIterator getRangeSlice(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    public static Single<PartitionIterator> getRangeSlice(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     {
         Tracing.trace("Computing ranges to query");
 
-        Keyspace keyspace = Keyspace.open(command.metadata().ksName);
-        RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
+        Callable<PartitionIterator> c = () ->
+        {
 
-        // our estimate of how many result rows there will be per-range
-        float resultsPerRange = estimateResultsPerRange(command, keyspace);
-        // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
-        // fetch enough rows in the first round
-        resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
-        int concurrencyFactor = resultsPerRange == 0.0
-                              ? 1
-                              : Math.max(1, Math.min(ranges.rangeCount(), (int) Math.ceil(command.limits().count() / resultsPerRange)));
-        logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
-                     resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
-        Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
+            Keyspace keyspace = Keyspace.open(command.metadata().ksName);
+            RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
 
-        // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
+            // our estimate of how many result rows there will be per-range
+            float resultsPerRange = estimateResultsPerRange(command, keyspace);
+            // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
+            // fetch enough rows in the first round
+            resultsPerRange -= resultsPerRange * CONCURRENT_SUBREQUESTS_MARGIN;
+            int concurrencyFactor = resultsPerRange == 0.0
+                                    ? 1
+                                    : Math.max(1, Math.min(ranges.rangeCount(), (int) Math.ceil(command.limits().count() / resultsPerRange)));
+            logger.trace("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
+                         resultsPerRange, command.limits().count(), ranges.rangeCount(), concurrencyFactor);
+            Tracing.trace("Submitting range requests on {} ranges with a concurrency of {} ({} rows per range expected)", ranges.rangeCount(), concurrencyFactor, resultsPerRange);
 
-        return command.limits().filter(command.postReconciliationProcessing(new RangeCommandIterator(ranges, command, concurrencyFactor, keyspace, consistencyLevel, queryStartNanoTime)), command.nowInSec());
+            // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
+
+            return command.limits().filter(command.postReconciliationProcessing(new RangeCommandIterator(ranges, command, concurrencyFactor, keyspace, consistencyLevel, queryStartNanoTime)), command.nowInSec());
+        };
+
+        return Single.fromCallable(c).observeOn(Schedulers.io());
     }
 
     public Map<String, List<String>> getSchemaVersions()

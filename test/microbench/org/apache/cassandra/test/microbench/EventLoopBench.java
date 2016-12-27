@@ -89,13 +89,13 @@ public class EventLoopBench {
             EventExecutor loop1 = loops.next();
             CountDownLatch latch = new CountDownLatch(2);
             loop1.submit(() -> {
-                NettyRxScheduler.instance(loop1, 0);
+                NettyRxScheduler.register(loop1, 0);
                 latch.countDown();
             });
 
             EventExecutor loop2 = loops.next();
             loop2.submit(() -> {
-                NettyRxScheduler.instance(loop2, 1);
+                NettyRxScheduler.register(loop2, 1);
                 latch.countDown();
             });
 
@@ -136,13 +136,13 @@ public class EventLoopBench {
             EventExecutor loop1 = loops.next();
             CountDownLatch latch = new CountDownLatch(2);
             loop1.submit(() -> {
-                NettyRxScheduler.instance(loop1, 0);
+                NettyRxScheduler.register(loop1, 0);
                 latch.countDown();
             });
 
             EventExecutor loop2 = loops.next();
             loop2.submit(() -> {
-                NettyRxScheduler.instance(loop2, 1);
+                NettyRxScheduler.register(loop2, 1);
                 latch.countDown();
             });
 

@@ -29,6 +29,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.BytesType;
@@ -45,7 +46,7 @@ public class NativeCellTest
 
     private static final Logger logger = LoggerFactory.getLogger(NativeCellTest.class);
     private static final NativeAllocator nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator();
-    private static final OpOrder.Group group = new OpOrder().start();
+    private static final TPCOpOrder.Group group = new OpOrder().start();
     private static Random rand;
 
     @BeforeClass

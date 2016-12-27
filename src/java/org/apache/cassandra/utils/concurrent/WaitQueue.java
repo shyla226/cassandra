@@ -83,9 +83,9 @@ public final class WaitQueue
      * The calling thread MUST be the thread that uses the signal
      * @return                                x
      */
-    public Signal register()
+    public Signal register(Thread caller)
     {
-        RegisteredSignal signal = new RegisteredSignal();
+        RegisteredSignal signal = new RegisteredSignal(caller);
         queue.add(signal);
         return signal;
     }
@@ -96,10 +96,10 @@ public final class WaitQueue
      * or the waiting thread is interrupted.
      * @return
      */
-    public Signal register(Timer.Context context)
+    public Signal register(Thread caller, Timer.Context context)
     {
         assert context != null;
-        RegisteredSignal signal = new TimedSignal(context);
+        RegisteredSignal signal = new TimedSignal(caller, context);
         queue.add(signal);
         return signal;
     }
@@ -320,8 +320,13 @@ public final class WaitQueue
      */
     private class RegisteredSignal extends AbstractSignal
     {
-        private volatile Thread thread = Thread.currentThread();
+        private volatile Thread thread;
         volatile int state;
+
+        RegisteredSignal(Thread thread)
+        {
+            this.thread = thread;
+        }
 
         public boolean isSignalled()
         {
@@ -391,8 +396,9 @@ public final class WaitQueue
     {
         private final Timer.Context context;
 
-        private TimedSignal(Timer.Context context)
+        private TimedSignal(Thread caller, Timer.Context context)
         {
+            super(caller);
             this.context = context;
         }
 

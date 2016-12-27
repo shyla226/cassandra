@@ -23,6 +23,7 @@ import java.util.function.BiFunction;
 
 import com.googlecode.concurrenttrees.common.Iterables;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.IndexTarget;
@@ -236,7 +237,7 @@ public class SASIIndex implements Index, INotificationConsumer
     public void validate(PartitionUpdate update) throws InvalidRequestException
     {}
 
-    public Indexer indexerFor(DecoratedKey key, PartitionColumns columns, int nowInSec, OpOrder.Group opGroup, IndexTransaction.Type transactionType)
+    public Indexer indexerFor(DecoratedKey key, PartitionColumns columns, int nowInSec, TPCOpOrder.Group opGroup, IndexTransaction.Type transactionType)
     {
         return new Indexer()
         {
@@ -273,7 +274,7 @@ public class SASIIndex implements Index, INotificationConsumer
                 return transactionType == IndexTransaction.Type.UPDATE;
             }
 
-            public void adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
+            public void adjustMemtableSize(long additionalSpace, TPCOpOrder.Group opGroup)
             {
                 baseCfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().allocate(additionalSpace, opGroup);
             }

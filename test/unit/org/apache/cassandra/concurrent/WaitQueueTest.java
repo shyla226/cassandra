@@ -49,7 +49,7 @@ public class WaitQueueTest
             @Override
             public void run()
             {
-                WaitQueue.Signal wait = queue.register();
+                WaitQueue.Signal wait = queue.register(Thread.currentThread());
                 ready.incrementAndGet();
                 try
                 {
@@ -89,7 +89,7 @@ public class WaitQueueTest
             @Override
             public void run()
             {
-                WaitQueue.Signal wait = queue.register();
+                WaitQueue.Signal wait = queue.register(Thread.currentThread());
                 if (condition.get())
                 {
                     System.err.println("");

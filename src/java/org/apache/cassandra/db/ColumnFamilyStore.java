@@ -1324,27 +1324,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public Single<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public Single<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         final BehaviorSubject<Integer> publisher = BehaviorSubject.create();
         Scheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
-        if (scheduler != null)
-        {
-            scheduler.scheduleDirect(() -> {
-                applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
-            });
-        }
-        else
-        {
-            // We're either already on the correct scheduler, or we're still starting up. Run this synchronously on
-            // the current thread.
-            applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
-        }
+
+        scheduler.scheduleDirect(() ->
+                                 {
+
+                                     applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
+                                 });
 
         return publisher.first(0);
     }
 
-    private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         long start = System.nanoTime();
         try
@@ -1709,7 +1703,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         ByteBuffer keyBuffer = hexFormat ? ByteBufferUtil.hexToBytes(key) : metadata.getKeyValidator().fromString(key);
         DecoratedKey dk = decorateKey(keyBuffer);
-        try (OpOrder.Group op = readOrdering.start())
+        try (TPCOpOrder.Group op = readOrdering.start())
         {
             List<String> files = new ArrayList<>();
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)

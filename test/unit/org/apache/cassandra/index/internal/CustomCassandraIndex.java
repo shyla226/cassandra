@@ -28,6 +28,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -287,7 +288,7 @@ public class CustomCassandraIndex implements Index
     public Indexer indexerFor(final DecoratedKey key,
                               final PartitionColumns columns,
                               final int nowInSec,
-                              final OpOrder.Group opGroup,
+                              final TPCOpOrder.Group opGroup,
                               final IndexTransaction.Type transactionType)
     {
         if (!isPrimaryKeyIndex() && !columns.contains(indexedColumn))
@@ -440,7 +441,7 @@ public class CustomCassandraIndex implements Index
     public void deleteStaleEntry(DecoratedKey indexKey,
                                  Clustering indexClustering,
                                  DeletionTime deletion,
-                                 OpOrder.Group opGroup)
+                                 TPCOpOrder.Group opGroup)
     {
         doDelete(indexKey, indexClustering, deletion, opGroup);
         logger.debug("Removed index entry for stale value {}", indexKey);
@@ -453,7 +454,7 @@ public class CustomCassandraIndex implements Index
                         Clustering clustering,
                         Cell cell,
                         LivenessInfo info,
-                        OpOrder.Group opGroup)
+                        TPCOpOrder.Group opGroup)
     {
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
@@ -470,7 +471,7 @@ public class CustomCassandraIndex implements Index
     private void delete(ByteBuffer rowKey,
                         Clustering clustering,
                         Cell cell,
-                        OpOrder.Group opGroup,
+                        TPCOpOrder.Group opGroup,
                         int nowInSec)
     {
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
@@ -488,7 +489,7 @@ public class CustomCassandraIndex implements Index
     private void delete(ByteBuffer rowKey,
                         Clustering clustering,
                         DeletionTime deletion,
-                        OpOrder.Group opGroup)
+                        TPCOpOrder.Group opGroup)
     {
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
@@ -502,7 +503,7 @@ public class CustomCassandraIndex implements Index
     private void doDelete(DecoratedKey indexKey,
                           Clustering indexClustering,
                           DeletionTime deletion,
-                          OpOrder.Group opGroup)
+                          TPCOpOrder.Group opGroup)
     {
         Row row = BTreeRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
         PartitionUpdate upd = partitionUpdate(indexKey, row);

@@ -21,6 +21,8 @@ import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.TimeoutException;
 
+import io.reactivex.Scheduler;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
@@ -510,7 +512,20 @@ public class DataResolver extends ResponseResolver
                 DataResolver resolver = new DataResolver(keyspace, retryCommand, ConsistencyLevel.ONE, 1, queryStartNanoTime);
                 ReadCallback handler = new ReadCallback(resolver, ConsistencyLevel.ONE, retryCommand, Collections.singletonList(source), queryStartNanoTime);
                 if (StorageProxy.canDoLocalRequest(source))
-                      StageManager.getStage(Stage.READ).maybeExecuteImmediately(new StorageProxy.LocalReadRunnable(retryCommand, handler));
+                {
+                    if (command instanceof SinglePartitionReadCommand)
+                    {
+                        SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
+
+                        Scheduler scheduler = NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey());
+
+                        scheduler.scheduleDirect(new StorageProxy.LocalReadRunnable(retryCommand, handler));
+                    }
+                    else
+                    {
+                        NettyRxScheduler.instance().scheduleDirect(() -> new StorageProxy.LocalReadRunnable(retryCommand, handler));
+                    }
+                }
                 else
                     MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), source, handler);
 

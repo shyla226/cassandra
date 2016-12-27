@@ -188,7 +188,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
     {
-        return Single.just(StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime));
+        return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime);
     }
 
     public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

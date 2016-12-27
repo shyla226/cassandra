@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db;
 
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -24,14 +25,14 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 public class ReadExecutionController implements AutoCloseable
 {
     // For every reads
-    private final OpOrder.Group baseOp;
+    private final TPCOpOrder.Group baseOp;
     private final CFMetaData baseMetadata; // kept to sanity check that we have take the op order on the right table
 
     // For index reads
     private final ReadExecutionController indexController;
-    private final OpOrder.Group writeOp;
+    private final TPCOpOrder.Group writeOp;
 
-    private ReadExecutionController(OpOrder.Group baseOp, CFMetaData baseMetadata, ReadExecutionController indexController, OpOrder.Group writeOp)
+    private ReadExecutionController(TPCOpOrder.Group baseOp, CFMetaData baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -47,7 +48,7 @@ public class ReadExecutionController implements AutoCloseable
         return indexController;
     }
 
-    public OpOrder.Group writeOpOrderGroup()
+    public TPCOpOrder.Group writeOpOrderGroup()
     {
         return writeOp;
     }
@@ -83,7 +84,7 @@ public class ReadExecutionController implements AutoCloseable
         }
         else
         {
-            OpOrder.Group baseOp = null, writeOp = null;
+            TPCOpOrder.Group baseOp = null, writeOp = null;
             ReadExecutionController indexController = null;
             // OpOrder.start() shouldn't fail, but better safe than sorry.
             try
