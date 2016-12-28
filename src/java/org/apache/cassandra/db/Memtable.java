@@ -126,7 +126,7 @@ public class Memtable implements Comparable<Memtable>
     // We index the memtable by PartitionPosition only for the purpose of being able
     // to select key range using Token.KeyBound. However put() ensures that we
     // actually only store DecoratedKey.
-    private final List<HashMap<PartitionPosition, AtomicBTreePartition>> partitions;
+    private final List<TreeMap<PartitionPosition, AtomicBTreePartition>> partitions;
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
     private final List<PartitionPosition> rangeList;
@@ -178,19 +178,19 @@ public class Memtable implements Comparable<Memtable>
         return NettyRxScheduler.getRangeList(cfs.keyspace.getName());
     }
 
-    private List<HashMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
+    private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
     {
         if (!hasSplits)
-            return Collections.singletonList(new HashMap<>(256));
+            return Collections.singletonList(new TreeMap<>());
 
         int capacity = rangeList.size();
-        ArrayList<HashMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
+        ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
         for (int i = 0; i < capacity; i++)
-            partitionMapContainer.add(new HashMap<>(1024));
+            partitionMapContainer.add(new TreeMap<>());
         return partitionMapContainer;
     }
 
-    private HashMap<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(PartitionPosition key)
+    private TreeMap<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(PartitionPosition key)
     {
         if (!hasSplits)
             return partitions.get(0);
@@ -284,7 +284,7 @@ public class Memtable implements Comparable<Memtable>
 
     public boolean isClean()
     {
-        for (HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
         {
             if (!memtableSubrange.isEmpty())
                 return false;
@@ -315,7 +315,7 @@ public class Memtable implements Comparable<Memtable>
     long put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
-        HashMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
+        TreeMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
         AtomicBTreePartition previous = partitionMap.get(key);
 
         long initialSize = 0;
@@ -402,141 +402,53 @@ public class Memtable implements Comparable<Memtable>
         boolean isBound = keyRange instanceof Bounds;
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
-        int startComparison = includeStart ? 0 : 1;
-        int endComparison = includeStop ? 0 : -1;
 
         // avoid iterating over the memtable if we purge all tombstones
         boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
-        // TODO combine sort and filtering into single step to handle small subrange reads efficiently?
-
         ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
         for (int i = 1; i < partitions.size(); i++)
         {
-            PartitionPosition memtableRangeStart = rangeList.get(i - 1);
-            PartitionPosition memtableRangeEnd = rangeList.get(i);
-            // TODO double check inclusivity of both memtable and requested range
-            //  check if the requested range intersects with this memtable subrange at all
-            if (keyRange.left.compareTo(memtableRangeEnd) >= 0 || keyRange.right.compareTo(memtableRangeStart) < 0)
-                continue;
+            TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
+            SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange = memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-            // optimize for the common case where the request includes the entire memtable subrange, or at least one end of it
-            boolean skipStartCheck = keyRange.left.compareTo(memtableRangeStart) <= 0;
-            boolean skipEndCheck = keyRange.right.compareTo(memtableRangeEnd) >= 0;
-
-            HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
-            for (Map.Entry<PartitionPosition, AtomicBTreePartition> entry : memtableSubrange.entrySet())
+            if (findMinLocalDeletionTime)
             {
-                PartitionPosition key = entry.getKey();
-                if ((skipStartCheck || key.compareTo(keyRange.left) >= startComparison) && (skipEndCheck || key.compareTo(keyRange.right) <= endComparison))
-                {
-                    keysInRange.add(key);
-                    if (findMinLocalDeletionTime)
-                        minLocalDeletionTime = Math.min(minLocalDeletionTime, entry.getValue().stats().minLocalDeletionTime);
-                }
+                for (AtomicBTreePartition partition : trimmedMemtableSubrange.values())
+                    minLocalDeletionTime = Math.min(minLocalDeletionTime, partition.stats().minLocalDeletionTime);
             }
+
+            keysInRange.addAll(trimmedMemtableSubrange.keySet());
         }
-        Collections.sort(keysInRange);
 
         return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), minLocalDeletionTime, columnFilter, dataRange);
     }
 
-    private Pair<List<Integer>, List<PartitionPosition>> getSortedKeySubrange(PartitionPosition from, PartitionPosition to)
+    private Pair<List<Set<PartitionPosition>>, List<Collection<AtomicBTreePartition>>> getAllSortedPartitions()
     {
-        ArrayList<PartitionPosition> keysInRange;
-
-        if (!hasSplits)
+        List<Set<PartitionPosition>> keySetList = new ArrayList<>(partitions.size());
+        List<Collection<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
         {
-            HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(0);
-            keysInRange = new ArrayList<>(memtableSubrange.size());
-
-            // TODO optimize for min/max range, where applicable?
-            for (PartitionPosition key : memtableSubrange.keySet())
-            {
-                if (key.compareTo(from) >= 0 && key.compareTo(to) < 0)
-                    keysInRange.add(key);
-            }
-            Collections.sort(keysInRange);
-            return Pair.create(Collections.singletonList(memtableSubrange.size()), keysInRange);
+            keySetList.add(partitionSubrange.navigableKeySet());
+            partitionSetList.add(partitionSubrange.values());
         }
-
-        ArrayList<Integer> subrangeKeyCounts = new ArrayList<>(partitions.size());
-
-        // if we're flushing the whole memtable, we can do something more efficient
-        if (from.getToken().equals(cfs.getPartitioner().getMinimumToken()) && to.getToken().equals(cfs.getPartitioner().getMaximumToken()))
-        {
-            int capacity = 0;
-            for (HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
-                capacity += memtableSubrange.size();
-
-
-            keysInRange = new ArrayList<>(capacity);
-            for (HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
-            {
-                keysInRange.addAll(memtableSubrange.keySet());
-                subrangeKeyCounts.add(memtableSubrange.size());
-            }
-        }
-        else
-        {
-            // estimate required capacity
-            keysInRange = new ArrayList<>(partitions.size() * partitions.get(0).size());
-
-            for (int i = 1; i < partitions.size(); i++)
-            {
-                PartitionPosition memtableRangeStart = rangeList.get(i - 1);
-                PartitionPosition memtableRangeEnd = rangeList.get(i);
-
-                // TODO double check inclusivity of both memtable and requested range
-                // old range was inclusive on start, exclusive on end
-
-                //  check if the requested range intersects with this memtable subrange at all
-                if (from.compareTo(memtableRangeEnd) >= 0 || to.compareTo(memtableRangeStart) < 0)
-                    continue;
-
-                // optimize for the common case where the request includes the entire memtable subrange, or at least one end of it
-                boolean skipStartCheck = from.compareTo(memtableRangeStart) <= 0;
-                boolean skipEndCheck = to.compareTo(memtableRangeEnd) >= 0;
-
-                HashMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
-                subrangeKeyCounts.add(memtableSubrange.size());
-                if (skipStartCheck && skipEndCheck)
-                {
-                    keysInRange.addAll(memtableSubrange.keySet());
-                }
-                {
-                    for (PartitionPosition key : memtableSubrange.keySet())
-                    {
-                        if ((skipStartCheck || key.compareTo(from) >= 0) && (skipEndCheck || key.compareTo(to) < 0))
-                            keysInRange.add(key);
-                    }
-                }
-            }
-        }
-        Collections.sort(keysInRange);
-        return Pair.create(subrangeKeyCounts, keysInRange);
+        return Pair.create(keySetList, partitionSetList);
     }
 
-    private Pair<List<Integer>, List<PartitionPosition>> getSortedKeys()
+    private Pair<List<Set<PartitionPosition>>, List<Collection<AtomicBTreePartition>>> getSortedSubrange(PartitionPosition from, PartitionPosition to)
     {
-        int capacity = 0;
-        for (HashMap<PartitionPosition, AtomicBTreePartition> partitionMap : partitions)
-            capacity += partitionMap.size();
-
-        int i = 0;
-        PartitionPosition[] sortedKeys = new PartitionPosition[capacity];
-        ArrayList<Integer> memtableSubrangeKeyCounts = new ArrayList<>(partitions.size());
-        for (HashMap<PartitionPosition, AtomicBTreePartition> partitionMap : partitions)
+        List<Set<PartitionPosition>> keySetList = new ArrayList<>(partitions.size());
+        List<Collection<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
         {
-            PartitionPosition[] subrangeKeys = new PartitionPosition[partitionMap.size()];
-            partitionMap.keySet().toArray(subrangeKeys);
-            Arrays.sort(subrangeKeys);
-            System.arraycopy(subrangeKeys, 0, sortedKeys, i, subrangeKeys.length);
-            memtableSubrangeKeyCounts.add(subrangeKeys.length);
-            i += subrangeKeys.length;
+            SortedMap<PartitionPosition, AtomicBTreePartition> submap = partitionSubrange.subMap(from, to);
+            // TreeMap returns these in normal sorted order
+            keySetList.add(submap.keySet());
+            partitionSetList.add(submap.values());
         }
-        return Pair.create(memtableSubrangeKeyCounts, Arrays.asList(sortedKeys));
+        return Pair.create(keySetList, partitionSetList);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -561,8 +473,8 @@ public class Memtable implements Comparable<Memtable>
     class FlushRunnable implements Callable<SSTableMultiWriter>
     {
         private final long estimatedSize;
-        private final List<PartitionPosition> keysToFlush;
-        private final List<Integer> memtableSubrangeKeyCounts;
+        private final List<Set<PartitionPosition>> keysToFlush;
+        private final List<Collection<AtomicBTreePartition>> partitionsToFlush;
 
         private final boolean isBatchLogTable;
         private final SSTableMultiWriter writer;
@@ -573,27 +485,33 @@ public class Memtable implements Comparable<Memtable>
 
         FlushRunnable(PartitionPosition from, PartitionPosition to, Directories.DataDirectory flushLocation, LifecycleTransaction txn)
         {
-            this(getSortedKeySubrange(from, to), flushLocation, from, to, txn);
+            this(getSortedSubrange(from, to), flushLocation, from, to, txn);
         }
 
         FlushRunnable(LifecycleTransaction txn)
         {
-            this(getSortedKeys(), null, null, null, txn);
+            this(getAllSortedPartitions(), null, null, null, txn);
         }
 
-        FlushRunnable(Pair<List<Integer>, List<PartitionPosition>> keysToFlush, Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
+        private FlushRunnable(Pair<List<Set<PartitionPosition>>, List<Collection<AtomicBTreePartition>>> toFlush,
+                              Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
         {
-            this.memtableSubrangeKeyCounts = keysToFlush.left;
-            this.keysToFlush = keysToFlush.right;
+            this.keysToFlush = toFlush.left;
+            this.partitionsToFlush = toFlush.right;
             this.from = from;
             this.to = to;
             long keySize = 0;
-            for (PartitionPosition key : this.keysToFlush)
+
+            for (Set<PartitionPosition> keySet : keysToFlush)
             {
-                //  make sure we don't write nonsensical keys
-                assert key instanceof DecoratedKey;
-                keySize += ((DecoratedKey) key).getKey().remaining();
+                for (PartitionPosition key : keySet)
+                {
+                    // make sure we don't write nonsensical keys
+                    assert key instanceof DecoratedKey;
+                    keySize += ((DecoratedKey) key).getKey().remaining();
+                }
             }
+
             estimatedSize = (long) ((keySize // index entries
                                     + keySize // keys in data file
                                     + liveDataSize.get()) // data
@@ -619,36 +537,24 @@ public class Memtable implements Comparable<Memtable>
 
             // (we can't clear out the map as-we-go to free up memory,
             //  since the memtable is being used for queries in the "pending flush" category)
-
-            int memtableSubrangeIndex = 0;
-            int subrangeKeyCounter = 0;
-            int currentSubrangeLength = memtableSubrangeKeyCounts.get(0);
-            for (PartitionPosition key : keysToFlush)
+            for (Collection<AtomicBTreePartition> partitionSet : partitionsToFlush)
             {
-                // advance our subrange index if necessary
-                while (subrangeKeyCounter >= currentSubrangeLength)
+                for (AtomicBTreePartition partition : partitionSet)
                 {
-                    memtableSubrangeIndex++;
-                    subrangeKeyCounter = 0;
-                    currentSubrangeLength = memtableSubrangeKeyCounts.get(memtableSubrangeIndex);
-                }
+                    // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
+                    // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
+                    // we don't need to preserve tombstones for repair. So if both operation are in this
+                    // memtable (which will almost always be the case if there is no ongoing failure), we can
+                    // just skip the entry (CASSANDRA-4667).
+                    if (isBatchLogTable && !partition.partitionLevelDeletion().isLive() && partition.hasRows())
+                        continue;
 
-                AtomicBTreePartition partition = partitions.get(memtableSubrangeIndex).get(key);
-                subrangeKeyCounter++;
-
-                // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
-                // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
-                // we don't need to preserve tombstones for repair. So if both operation are in this
-                // memtable (which will almost always be the case if there is no ongoing failure), we can
-                // just skip the entry (CASSANDRA-4667).
-                if (isBatchLogTable && !partition.partitionLevelDeletion().isLive() && partition.hasRows())
-                    continue;
-
-                if (!partition.isEmpty())
-                {
-                    try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+                    if (!partition.isEmpty())
                     {
-                        writer.append(iter);
+                        try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+                        {
+                            writer.append(iter);
+                        }
                     }
                 }
             }
@@ -671,7 +577,7 @@ public class Memtable implements Comparable<Memtable>
                     .commitLogIntervals(new IntervalSet<>(commitLogLowerBound.get(), commitLogUpperBound.get()));
 
             return cfs.createSSTableMultiWriter(descriptor,
-                                                (long)keysToFlush.size(),
+                                                keysToFlush.size(),
                                                 ActiveRepairService.UNREPAIRED_SSTABLE,
                                                 sstableMetadataCollector,
                                                 new SerializationHeader(true, cfs.metadata, columns, stats), txn);
