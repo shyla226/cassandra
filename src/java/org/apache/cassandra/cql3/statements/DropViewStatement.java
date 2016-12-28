@@ -76,7 +76,7 @@ public class DropViewStatement extends SchemaAlteringStatement
 //            }
 
             return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
-                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
         }
         catch (ConfigurationException e)
         {

@@ -40,6 +40,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+
+import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 
@@ -1084,10 +1086,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         doAuthSetup().blockingGet();
     }
 
-    private Single<Integer> doAuthSetup()
+    private Completable doAuthSetup()
     {
         return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
-                .doOnEvent((value, exc) -> {
+                .doOnComplete(() -> {
                     DatabaseDescriptor.getRoleManager().setup();
                     DatabaseDescriptor.getAuthenticator().setup();
                     DatabaseDescriptor.getAuthorizer().setup();
@@ -1101,7 +1103,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return authSetupComplete;
     }
 
-    private Single<Integer> maybeAddKeyspace(KeyspaceMetadata ksm)
+    private Completable maybeAddKeyspace(KeyspaceMetadata ksm)
     {
         try
         {
@@ -1110,7 +1112,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         catch (AlreadyExistsException e)
         {
             logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
-            return Single.just(0);
+            return Completable.complete();
         }
     }
 
@@ -1118,7 +1120,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Ensure the schema of a pseudo-system keyspace (a distributed system keyspace: traces, auth and the so-called distributedKeyspace),
      * is up to date with what we expected (creating it if it doesn't exist and updating tables that may have been upgraded).
      */
-    private Single<Integer> maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
+    private Completable maybeAddOrUpdateKeyspace(KeyspaceMetadata expected)
     {
         // Note that want to deal with the keyspace and its table a bit differently: for the keyspace definition
         // itself, we want to create it if it doesn't exist yet, but if it does exist, we don't want to modify it,
@@ -1129,29 +1131,29 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         // KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
         // If the keyspace doesn't exist, create it
-        Single<Integer> observable;
+        Completable migration;
         if (Schema.instance.getKSMetaData(expected.name) == null)
-            observable = maybeAddKeyspace(expected);
+            migration = maybeAddKeyspace(expected);
         else
-            observable = Single.just(0);
+            migration = Completable.complete();
 
-        return observable.flatMap(v -> {
+        return migration.andThen(Completable.fromCallable( () -> {
             KeyspaceMetadata defined = Schema.instance.getKSMetaData(expected.name);
 
             // While the keyspace exists, it might miss table or have outdated one
             // There is also the potential for a race, as schema migrations add the bare
             // keyspace into Schema.instance before adding its tables, so double check that
             // all the expected tables are present
-            List<Single<Integer>> singles = new ArrayList<>();
+            List<Completable> migrations = new ArrayList<>();
             for (CFMetaData expectedTable : expected.tables)
             {
                 CFMetaData definedTable = defined.tables.get(expectedTable.cfName).orElse(null);
                 if (definedTable == null || !definedTable.equals(expectedTable))
-                    singles.add(MigrationManager.forceAnnounceNewColumnFamily(expectedTable));
+                    migrations.add(MigrationManager.forceAnnounceNewColumnFamily(expectedTable));
             }
 
-            return singles.isEmpty() ? Single.just(0) : Single.merge(singles).last(0);
-        });
+            return migrations.isEmpty() ? Completable.complete() : Completable.merge(migrations);
+        }));
     }
 
     public boolean isJoined()
@@ -5146,16 +5148,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("Updated hinted_handoff_throttle_in_kb to {}", throttleInKB);
     }
 
-    public static List<Range<Token>> getLocalRanges(ColumnFamilyStore cfs)
+    public static List<Range<Token>> getStartupTokenRanges(String keyspaceName)
     {
-        if (!cfs.getPartitioner().splitter().isPresent())
+        if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())
             return null;
 
         Collection<Range<Token>> lr;
 
         if (StorageService.instance.isBootstrapMode())
         {
-            lr = StorageService.instance.getTokenMetadata().getPendingRanges(cfs.keyspace.getName(), FBUtilities.getBroadcastAddress());
+            lr = StorageService.instance.getTokenMetadata().getPendingRanges(keyspaceName, FBUtilities.getBroadcastAddress());
         }
         else
         {
@@ -5163,7 +5165,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // from that node to the correct location on disk, if we didn't, we would put new files in the wrong places.
             // We do this to minimize the amount of data we need to move in rebalancedisks once everything settled
             TokenMetadata tmd = StorageService.instance.getTokenMetadata().cloneAfterAllSettled();
-            lr = cfs.keyspace.getReplicationStrategy().getAddressRanges(tmd).get(FBUtilities.getBroadcastAddress());
+            lr = Keyspace.open(keyspaceName).getReplicationStrategy().getAddressRanges(tmd).get(FBUtilities.getBroadcastAddress());
         }
 
         if (lr == null || lr.isEmpty())
@@ -5174,7 +5176,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
     {
-        List<Range<Token>> localRanges = getLocalRanges(cfs);
+        List<Range<Token>> localRanges = getStartupTokenRanges(cfs.keyspace.getName());
         if (localRanges == null)
             return null;
 

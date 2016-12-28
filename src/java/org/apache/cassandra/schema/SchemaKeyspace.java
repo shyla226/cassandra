@@ -281,18 +281,18 @@ public final class SchemaKeyspace
         ALL.forEach(table -> getSchemaCFS(table).truncateBlocking());
     }
 
-    static Single<Integer> flush()
+    static Completable flush()
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
         {
-            List<Single<?>> observables = new ArrayList<>(ALL.size());
+            List<Completable> flushes = new ArrayList<>(ALL.size());
             for (String table : ALL)
-                observables.add(getSchemaCFS(table).forceFlush().single(CommitLogPosition.NONE));
+                flushes.add(getSchemaCFS(table).forceFlush().flatMapCompletable(position -> Completable.complete()));
 
-            return Single.merge(observables).last(CommitLogPosition.NONE).map(clPosition -> 0);
+            return Completable.merge(flushes);
         }
 
-        return Single.just(0);
+        return Completable.complete();
     }
 
     /**
@@ -1312,18 +1312,18 @@ public final class SchemaKeyspace
      *
      * @throws ConfigurationException If one of metadata attributes has invalid value
      */
-    public static synchronized Single<Integer> mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
+    public static synchronized Completable mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
     {
         return mergeSchema(mutations, true);
     }
 
-    public static Single<Integer> mergeSchema(Collection<Mutation> mutations)
+    public static Completable mergeSchema(Collection<Mutation> mutations)
     {
         return mergeSchema(mutations, false);
     }
 
     // TODO need an async lock for this, synchronization doesn't cover what's run in the map/flatMap call
-    public static synchronized Single<Integer> mergeSchema(Collection<Mutation> mutations, boolean announce)
+    public static synchronized Completable mergeSchema(Collection<Mutation> mutations, boolean announce)
     {
         logger.debug("Going to merge schema change");
 
@@ -1337,52 +1337,53 @@ public final class SchemaKeyspace
         Keyspaces before = Schema.instance.getKeyspaces(affectedKeyspaces);
 
         // apply the schema mutations and flush
-        List<Single<Integer>> singles = new ArrayList<>(mutations.size());
+        List<Completable> writes = new ArrayList<>(mutations.size());
         for (Mutation mutation : mutations)
-            singles.add(mutation.applyAsync());
+            writes.add(mutation.applyAsync());
 
-        return Single.merge(singles).last(0).flatMap(uu ->
-            FLUSH_SCHEMA_TABLES ? flush() : Single.just(0)
-        ).flatMap(vv -> {
-            // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
-            Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
+        return Completable.merge(writes)
+                          .andThen(FLUSH_SCHEMA_TABLES ? flush() : Completable.complete())
+                          .andThen(Completable.fromCallable(() ->
+                                                            {
+                                                                // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
+                                                                Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
 
-            // deal with the diff
-            MapDifference<String, KeyspaceMetadata> keyspacesDiff = before.diff(after);
+                                                                // deal with the diff
+                                                                MapDifference<String, KeyspaceMetadata> keyspacesDiff = before.diff(after);
 
-            // dropped keyspaces
-            for (KeyspaceMetadata keyspace : keyspacesDiff.entriesOnlyOnLeft().values())
-            {
-                keyspace.functions.udas().forEach(Schema.instance::dropAggregate);
-                keyspace.functions.udfs().forEach(Schema.instance::dropFunction);
-                keyspace.views.forEach(v -> Schema.instance.dropView(v.ksName, v.viewName));
-                keyspace.tables.forEach(t -> Schema.instance.dropTable(t.ksName, t.cfName));
-                keyspace.types.forEach(Schema.instance::dropType);
-                Schema.instance.dropKeyspace(keyspace.name);
-            }
+                                                                // dropped keyspaces
+                                                                for (KeyspaceMetadata keyspace : keyspacesDiff.entriesOnlyOnLeft().values())
+                                                                {
+                                                                    keyspace.functions.udas().forEach(Schema.instance::dropAggregate);
+                                                                    keyspace.functions.udfs().forEach(Schema.instance::dropFunction);
+                                                                    keyspace.views.forEach(v -> Schema.instance.dropView(v.ksName, v.viewName));
+                                                                    keyspace.tables.forEach(t -> Schema.instance.dropTable(t.ksName, t.cfName));
+                                                                    keyspace.types.forEach(Schema.instance::dropType);
+                                                                    Schema.instance.dropKeyspace(keyspace.name);
+                                                                }
 
-            // new keyspaces
-            for (KeyspaceMetadata keyspace : keyspacesDiff.entriesOnlyOnRight().values())
-            {
-                Schema.instance.addKeyspace(KeyspaceMetadata.create(keyspace.name, keyspace.params));
-                keyspace.types.forEach(Schema.instance::addType);
-                keyspace.tables.forEach(Schema.instance::addTable);
-                keyspace.views.forEach(Schema.instance::addView);
-                keyspace.functions.udfs().forEach(Schema.instance::addFunction);
-                keyspace.functions.udas().forEach(Schema.instance::addAggregate);
-            }
+                                                                // new keyspaces
+                                                                for (KeyspaceMetadata keyspace : keyspacesDiff.entriesOnlyOnRight().values())
+                                                                {
+                                                                    Schema.instance.addKeyspace(KeyspaceMetadata.create(keyspace.name, keyspace.params));
+                                                                    keyspace.types.forEach(Schema.instance::addType);
+                                                                    keyspace.tables.forEach(Schema.instance::addTable);
+                                                                    keyspace.views.forEach(Schema.instance::addView);
+                                                                    keyspace.functions.udfs().forEach(Schema.instance::addFunction);
+                                                                    keyspace.functions.udas().forEach(Schema.instance::addAggregate);
+                                                                }
 
-            // updated keyspaces
-            for (Map.Entry<String, MapDifference.ValueDifference<KeyspaceMetadata>> diff : keyspacesDiff.entriesDiffering().entrySet())
-                updateKeyspace(diff.getKey(), diff.getValue().leftValue(), diff.getValue().rightValue());
+                                                                // updated keyspaces
+                                                                for (Map.Entry<String, MapDifference.ValueDifference<KeyspaceMetadata>> diff : keyspacesDiff.entriesDiffering().entrySet())
+                                                                    updateKeyspace(diff.getKey(), diff.getValue().leftValue(), diff.getValue().rightValue());
 
-            logger.debug("Done merging schema");
+                                                                logger.debug("Done merging schema");
 
-            if (announce)
-                return Schema.instance.updateVersionAndAnnounce().map(resultSet -> 0);
-            else
-                return Single.just(0);
-        });
+                                                                if (announce)
+                                                                    return Schema.instance.updateVersionAndAnnounce().toCompletable();
+                                                                else
+                                                                    return Completable.complete();
+                                                            }));
     }
 
     private static void updateKeyspace(String keyspaceName, KeyspaceMetadata keyspaceBefore, KeyspaceMetadata keyspaceAfter)

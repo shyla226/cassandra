@@ -58,7 +58,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         message.payload.applyAsync().subscribe(
             // onNext
-            v -> reply(id, replyTo),
+            () -> reply(id, replyTo),
 
             // onError
             exc -> failed()

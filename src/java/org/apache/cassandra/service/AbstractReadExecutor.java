@@ -118,12 +118,8 @@ public abstract class AbstractReadExecutor
             {
                 SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
 
-                Scheduler scheduler = NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey());
-                // if we're already on the correct scheduler, run this directly
-                if (scheduler == null)
-                    executeLocalRead();
-                else
-                    scheduler.scheduleDirect(this::executeLocalRead);
+                Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().ksName, singleCommand.partitionKey(), false);
+                scheduler.scheduleDirect(this::executeLocalRead);
             }
             else
             {

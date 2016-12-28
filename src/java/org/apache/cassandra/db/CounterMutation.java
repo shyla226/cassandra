@@ -29,6 +29,7 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Striped;
 
+import io.reactivex.Completable;
 import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.*;
@@ -137,11 +138,11 @@ public class CounterMutation implements IMutation
         applyCounterMutation();
     }
 
-    public Single<Integer> applyAsync()
+    public Completable applyAsync()
     {
         // TODO rx-ify
         applyCounterMutation();
-        return Single.just(0);
+        return Completable.complete();
     }
 
     private void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException

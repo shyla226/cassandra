@@ -32,6 +32,8 @@ import java.util.SortedSet;
 import java.util.UUID;
 
 import com.google.common.collect.Iterables;
+
+import io.reactivex.Completable;
 import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
@@ -596,14 +598,14 @@ public abstract class ModificationStatement implements CQLStatement
         if (mutations.isEmpty())
             return Single.just(new ResultMessage.Void());
 
-        List<Single<Integer>> mutationObservables = new ArrayList<>(mutations.size());
+        List<Completable> mutationObservables = new ArrayList<>(mutations.size());
         for (IMutation mutation : mutations)
             mutationObservables.add(mutation.applyAsync());
 
         if (mutationObservables.size() == 1)
-            return mutationObservables.get(0).map(v -> new ResultMessage.Void());
+            return mutationObservables.get(0).toSingle(() -> new ResultMessage.Void());
         else
-            return Single.merge(mutationObservables).last(0).map(v -> new ResultMessage.Void());
+            return Completable.merge(mutationObservables).toSingle(() -> new ResultMessage.Void());
     }
 
     public Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException

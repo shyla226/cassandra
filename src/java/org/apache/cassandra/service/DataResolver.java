@@ -517,7 +517,7 @@ public class DataResolver extends ResponseResolver
                     {
                         SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
 
-                        Scheduler scheduler = NettyRxScheduler.getForKey(Keyspace.openAndGetStore(command.metadata()), singleCommand.partitionKey());
+                        Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().ksName, singleCommand.partitionKey(), false);
 
                         scheduler.scheduleDirect(new StorageProxy.LocalReadRunnable(retryCommand, handler));
                     }

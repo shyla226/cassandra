@@ -165,7 +165,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         UDFunction udFunction = UDFunction.create(functionName, argNames, argTypes, returnType, calledOnNullInput, language, body);
 
         return MigrationManager.announceNewFunction(udFunction, isLocalOnly)
-                .map(v -> new Event.SchemaChange(
+                .toSingle(() -> new Event.SchemaChange(
                         replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
                         Event.SchemaChange.Target.FUNCTION,
                         udFunction.name().keyspace, udFunction.name().name, AbstractType.asCQLTypeStringList(udFunction.argTypes())));

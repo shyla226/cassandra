@@ -130,7 +130,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
 
         final Function oldFinal = old;
         return MigrationManager.announceAggregateDrop((UDAggregate)old, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
                                       oldFinal.name().keyspace, oldFinal.name().name, AbstractType.asCQLTypeStringList(oldFinal.argTypes())));
 
     }

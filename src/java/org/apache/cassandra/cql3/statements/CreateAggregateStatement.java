@@ -239,7 +239,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         UDAggregate udAggregate = new UDAggregate(functionName, argTypes, returnType, stateFunction, finalFunction, initcond);
 
         return MigrationManager.announceNewAggregate(udAggregate, isLocalOnly)
-                .map(v -> new Event.SchemaChange(
+                .toSingle(() -> new Event.SchemaChange(
                         replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
                         Event.SchemaChange.Target.AGGREGATE,
                         udAggregate.name().keyspace, udAggregate.name().name, AbstractType.asCQLTypeStringList(udAggregate.argTypes())));

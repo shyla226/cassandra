@@ -41,6 +41,7 @@ import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -160,61 +161,62 @@ public class NettyRxScheduler extends Scheduler
         return scheduler;
     }
 
-    public static Scheduler getForKey(ColumnFamilyStore cfs, DecoratedKey key)
+    public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
     {
         // force all system table operations to go through a single core
-        if (cfs.hasSpecialHandlingForTPC)
-        {
-            if (perCoreSchedulers[0] != null)
-                return perCoreSchedulers[0];
+        if (isStartup)
+            return ImmediateThinScheduler.INSTANCE;
 
-            // during initial startup we have no schedulers, and should run tasks directly
-            return null;
-        }
-
-        List<PartitionPosition> keyspaceRanges = getRangeList(cfs);
+        List<PartitionPosition> keyspaceRanges = getRangeList(keyspaceName);
 
         PartitionPosition rangeStart = keyspaceRanges.get(0);
         for (int i = 1; i < keyspaceRanges.size(); i++)
         {
             PartitionPosition next = keyspaceRanges.get(i);
             if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
-                return getForCore(i - 1);
+            {
+                if (useImmediateForLocal)
+                {
+                    Integer callerCoreId = getCoreId();
+                    return callerCoreId != null && callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
+                }
 
+                return getForCore(i - 1);
+            }
 
             rangeStart = next;
         }
 
-        throw new IllegalStateException(String.format("Unable to map %s to cpu for %s.%s", key, cfs.keyspace.getName(), cfs.getTableName()));
+        throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
     }
 
-    public static List<PartitionPosition> getRangeList(ColumnFamilyStore cfs)
+    public static List<PartitionPosition> getRangeList(String keyspaceName)
     {
-        return getRangeList(cfs, true);
+        return getRangeList(keyspaceName, true);
     }
 
-    public static List<PartitionPosition> getRangeList(ColumnFamilyStore cfs, boolean persist)
+    public static List<PartitionPosition> getRangeList(String keyspaceName, boolean persist)
     {
-        List<PartitionPosition> ranges = keyspaceToRangeMapping.get(cfs.keyspace.getName());
+        List<PartitionPosition> ranges = keyspaceToRangeMapping.get(keyspaceName);
 
         if (ranges != null)
             return ranges;
 
-        List<Range<Token>> localRanges = StorageService.getLocalRanges(cfs);
-        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, cfs.getPartitioner(), NUM_NETTY_THREADS);
+        List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspaceName);
+        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS);
 
         if (persist)
         {
             if (instance().cpuId == 0)
             {
-                keyspaceToRangeMapping.put(cfs.keyspace.getName(), splits);
+                keyspaceToRangeMapping.put(keyspaceName, splits);
             }
             else
             {
                 CountDownLatch ready = new CountDownLatch(1);
 
                 getForCore(0).scheduleDirect(() -> {
-                    keyspaceToRangeMapping.put(cfs.keyspace.getName(), splits);
+                    keyspaceToRangeMapping.put(keyspaceName, splits);
                     ready.countDown();
                 });
 

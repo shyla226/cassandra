@@ -90,7 +90,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
         try
         {
             return MigrationManager.announceNewColumnFamily(getCFMetaData(), isLocalOnly)
-                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
         }
         catch (AlreadyExistsException e)
         {

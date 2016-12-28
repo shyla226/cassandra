@@ -235,6 +235,6 @@ public class CreateIndexStatement extends SchemaAlteringStatement
 
         // Creating an index is akin to updating the CF
         return MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 }

@@ -26,12 +26,15 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+
+import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import io.reactivex.SingleSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TPCOpOrder;
@@ -425,7 +428,7 @@ public class Keyspace
         }
     }
 
-    public Single<Integer> apply(Mutation mutation, boolean writeCommitLog)
+    public Completable apply(Mutation mutation, boolean writeCommitLog)
     {
         return apply(mutation, writeCommitLog, true, false);
     }
@@ -439,22 +442,22 @@ public class Keyspace
      * @param writeCommitLog
      * @return
      */
-    public Single<Integer> applyNotDeferrable(Mutation mutation, boolean writeCommitLog)
+    public Completable applyNotDeferrable(Mutation mutation, boolean writeCommitLog)
     {
         return apply(mutation, writeCommitLog, true, false, false);
     }
 
-    public Single<Integer> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    public Completable apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
         return apply(mutation, writeCommitLog, updateIndexes, false);
     }
 
-    public Single<Integer> applyFromCommitLog(Mutation mutation)
+    public Completable applyFromCommitLog(Mutation mutation)
     {
         return apply(mutation, false, true, true);
     }
 
-    public Single<Integer> apply(final Mutation mutation,
+    public Completable apply(final Mutation mutation,
                                       final boolean writeCommitLog,
                                       boolean updateIndexes,
                                       boolean isClReplay)
@@ -472,14 +475,14 @@ public class Keyspace
      * @param isClReplay     true if caller is the commitlog replayer
      * @param isDeferrable   true if caller is not waiting for future to complete, so that future may be deferred
      */
-    public Single<Integer> apply(final Mutation mutation,
+    private Completable apply(final Mutation mutation,
                                  final boolean writeCommitLog,
                                  boolean updateIndexes,
                                  boolean isClReplay,
                                  boolean isDeferrable)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
-            return io.reactivex.Single.error(new RuntimeException("Testing write failures"));
+            return Completable.error(new RuntimeException("Testing write failures"));
 
         Lock[] locks = null;
 
@@ -580,31 +583,40 @@ public class Keyspace
         }
         */
 
-        int nowInSec = FBUtilities.nowInSeconds();
-        TPCOpOrder.Group opGroup = writeOrder.start();
+        return Completable.defer(() ->
+                            {
+                                int nowInSec = FBUtilities.nowInSeconds();
 
-        // write the mutation to the commitlog
-        Single<CommitLogPosition> commitLogPositionObservable;
-        if (writeCommitLog)
-        {
-            Tracing.trace("Appending to commitlog");
-            commitLogPositionObservable = CommitLog.instance.add(mutation);
-        }
-        else
-        {
-            commitLogPositionObservable = Single.just(CommitLogPosition.NONE);
-        }
+                                // write the mutation to the commitlog
+                                Single<CommitLogPosition> commitLogPositionObservable;
+                                if (writeCommitLog)
+                                {
+                                    Tracing.trace("Appending to commitlog");
+                                    commitLogPositionObservable = CommitLog.instance.add(mutation);
+                                }
+                                else
+                                {
+                                    commitLogPositionObservable = Single.just(CommitLogPosition.NONE);
+                                }
 
-        return commitLogPositionObservable.flatMap(commitLogPosition -> {
-            List<Single<Integer>> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
-            for (PartitionUpdate upd : mutation.getPartitionUpdates())
-            {
-                ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
-                if (cfs == null)
-                {
-                    logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().cfId, upd.metadata().ksName, upd.metadata().cfName);
-                    continue;
-                }
+                                TPCOpOrder.Group opGroup = writeOrder.start();
+
+                                return commitLogPositionObservable
+                                       .flatMapCompletable(commitLogPosition ->
+                                                {
+                                                    List<Completable> memtablePutObservables = new ArrayList<>(mutation.getPartitionUpdates().size());
+
+
+                                                    {
+                                                        for (PartitionUpdate upd : mutation.getPartitionUpdates())
+                                                        {
+
+                                                            ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().cfId);
+                                                            if (cfs == null)
+                                                            {
+                                                                logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().cfId, upd.metadata().ksName, upd.metadata().cfName);
+                                                                continue;
+                                                            }
 
                 /*
                 AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
@@ -625,26 +637,29 @@ public class Keyspace
                 }
                 */
 
-                Tracing.trace("Adding to {} memtable", upd.metadata().cfName);
-                UpdateTransaction indexTransaction = updateIndexes
-                                                     ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
-                                                     : UpdateTransaction.NO_OP;
-                Single<Integer> memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
-                memtablePutObservables.add(memtableObservable);
+                                                            Tracing.trace("Adding to {} memtable", upd.metadata().cfName);
+                                                            UpdateTransaction indexTransaction = updateIndexes
+                                                                                                 ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
+                                                                                                 : UpdateTransaction.NO_OP;
+                                                            Completable memtableObservable = cfs.apply(upd, indexTransaction, opGroup, commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition);
+                                                            memtablePutObservables.add(memtableObservable);
 
                 /*
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());
                 */
-            }
+                                                        }
 
-            // avoid the expensive merge call if there's only 1 observable
-            if (memtablePutObservables.size() == 1)
-                return memtablePutObservables.get(0);
-            else
-                return Single.merge(memtablePutObservables).last(0);
-
-        }).doOnEvent((i, throwable) -> opGroup.close());
+                                                        // avoid the expensive merge call if there's only 1 observable
+                                                        if (memtablePutObservables.size() == 1)
+                                                            return memtablePutObservables.get(0);
+                                                        else
+                                                            return Completable.merge(memtablePutObservables);
+                                                    }
+                                                }).doOnComplete(() -> opGroup.close());
+                            })
+                          //Route the work to the correct core
+                          .subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

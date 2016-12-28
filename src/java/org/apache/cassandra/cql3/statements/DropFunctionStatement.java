@@ -145,7 +145,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
             return error(String.format("Function '%s' still referenced by %s", old, referrers));
 
         return MigrationManager.announceFunctionDrop((UDFunction) old, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
                                       old.name().keyspace, old.name().name, AbstractType.asCQLTypeStringList(old.argTypes())));
     }
 

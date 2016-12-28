@@ -105,7 +105,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         try
         {
             return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
-                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace()));
+                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace()));
         }
         catch (AlreadyExistsException e)
         {

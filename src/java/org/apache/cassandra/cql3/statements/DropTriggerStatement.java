@@ -75,6 +75,6 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         logger.info("Dropping trigger with name {}", triggerName);
         cfm.triggers(triggers.without(triggerName));
         return MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 }

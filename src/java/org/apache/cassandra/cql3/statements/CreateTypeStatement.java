@@ -135,6 +135,6 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             return error(String.format("Duplicate field name %s in type %s", duplicate, type.name));
 
         return MigrationManager.announceNewType(type, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
     }
 }

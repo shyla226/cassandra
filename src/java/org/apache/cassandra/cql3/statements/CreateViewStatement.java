@@ -300,7 +300,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         try
         {
             return MigrationManager.announceNewView(definition, isLocalOnly)
-                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
         }
         catch (AlreadyExistsException e)
         {

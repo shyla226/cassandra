@@ -175,7 +175,7 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return null;
 
-        return NettyRxScheduler.getRangeList(cfs);
+        return NettyRxScheduler.getRangeList(cfs.keyspace.getName());
     }
 
     private List<HashMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()

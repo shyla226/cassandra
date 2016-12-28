@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
+import io.reactivex.Completable;
 import io.reactivex.Single;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.commons.lang3.StringUtils;
@@ -207,13 +208,13 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    private Single<Integer> applyAsync(boolean durableWrites)
+    private Completable applyAsync(boolean durableWrites)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
         return ks.apply(this, durableWrites);
     }
 
-    public Single<Integer> applyAsync()
+    public Completable applyAsync()
     {
         return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
     }

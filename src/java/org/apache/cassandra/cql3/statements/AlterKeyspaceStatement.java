@@ -86,6 +86,6 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
 
         KeyspaceMetadata newKsm = oldKsm.withSwapped(attrs.asAlteredKeyspaceParams(oldKsm.params));
         return MigrationManager.announceKeyspaceUpdate(newKsm, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace()));
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace()));
     }
 }

@@ -87,7 +87,7 @@ public class AlterViewStatement extends SchemaAlteringStatement
         viewCopy.metadata.params(params);
 
         return MigrationManager.announceViewUpdate(viewCopy, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 
     public String toString()

@@ -37,6 +37,7 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
+import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
@@ -1324,49 +1325,43 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public Single<Integer> apply(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public Completable apply(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
-        final BehaviorSubject<Integer> publisher = BehaviorSubject.create();
-        Scheduler scheduler = NettyRxScheduler.getForKey(this, update.partitionKey());
-
-        scheduler.scheduleDirect(() ->
-                                 {
-
-                                     applyInternal(publisher, update, indexer, opGroup, commitLogPosition);
-                                 });
-
-        return publisher.first(0);
+        return Completable.defer(() -> applyInternal(update, indexer, opGroup, commitLogPosition))
+                   .subscribeOn(NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey(), true));
     }
 
-    private void applyInternal(BehaviorSubject<Integer> publisher, PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    private Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
-        long start = System.nanoTime();
-        try
-        {
-            Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
-            long timeDelta = mt.put(update, indexer, opGroup);
-            DecoratedKey key = update.partitionKey();
-            invalidateCachedPartition(key);
-            metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
-            StorageHook.instance.reportWrite(metadata.cfId, update);
-            metric.writeLatency.addNano(System.nanoTime() - start);
+        return Completable.fromAction(() ->
+                               {
+                                   long start = System.nanoTime();
+                                   try
+                                   {
+                                       Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
+                                       long timeDelta = mt.put(update, indexer, opGroup);
+                                       DecoratedKey key = update.partitionKey();
+                                       invalidateCachedPartition(key);
+                                       metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
+                                       StorageHook.instance.reportWrite(metadata.cfId, update);
+                                       metric.writeLatency.addNano(System.nanoTime() - start);
 
-            // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
-            // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
-            // a minimal write, etc). This limits the time delta to the max value the histogram
-            // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
-            // to update.
-            if(timeDelta < Long.MAX_VALUE)
-                metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
-            publisher.onNext(0);
-        }
-        catch (RuntimeException e)
-        {
-            RuntimeException exc = new RuntimeException(e.getMessage()
-                    + " for ks: "
-                    + keyspace.getName() + ", table: " + name, e);
-            publisher.onError(exc);
-        }
+                                       // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
+                                       // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
+                                       // a minimal write, etc). This limits the time delta to the max value the histogram
+                                       // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
+                                       // to update.
+                                       if (timeDelta < Long.MAX_VALUE)
+                                           metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+                                   }
+                                   catch (RuntimeException e)
+                                   {
+                                       RuntimeException exc = new RuntimeException(e.getMessage()
+                                                                                   + " for ks: "
+                                                                                   + keyspace.getName() + ", table: " + name, e);
+                                       throw exc;
+                                   }
+                               });
     }
 
     /**

@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 
+import io.reactivex.Completable;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
@@ -329,16 +330,16 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 break;
         }
 
-        List<Single<Integer>> singles = new ArrayList<>();
-        singles.add(MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly));
+        List<Completable> migrations = new ArrayList<>();
+        migrations.add(MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly));
         if (viewUpdates != null)
         {
             for (ViewDefinition viewUpdate : viewUpdates)
-                singles.add(MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly));
+                migrations.add(MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly));
         }
 
-        return Single.merge(singles).last(0)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+        return Completable.merge(migrations)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 
     private static void validateAlter(CFMetaData cfm, ColumnDefinition def, AbstractType<?> validatorType)

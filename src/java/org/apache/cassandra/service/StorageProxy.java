@@ -1344,15 +1344,16 @@ public class StorageProxy implements StorageProxyMBean
         if (insertLocal)
         {
             mutation.applyAsync().subscribe(
-                    // onSuccess
-                    v -> responseHandler.response(null),
+                // On Success
+                () -> responseHandler.response(null),
 
-                    // onError
-                    exc -> {
-                        if (!(exc instanceof WriteTimeoutException))
-                            logger.error("Failed to apply mutation locally : {}", exc);
-                        responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                    }
+                // onError
+                exc ->
+                {
+                    if (!(exc instanceof WriteTimeoutException))
+                        logger.error("Failed to apply mutation locally : {}", exc);
+                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                }
             );
         }
 

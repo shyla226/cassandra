@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import io.reactivex.Completable;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
@@ -106,8 +107,8 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
 
         // Now, we need to announce the type update to basically change it for new tables using this type,
         // but we also need to find all existing user types and CF using it and change them.
-        List<Single<Integer>> singles = new ArrayList<>();
-        singles.add(MigrationManager.announceTypeUpdate(updated, isLocalOnly));
+        List<Completable> migrations = new ArrayList<>();
+        migrations.add(MigrationManager.announceTypeUpdate(updated, isLocalOnly));
 
         for (CFMetaData cfm : ksm.tables)
         {
@@ -116,7 +117,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             for (ColumnDefinition def : copy.allColumns())
                 modified |= updateDefinition(copy, def, toUpdate.keyspace, toUpdate.name, updated);
             if (modified)
-                singles.add(MigrationManager.announceColumnFamilyUpdate(copy, isLocalOnly));
+                migrations.add(MigrationManager.announceColumnFamilyUpdate(copy, isLocalOnly));
         }
 
         for (ViewDefinition view : ksm.views)
@@ -126,7 +127,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             for (ColumnDefinition def : copy.metadata.allColumns())
                 modified |= updateDefinition(copy.metadata, def, toUpdate.keyspace, toUpdate.name, updated);
             if (modified)
-                singles.add(MigrationManager.announceViewUpdate(copy, isLocalOnly));
+                migrations.add(MigrationManager.announceViewUpdate(copy, isLocalOnly));
         }
 
         // Other user types potentially using the updated type
@@ -137,16 +138,16 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             if (ut.keyspace.equals(toUpdate.keyspace) && ut.name.equals(toUpdate.name))
             {
                 if (!ut.keyspace.equals(updated.keyspace) || !ut.name.equals(updated.name))
-                    singles.add(MigrationManager.announceTypeDrop(ut));
+                    migrations.add(MigrationManager.announceTypeDrop(ut));
                 continue;
             }
             AbstractType<?> upd = updateWith(ut, toUpdate.keyspace, toUpdate.name, updated);
             if (upd != null)
-                singles.add(MigrationManager.announceTypeUpdate((UserType) upd, isLocalOnly));
+                migrations.add(MigrationManager.announceTypeUpdate((UserType) upd, isLocalOnly));
         }
 
-        return Single.merge(singles).last(0)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
+        return Completable.merge(migrations)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
     }
 
     private boolean updateDefinition(CFMetaData cfm, ColumnDefinition def, String keyspace, ByteBuffer toReplace, UserType updated)

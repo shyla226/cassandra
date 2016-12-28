@@ -62,7 +62,7 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
         try
         {
             return MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly)
-                    .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace()));
+                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace()));
         }
         catch(ConfigurationException e)
         {

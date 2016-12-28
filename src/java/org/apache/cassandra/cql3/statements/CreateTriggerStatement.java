@@ -89,6 +89,6 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         cfm.triggers(triggers.with(TriggerMetadata.create(triggerName, triggerClass)));
         logger.info("Adding trigger with name {} and class {}", triggerName, triggerClass);
         return MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly)
-                .map(v -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
     }
 }
