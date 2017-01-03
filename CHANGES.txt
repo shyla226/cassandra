@@ -220,6 +220,7 @@ Merged from 3.0:
  * If CF has no clustering columns, any row cache is full partition cache (CASSANDRA-12499)
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
+ * Fix DynamicEndpointSnitch noop in multi-datacenter situations (CASSANDRA-13074)
 Merged from 2.2:
  * Fix DynamicEndpointSnitch noop in multi-datacenter situations (CASSANDRA-13074)
  * cqlsh copy-from: encode column names to avoid primary key parsing errors (CASSANDRA-12909)
