@@ -1342,8 +1342,8 @@ public final class SchemaKeyspace
             writes.add(mutation.applyAsync());
 
         return Completable.merge(writes)
-                          .andThen(FLUSH_SCHEMA_TABLES ? flush() : Completable.complete())
-                          .andThen(Completable.fromCallable(() ->
+                          .andThen(Completable.defer(() -> FLUSH_SCHEMA_TABLES ? flush() : Completable.complete()))
+                          .andThen(Completable.defer(() ->
                                                             {
                                                                 // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
                                                                 Keyspaces after = fetchKeyspacesOnly(affectedKeyspaces);
