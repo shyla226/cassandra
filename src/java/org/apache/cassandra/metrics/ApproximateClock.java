@@ -15,32 +15,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.metrics;
 
-import com.google.common.annotations.VisibleForTesting;
+import java.util.concurrent.TimeUnit;
 
-/**
- * Adds ability to reset a histogram
- */
-public class ClearableHistogram extends Histogram
+import com.codahale.metrics.Clock;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
+
+class ApproximateClock extends Clock
 {
-    private final DecayingEstimatedHistogramReservoir reservoirRef;
+    private static final Clock DEFAULT = new ApproximateClock();
 
-    /**
-     * Creates a new {@link com.codahale.metrics.Histogram} with the given reservoir.
-     *
-     * @param reservoir the reservoir to create a histogram from
-     */
-    public ClearableHistogram(DecayingEstimatedHistogramReservoir reservoir)
+    public static Clock defaultClock()
     {
-        super(reservoir);
-
-        this.reservoirRef = reservoir;
+        return DEFAULT;
     }
 
-    @VisibleForTesting
-    public void clear()
+    public long getTime()
     {
-        reservoirRef.clear();
+        return ApproximateTime.currentTimeMillis();
+    }
+
+    public long getTick()
+    {
+        //return System.nanoTime();
+        return TimeUnit.MILLISECONDS.toNanos(ApproximateTime.currentTimeMillis());
     }
 }

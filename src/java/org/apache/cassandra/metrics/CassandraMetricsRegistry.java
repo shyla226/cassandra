@@ -68,7 +68,7 @@ public class CassandraMetricsRegistry extends MetricRegistry
 
     public Histogram histogram(MetricName name, boolean considerZeroes)
     {
-        return register(name, new ClearableHistogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
+        return register(name, new Histogram(new DecayingEstimatedHistogramReservoir(considerZeroes)));
     }
 
     public Histogram histogram(MetricName name, MetricName alias, boolean considerZeroes)

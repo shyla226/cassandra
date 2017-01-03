@@ -24,6 +24,7 @@ import java.util.Arrays;
 
 class Stack
 {
+    public static final int INITIAL_TRANSFORMATION_LENGTH = 5;
     public static final Transformation[] EMPTY_TRANSFORMATIONS = new Transformation[0];
     public static final MoreContentsHolder[] EMPTY_MORE_CONTENTS_HOLDERS = new MoreContentsHolder[0];
     static final Stack EMPTY = new Stack();
@@ -72,7 +73,7 @@ class Stack
 
     private static <E> E[] resize(E[] array)
     {
-        int newLen = array.length == 0 ? 5 : array.length * 2;
+        int newLen = array.length == 0 ? INITIAL_TRANSFORMATION_LENGTH : array.length * 2;
         return Arrays.copyOf(array, newLen);
     }
 

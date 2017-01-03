@@ -31,7 +31,6 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.junit.Test;
@@ -410,7 +409,7 @@ public class KeyspaceTest extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        cfs.metric.sstablesPerReadHistogram.cf.clear();
 
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", slices(cfs, null, 1499, false), 1000);
         int[] expectedValues = new int[500];
@@ -419,7 +418,7 @@ public class KeyspaceTest extends CQLTester
         assertRowsInResult(cfs, command, expectedValues);
 
         assertEquals(5, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        cfs.metric.sstablesPerReadHistogram.cf.clear();
 
         command = singlePartitionSlice(cfs, "0", slices(cfs, 1500, 2000, false), 1000);
         for (int i = 0; i < 500; i++)
@@ -427,7 +426,7 @@ public class KeyspaceTest extends CQLTester
         assertRowsInResult(cfs, command, expectedValues);
 
         assertEquals(5, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        cfs.metric.sstablesPerReadHistogram.cf.clear();
 
         // reverse
         command = singlePartitionSlice(cfs, "0", slices(cfs, 1500, 2000, true), 1000);
@@ -463,7 +462,7 @@ public class KeyspaceTest extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear();
+        cfs.metric.sstablesPerReadHistogram.cf.clear();
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND (b, c) >= (?, ?) AND (b) <= (?) LIMIT 1000", "0", "a5", 85, "a5"),
                 row("0", "a5", 85, 0),
                 row("0", "a5", 95, 0));

@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.DefaultSelectStrategyFactory;
@@ -37,7 +38,6 @@ import io.netty.channel.MultithreadEventLoopGroup;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.epoll.Native;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
 
 import io.netty.util.internal.logging.InternalLogger;
@@ -47,6 +47,8 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
+
+import org.apache.cassandra.service.NativeTransportService;
 
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 {
@@ -67,9 +69,49 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
     private final Thread monitorThread;
 
+    private volatile boolean shutdown;
+
     public MonitoredEpollEventLoopGroup(int nThreads)
     {
-        this(nThreads, new DefaultThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
+        this(nThreads, new NettyRxScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
+    }
+
+    /**
+     * This constructor is called by jmh benchmarks, when using a custom executor.
+     * It should only be called for testing, not production code, since it wires the NettyRxScheduler
+     * as well, but unlike {@link NativeTransportService#initializeTPC()}, it will not set any CPU
+     * affinity or epoll IO ratio.
+     *
+     * @param nThreads - the number of threads
+     * @param name - the thread name (unused)
+     */
+    @VisibleForTesting
+    public MonitoredEpollEventLoopGroup(int nThreads, String name)
+    {
+        this(nThreads, new NettyRxScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
+
+        CountDownLatch ready = new CountDownLatch(eventLoops.length);
+
+        for (int i = 0; i < eventLoops.length; i++)
+        {
+            EventLoop loop = eventLoops[i];
+            eventLoops[i].schedule(() -> {
+                try
+                {
+                    NettyRxScheduler.register(loop);
+                }
+                catch (Exception ex)
+                {
+                    logger.error("Failed to initialize monitored epoll event loop group due to exception", ex);
+                }
+                finally
+                {
+                    ready.countDown();
+                }
+            }, 0, TimeUnit.SECONDS);
+        }
+
+        Uninterruptibles.awaitUninterruptibly(ready);
     }
 
     /**
@@ -88,13 +130,16 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         monitorThread = threadFactory.newThread(() -> {
             int length = eventLoops.length;
 
-            while (true)
+            while (!shutdown)
             {
                 for (int i = 0; i < length; i++)
                     eventLoops[i].checkQueues();
 
                 LockSupport.parkNanos(1);
             }
+
+            for (int i = 0; i < length; i++)
+                eventLoops[i].unpark();
         });
 
         monitorThread.setName("netty-monitor-event-loop-thread");
@@ -105,8 +150,34 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     @Override
     public void shutdown()
     {
-        monitorThread.interrupt();
-        super.shutdown();
+        for (EventLoop loop : eventLoops)
+            loop.shutdown();
+
+        shutdown = true;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException
+    {
+        long start = System.nanoTime();
+        long timeoutNanos = TimeUnit.NANOSECONDS.convert(timeout, unit);
+
+        monitorThread.join(timeoutNanos / 1000000, (int)(timeoutNanos % 1000000));
+        if (monitorThread.isAlive())
+            return false;
+
+        for (EventLoop loop : eventLoops)
+        {
+            long elapsed = System.nanoTime() - start;
+            timeoutNanos -= elapsed;
+            if (timeoutNanos <= 0)
+                return false;
+
+            if (!loop.awaitTermination(timeoutNanos, TimeUnit.NANOSECONDS))
+                return false;
+        }
+
+        return true;
     }
 
     private synchronized void maybeInit(int nThreads, ThreadFactory threadFactory)
@@ -203,13 +274,13 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             try
             {
-                while (true)
+                while (!shutdown)
                 {
                     //deal with spurious wakeups
                     if (state == CoreState.WORKING)
                     {
                         int spins = 0;
-                        while (true)
+                        while (!shutdown)
                         {
                             int drained = drain();
                             if (drained > 0 || ++spins < busyExtraSpins)

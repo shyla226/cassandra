@@ -45,7 +45,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
@@ -493,7 +492,7 @@ public class RowCacheTest
         //force flush for confidence that SSTables exists
         cachedStore.forceBlockingFlush();
 
-        ((ClearableHistogram)cachedStore.metric.sstablesPerReadHistogram.cf).clear();
+        cachedStore.metric.sstablesPerReadHistogram.cf.clear();
 
         for (int i = 0; i < 100; i++)
         {

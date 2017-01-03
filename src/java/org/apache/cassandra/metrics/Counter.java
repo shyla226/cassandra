@@ -18,10 +18,9 @@
 
 package org.apache.cassandra.metrics;
 
-import java.util.concurrent.atomic.LongAdder;
-
 import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
+import org.apache.cassandra.utils.concurrent.LongAdder;
 
 /**
  * An incrementing and decrementing counter metric.

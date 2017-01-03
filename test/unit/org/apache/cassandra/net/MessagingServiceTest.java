@@ -34,6 +34,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
+
+import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.metrics.Timer;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -41,7 +44,6 @@ import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
-import org.caffinitas.ohc.histo.EstimatedHistogram;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -51,7 +53,6 @@ import static org.junit.Assert.*;
 public class MessagingServiceTest
 {
     private final static long ONE_SECOND = TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS);
-    private final static long[] bucketOffsets = new EstimatedHistogram(160).getBucketOffsets();
     private final MessagingService messagingService = MessagingService.test();
 
     @BeforeClass
@@ -80,7 +81,7 @@ public class MessagingServiceTest
 
         List<String> logs = messagingService.getDroppedMessagesLogs();
         assertEquals(1, logs.size());
-        assertEquals("READ messages were dropped in last 5000 ms: 2500 internal and 2500 cross node. Mean internal dropped latency: 2730 ms and Mean cross-node dropped latency: 2731 ms", logs.get(0));
+        assertEquals("READ messages were dropped in last 5000 ms: 2500 internal and 2500 cross node. Mean internal dropped latency: 2468 ms and Mean cross-node dropped latency: 2469 ms", logs.get(0));
         assertEquals(5000, (int) messagingService.getDroppedMessages().get(verb.toString()));
 
         logs = messagingService.getDroppedMessagesLogs();
@@ -90,7 +91,7 @@ public class MessagingServiceTest
             messagingService.incrementDroppedMessages(verb, i, i % 2 == 0);
 
         logs = messagingService.getDroppedMessagesLogs();
-        assertEquals("READ messages were dropped in last 5000 ms: 1250 internal and 1250 cross node. Mean internal dropped latency: 2277 ms and Mean cross-node dropped latency: 2278 ms", logs.get(0));
+        assertEquals("READ messages were dropped in last 5000 ms: 1250 internal and 1250 cross node. Mean internal dropped latency: 2057 ms and Mean cross-node dropped latency: 2057 ms", logs.get(0));
         assertEquals(7500, (int) messagingService.getDroppedMessages().get(verb.toString()));
     }
 
@@ -107,8 +108,17 @@ public class MessagingServiceTest
         addDCLatency(sentAt, now);
         assertNotNull(dcLatency.get("datacenter1"));
         assertEquals(1, dcLatency.get("datacenter1").getCount());
-        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, TimeUnit.MILLISECONDS.toNanos(latency))) - 1];
-        assertEquals(expectedBucket, dcLatency.get("datacenter1").getSnapshot().getMax());
+
+        long latencyNanos = TimeUnit.MILLISECONDS.toNanos(latency);
+        Snapshot snapshot = dcLatency.get("datacenter1").getSnapshot();
+        long max = snapshot.getMax();
+        long min = snapshot.getMin();
+        assertTrue(min <= latencyNanos);
+        assertTrue(max >= latencyNanos);
+
+        long[] bucketOffsets = ((DecayingEstimatedHistogramReservoir.Snapshot)snapshot).getOffsets();
+        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, latencyNanos)) - 1];
+        assertEquals(expectedBucket, snapshot.getMax() + 1);
     }
 
     @Test
@@ -141,8 +151,17 @@ public class MessagingServiceTest
         MessagingService.instance().metrics.addQueueWaitTime(verb, latency);
         assertNotNull(queueWaitLatency.get(verb));
         assertEquals(1, queueWaitLatency.get(verb).getCount());
-        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, TimeUnit.MILLISECONDS.toNanos(latency))) - 1];
-        assertEquals(expectedBucket, queueWaitLatency.get(verb).getSnapshot().getMax());
+
+        long latencyNanos = TimeUnit.MILLISECONDS.toNanos(latency);
+        Snapshot snapshot = queueWaitLatency.get(verb).getSnapshot();
+        long max = snapshot.getMax();
+        long min = snapshot.getMin();
+        assertTrue(min <= latencyNanos);
+        assertTrue(max >= latencyNanos);
+
+        long[] bucketOffsets = ((DecayingEstimatedHistogramReservoir.Snapshot)snapshot).getOffsets();
+        long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, latencyNanos)) - 1];
+        assertEquals(expectedBucket, snapshot.getMax() + 1);
     }
 
     @Test

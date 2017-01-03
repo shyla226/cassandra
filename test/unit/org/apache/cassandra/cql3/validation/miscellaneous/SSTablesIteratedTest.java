@@ -27,7 +27,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.metrics.ClearableHistogram;
 
 /**
  * Tests for checking how many sstables we access during cql queries with LIMIT specified,
@@ -39,7 +38,7 @@ public class SSTablesIteratedTest extends CQLTester
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
 
-        ((ClearableHistogram) cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
+        cfs.metric.sstablesPerReadHistogram.cf.clear(); // resets counts
 
         assertRows(execute(query), rows);
 

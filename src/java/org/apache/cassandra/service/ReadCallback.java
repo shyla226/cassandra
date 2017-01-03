@@ -73,7 +73,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     final Single<PartitionIterator> observable;
 
     // the core on which a local request is scheduled, if any
-    private Integer localCoreId = null;
+    private int localCoreId = -1;
 
     /**
      * Constructor when response count has to be calculated and blocked for.
@@ -132,7 +132,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                        {
                            logger.info("Local request was running on core {}, thread stack:\n{}",
                                        localCoreId,
-                                       Arrays.stream(NettyRxScheduler.maybeGetForCore(localCoreId).cpuThread.getStackTrace())
+                                       Arrays.stream(NettyRxScheduler.getForCore(localCoreId).cpuThread.getStackTrace())
                                              .map(e -> String.format("\tat %s\n", e))
                                              .collect(Collectors.toList()));
                        }
@@ -154,7 +154,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
      *
      * @param localCoreId - the core id of the local read request, null if running on a scheduler with unassinged core
      */
-    public void setLocalCoreId(Integer localCoreId)
+    public void setLocalCoreId(int localCoreId)
     {
         this.localCoreId = localCoreId;
     }

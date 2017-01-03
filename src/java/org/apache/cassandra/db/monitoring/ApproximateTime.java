@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.Config;
 
 /**
@@ -42,10 +42,10 @@ public class ApproximateTime
     static
     {
         logger.info("Scheduling approximate time-check task with a precision of {} milliseconds", CHECK_INTERVAL_MS);
-        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(() -> time = System.currentTimeMillis(),
-                                                                     CHECK_INTERVAL_MS,
-                                                                     CHECK_INTERVAL_MS,
-                                                                     TimeUnit.MILLISECONDS);
+        NettyRxScheduler.instance().schedulePeriodicallyDirect(() -> time = System.currentTimeMillis(),
+                                                               CHECK_INTERVAL_MS,
+                                                               CHECK_INTERVAL_MS,
+                                                               TimeUnit.MILLISECONDS);
     }
 
     public static long currentTimeMillis()

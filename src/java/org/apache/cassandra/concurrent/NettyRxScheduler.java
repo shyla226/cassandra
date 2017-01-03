@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,23 +27,28 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.DefaultEventExecutor;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.EventExecutorGroup;
 import io.netty.util.concurrent.FastThreadLocal;
+import io.netty.util.concurrent.FastThreadLocalThread;
 import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.SingleThreadEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposables;
 import io.reactivex.internal.disposables.DisposableContainer;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.disposables.ListCompositeDisposable;
-import io.reactivex.internal.schedulers.ComputationScheduler;
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -51,11 +57,8 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -96,7 +99,43 @@ public class NettyRxScheduler extends Scheduler
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
     static
     {
-        perCoreSchedulers[0] = new NettyRxScheduler(GlobalEventExecutor.INSTANCE, 0);
+        perCoreSchedulers[0] = new NettyRxScheduler(new DefaultEventExecutor(new NettyRxThreadFactory("startup-scheduler", Thread.MAX_PRIORITY)), 0);
+    }
+
+    private final static class NettyRxThread extends FastThreadLocalThread
+    {
+        private final int cpuId;
+
+        public NettyRxThread(ThreadGroup group, Runnable target, String name, int cpuId)
+        {
+            super(group, target, name);
+            this.cpuId = cpuId;
+        }
+
+        public int getCpuId()
+        {
+            return cpuId;
+        }
+    }
+
+    public final static class NettyRxThreadFactory extends DefaultThreadFactory
+    {
+        AtomicInteger cpuId = new AtomicInteger(0);
+
+        public NettyRxThreadFactory(Class<?> poolType, int priority)
+        {
+            super(poolType, priority);
+        }
+
+        public NettyRxThreadFactory(String poolName, int priority)
+        {
+            super(poolName, priority);
+        }
+
+        protected Thread newThread(Runnable r, String name)
+        {
+            return new NettyRxThread(this.threadGroup, r, name, cpuId.getAndIncrement());
+        }
     }
 
     /**
@@ -125,42 +164,39 @@ public class NettyRxScheduler extends Scheduler
         return localNettyEventLoop.get();
     }
 
-    public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
+    public static synchronized NettyRxScheduler register(EventExecutor loop)
     {
         NettyRxScheduler scheduler = localNettyEventLoop.get();
         if (scheduler.eventLoop != loop)
         {
             assert loop.inEventLoop();
 
+            Thread t = Thread.currentThread();
+            assert t instanceof NettyRxThread;
+
+            int cpuId = ((NettyRxThread)t).getCpuId();
+            assert cpuId >= 0 && cpuId < perCoreSchedulers.length;
+
             if (cpuId == 0)
-                awaitInactivity(scheduler);
+                shutdown(perCoreSchedulers[0].eventLoop);
 
             scheduler = new NettyRxScheduler(loop, cpuId);
             localNettyEventLoop.set(scheduler);
             perCoreSchedulers[cpuId] = scheduler;
-            logger.info("Putting {} on core {}", Thread.currentThread().getName(), cpuId);
+
+            logger.info("Putting {} on core {}", t.getName(), cpuId);
             isStartup = false;
         }
 
         return scheduler;
     }
 
-    /**
-     * Wait up to a second for inactivity on the global event loop. This ensures that we can
-     * switch from the startup thread that is assigned to core zero, the Netty global executor, to
-     * the new executor without causing races, for example in
-     * {{{@link org.apache.cassandra.utils.concurrent.OpOrder}}} or other structures that have been
-     * partitioned by core.
-     *
-     * @param scheduler - a scheduler whose eventLoop instance must be GlobalEventExecutor.INSTANCE
-     */
-    private static void awaitInactivity(NettyRxScheduler scheduler)
+    private static void shutdown(EventExecutorGroup loop)
     {
-        assert scheduler.eventLoop == GlobalEventExecutor.INSTANCE;
         try
         {
-            if (!GlobalEventExecutor.INSTANCE.awaitInactivity(1, TimeUnit.SECONDS))
-                logger.warn("Failed to wait for inactivity when switching away from global event executor");
+           loop.shutdownGracefully();
+           loop.awaitTermination(1, TimeUnit.SECONDS);
         }
         catch (InterruptedException ex)
         {
@@ -168,26 +204,20 @@ public class NettyRxScheduler extends Scheduler
         }
     }
 
-    private static Integer getCoreId()
+    /**
+     * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
+     * core is valid via {@link NettyRxScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
+     * array with length num_cores + 1, and use thread safe operations only on the last element.
+     */
+    public static int getCoreId()
     {
-        if (isStartup)
-            return 0;
-
-        NettyRxScheduler instance = instance();
-        return isValidCoreId(instance.cpuId) ? instance.cpuId : null;
+        Thread t = Thread.currentThread();
+        return t instanceof NettyRxThread ? ((NettyRxThread)t).getCpuId() : perCoreSchedulers.length;
     }
 
     public static boolean isTPCThread()
     {
-        return isValidCoreId(instance().cpuId);
-    }
-
-    public static Integer getCoreId(Scheduler scheduler)
-    {
-        if (scheduler instanceof NettyRxScheduler)
-            return ((NettyRxScheduler)scheduler).cpuId;
-
-        return null;
+        return Thread.currentThread() instanceof NettyRxThread;
     }
 
     private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
@@ -214,7 +244,7 @@ public class NettyRxScheduler extends Scheduler
      *
      * @return - the scheduler of the core specified, or the scheduler of core zero if not yet assigned
      */
-    public static Scheduler getForCore(int core)
+    public static NettyRxScheduler getForCore(int core)
     {
         NettyRxScheduler scheduler = perCoreSchedulers[core];
         return scheduler == null ? perCoreSchedulers[0] : scheduler;
@@ -243,7 +273,7 @@ public class NettyRxScheduler extends Scheduler
         if (isStartup)
             return ImmediateThinScheduler.INSTANCE;
 
-        Integer callerCoreId = null;
+        int callerCoreId = -1;
         if (useImmediateForLocal)
             callerCoreId = getCoreId();
 
@@ -269,7 +299,7 @@ public class NettyRxScheduler extends Scheduler
                 //logger.info("Read moving to {} from {}", i-1, getCoreId());
 
                 if (useImmediateForLocal)
-                    return callerCoreId != null && callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
+                    return callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
 
                 return getForCore(i - 1);
             }
@@ -451,6 +481,26 @@ public class NettyRxScheduler extends Scheduler
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
         //RxSubscriptionDebugger.enable();
+    }
+
+    private static final sun.misc.Unsafe UNSAFE;
+    private static final long PROBE;
+
+    static
+    {
+        try
+        {
+            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            field.setAccessible(true);
+            UNSAFE = (sun.misc.Unsafe) field.get(null);
+
+            Class<?> tk = Thread.class;
+            PROBE = UNSAFE.objectFieldOffset(tk.getDeclaredField("threadLocalRandomProbe"));
+        }
+        catch (Exception e)
+        {
+            throw new AssertionError(e);
+        }
     }
 
 }

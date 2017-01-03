@@ -881,10 +881,11 @@ public class TableMetrics
 
         public void update(long i)
         {
-            for(Histogram histo : all)
-            {
-                histo.update(i);
-            }
+//            for(Histogram histo : all)
+//            {
+//                histo.update(i);
+//            }
+            cf.update(i);
         }
     }
 

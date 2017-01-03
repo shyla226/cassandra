@@ -734,7 +734,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                     .filter(it -> ((LazilyInitializedUnfilteredRowIterator)it).initialized())
                                                     .count();
 
-               //metrics.updateSSTableIterated(sstablesIterated);
+               metrics.updateSSTableIterated(sstablesIterated);
                Tracing.trace("Merged data from memtables and {} sstables", sstablesIterated);
            }
         };
@@ -840,7 +840,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        //cfs.metric.updateSSTableIterated(sstablesIterated);
+        cfs.metric.updateSSTableIterated(sstablesIterated);
 
         if (result == null || result.isEmpty())
             return Single.just(EmptyIterators.unfilteredRow(metadata(), partitionKey(), false));

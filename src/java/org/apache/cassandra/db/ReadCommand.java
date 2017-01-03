@@ -366,7 +366,7 @@ public abstract class ReadCommand implements ReadQuery
         Single s =  Single.defer(
         () ->
         {
-
+            long startTimeNanos = System.nanoTime();
             ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
             Index index = getIndex(cfs);
 
@@ -391,9 +391,7 @@ public abstract class ReadCommand implements ReadQuery
             return resultIterator.map(
             r ->
             {
-                r = withStateTracking(r);
-                r = withOpOrderTracking(r, group);
-                //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+                r = withTracking(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos, group);
 
                 // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
                 // no point in checking it again.
@@ -428,13 +426,21 @@ public abstract class ReadCommand implements ReadQuery
     }
 
     /**
-     * Wraps the provided iterator so that metrics on what is scanned by the command are recorded.
-     * This also log warning/trow TombstoneOverwhelmingException if appropriate.
+     * Wraps the provided iterator so that:
+     * - metrics on what is scanned by the command are recorded.
+     * - log warning/trow TombstoneOverwhelmingException if appropriate.
+     * - check if command should be aborted (if it's taking too long)
+     * - the opOrder is closed when the iterator is closed
      */
-    private UnfilteredPartitionIterator withMetricsRecording(UnfilteredPartitionIterator iter, final TableMetrics metric, final long startTimeNanos)
+    private UnfilteredPartitionIterator withTracking(UnfilteredPartitionIterator iter,
+                                                     final TableMetrics metric,
+                                                     final long startTimeNanos,
+                                                     final TPCOpOrder.Group opOrder)
     {
-        class MetricRecording extends Transformation<UnfilteredRowIterator>
+        class TrackingTransformation extends StoppingTransformation<UnfilteredRowIterator>
         {
+            private long lastCheckedForAbort = 0;
+
             private final int failureThreshold = DatabaseDescriptor.getTombstoneFailureThreshold();
             private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
 
@@ -444,12 +450,46 @@ public abstract class ReadCommand implements ReadQuery
             private int tombstones = 0;
 
             private DecoratedKey currentKey;
+            private boolean opOrderClosed;
 
             @Override
             public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator iter)
             {
+                if (maybeAbort())
+                {
+                    iter.close();
+                    return null;
+                }
+
                 currentKey = iter.partitionKey();
                 return Transformation.apply(iter, this);
+            }
+
+            private boolean maybeAbort()
+            {
+                if (optionalMonitor == null)
+                    return false;
+
+                /**
+                 * The value returned by ApproximateTime.currentTimeMillis() is updated only every
+                 * {@link ApproximateTime.CHECK_INTERVAL_MS}, by default 10 millis. Since MonitorableImpl
+                 * relies on ApproximateTime, we don't need to check unless the approximate time has elapsed.
+                 */
+                if (lastCheckedForAbort == ApproximateTime.currentTimeMillis())
+                    return false;
+
+                lastCheckedForAbort = ApproximateTime.currentTimeMillis();
+
+                if (optionalMonitor.isAborted())
+                {
+                    if (logger.isTraceEnabled())
+                        logger.trace("Stopping {}.{} with monitorable {}", metadata.ksName, metadata.cfName, optionalMonitor);
+
+                    stop();
+                    return true;
+                }
+
+                return false;
             }
 
             @Override
@@ -461,14 +501,24 @@ public abstract class ReadCommand implements ReadQuery
             @Override
             public Row applyToRow(Row row)
             {
-                if (row.hasLiveData(ReadCommand.this.nowInSec()))
-                    ++liveRows;
+                if (TEST_ITERATION_DELAY_MILLIS > 0)
+                    maybeDelayForTesting();
 
+                if (maybeAbort())
+                    return null;
+
+                boolean hasLiveCells = false;
                 for (Cell cell : row.cells())
                 {
                     if (!cell.isLive(ReadCommand.this.nowInSec()))
                         countTombstone(row.clustering());
+                    else if (!hasLiveCells)
+                        hasLiveCells = true;
                 }
+
+                if (hasLiveCells || row.primaryKeyLivenessInfo().isLive(nowInSec))
+                    ++ liveRows;
+
                 return row;
             }
 
@@ -493,6 +543,19 @@ public abstract class ReadCommand implements ReadQuery
             @Override
             public void onClose()
             {
+                // TODO - port of the logic in TrackOpOrder but I am not entirely sure this is correct,
+                // I think in some cases onClose is called multiple times, see RxBaseIterator.tryGetMoreContents(0
+                if (!opOrderClosed)
+                {
+                    opOrder.close();
+                    opOrderClosed = true;
+                }
+                else
+                {
+                    throw new AssertionError("OpOrder already closed");
+                }
+                //end TODO
+
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 
                 metric.tombstoneScannedHistogram.update(tombstones);
@@ -510,58 +573,7 @@ public abstract class ReadCommand implements ReadQuery
             }
         };
 
-        return Transformation.apply(iter, new MetricRecording());
-    }
-
-    protected class CheckForAbort extends StoppingTransformation<UnfilteredRowIterator>
-    {
-        long lastChecked = 0;
-
-        protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
-        {
-            if (maybeAbort())
-            {
-                partition.close();
-                return null;
-            }
-
-            return Transformation.apply(partition, this);
-        }
-
-        protected Row applyToRow(Row row)
-        {
-            if (TEST_ITERATION_DELAY_MILLIS > 0)
-                maybeDelayForTesting();
-
-            return maybeAbort() ? null : row;
-        }
-
-        private boolean maybeAbort()
-        {
-            if (optionalMonitor == null)
-                return false;
-
-            /**
-             * The value returned by ApproximateTime.currentTimeMillis() is updated only every
-             * {@link ApproximateTime.CHECK_INTERVAL_MS}, by default 10 millis. Since MonitorableImpl
-             * relies on ApproximateTime, we don't need to check unless the approximate time has elapsed.
-             */
-            if (lastChecked == ApproximateTime.currentTimeMillis())
-                return false;
-
-            lastChecked = ApproximateTime.currentTimeMillis();
-
-            if (optionalMonitor.isAborted())
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace("Stopping {}.{} with monitorable {}", metadata.ksName, metadata.cfName, optionalMonitor);
-
-                stop();
-                return true;
-            }
-
-            return false;
-        }
+        return Transformation.apply(iter, new TrackingTransformation());
     }
 
     private void maybeDelayForTesting()
@@ -570,36 +582,31 @@ public abstract class ReadCommand implements ReadQuery
             FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
     }
 
-    protected UnfilteredPartitionIterator withStateTracking(UnfilteredPartitionIterator iter)
-    {
-        return Transformation.apply(iter, new CheckForAbort());
-    }
 
-
-    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
-    {
-        final TPCOpOrder.Group group;
-        boolean closed = false;
-
-        TrackOpOrder(TPCOpOrder.Group group)
-        {
-            this.group = group;
-        }
-
-        protected void onClose()
-        {
-            if (closed)
-                throw new AssertionError("OpOrder already closed");
-
-            group.close();
-            closed = true;
-        }
-    }
-
-    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
-    {
-        return Transformation.apply(iter, new TrackOpOrder(group));
-    }
+//    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
+//    {
+//        final TPCOpOrder.Group group;
+//        boolean closed = false;
+//
+//        TrackOpOrder(TPCOpOrder.Group group)
+//        {
+//            this.group = group;
+//        }
+//
+//        protected void onClose()
+//        {
+//            if (closed)
+//                throw new AssertionError("OpOrder already closed");
+//
+//            group.close();
+//            closed = true;
+//        }
+//    }
+//
+//    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
+//    {
+//        return Transformation.apply(iter, new TrackOpOrder(group));
+//    }
 
 
     /**

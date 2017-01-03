@@ -20,10 +20,10 @@ package org.apache.cassandra.metrics;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Metered;
+import org.apache.cassandra.utils.concurrent.LongAdder;
 
 /**
  * A meter metric which measures mean throughput and one-, five-, and fifteen-minute
@@ -54,7 +54,7 @@ public class Meter implements Metered
      * Creates a new {@link com.codahale.metrics.Meter}.
      */
     public Meter() {
-        this(Clock.defaultClock());
+        this(ApproximateClock.defaultClock());
     }
 
     /**

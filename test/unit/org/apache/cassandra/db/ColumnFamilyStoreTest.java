@@ -45,7 +45,6 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -111,7 +110,7 @@ public class ColumnFamilyStoreTest
                 .applyUnsafe();
         cfs.forceBlockingFlush();
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
+        cfs.metric.sstablesPerReadHistogram.cf.clear(); // resets counts
         Util.getAll(Util.cmd(cfs, "key1").includeRow("c1").build());
         assertEquals(1, cfs.metric.sstablesPerReadHistogram.cf.getCount());
     }

@@ -3,10 +3,8 @@ package org.apache.cassandra.metrics;
 import java.io.Closeable;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 import com.codahale.metrics.Clock;
-import com.codahale.metrics.ExponentiallyDecayingReservoir;
 import com.codahale.metrics.Metered;
 import com.codahale.metrics.Sampling;
 import com.codahale.metrics.Snapshot;
@@ -57,11 +55,11 @@ public class Timer implements Metered, Sampling
     }
 
     private final Meter meter;
-    private final Reservoir histogram;
+    private final DecayingEstimatedHistogramReservoir histogram;
     private final Clock clock;
 
     /**
-     * Creates a new {@link Timer} using an {@link ExponentiallyDecayingReservoir} and the default
+     * Creates a new {@link Timer} using an {@link DecayingEstimatedHistogramReservoir} and the default
      * {@link Clock}.
      */
     public Timer() {
@@ -73,7 +71,7 @@ public class Timer implements Metered, Sampling
      *
      * @param reservoir the {@link Reservoir} implementation the timer should use
      */
-    public Timer(Reservoir reservoir) {
+    public Timer(DecayingEstimatedHistogramReservoir reservoir) {
         this(reservoir, Clock.defaultClock());
     }
 
@@ -83,7 +81,7 @@ public class Timer implements Metered, Sampling
      * @param reservoir the {@link Reservoir} implementation the timer should use
      * @param clock  the {@link Clock} implementation the timer should use
      */
-    public Timer(Reservoir reservoir, Clock clock) {
+    public Timer(DecayingEstimatedHistogramReservoir reservoir, Clock clock) {
         this.meter = new Meter(clock);
         this.clock = clock;
         this.histogram = reservoir;

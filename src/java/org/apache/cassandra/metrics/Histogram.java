@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.metrics;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
 import com.codahale.metrics.Sampling;
@@ -34,14 +36,14 @@ import com.codahale.metrics.Snapshot;
  */
 public class Histogram implements Metric, Sampling, Counting
 {
-    private final Reservoir reservoir;
+    private final DecayingEstimatedHistogramReservoir reservoir;
 
     /**
      * Creates a new {@link com.codahale.metrics.Histogram} with the given reservoir.
      *
      * @param reservoir the reservoir to create a histogram from
      */
-    public Histogram(Reservoir reservoir) {
+    public Histogram(DecayingEstimatedHistogramReservoir reservoir) {
         this.reservoir = reservoir;
     }
 
@@ -50,16 +52,7 @@ public class Histogram implements Metric, Sampling, Counting
      *
      * @param value the length of the value
      */
-    public void update(int value) {
-        update((long) value);
-    }
-
-    /**
-     * Adds a recorded value.
-     *
-     * @param value the length of the value
-     */
-    public void update(long value) {
+    public final void update(final long value) {
         reservoir.update(value);
     }
 
@@ -76,5 +69,17 @@ public class Histogram implements Metric, Sampling, Counting
     @Override
     public Snapshot getSnapshot() {
         return reservoir.getSnapshot();
+    }
+
+    @VisibleForTesting
+    public void clear()
+    {
+        reservoir.clear();
+    }
+
+    @VisibleForTesting
+    public void aggregate()
+    {
+        reservoir.aggregate();
     }
 }

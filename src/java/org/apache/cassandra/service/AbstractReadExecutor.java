@@ -122,13 +122,13 @@ public abstract class AbstractReadExecutor
                 {
                     SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
                     Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().ksName, singleCommand.partitionKey(), false);
-                    handler.setLocalCoreId(NettyRxScheduler.getCoreId(scheduler));
+                    handler.setLocalCoreId(NettyRxScheduler.getCoreId());
                     return executeLocalRead().subscribeOn(scheduler);
                 }
                 else
                 {
                     Scheduler scheduler = NettyRxScheduler.instance();
-                    handler.setLocalCoreId(NettyRxScheduler.getCoreId(scheduler));
+                    handler.setLocalCoreId(NettyRxScheduler.getCoreId());
                     return executeLocalRead().subscribeOn(scheduler);
                 }
             }
