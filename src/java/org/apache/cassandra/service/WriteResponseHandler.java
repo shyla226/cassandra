@@ -39,8 +39,6 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     protected static final Logger logger = LoggerFactory.getLogger(WriteResponseHandler.class);
 
     protected volatile int responses;
-    private static final AtomicIntegerFieldUpdater<WriteResponseHandler> responsesUpdater
-            = AtomicIntegerFieldUpdater.newUpdater(WriteResponseHandler.class, "responses");
 
     public WriteResponseHandler(Collection<InetAddress> writeEndpoints,
                                 Collection<InetAddress> pendingEndpoints,
@@ -60,7 +58,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
 
     public void response(MessageIn<T> m)
     {
-        if (responsesUpdater.decrementAndGet(this) == 0)
+        if (--responses == 0)
             signalComplete();
     }
 

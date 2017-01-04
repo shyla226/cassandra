@@ -50,8 +50,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     public final ConsistencyLevel consistencyLevel;
     protected final Collection<InetAddress> pendingEndpoints;
     protected final WriteType writeType;
-    private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
-        = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
+
     private volatile int failures = 0;
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
@@ -169,7 +168,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         logger.trace("Got failure from {}", from);
 
         int n = waitingFor(from)
-              ? failuresUpdater.incrementAndGet(this)
+              ? failures++
               : failures;
 
         failureReasonByEndpoint.put(from, failureReason);
