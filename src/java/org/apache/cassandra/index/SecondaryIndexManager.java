@@ -18,7 +18,16 @@
 package org.apache.cassandra.index;
 
 import java.lang.reflect.Constructor;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -37,6 +46,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
@@ -44,6 +54,7 @@ import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
@@ -58,7 +69,6 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 /**
@@ -465,7 +475,7 @@ public class SecondaryIndexManager implements IndexRegistry
         if (indexes.isEmpty())
             return;
 
-        List<io.reactivex.Observable<?>> wait = new ArrayList<>();
+        List<Observable<CommitLogPosition>> wait = new ArrayList<>();
         List<Index> nonCfsIndexes = new ArrayList<>();
 
         // for each CFS backed index, submit a flush task which we'll wait on for completion
@@ -474,12 +484,12 @@ public class SecondaryIndexManager implements IndexRegistry
         {
             indexes.forEach(index ->
                 index.getBackingTable()
-                     .map(cfs -> wait.add(cfs.forceFlush()))
+                     .map(cfs -> wait.add(cfs.forceFlush().toObservable()))
                      .orElseGet(() -> nonCfsIndexes.add(index)));
         }
 
         executeAllBlocking(nonCfsIndexes.stream(), Index::getBlockingFlushTask);
-        io.reactivex.Observable.merge(wait).blockingLast();
+        Observable.merge(wait).blockingLast();
     }
 
     /**

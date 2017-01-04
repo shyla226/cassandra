@@ -689,9 +689,9 @@ public class Keyspace
         }
     }
 
-    public List<Observable<?>> flush()
+    public List<Single<CommitLogPosition>> flush()
     {
-        List<Observable<?>> futures = new ArrayList<>(columnFamilyStores.size());
+        List<Single<CommitLogPosition>> futures = new ArrayList<>(columnFamilyStores.size());
         for (ColumnFamilyStore cfs : columnFamilyStores.values())
             futures.add(cfs.forceFlush());
         return futures;

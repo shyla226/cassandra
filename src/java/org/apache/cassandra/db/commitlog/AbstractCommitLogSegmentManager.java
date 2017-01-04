@@ -389,7 +389,7 @@ public abstract class AbstractCommitLogSegmentManager
                     final ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(dirtyCFId);
                     // can safely call forceFlush here as we will only ever block (briefly) for other attempts to flush,
                     // no deadlock possibility since switchLock removal
-                    flushes.put(dirtyCFId, force ? cfs.forceFlush() : cfs.forceFlush(maxCommitLogPosition));
+                    flushes.put(dirtyCFId, force ? cfs.forceFlush().toObservable() : cfs.forceFlush(maxCommitLogPosition).toObservable());
                 }
             }
         }

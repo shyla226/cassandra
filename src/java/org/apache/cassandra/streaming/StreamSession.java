@@ -28,7 +28,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableIntervalTree;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
@@ -783,10 +785,10 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      */
     private void flushSSTables(Iterable<ColumnFamilyStore> stores)
     {
-        List<io.reactivex.Observable<?>> flushes = new ArrayList<>();
+        List<Single<CommitLogPosition>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
-        io.reactivex.Observable.merge(flushes).blockingLast();
+        Single.merge(flushes).blockingLast();
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)

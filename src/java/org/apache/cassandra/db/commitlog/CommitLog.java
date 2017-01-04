@@ -293,7 +293,7 @@ public class CommitLog implements CommitLogMBean
                 alloc.markWritten();
             }
 
-            return executor.finishWriteFor(alloc).map(syncTimestamp -> alloc.getCommitLogPosition());
+            return executor.finishWriteFor(alloc).toSingle(() -> alloc.getCommitLogPosition());
         }
         catch (IOException e)
         {

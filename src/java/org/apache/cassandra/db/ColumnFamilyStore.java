@@ -850,7 +850,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      *
      * @param memtable
      */
-    public io.reactivex.Observable<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
+    public Single<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
     {
         synchronized (data)
         {
@@ -867,7 +867,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * not complete until the Memtable (and all prior Memtables) have been successfully flushed, and the CL
      * marked clean up to the position owned by the Memtable.
      */
-    public io.reactivex.Observable<CommitLogPosition> switchMemtable()
+    public Single<CommitLogPosition> switchMemtable()
     {
         synchronized (data)
         {
@@ -889,7 +889,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 }
                 publisher.onComplete();
             });
-            return publisher.observeOn(Schedulers.io());
+            return publisher.singleOrError().observeOn(Schedulers.io());
         }
     }
 
@@ -930,7 +930,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public io.reactivex.Observable<CommitLogPosition> forceFlush()
+    public Single<CommitLogPosition> forceFlush()
     {
         synchronized (data)
         {
@@ -949,7 +949,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    public io.reactivex.Observable<CommitLogPosition> forceFlush(CommitLogPosition flushIfDirtyBefore)
+    public Single<CommitLogPosition> forceFlush(CommitLogPosition flushIfDirtyBefore)
     {
         // we don't loop through the remaining memtables since here we only care about commit log dirtiness
         // and this does not vary between a table and its table-backed indexes
@@ -963,7 +963,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
      *         to sstables for this table once the future completes
      */
-    private io.reactivex.Observable<CommitLogPosition> waitForFlushes()
+    private Single<CommitLogPosition> waitForFlushes()
     {
         // we grab the current memtable; once any preceding memtables have flushed, we know its
         // commitLogLowerBound has been set (as this it is set with the upper bound of the preceding memtable)
@@ -974,12 +974,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             publisher.onNext(current.getCommitLogLowerBound());
             publisher.onComplete();
         });
-        return publisher.observeOn(Schedulers.io());
+
+        return publisher.singleOrError().observeOn(Schedulers.io());
     }
 
     public CommitLogPosition forceBlockingFlush()
     {
-        return forceFlush().blockingFirst();
+        return forceFlush().blockingGet();
     }
 
     /**

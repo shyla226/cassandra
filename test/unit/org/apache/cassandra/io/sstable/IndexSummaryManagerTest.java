@@ -174,7 +174,7 @@ public class IndexSummaryManagerTest
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
 
-        ArrayList<io.reactivex.Observable<?>> observables = new ArrayList<>(numSSTables);
+        ArrayList<Single<?>> observables = new ArrayList<>(numSSTables);
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
         for (int sstable = 0; sstable < numSSTables; sstable++)
         {
@@ -190,7 +190,7 @@ public class IndexSummaryManagerTest
             }
             observables.add(cfs.forceFlush());
         }
-        io.reactivex.Observable.merge(observables).blockingLast();
+        Single.merge(observables).blockingLast();
         assertEquals(numSSTables, cfs.getLiveSSTables().size());
         validateData(cfs, numPartition);
     }

@@ -158,12 +158,12 @@ public abstract class AbstractCommitLogService
     /**
      * Block for @param alloc to be sync'd as necessary, and handle bookkeeping
      */
-    public Single<Long> finishWriteFor(Allocation alloc)
+    public Completable finishWriteFor(Allocation alloc)
     {
-        return maybeWaitForSync(alloc).doOnSuccess(v -> written.incrementAndGet());
+        return maybeWaitForSync(alloc).doOnComplete(() -> written.incrementAndGet());
     }
 
-    protected abstract Single<Long> maybeWaitForSync(Allocation alloc);
+    protected abstract Completable maybeWaitForSync(Allocation alloc);
 
     /**
      * Request an additional sync cycle without blocking.

@@ -158,7 +158,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
         futures.clear();
         boolean flushingSystem = false;
 
-        List<io.reactivex.Observable<?>> observables = new ArrayList<>();
+        List<Single<CommitLogPosition>> observables = new ArrayList<>();
         for (Keyspace keyspace : keyspacesReplayed)
         {
             if (keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
@@ -171,7 +171,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
         if (!flushingSystem)
             observables.add(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceFlush());
 
-        io.reactivex.Observable.merge(observables).blockingLast();
+        Single.merge(observables).blockingLast();
 
         return replayedCount.get();
     }

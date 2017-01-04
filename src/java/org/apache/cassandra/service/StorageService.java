@@ -69,6 +69,7 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.*;
@@ -4474,18 +4475,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 totalCFs += keyspace.getColumnFamilyStores().size();
             remainingCFs = totalCFs;
             // flush
-            List<Observable<?>> flushes = new ArrayList<>();
+            List<Observable<CommitLogPosition>> flushes = new ArrayList<>();
             for (Keyspace keyspace : Keyspace.nonSystem())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush().doOnComplete(() -> remainingCFs--));
+                    flushes.add(cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--).toObservable());
             }
             // wait for the flushes.
             // TODO this is a godawful way to track progress, since they flush in parallel.  a long one could
             // thus make several short ones "instant" if we wait for them later.try
             try
             {
-                Observable.merge(flushes).blockingLast();
+                Observable.merge(flushes).blockingLast(CommitLogPosition.NONE);
             }
             catch (Throwable t)
             {
@@ -4505,7 +4506,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Keyspace keyspace : Keyspace.system())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush());
+                    flushes.add(cfs.forceFlush().toObservable());
             }
             Observable.merge(flushes).blockingLast();
 

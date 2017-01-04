@@ -687,7 +687,7 @@ public final class SystemKeyspace
     public static void forceBlockingFlush(String cfname)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(cfname).forceFlush().blockingSingle();
+            Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(cfname).forceBlockingFlush();
     }
 
     /**

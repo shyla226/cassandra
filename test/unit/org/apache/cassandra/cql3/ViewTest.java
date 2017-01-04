@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.reactivex.Single;
 import junit.framework.Assert;
 import org.junit.After;
 import org.junit.Before;
@@ -393,14 +394,14 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            io.reactivex.Observable.merge(ks.flush()).blockingLast();
+            Single.merge(ks.flush()).blockingLast();
 
         //update c's timestamp TS=2
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 2 SET c = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0));
 
         if (flush)
-            io.reactivex.Observable.merge(ks.flush()).blockingLast();
+            Single.merge(ks.flush()).blockingLast();
 
             //change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
@@ -409,7 +410,7 @@ public class ViewTest extends CQLTester
         if(flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            io.reactivex.Observable.merge(ks.flush()).blockingLast();
+            Single.merge(ks.flush()).blockingLast();
         }
 
 
@@ -418,7 +419,7 @@ public class ViewTest extends CQLTester
         if (flush)
         {
             ks.getColumnFamilyStore("mv").forceMajorCompaction();
-            io.reactivex.Observable.merge(ks.flush()).blockingLast();
+            Single.merge(ks.flush()).blockingLast();
         }
 
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, null));
@@ -429,7 +430,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d,e from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(0, 1));
 
         if (flush)
-            io.reactivex.Observable.merge(ks.flush()).blockingLast();
+            Single.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=2
@@ -437,7 +438,7 @@ public class ViewTest extends CQLTester
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(2));
 
         if (flush)
-            io.reactivex.Observable.merge(ks.flush()).blockingLast();
+            Single.merge(ks.flush()).blockingLast();
 
 
         //Change d value @ TS=3

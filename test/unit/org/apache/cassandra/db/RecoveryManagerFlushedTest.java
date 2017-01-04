@@ -33,6 +33,7 @@ import org.junit.runners.Parameterized.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
@@ -95,8 +96,8 @@ public class RecoveryManagerFlushedTest
     public void testWithFlush() throws Exception
     {
         // Flush everything that may be in the commit log now to start fresh
-        io.reactivex.Observable.merge(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
-        io.reactivex.Observable.merge(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
+        Single.merge(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
+        Single.merge(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
 
 
         CompactionManager.instance.disableAutoCompaction();
