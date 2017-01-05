@@ -206,7 +206,7 @@ public class CustomCassandraIndex implements Index
 
     public long getEstimatedResultRows()
     {
-        return indexCfs.getMeanColumns();
+        return indexCfs.getMeanCells();
     }
 
     /**

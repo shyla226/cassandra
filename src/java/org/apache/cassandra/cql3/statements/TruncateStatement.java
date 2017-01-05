@@ -62,7 +62,7 @@ public class TruncateStatement extends CFStatement implements CQLStatement
 
     public void validate(ClientState state) throws InvalidRequestException
     {
-        ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
+        Validation.validateColumnFamily(keyspace(), columnFamily());
     }
 
     public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException

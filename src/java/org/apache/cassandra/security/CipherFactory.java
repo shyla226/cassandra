@@ -25,20 +25,21 @@ import java.security.Key;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CompletionException;
 import javax.crypto.Cipher;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.IvParameterSpec;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
-import com.google.common.cache.RemovalListener;
-import com.google.common.cache.RemovalNotification;
+import com.google.common.util.concurrent.MoreExecutors;
+
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.TransparentDataEncryptionOptions;
 
 /**
@@ -54,7 +55,7 @@ public class CipherFactory
      * Bonus points if you can avoid calling (@code Cipher#init); hence, the point of the supporting struct
      * for caching Cipher instances.
      */
-    private static final ThreadLocal<CachedCipher> cipherThreadLocal = new ThreadLocal<>();
+    private static final FastThreadLocal<CachedCipher> cipherThreadLocal = new FastThreadLocal<>();
 
     private final SecureRandom secureRandom;
     private final LoadingCache<String, Key> cache;
@@ -78,26 +79,19 @@ public class CipherFactory
             throw new RuntimeException("couldn't load cipher factory", e);
         }
 
-        cache = CacheBuilder.newBuilder() // by default cache is unbounded
+        cache = Caffeine.newBuilder() // by default cache is unbounded
                 .maximumSize(64) // a value large enough that we should never even get close (so nothing gets evicted)
-                .concurrencyLevel(Runtime.getRuntime().availableProcessors())
-                .removalListener(new RemovalListener<String, Key>()
+                .executor(MoreExecutors.directExecutor())
+                .removalListener((key, value, cause) ->
                 {
-                    public void onRemoval(RemovalNotification<String, Key> notice)
-                    {
-                        // maybe reload the key? (to avoid the reload being on the user's dime)
-                        logger.info("key {} removed from cipher key cache", notice.getKey());
-                    }
+                    // maybe reload the key? (to avoid the reload being on the user's dime)
+                    logger.info("key {} removed from cipher key cache", key);
                 })
-                .build(new CacheLoader<String, Key>()
-                {
-                    @Override
-                    public Key load(String alias) throws Exception
-                    {
-                        logger.info("loading secret key for alias {}", alias);
-                        return keyProvider.getSecretKey(alias);
-                    }
-                });
+                .build(alias ->
+                       {
+                           logger.info("loading secret key for alias {}", alias);
+                           return keyProvider.getSecretKey(alias);
+                       });
     }
 
     public Cipher getEncryptor(String transformation, String keyAlias) throws IOException
@@ -147,7 +141,7 @@ public class CipherFactory
         {
             return cache.get(keyAlias);
         }
-        catch (ExecutionException e)
+        catch (CompletionException e)
         {
             if (e.getCause() instanceof IOException)
                 throw (IOException)e.getCause();

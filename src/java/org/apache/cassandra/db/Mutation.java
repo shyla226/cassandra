@@ -77,6 +77,8 @@ public class Mutation implements IMutation
         this.keyspaceName = keyspaceName;
         this.key = key;
         this.modifications = modifications;
+        for (PartitionUpdate pu : modifications.values())
+            cdcEnabled |= pu.metadata().params.cdc;
     }
 
     public Mutation copy()
@@ -91,6 +93,11 @@ public class Mutation implements IMutation
 
         Mutation copy = copy();
         copy.modifications.keySet().removeAll(cfIds);
+
+        copy.cdcEnabled = false;
+        for (PartitionUpdate pu : modifications.values())
+            copy.cdcEnabled |= pu.metadata().params.cdc;
+
         return copy;
     }
 
@@ -208,20 +215,25 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    private Completable applyAsync(boolean durableWrites)
+    private Completable applyAsync(boolean durableWrites, boolean isDroppable)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.apply(this, durableWrites);
+        return ks.applyFuture(this, durableWrites, isDroppable);
     }
 
     public Completable applyAsync()
     {
-        return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
+        return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
+    }
+
+    public void apply(boolean durableWrites, boolean isDroppable)
+    {
+        Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable);
     }
 
     public void apply(boolean durableWrites)
     {
-        applyAsync(durableWrites).blockingGet();
+        applyAsync(durableWrites, true).blockingGet();
     }
 
     /*

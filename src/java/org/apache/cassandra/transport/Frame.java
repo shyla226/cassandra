@@ -190,7 +190,7 @@ public class Frame
             Message.Type type;
             try
             {
-                type = Message.Type.fromOpcode(buffer.getByte(idx++), direction);
+                type = Message.Type.fromOpcode(buffer.getUnsignedByte(idx++), direction);
             }
             catch (ProtocolException e)
             {

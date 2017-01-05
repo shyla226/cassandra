@@ -23,12 +23,22 @@ import java.nio.file.Files;
 import java.util.*;
 
 import com.google.common.collect.ImmutableMap;
+
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static junit.framework.Assert.*;
 
 public class HintsCatalogTest
 {
+    @BeforeClass
+    public static void setUp()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void loadCompletenessAndOrderTest() throws IOException
     {

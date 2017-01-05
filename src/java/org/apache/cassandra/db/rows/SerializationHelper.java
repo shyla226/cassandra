@@ -125,6 +125,9 @@ public class SerializationHelper
 
     public boolean isDropped(Cell cell, boolean isComplex)
     {
+        if (droppedColumns.isEmpty())
+            return false;
+
         CFMetaData.DroppedColumn dropped = isComplex ? currentDroppedComplex : droppedColumns.get(cell.column().name.bytes);
         return dropped != null && cell.timestamp() <= dropped.droppedTime;
     }

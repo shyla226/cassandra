@@ -375,8 +375,9 @@ public interface StorageServiceMBean extends NotificationEmitter
 
     /**
      * transfer this node's data to other machines and remove it from service.
+     * @param force Decommission even if this will reduce N to be less than RF.
      */
-    public void decommission() throws InterruptedException;
+    public void decommission(boolean force) throws InterruptedException;
 
     /**
      * @param newToken token to move this node to.
@@ -510,15 +511,6 @@ public interface StorageServiceMBean extends NotificationEmitter
     // to determine if initialization has completed
     public boolean isInitialized();
 
-    // allows a user to disable thrift
-    public void stopRPCServer();
-
-    // allows a user to reenable thrift
-    public void startRPCServer();
-
-    // to determine if thrift is running
-    public boolean isRPCServerRunning();
-
     public void stopNativeTransport();
     public void startNativeTransport();
     public boolean isNativeTransportRunning();
@@ -624,7 +616,7 @@ public interface StorageServiceMBean extends NotificationEmitter
     public void resetLocalSchema() throws IOException;
 
     /**
-     * Enables/Disables tracing for the whole system. Only thrift requests can start tracing currently.
+     * Enables/Disables tracing for the whole system.
      *
      * @param probability
      *            ]0,1[ will enable tracing on a partial number of requests with the provided probability. 0 will

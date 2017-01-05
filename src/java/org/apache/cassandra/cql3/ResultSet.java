@@ -22,14 +22,20 @@ import java.util.*;
 
 import io.netty.buffer.ByteBuf;
 
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.cql3.selection.ResultBuilder;
+import org.apache.cassandra.cql3.selection.Selection;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.aggregation.AggregationSpecification;
+import org.apache.cassandra.db.aggregation.GroupMaker;
+import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
-import org.apache.cassandra.thrift.Column;
-import org.apache.cassandra.thrift.CqlMetadata;
-import org.apache.cassandra.thrift.CqlResult;
-import org.apache.cassandra.thrift.CqlResultType;
-import org.apache.cassandra.thrift.CqlRow;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.service.pager.PagingState;
 
@@ -42,7 +48,7 @@ public class ResultSet
 
     public ResultSet(List<ColumnSpecification> metadata)
     {
-        this(new ResultMetadata(metadata), new ArrayList<List<ByteBuffer>>());
+        this(new ResultMetadata(metadata), new ArrayList<>());
     }
 
     public ResultSet(ResultMetadata metadata, List<List<ByteBuffer>> rows)
@@ -70,7 +76,7 @@ public class ResultSet
     public void addColumnValue(ByteBuffer value)
     {
         if (rows.isEmpty() || lastRow().size() == metadata.valueCount())
-            rows.add(new ArrayList<ByteBuffer>(metadata.valueCount()));
+            rows.add(new ArrayList<>(metadata.valueCount()));
 
         lastRow().add(value);
     }
@@ -93,44 +99,6 @@ public class ResultSet
             for (int i = 0; i < toRemove; i++)
                 rows.remove(rows.size() - 1);
         }
-    }
-
-    public CqlResult toThriftResult()
-    {
-        assert metadata.names != null;
-
-        String UTF8 = "UTF8Type";
-        CqlMetadata schema = new CqlMetadata(new HashMap<ByteBuffer, String>(),
-                new HashMap<ByteBuffer, String>(),
-                // The 2 following ones shouldn't be needed in CQL3
-                UTF8, UTF8);
-
-        for (int i = 0; i < metadata.columnCount; i++)
-        {
-            ColumnSpecification spec = metadata.names.get(i);
-            ByteBuffer colName = ByteBufferUtil.bytes(spec.name.toString());
-            schema.name_types.put(colName, UTF8);
-            AbstractType<?> normalizedType = spec.type instanceof ReversedType ? ((ReversedType)spec.type).baseType : spec.type;
-            schema.value_types.put(colName, normalizedType.toString());
-
-        }
-
-        List<CqlRow> cqlRows = new ArrayList<CqlRow>(rows.size());
-        for (List<ByteBuffer> row : rows)
-        {
-            List<Column> thriftCols = new ArrayList<Column>(metadata.columnCount);
-            for (int i = 0; i < metadata.columnCount; i++)
-            {
-                Column col = new Column(ByteBufferUtil.bytes(metadata.names.get(i).name.toString()));
-                col.setValue(row.get(i));
-                thriftCols.add(col);
-            }
-            // The key of CqlRow shoudn't be needed in CQL3
-            cqlRows.add(new CqlRow(ByteBufferUtil.EMPTY_BYTE_BUFFER, thriftCols));
-        }
-        CqlResult res = new CqlResult(CqlResultType.ROWS);
-        res.setRows(cqlRows).setSchema(schema);
-        return res;
     }
 
     @Override
@@ -181,7 +149,7 @@ public class ResultSet
         {
             ResultMetadata m = ResultMetadata.codec.decode(body, version);
             int rowCount = body.readInt();
-            ResultSet rs = new ResultSet(m, new ArrayList<List<ByteBuffer>>(rowCount));
+            ResultSet rs = new ResultSet(m, new ArrayList<>(rowCount));
 
             // rows
             int totalValues = rowCount * m.columnCount;
@@ -191,27 +159,81 @@ public class ResultSet
             return rs;
         }
 
+        /**
+         * Encode all the rows in the result set, including the header (metadata and num rows).
+         */
         public void encode(ResultSet rs, ByteBuf dest, ProtocolVersion version)
         {
-            ResultMetadata.codec.encode(rs.metadata, dest, version);
-            dest.writeInt(rs.rows.size());
+            encodeHeader(rs.metadata, dest, rs.rows.size(), version);
             for (List<ByteBuffer> row : rs.rows)
+                encodeRow(row, rs.metadata, dest, false);
+        }
+
+        /**
+         * Write the header to the Netty byte buffer.
+         * @param metadata the result set metadata
+         * @param dest the Netty byte buffer
+         * @param numRows the number of rows
+         */
+        public void encodeHeader(ResultMetadata metadata, ByteBuf dest, int numRows, ProtocolVersion version)
+        {
+            ResultMetadata.codec.encode(metadata, dest, version);
+            dest.writeInt(numRows);
+        }
+
+        /**
+         * Write the current row to the Netty byte buffer.
+         * <p>
+         * If checkSpace is true, that means that the Netty byte buffer was created with a fixed size and the
+         * current row may not fit, so before writing each value we check if there is enough space. If there isn't
+         * enough space, we return false. Note that the row will have been partially written in this case, so the
+         * caller must handle this possibility.
+         * <p>
+         * If checkSpace is false, it means the caller ensured that there is enough space in the buffer to fit
+         * the entire row, for example by calling encodedSize() to create the byte buffer.
+         * <p>
+         * Note that we do only want to serialize only the first columnCount values, even if the row
+         * has more: see comment on ResultMetadata.names field.
+         *
+         * @param row the current row
+         * @param metadata the result set metadata
+         * @param dest the Netty byte buffer
+         * @param checkSpace when true check if there is sufficient space in the Netty byte buffer before adding each value
+         *                   .
+         * @return true if the row was written entirely, false if it was written only partially, or not at all.
+         */
+        public boolean encodeRow(List<ByteBuffer> row, ResultMetadata metadata, ByteBuf dest, boolean checkSpace)
+        {
+            for (int i = 0; i < metadata.columnCount; i++)
             {
-                // Note that we do only want to serialize only the first columnCount values, even if the row
-                // as more: see comment on ResultMetadata.names field.
-                for (int i = 0; i < rs.metadata.columnCount; i++)
-                    CBUtil.writeValue(row.get(i), dest);
+                if (checkSpace && dest.writableBytes() < CBUtil.sizeOfValue(row.get(i)))
+                    return false;
+
+                CBUtil.writeValue(row.get(i), dest);
             }
+
+            return true;
         }
 
         public int encodedSize(ResultSet rs, ProtocolVersion version)
         {
-            int size = ResultMetadata.codec.encodedSize(rs.metadata, version) + 4;
+            int size = encodedHeaderSize(rs.metadata, version);
             for (List<ByteBuffer> row : rs.rows)
-            {
-                for (int i = 0; i < rs.metadata.columnCount; i++)
-                    size += CBUtil.sizeOfValue(row.get(i));
-            }
+                size += encodedRowSize(row, rs.metadata);
+
+            return size;
+        }
+
+        public int encodedHeaderSize(ResultMetadata metadata, ProtocolVersion version)
+        {
+            return ResultMetadata.codec.encodedSize(metadata, version) + 4;
+        }
+
+        public int encodedRowSize(List<ByteBuffer> row, ResultMetadata metadata)
+        {
+            int size = 0;
+            for (int i = 0; i < metadata.columnCount; i++)
+                size += CBUtil.sizeOfValue(row.get(i));
             return size;
         }
     }
@@ -223,7 +245,7 @@ public class ResultSet
     {
         public static final CBCodec<ResultMetadata> codec = new Codec();
 
-        public static final ResultMetadata EMPTY = new ResultMetadata(EnumSet.of(Flag.NO_METADATA), null, 0, null);
+        public static final ResultMetadata EMPTY = new ResultMetadata(EnumSet.of(Flag.NO_METADATA), null, 0, PagingResult.NONE);
 
         private final EnumSet<Flag> flags;
         // Please note that columnCount can actually be smaller than names, even if names is not null. This is
@@ -232,26 +254,26 @@ public class ResultSet
         // (CASSANDRA-4911). So the serialization code will exclude any columns in name whose index is >= columnCount.
         public final List<ColumnSpecification> names;
         private final int columnCount;
-        private PagingState pagingState;
+        private PagingResult pagingResult;
 
         public ResultMetadata(List<ColumnSpecification> names)
         {
-            this(EnumSet.noneOf(Flag.class), names, names.size(), null);
+            this(EnumSet.noneOf(Flag.class), names, names.size(), PagingResult.NONE);
             if (!names.isEmpty() && ColumnSpecification.allInSameTable(names))
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
-        private ResultMetadata(EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingState pagingState)
+        private ResultMetadata(EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingResult pagingResult)
         {
             this.flags = flags;
             this.names = names;
             this.columnCount = columnCount;
-            this.pagingState = pagingState;
+            this.pagingResult = pagingResult;
         }
 
         public ResultMetadata copy()
         {
-            return new ResultMetadata(EnumSet.copyOf(flags), names, columnCount, pagingState);
+            return new ResultMetadata(EnumSet.copyOf(flags), names, columnCount, pagingResult);
         }
 
         /**
@@ -281,13 +303,26 @@ public class ResultSet
             names.add(name);
         }
 
-        public void setHasMorePages(PagingState pagingState)
+        public void setPagingResult(PagingResult pagingResult)
         {
-            this.pagingState = pagingState;
-            if (pagingState == null)
-                flags.remove(Flag.HAS_MORE_PAGES);
-            else
+            this.pagingResult = pagingResult;
+
+            if (pagingResult.state != null)
                 flags.add(Flag.HAS_MORE_PAGES);
+            else
+                flags.remove(Flag.HAS_MORE_PAGES);
+
+            boolean continuous = pagingResult.seqNo > 0;
+
+            if (continuous)
+                flags.add(Flag.CONTINUOUS_PAGING);
+            else
+                flags.remove(Flag.CONTINUOUS_PAGING);
+
+            if (continuous && pagingResult.last)
+                flags.add(Flag.LAST_CONTINOUS_PAGE);
+            else
+                flags.remove(Flag.LAST_CONTINOUS_PAGE);
         }
 
         public void setSkipMetadata()
@@ -309,13 +344,13 @@ public class ResultSet
             return Objects.equals(flags, that.flags)
                    && Objects.equals(names, that.names)
                    && columnCount == that.columnCount
-                   && Objects.equals(pagingState, that.pagingState);
+                   && Objects.equals(pagingResult, that.pagingResult);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(flags, names, columnCount, pagingState);
+            return Objects.hash(flags, names, columnCount, pagingResult);
         }
 
         @Override
@@ -336,8 +371,13 @@ public class ResultSet
                     sb.append(", ").append(name.type).append("]");
                 }
             }
+
+            if (pagingResult != null)
+                sb.append("[").append(pagingResult.toString()).append("]");
+
             if (flags.contains(Flag.HAS_MORE_PAGES))
                 sb.append(" (to be continued)");
+
             return sb.toString();
         }
 
@@ -351,12 +391,16 @@ public class ResultSet
 
                 EnumSet<Flag> flags = Flag.deserialize(iflags);
 
-                PagingState state = null;
-                if (flags.contains(Flag.HAS_MORE_PAGES))
-                    state = PagingState.deserialize(CBUtil.readValue(body), version);
+                PagingState state = flags.contains(Flag.HAS_MORE_PAGES)
+                                    ? PagingState.deserialize(CBUtil.readValue(body), version)
+                                    : null;
+
+                PagingResult pagingResult = flags.contains(Flag.CONTINUOUS_PAGING)
+                                            ? new PagingResult(state, body.readInt(), flags.contains(Flag.LAST_CONTINOUS_PAGE))
+                                            : state == null ? PagingResult.NONE : new PagingResult(state);
 
                 if (flags.contains(Flag.NO_METADATA))
-                    return new ResultMetadata(flags, null, columnCount, state);
+                    return new ResultMetadata(flags, null, columnCount, pagingResult);
 
                 boolean globalTablesSpec = flags.contains(Flag.GLOBAL_TABLES_SPEC);
 
@@ -378,7 +422,7 @@ public class ResultSet
                     AbstractType type = DataType.toType(DataType.codec.decodeOne(body, version));
                     names.add(new ColumnSpecification(ksName, cfName, colName, type));
                 }
-                return new ResultMetadata(flags, names, names.size(), state);
+                return new ResultMetadata(flags, names, names.size(), pagingResult);
             }
 
             public void encode(ResultMetadata m, ByteBuf dest, ProtocolVersion version)
@@ -386,6 +430,7 @@ public class ResultSet
                 boolean noMetadata = m.flags.contains(Flag.NO_METADATA);
                 boolean globalTablesSpec = m.flags.contains(Flag.GLOBAL_TABLES_SPEC);
                 boolean hasMorePages = m.flags.contains(Flag.HAS_MORE_PAGES);
+                boolean continuousPaging = m.flags.contains(Flag.CONTINUOUS_PAGING);
 
                 assert version.isGreaterThan(ProtocolVersion.V1) || (!hasMorePages && !noMetadata)
                     : "version = " + version + ", flags = " + m.flags;
@@ -394,7 +439,14 @@ public class ResultSet
                 dest.writeInt(m.columnCount);
 
                 if (hasMorePages)
-                    CBUtil.writeValue(m.pagingState.serialize(version), dest);
+                    CBUtil.writeValue(m.pagingResult.state.serialize(version), dest);
+
+                if (continuousPaging)
+                {
+                    assert version.isGreaterOrEqualTo(ProtocolVersion.DSE_V1)
+                        : "version = " + version + ", does not support optimized paging.";
+                    dest.writeInt(m.pagingResult.seqNo);
+                }
 
                 if (!noMetadata)
                 {
@@ -423,10 +475,14 @@ public class ResultSet
                 boolean noMetadata = m.flags.contains(Flag.NO_METADATA);
                 boolean globalTablesSpec = m.flags.contains(Flag.GLOBAL_TABLES_SPEC);
                 boolean hasMorePages = m.flags.contains(Flag.HAS_MORE_PAGES);
+                boolean continuousPaging = m.flags.contains(Flag.CONTINUOUS_PAGING);
 
                 int size = 8;
                 if (hasMorePages)
-                    size += CBUtil.sizeOfValue(m.pagingState.serializedSize(version));
+                    size += CBUtil.sizeOfValue(m.pagingResult.state.serializedSize(version));
+
+                if (continuousPaging)
+                    size += 4;
 
                 if (!noMetadata)
                 {
@@ -643,19 +699,31 @@ public class ResultSet
 
     public enum Flag
     {
-        // The order of that enum matters!!
-        GLOBAL_TABLES_SPEC,
-        HAS_MORE_PAGES,
-        NO_METADATA;
+        // public flags
+        GLOBAL_TABLES_SPEC(0),
+        HAS_MORE_PAGES(1),
+        NO_METADATA(2),
+
+        // private flags
+        CONTINUOUS_PAGING(30),
+        LAST_CONTINOUS_PAGE(31);
+
+        /** The position of the bit that must be set to one to indicate a flag is set */
+        private final int pos;
+
+        Flag(int pos)
+        {
+            this.pos = pos;
+        }
 
         public static EnumSet<Flag> deserialize(int flags)
         {
             EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
             Flag[] values = Flag.values();
-            for (int n = 0; n < values.length; n++)
+            for (Flag flag : values)
             {
-                if ((flags & (1 << n)) != 0)
-                    set.add(values[n]);
+                if ((flags & (1 << flag.pos)) != 0)
+                    set.add(flag);
             }
             return set;
         }
@@ -664,8 +732,76 @@ public class ResultSet
         {
             int i = 0;
             for (Flag flag : flags)
-                i |= 1 << flag.ordinal();
+                i |= 1 << flag.pos;
             return i;
+        }
+    }
+
+    /**
+     * Return an estimated size of a CQL row. For each column, if the column type is fixed, return its
+     * fixed length. Otherwise estimate a mean cell size by dividing the mean partition size by the mean
+     * number of cells.
+     * <p>
+     * This method really could use some improvement since avgColumnSize is not correct for partition or
+     * primary columns, as well as complex columns and ignores disk format overheads.
+     * @return - an estimated size of a CQL row.
+     */
+    public static int estimatedRowSize(CFMetaData cfm, List<ColumnDefinition> columns)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
+
+        int avgColumnSize = (int)(cfs.getMeanCells() > 0
+                                  ? cfs.getMeanPartitionSize() / cfs.getMeanCells()
+                                  : cfs.getMeanPartitionSize());
+
+        int ret = 0;
+        for (ColumnDefinition def : columns)
+        {
+            int fixedLength = def.type.valueLengthIfFixed();
+            ret += CBUtil.sizeOfValue(fixedLength > 0 ? fixedLength : avgColumnSize);
+        }
+        return ret;
+    }
+
+    public static Builder makeBuilder(QueryOptions options, boolean isJson, Selection selection)
+    {
+        return new ResultSet.Builder(options, isJson, null, selection);
+    }
+
+    public static Builder makeBuilder(QueryOptions options, boolean isJson, AggregationSpecification aggregationSpec, Selection selection)
+    {
+        return aggregationSpec == null ? new ResultSet.Builder(options, isJson, null, selection)
+                                       : new ResultSet.Builder(options, isJson, aggregationSpec.newGroupMaker(), selection);
+    }
+
+    /**
+     * Build a ResultSet by implementing the abstract methods of {@link ResultBuilder}.
+     */
+    public final static class Builder extends ResultBuilder
+    {
+        private ResultSet resultSet;
+
+        public Builder(QueryOptions options, boolean isJson, GroupMaker groupMaker, Selection selection)
+        {
+            super(options, isJson, groupMaker, selection);
+            this.resultSet = new ResultSet(selection.getResultMetadata(isJson).copy(), new ArrayList<>());
+        }
+
+        public boolean onRowCompleted(List<ByteBuffer> row, boolean nextRowPending)
+        {
+            resultSet.addRow(row);
+            return true;
+        }
+
+        public boolean resultIsEmpty()
+        {
+            return resultSet.isEmpty();
+        }
+
+        public ResultSet build() throws InvalidRequestException
+        {
+            complete();
+            return resultSet;
         }
     }
 }

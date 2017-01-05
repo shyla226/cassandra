@@ -53,17 +53,11 @@
 # before joining the ring.
 #-Dcassandra.ring_delay_ms=ms
 
-# Set the port for the Thrift RPC service, which is used for client connections. (Default: 9160)
-#-Dcassandra.rpc_port=port
-
 # Set the SSL port for encrypted communication. (Default: 7001)
 #-Dcassandra.ssl_storage_port=port
 
 # Enable or disable the native transport server. See start_native_transport in cassandra.yaml.
 # cassandra.start_native_transport=true|false
-
-# Enable or disable the Thrift RPC server. (Default: true)
-#-Dcassandra.start_rpc=true/false
 
 # Set the port for inter-node communication. (Default: 7000)
 #-Dcassandra.storage_port=port
@@ -79,6 +73,11 @@
 # roles). This will mean those config options can only be set (persistently) in cassandra.yaml
 # and will require a restart for new values to take effect.
 #-Dcassandra.disable_auth_caches_remote_configuration=true
+
+# To disable dynamic calculation of the page size used when indexing an entire partition (during
+# initial index build/rebuild). If set to true, the page size will be fixed to the default of
+# 10000 rows per page.
+#-Dcassandra.force_default_indexing_page_size=true
 
 ########################
 # GENERAL JVM SETTINGS #
@@ -135,9 +134,9 @@
 #-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1414
 
 # uncomment to have Cassandra JVM log internal method compilation (developers only)
--XX:+UnlockDiagnosticVMOptions
--XX:+DebugNonSafepoints
--XX:+PreserveFramePointer
+#-XX:+UnlockDiagnosticVMOptions
+#-XX:+DebugNonSafepoints
+#-XX:+PreserveFramePointer
 #-XX:+LogCompilation
 
 #################
@@ -183,8 +182,6 @@
 #################
 
 ### CMS Settings
--XX:+UseNUMA
-
 -XX:+UseParNewGC
 -XX:+UseConcMarkSweepGC
 -XX:+CMSParallelRemarkEnabled

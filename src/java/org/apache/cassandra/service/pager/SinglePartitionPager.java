@@ -29,21 +29,18 @@ import org.apache.cassandra.transport.ProtocolVersion;
  *
  * For use by MultiPartitionPager.
  */
-public class SinglePartitionPager extends AbstractQueryPager
+public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionReadCommand>
 {
-    private final SinglePartitionReadCommand command;
-
     private volatile PagingState.RowMark lastReturned;
 
     public SinglePartitionPager(SinglePartitionReadCommand command, PagingState state, ProtocolVersion protocolVersion)
     {
         super(command, protocolVersion);
-        this.command = command;
 
         if (state != null)
         {
             lastReturned = state.rowMark;
-            restoreState(command.partitionKey(), state.remaining, state.remainingInPartition);
+            restoreState(command.partitionKey(), state.remaining, state.remainingInPartition, state.inclusive);
         }
     }
 
@@ -54,9 +51,8 @@ public class SinglePartitionPager extends AbstractQueryPager
                                  int remainingInPartition)
     {
         super(command, protocolVersion);
-        this.command = command;
         this.lastReturned = rowMark;
-        restoreState(command.partitionKey(), remaining, remainingInPartition);
+        restoreState(command.partitionKey(), remaining, remainingInPartition, false);
     }
 
     @Override
@@ -79,26 +75,44 @@ public class SinglePartitionPager extends AbstractQueryPager
         return command.limits();
     }
 
-    public PagingState state()
+    protected PagingState makePagingState(DecoratedKey lastKey, Row lastRow, boolean inclusive)
     {
-        return lastReturned == null
-             ? null
-             : new PagingState(null, lastReturned, maxRemaining(), remainingInPartition());
+        return makePagingState(getLastReturned(lastRow), inclusive);
+    }
+
+    protected PagingState makePagingState(boolean inclusive)
+    {
+        return makePagingState(lastReturned, inclusive);
+    }
+
+    private PagingState makePagingState(PagingState.RowMark lastRow, boolean inclusive)
+    {
+        return lastRow == null
+               ? null
+               : new PagingState(null, lastRow, maxRemaining(), remainingInPartition(), inclusive);
     }
 
     protected ReadCommand nextPageReadCommand(int pageSize)
     {
         Clustering clustering = lastReturned == null ? null : lastReturned.clustering(command.metadata());
-        DataLimits limits = (lastReturned == null || command.isForThrift()) ? limits().forPaging(pageSize)
-                                                                            : limits().forPaging(pageSize, key(), remainingInPartition());
+        DataLimits limits = lastReturned == null
+                          ? limits().forPaging(pageSize)
+                          : limits().forPaging(pageSize, key(), remainingInPartition());
 
-        return command.forPaging(clustering, limits);
+        return command.forPaging(clustering, limits, inclusive);
     }
 
     protected void recordLast(DecoratedKey key, Row last)
     {
+        lastReturned = getLastReturned(last);
+    }
+
+    private PagingState.RowMark getLastReturned(Row last)
+    {
         if (last != null && last.clustering() != Clustering.STATIC_CLUSTERING)
-            lastReturned = PagingState.RowMark.create(command.metadata(), last, protocolVersion);
+            return PagingState.RowMark.create(command.metadata(), last, protocolVersion);
+
+        return lastReturned;
     }
 
     protected boolean isPreviouslyReturnedPartition(DecoratedKey key)

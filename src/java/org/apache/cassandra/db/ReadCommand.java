@@ -33,7 +33,8 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.db.monitoring.MonitorableImpl;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -65,7 +66,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
  * <p>
  * This contains all the informations needed to do a local read.
  */
-public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
+public abstract class ReadCommand implements ReadQuery
 {
     private static final int TEST_ITERATION_DELAY_MILLIS = Integer.parseInt(System.getProperty("cassandra.test.read_iteration_delay_ms", "0"));
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
@@ -92,11 +93,12 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
     private boolean isDigestQuery;
     // if a digest query, the version for which the digest is expected. Ignored if not a digest.
     private int digestVersion;
-    private final boolean isForThrift;
+
+    protected Monitorable optionalMonitor;
 
     protected static abstract class SelectionDeserializer
     {
-        public abstract ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, boolean isForThrift, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index) throws IOException;
+        public abstract ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index) throws IOException;
     }
 
     protected enum Kind
@@ -115,22 +117,22 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
     protected ReadCommand(Kind kind,
                           boolean isDigestQuery,
                           int digestVersion,
-                          boolean isForThrift,
                           CFMetaData metadata,
                           int nowInSec,
                           ColumnFilter columnFilter,
                           RowFilter rowFilter,
-                          DataLimits limits)
+                          DataLimits limits,
+                          Monitorable optionalMonitor)
     {
         this.kind = kind;
         this.isDigestQuery = isDigestQuery;
         this.digestVersion = digestVersion;
-        this.isForThrift = isForThrift;
         this.metadata = metadata;
         this.nowInSec = nowInSec;
         this.columnFilter = columnFilter;
         this.rowFilter = rowFilter;
         this.limits = limits;
+        this.optionalMonitor = optionalMonitor;
     }
 
     protected abstract void serializeSelection(DataOutputPlus out, int version) throws IOException;
@@ -262,16 +264,6 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
     }
 
     /**
-     * Whether this query is for thrift or not.
-     *
-     * @return whether this query is for thrift.
-     */
-    public boolean isForThrift()
-    {
-        return isForThrift;
-    }
-
-    /**
      * The clustering index filter this command to use for the provided key.
      * <p>
      * Note that that method should only be called on a key actually queried by this command
@@ -308,6 +300,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             return IndexMetadata.serializer.serializedSize(index.get(), version);
         else
             return 0;
+    }
+
+    public Index getIndex()
+    {
+        return getIndex(Keyspace.openAndGetStore(metadata));
     }
 
     public Index getIndex(ColumnFamilyStore cfs)
@@ -508,9 +505,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         return Transformation.apply(iter, new MetricRecording());
     }
 
-    protected class CheckForAbort extends StoppingTransformation<BaseRowIterator<?>>
+    protected class CheckForAbort extends StoppingTransformation<UnfilteredRowIterator>
     {
-        protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
+        long lastChecked = 0;
+
+        protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
         {
             if (maybeAbort())
             {
@@ -518,21 +517,37 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
                 return null;
             }
 
-            return partition;
+            return Transformation.apply(partition, this);
         }
 
         protected Row applyToRow(Row row)
         {
+            if (TEST_ITERATION_DELAY_MILLIS > 0)
+                maybeDelayForTesting();
+
             return maybeAbort() ? null : row;
         }
 
         private boolean maybeAbort()
         {
-            if (TEST_ITERATION_DELAY_MILLIS > 0)
-                maybeDelayForTesting();
+            if (optionalMonitor == null)
+                return false;
 
-            if (isAborted())
+            /**
+             * The value returned by ApproximateTime.currentTimeMillis() is updated only every
+             * {@link ApproximateTime.CHECK_INTERVAL_MS}, by default 10 millis. Since MonitorableImpl
+             * relies on ApproximateTime, we don't need to check unless the approximate time has elapsed.
+             */
+            if (lastChecked == ApproximateTime.currentTimeMillis())
+                return false;
+
+            lastChecked = ApproximateTime.currentTimeMillis();
+
+            if (optionalMonitor.isAborted())
             {
+                if (logger.isTraceEnabled())
+                    logger.trace("Stopping {}.{} with monitorable {}", metadata.ksName, metadata.cfName, optionalMonitor);
+
                 stop();
                 return true;
             }
@@ -577,10 +592,16 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         return Transformation.apply(iter, new CheckForAbort());
     }
 
-    private void maybeDelayForTesting()
+        private void maybeDelayForTesting()
+        {
+            if (!metadata.ksName.startsWith("system"))
+                FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
+        }
+    }
+
+    protected UnfilteredPartitionIterator withStateTracking(UnfilteredPartitionIterator iter)
     {
-        if (!metadata.ksName.startsWith("system"))
-            FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
+        return Transformation.apply(iter, new CheckForAbort());
     }
 
     /**
@@ -595,12 +616,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
     protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator, ColumnFamilyStore cfs)
     {
-        final boolean isForThrift = iterator.isForThrift();
         class WithoutPurgeableTombstones extends PurgeFunction
         {
             public WithoutPurgeableTombstones()
             {
-                super(isForThrift, nowInSec(), cfs.gcBefore(nowInSec()), oldestUnrepairedTombstone(), cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
+                super(nowInSec(), cfs.gcBefore(nowInSec()), oldestUnrepairedTombstone(), cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
             }
 
             protected Predicate<Long> getPurgeEvaluator()
@@ -632,10 +652,34 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         return sb.toString();
     }
 
-    // Monitorable interface
-    public String name()
+    public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode)
     {
-        return toCQLString();
+       optionalMonitor = Monitorable.forNormalQuery(toCQLString(), constructionTime, timeout, slowQueryTimeout, isCrossNode);
+    }
+
+    public void monitorLocal(long startTime)
+    {
+        optionalMonitor = Monitorable.forLocalQuery(toCQLString(), startTime, DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
+    }
+
+    public boolean complete()
+    {
+        if (optionalMonitor == null)
+            return true;
+
+        return optionalMonitor.complete();
+    }
+
+    @VisibleForTesting
+    void abort()
+    {
+        if (optionalMonitor != null)
+            optionalMonitor.abort();
+    }
+
+    public boolean aborted()
+    {
+        return optionalMonitor == null ? false : optionalMonitor.isAborted();
     }
 
     private static class Serializer implements IVersionedSerializer<ReadCommand>
@@ -650,11 +694,11 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             return (flags & 0x01) != 0;
         }
 
-        private static int thriftFlag(boolean isForThrift)
-        {
-            return isForThrift ? 0x02 : 0;
-        }
-
+        // We don't set this flag anymore, but still look if we receive a
+        // command with it set in case someone is using thrift a mixed 3.0/4.0+
+        // cluster (which is unsupported). This is also a reminder for not
+        // re-using this flag until we drop 3.0/3.X compatibility (since it's
+        // used by these release for thrift and would thus confuse things)
         private static boolean isForThrift(int flags)
         {
             return (flags & 0x02) != 0;
@@ -673,7 +717,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
             out.writeByte(command.kind.ordinal());
-            out.writeByte(digestFlag(command.isDigestQuery()) | thriftFlag(command.isForThrift()) | indexFlag(command.index.isPresent()));
+            out.writeByte(digestFlag(command.isDigestQuery()) | indexFlag(command.index.isPresent()));
             if (command.isDigestQuery())
                 out.writeUnsignedVInt(command.digestVersion());
             CFMetaData.serializer.serialize(command.metadata(), out, version);
@@ -692,7 +736,14 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
             Kind kind = Kind.values()[in.readByte()];
             int flags = in.readByte();
             boolean isDigest = isDigest(flags);
-            boolean isForThrift = isForThrift(flags);
+            // Shouldn't happen or it's a user error (see comment above) but
+            // better complain loudly than doing the wrong thing.
+            if (isForThrift(flags))
+                throw new IllegalStateException("Received a command with the thrift flag set. "
+                                              + "This means thrift is in use in a mixed 3.0/3.X and 4.0+ cluster, "
+                                              + "which is unsupported. Make sure to stop using thrift before "
+                                              + "upgrading to 4.0");
+
             boolean hasIndex = hasIndex(flags);
             int digestVersion = isDigest ? (int)in.readUnsignedVInt() : 0;
             CFMetaData metadata = CFMetaData.serializer.deserialize(in, version);
@@ -704,7 +755,7 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
                                           ? deserializeIndexMetadata(in, version, metadata)
                                           : Optional.empty();
 
-            return kind.selectionDeserializer.deserialize(in, version, isDigest, digestVersion, isForThrift, metadata, nowInSec, columnFilter, rowFilter, limits, index);
+            return kind.selectionDeserializer.deserialize(in, version, isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, index);
         }
 
         private Optional<IndexMetadata> deserializeIndexMetadata(DataInputPlus in, int version, CFMetaData cfm) throws IOException

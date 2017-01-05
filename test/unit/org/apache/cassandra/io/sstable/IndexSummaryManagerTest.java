@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -610,7 +611,7 @@ public class IndexSummaryManagerTest
         // barrier to control when redistribution runs
         final CountDownLatch barrier = new CountDownLatch(1);
 
-        Thread t = new Thread(new Runnable()
+        Thread t = NamedThreadFactory.createThread(new Runnable()
         {
             public void run()
             {

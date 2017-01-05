@@ -74,9 +74,6 @@ public final class AuthConfig
         if (conf.authorizer != null)
             authorizer = FBUtilities.newAuthorizer(conf.authorizer);
 
-        if (!authenticator.requireAuthentication() && authorizer.requireAuthorization())
-            throw new ConfigurationException(conf.authenticator + " can't be used with " + conf.authorizer, false);
-
         DatabaseDescriptor.setAuthorizer(authorizer);
 
         // role manager
@@ -109,5 +106,11 @@ public final class AuthConfig
         authorizer.validateConfiguration();
         roleManager.validateConfiguration();
         internodeAuthenticator.validateConfiguration();
+
+        if (!authenticator.requireAuthentication() && authorizer.requireAuthorization())
+            throw new ConfigurationException(conf.authenticator + " does not currently require authentication, so it " +
+                                             "can't be used with " + conf.authorizer + " which does currently require " +
+                                             "authorization.  You need to either choose new classes or update their " +
+                                             "configurations so they are compatible.");
     }
 }

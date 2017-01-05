@@ -23,6 +23,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.cql3.CFName;
+import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -31,8 +32,6 @@ import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.transport.Event;
-
-import static org.apache.cassandra.thrift.ThriftValidation.validateColumnFamily;
 
 public class AlterViewStatement extends SchemaAlteringStatement
 {
@@ -58,7 +57,7 @@ public class AlterViewStatement extends SchemaAlteringStatement
 
     public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
-        CFMetaData meta = validateColumnFamily(keyspace(), columnFamily());
+        CFMetaData meta = Validation.validateColumnFamily(keyspace(), columnFamily());
         if (!meta.isView())
             return error("Cannot use ALTER MATERIALIZED VIEW on Table");
 

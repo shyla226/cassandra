@@ -46,6 +46,7 @@ import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
@@ -81,6 +82,9 @@ public class OutboundTcpConnection extends FastThreadLocalThread
      */
     private static final String BUFFER_SIZE_PROPERTY = PREFIX + "otc_buffer_size";
     private static final int BUFFER_SIZE = Integer.getInteger(BUFFER_SIZE_PROPERTY, 1024 * 64);
+
+    //Size of 3 elements added to every message
+    private static final int PROTOCOL_MAGIC_ID_TIMESTAMP_SIZE = 12;
 
     private static CoalescingStrategy newCoalescingStrategy(String displayName)
     {
@@ -280,7 +284,9 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             {
                 UUID sessionId = UUIDGen.getUUID(ByteBuffer.wrap(sessionBytes));
                 TraceState state = Tracing.instance.get(sessionId);
-                String message = String.format("Sending %s message to %s", qm.message.verb, poolReference.endPoint());
+                String message = String.format("Sending %s message to %s message size %d bytes", qm.message.verb,
+                                               poolReference.endPoint(),
+                                               qm.message.serializedSize(targetVersion) + PROTOCOL_MAGIC_ID_TIMESTAMP_SIZE);
                 // session may have already finished; see CASSANDRA-5668
                 if (state == null)
                 {
@@ -335,6 +341,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     private void writeInternal(MessageOut message, int id, long timestamp) throws IOException
     {
+        //If you add/remove fields before the message don't forget to update PROTOCOL_MAGIC_ID_TIMESTAMP_SIZE
         out.writeInt(MessagingService.PROTOCOL_MAGIC);
         out.writeInt(id);
 
@@ -489,31 +496,27 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     {
         final AtomicInteger version = new AtomicInteger(NO_VERSION);
         final CountDownLatch versionLatch = new CountDownLatch(1);
-        new Thread("HANDSHAKE-" + poolReference.endPoint())
+        NamedThreadFactory.createThread(() ->
         {
-            @Override
-            public void run()
+            try
             {
-                try
-                {
-                    logger.info("Handshaking version with {}", poolReference.endPoint());
-                    version.set(inputStream.readInt());
-                }
-                catch (IOException ex)
-                {
-                    final String msg = "Cannot handshake version with " + poolReference.endPoint();
-                    if (logger.isTraceEnabled())
-                        logger.trace(msg, ex);
-                    else
-                        logger.info(msg);
-                }
-                finally
-                {
-                    //unblock the waiting thread on either success or fail
-                    versionLatch.countDown();
-                }
+                logger.info("Handshaking version with {}", poolReference.endPoint());
+                version.set(inputStream.readInt());
             }
-        }.start();
+            catch (IOException ex)
+            {
+                final String msg = "Cannot handshake version with " + poolReference.endPoint();
+                if (logger.isTraceEnabled())
+                    logger.trace(msg, ex);
+                else
+                    logger.info(msg);
+            }
+            finally
+            {
+                //unblock the waiting thread on either success or fail
+                versionLatch.countDown();
+            }
+        }, "HANDSHAKE-" + poolReference.endPoint()).start();
 
         try
         {

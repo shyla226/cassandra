@@ -109,16 +109,10 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
             metrics.beginCompaction(this);
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
-                                             ? EmptyIterators.unfilteredPartition(controller.cfs.metadata, false)
+                                             ? EmptyIterators.unfilteredPartition(controller.cfs.metadata)
                                              : UnfilteredPartitionIterators.merge(scanners, nowInSec, listener());
-        boolean isForThrift = merged.isForThrift(); // to stop capture of iterator in Purger, which is confusing for debug
         merged = Transformation.apply(merged, new GarbageSkipper(controller, nowInSec));
-        this.compacted = Transformation.apply(merged, new Purger(isForThrift, controller, nowInSec));
-    }
-
-    public boolean isForThrift()
-    {
-        return false;
+        this.compacted = Transformation.apply(merged, new Purger(controller, nowInSec));
     }
 
     public CFMetaData metadata()
@@ -155,6 +149,9 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     {
         return new UnfilteredPartitionIterators.MergeListener()
         {
+            //We don't know if CUSTOM indexes require this so we always send trivial merges
+            boolean callOnTrivialMerge = controller.cfs.indexManager.listIndexes().stream().anyMatch(index -> index.getIndexMetadata().isCustom());
+
             public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
             {
                 int merged = 0;
@@ -225,6 +222,11 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
             public void close()
             {
             }
+
+            public boolean callOnTrivialMerge()
+            {
+                return callOnTrivialMerge;
+            }
         };
     }
 
@@ -283,9 +285,9 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
 
         private long compactedUnfiltered;
 
-        private Purger(boolean isForThrift, CompactionController controller, int nowInSec)
+        private Purger(CompactionController controller, int nowInSec)
         {
-            super(isForThrift, nowInSec, controller.gcBefore, controller.compactingRepaired() ? Integer.MAX_VALUE : Integer.MIN_VALUE, controller.cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
+            super(nowInSec, controller.gcBefore, controller.compactingRepaired() ? Integer.MAX_VALUE : Integer.MIN_VALUE, controller.cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
             this.controller = controller;
         }
 

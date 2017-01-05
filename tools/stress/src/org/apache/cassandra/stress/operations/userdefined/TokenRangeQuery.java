@@ -19,6 +19,7 @@
 package org.apache.cassandra.stress.operations.userdefined;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -26,33 +27,36 @@ import java.util.stream.Collectors;
 
 import javax.naming.OperationNotSupportedException;
 
+import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ColumnMetadata;
-import com.datastax.driver.core.PagingState;
-import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.ContinuousPagingOptions;
 import com.datastax.driver.core.Row;
+import com.datastax.driver.core.RowIterator;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.TableMetadata;
 import com.datastax.driver.core.Token;
 import com.datastax.driver.core.TokenRange;
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.stress.Operation;
 import org.apache.cassandra.stress.StressYaml;
 import org.apache.cassandra.stress.WorkManager;
 import org.apache.cassandra.stress.generate.TokenRangeIterator;
 import org.apache.cassandra.stress.report.Timer;
+import org.apache.cassandra.stress.settings.SettingsTokenRange;
 import org.apache.cassandra.stress.settings.StressSettings;
 import org.apache.cassandra.stress.util.JavaDriverClient;
-import org.apache.cassandra.stress.util.ThriftClient;
 
 public class TokenRangeQuery extends Operation
 {
-    private final ThreadLocal<State> currentState = new ThreadLocal<>();
+    private final FastThreadLocal<State> currentState = new FastThreadLocal<>();
 
     private final TableMetadata tableMetadata;
     private final TokenRangeIterator tokenRangeIterator;
     private final String columns;
     private final int pageSize;
     private final boolean isWarmup;
+    private final PrintWriter resultsWriter;
 
     public TokenRangeQuery(Timer timer,
                            StressSettings settings,
@@ -67,6 +71,19 @@ public class TokenRangeQuery extends Operation
         this.columns = sanitizeColumns(def.columns, tableMetadata);
         this.pageSize = isWarmup ? Math.min(100, def.page_size) : def.page_size;
         this.isWarmup = isWarmup;
+        this.resultsWriter = maybeCreateResultsWriter(settings.tokenRange);
+    }
+
+    private static PrintWriter maybeCreateResultsWriter(SettingsTokenRange settings)
+    {
+        try
+        {
+            return settings.saveData ? new PrintWriter(settings.dataFileName, "UTF-8") : null;
+        }
+        catch (IOException ex)
+        {
+            throw new RuntimeException(ex);
+        }
     }
 
     /**
@@ -83,14 +100,14 @@ public class TokenRangeQuery extends Operation
 
     /**
      * The state of a token range currently being retrieved.
-     * Here we store the paging state to retrieve more pages
+     * Here we store the row iterator to retrieve more pages
      * and we keep track of which partitions have already been retrieved,
      */
     private final static class State
     {
         public final TokenRange tokenRange;
         public final String query;
-        public PagingState pagingState;
+        public RowIterator it;
         public Set<Token> partitions = new HashSet<>();
 
         public State(TokenRange tokenRange, String query)
@@ -146,21 +163,20 @@ public class TokenRangeQuery extends Operation
                 currentState.set(state);
             }
 
-            ResultSet results;
-            Statement statement = new SimpleStatement(state.query);
-            statement.setFetchSize(pageSize);
-
-            if (state.pagingState != null)
-                statement.setPagingState(state.pagingState);
-
-            results = client.execute(statement);
-            state.pagingState = results.getExecutionInfo().getPagingState();
-
-            int remaining = results.getAvailableWithoutFetching();
-            rowCount += remaining;
-
-            for (Row row : results)
+            if (state.it == null)
             {
+                Statement statement = new SimpleStatement(state.query);
+                statement.setRoutingTokenRange(state.tokenRange);
+                statement.setConsistencyLevel(JavaDriverClient.from(settings.command.consistencyLevel));
+                state.it = client.execute(statement, ContinuousPagingOptions.create(pageSize, ContinuousPagingOptions.PageUnit.ROWS));
+            }
+
+            int rowsToProcess = pageSize;
+            while (state.it.hasNext())
+            {
+                Row row = state.it.next();
+                rowCount++;
+
                 // this call will only succeed if we've added token(partition keys) to the query
                 Token partition = row.getPartitionKeyToken();
                 if (!state.partitions.contains(partition))
@@ -169,18 +185,61 @@ public class TokenRangeQuery extends Operation
                     state.partitions.add(partition);
                 }
 
-                if (--remaining == 0)
+                if (shouldSaveResults())
+                    saveRow(row);
+
+                // each cassandra-stress operation is one page, so if we've processed pageSize rows,
+                // we stop and resume later on with the next operation
+                if (--rowsToProcess == 0)
                     break;
             }
 
-            if (results.isExhausted() || isWarmup)
+            if (shouldSaveResults())
+                flushResults();
+
+            if (!state.it.hasNext() || isWarmup)
             { // no more pages to fetch or just warming up, ready to move on to another token range
+                state.it.close();
                 currentState.set(null);
             }
 
             return true;
         }
+
+        private boolean shouldSaveResults()
+        {
+            return resultsWriter != null && !isWarmup;
+        }
+
+        private void flushResults()
+        {
+            synchronized (resultsWriter)
+            {
+                resultsWriter.flush();
+            }
+        }
+
+        private void saveRow(Row row)
+        {
+            assert resultsWriter != null;
+            synchronized (resultsWriter)
+            {
+                for (ColumnDefinitions.Definition cd : row.getColumnDefinitions())
+                {
+                    Object value = row.getObject(cd.getName());
+
+                    if (value instanceof String)
+                        resultsWriter.print(((String)value).replaceAll("\\p{C}", "?"));
+                    else
+                        resultsWriter.print(value.toString());
+
+                    resultsWriter.print(',');
+                }
+                resultsWriter.print(System.lineSeparator());
+            }
+        }
     }
+
 
     private String buildQuery(TokenRange tokenRange)
     {
@@ -195,6 +254,8 @@ public class TokenRangeQuery extends Operation
         ret.append(", ");
         ret.append(columns);
         ret.append(" FROM ");
+        ret.append(tableMetadata.getKeyspace().getName());
+        ret.append(".");
         ret.append(tableMetadata.getName());
         if (start != null || end != null)
             ret.append(" WHERE ");
@@ -218,32 +279,10 @@ public class TokenRangeQuery extends Operation
         return ret.toString();
     }
 
-    private static class ThriftRun extends Runner
-    {
-        final ThriftClient client;
-
-        private ThriftRun(ThriftClient client)
-        {
-            this.client = client;
-        }
-
-        public boolean run() throws Exception
-        {
-            throw new OperationNotSupportedException("Bulk read over thrift not supported");
-        }
-    }
-
-
     @Override
     public void run(JavaDriverClient client) throws IOException
     {
         timeWithRetry(new JavaDriverRun(client));
-    }
-
-    @Override
-    public void run(ThriftClient client) throws IOException
-    {
-        timeWithRetry(new ThriftRun(client));
     }
 
     public int ready(WorkManager workManager)
@@ -254,8 +293,15 @@ public class TokenRangeQuery extends Operation
             return 0;
 
         int numLeft = workManager.takePermits(1);
+        int ret = numLeft > 0 ? 1 : 0;
 
-        return numLeft > 0 ? 1 : 0;
+        if (ret == 0)
+        {
+            State state = currentState.get();
+            if (state != null && state.it != null)
+                state.it.close(); // be nice to the driver
+        }
+        return ret;
     }
 
     public String key()

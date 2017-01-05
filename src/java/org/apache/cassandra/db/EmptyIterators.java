@@ -60,17 +60,10 @@ public class EmptyIterators
     private static class EmptyUnfilteredPartitionIterator extends EmptyBasePartitionIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         final CFMetaData metadata;
-        final boolean isForThrift;
 
-        public EmptyUnfilteredPartitionIterator(CFMetaData metadata, boolean isForThrift)
+        public EmptyUnfilteredPartitionIterator(CFMetaData metadata)
         {
             this.metadata = metadata;
-            this.isForThrift = isForThrift;
-        }
-
-        public boolean isForThrift()
-        {
-            return isForThrift;
         }
 
         public CFMetaData metadata()
@@ -97,8 +90,8 @@ public class EmptyIterators
     {
         final PartitionColumns columns;
         final CFMetaData metadata;
-        final DecoratedKey partitionKey;
-        final boolean isReverseOrder;
+        DecoratedKey partitionKey;
+        boolean isReverseOrder;
         final Row staticRow;
 
         EmptyBaseRowIterator(PartitionColumns columns, CFMetaData metadata, DecoratedKey partitionKey, boolean isReverseOrder, Row staticRow)
@@ -155,9 +148,9 @@ public class EmptyIterators
         }
     }
 
-    private static class EmptyUnfilteredRowIterator extends EmptyBaseRowIterator<Unfiltered> implements UnfilteredRowIterator
+    public static class EmptyUnfilteredRowIterator extends EmptyBaseRowIterator<Unfiltered> implements UnfilteredRowIterator
     {
-        final DeletionTime partitionLevelDeletion;
+        DeletionTime partitionLevelDeletion;
         public EmptyUnfilteredRowIterator(PartitionColumns columns, CFMetaData metadata, DecoratedKey partitionKey,
                                           boolean isReverseOrder, Row staticRow, DeletionTime partitionLevelDeletion)
         {
@@ -180,6 +173,17 @@ public class EmptyIterators
             return EncodingStats.NO_STATS;
         }
 
+        /**
+         * Allow empty iterator to be reused across partitions.
+         * Can only be reused on the same table not across tables.
+         */
+        public void reuse(DecoratedKey partitionKey, boolean isReverseOrder, DeletionTime partitionLevelDeletion)
+        {
+            this.partitionKey = partitionKey;
+            this.isReverseOrder = isReverseOrder;
+            this.partitionLevelDeletion = partitionLevelDeletion;
+        }
+
         public Observable<Unfiltered> asObservable()
         {
             return Observable.empty();
@@ -194,9 +198,9 @@ public class EmptyIterators
         }
     }
 
-    public static UnfilteredPartitionIterator unfilteredPartition(CFMetaData metadata, boolean isForThrift)
+    public static UnfilteredPartitionIterator unfilteredPartition(CFMetaData metadata)
     {
-        return new EmptyUnfilteredPartitionIterator(metadata, isForThrift);
+        return new EmptyUnfilteredPartitionIterator(metadata);
     }
 
     public static PartitionIterator partition()

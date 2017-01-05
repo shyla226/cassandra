@@ -52,11 +52,6 @@ public abstract class QueryOptions
     // A cache of bind values parsed as JSON, see getJsonColumnValue for details.
     private List<Map<ColumnIdentifier, Term>> jsonValuesCache;
 
-    public static QueryOptions fromThrift(ConsistencyLevel consistency, List<ByteBuffer> values)
-    {
-        return new DefaultQueryOptions(consistency, values, false, SpecificOptions.DEFAULT, ProtocolVersion.V3);
-    }
-
     public static QueryOptions forInternalCalls(ConsistencyLevel consistency, List<ByteBuffer> values)
     {
         return new DefaultQueryOptions(consistency, values, false, SpecificOptions.DEFAULT, ProtocolVersion.V3);
@@ -74,7 +69,17 @@ public abstract class QueryOptions
 
     public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, int pageSize, PagingState pagingState, ConsistencyLevel serialConsistency, ProtocolVersion version)
     {
-        return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(pageSize, pagingState, serialConsistency, -1L), version);
+        // paging state is ignored if pageSize <= 0
+        assert pageSize > 0 || pagingState == null;
+        PagingOptions pagingOptions = pageSize > 0
+                                      ? new PagingOptions(PageSize.rowsSize(pageSize), PagingOptions.Mechanism.SINGLE, pagingState)
+                                      : null;
+        return create(consistency, values, skipMetadata, pagingOptions, serialConsistency, version);
+    }
+
+    public static QueryOptions create(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, PagingOptions pagingOptions, ConsistencyLevel serialConsistency, ProtocolVersion version)
+    {
+        return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(pagingOptions, serialConsistency, -1L), version);
     }
 
     public static QueryOptions addColumnSpecifications(QueryOptions options, List<ColumnSpecification> columnSpecs)
@@ -153,18 +158,6 @@ public abstract class QueryOptions
         throw new UnsupportedOperationException();
     }
 
-    /**  The pageSize for this query. Will be {@code <= 0} if not relevant for the query.  */
-    public int getPageSize()
-    {
-        return getSpecificOptions().pageSize;
-    }
-
-    /** The paging state for this query, or null if not relevant. */
-    public PagingState getPagingState()
-    {
-        return getSpecificOptions().state;
-    }
-
     /**  Serial consistency for conditional updates. */
     public ConsistencyLevel getSerialConsistency()
     {
@@ -178,13 +171,32 @@ public abstract class QueryOptions
     }
 
     /**
-     * The protocol version for the query. Will be 3 if the object don't come from
-     * a native protocol request (i.e. it's been allocated locally or by CQL-over-thrift).
+     * The protocol version for the query.
      */
     public abstract ProtocolVersion getProtocolVersion();
 
     // Mainly for the sake of BatchQueryOptions
     abstract SpecificOptions getSpecificOptions();
+
+    /**
+     * The paging options for this query, if paging is requested.
+     *
+     * @return the paging options for this query if paging is requested,
+     * {@code null} otherwise.
+     */
+    public PagingOptions getPagingOptions()
+    {
+        return getSpecificOptions().pagingOptions;
+    }
+
+    /**
+     * @return true if the client has requested pages to be pushed continuously.
+     */
+    public boolean continuousPagesRequested()
+    {
+        PagingOptions pagingOptions = getPagingOptions();
+        return pagingOptions != null && pagingOptions.isContinuous();
+    }
 
     public QueryOptions prepare(List<ColumnSpecification> specs)
     {
@@ -344,22 +356,116 @@ public abstract class QueryOptions
         }
     }
 
-    // Options that are likely to not be present in most queries
+    /**
+     * Options that are not necessarily present in all queries.
+     */
     static class SpecificOptions
     {
-        private static final SpecificOptions DEFAULT = new SpecificOptions(-1, null, null, Long.MIN_VALUE);
+        private static final SpecificOptions DEFAULT = new SpecificOptions(null, null, Long.MIN_VALUE);
 
-        private final int pageSize;
-        private final PagingState state;
+        private final PagingOptions pagingOptions;
         private final ConsistencyLevel serialConsistency;
         private final long timestamp;
 
-        private SpecificOptions(int pageSize, PagingState state, ConsistencyLevel serialConsistency, long timestamp)
+        private SpecificOptions(PagingOptions pagingOptions, ConsistencyLevel serialConsistency, long timestamp)
         {
-            this.pageSize = pageSize;
-            this.state = state;
+            this.pagingOptions = pagingOptions;
             this.serialConsistency = serialConsistency == null ? ConsistencyLevel.SERIAL : serialConsistency;
             this.timestamp = timestamp;
+        }
+    }
+
+    /**
+     * The paging options requested by the client, these include the page size,
+     * the paging mechanism and other paging parameters.
+     */
+    public static class PagingOptions
+    {
+        private enum Mechanism
+        {
+            /** The client requests only a single page */
+            SINGLE,
+
+            /**
+             * The client requests up to maxPages, or all pages if maxPages <= 0,
+             * to be pushed continuously with a rate not exceeding maxPagesPerSecond per second, if >0,
+             * or as quickly as possible.
+             */
+            CONTINUOUS
+        };
+
+        private final PageSize pageSize;
+        private final Mechanism mechanism;
+        private final PagingState pagingState;
+        private final int maxPages;
+        private final int maxPagesPerSecond;
+
+        private PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState)
+        {
+            this(pageSize, mechanism, pagingState, 0, 0);
+        }
+
+        private PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState, int maxPages, int maxPagesPerSecond)
+        {
+            assert pageSize != null : "pageSize cannot be null";
+
+            this.pageSize = pageSize;
+            this.mechanism = mechanism;
+            this.pagingState = pagingState;
+            this.maxPages = maxPages <= 0 ? Integer.MAX_VALUE : maxPages;
+            this.maxPagesPerSecond = maxPagesPerSecond;
+        }
+
+        public boolean isContinuous()
+        {
+            return mechanism == Mechanism.CONTINUOUS;
+        }
+
+        public PageSize pageSize()
+        {
+            return pageSize;
+        }
+
+        public PagingState state()
+        {
+            return pagingState;
+        }
+
+        public int maxPages()
+        {
+            return maxPages;
+        }
+
+        public int maxPagesPerSecond()
+        {
+            return maxPagesPerSecond;
+        }
+
+        @Override
+        public final int hashCode()
+        {
+            return Objects.hash(pageSize, mechanism, pagingState, maxPages, maxPagesPerSecond);
+        }
+
+        @Override
+        public final boolean equals(Object o)
+        {
+            if(!(o instanceof PagingOptions))
+                return false;
+
+            PagingOptions that = (PagingOptions)o;
+            return Objects.equals(this.pageSize, that.pageSize)
+                && Objects.equals(this.mechanism, that.mechanism)
+                && Objects.equals(this.pagingState, that.pagingState)
+                && this.maxPages == that.maxPages
+                && this.maxPagesPerSecond == that.maxPagesPerSecond;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("%s %s (max %d, %d per second) with state %s",
+                                 pageSize, mechanism, maxPages, maxPagesPerSecond, pagingState);
         }
     }
 
@@ -367,24 +473,36 @@ public abstract class QueryOptions
     {
         private enum Flag
         {
-            // The order of that enum matters!!
-            VALUES,
-            SKIP_METADATA,
-            PAGE_SIZE,
-            PAGING_STATE,
-            SERIAL_CONSISTENCY,
-            TIMESTAMP,
-            NAMES_FOR_VALUES;
+            // public flags
+            VALUES(0),
+            SKIP_METADATA(1),
+            PAGE_SIZE(2),
+            PAGING_STATE(3),
+            SERIAL_CONSISTENCY(4),
+            TIMESTAMP(5),
+            NAMES_FOR_VALUES(6),
+
+            // private flags
+            PAGE_SIZE_BYTES(30),
+            CONTINUOUS_PAGING(31);
+
+            /** The position of the bit that must be set to one to indicate a flag is set */
+            private final int pos;
+
+            Flag(int pos)
+            {
+                this.pos = pos;
+            }
 
             private static final Flag[] ALL_VALUES = values();
 
             public static EnumSet<Flag> deserialize(int flags)
             {
                 EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
-                for (int n = 0; n < ALL_VALUES.length; n++)
+                for (Flag flag : ALL_VALUES)
                 {
-                    if ((flags & (1 << n)) != 0)
-                        set.add(ALL_VALUES[n]);
+                    if ((flags & (1 << flag.pos)) != 0)
+                        set.add(flag);
                 }
                 return set;
             }
@@ -393,7 +511,7 @@ public abstract class QueryOptions
             {
                 int i = 0;
                 for (Flag flag : flags)
-                    i |= 1 << flag.ordinal();
+                    i |= 1 << flag.pos;
                 return i;
             }
         }
@@ -428,9 +546,24 @@ public abstract class QueryOptions
             SpecificOptions options = SpecificOptions.DEFAULT;
             if (!flags.isEmpty())
             {
-                int pageSize = flags.contains(Flag.PAGE_SIZE) ? body.readInt() : -1;
+                PageSize pageSize = null;
+                if (flags.contains(Flag.PAGE_SIZE))
+                {
+                    try
+                    {
+                        pageSize = new PageSize(body.readInt(),
+                                                flags.contains(Flag.PAGE_SIZE_BYTES) ? PageSize.PageUnit.BYTES : PageSize.PageUnit.ROWS);
+                    }
+                    catch (IllegalArgumentException e)
+                    {
+                        throw new ProtocolException(String.format("Invalid page size: " + e.getMessage()));
+                    }
+                }
+
                 PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValue(body), version) : null;
+
                 ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : ConsistencyLevel.SERIAL;
+
                 long timestamp = Long.MIN_VALUE;
                 if (flags.contains(Flag.TIMESTAMP))
                 {
@@ -440,14 +573,43 @@ public abstract class QueryOptions
                     timestamp = ts;
                 }
 
-                options = new SpecificOptions(pageSize, pagingState, serialConsistency, timestamp);
+                PagingOptions pagingOptions = null;
+                boolean hasContinuousPaging = flags.contains(Flag.CONTINUOUS_PAGING);
+
+                if (pageSize == null)
+                {
+                    // Not paging, so check no other paging option had been set
+                    if (hasContinuousPaging)
+                        throw new ProtocolException("Cannot use continuous paging without indicating a positive page size");
+                    if (pagingState != null)
+                        throw new ProtocolException("Paging state requires a page size");
+                }
+                else if (hasContinuousPaging)
+                {
+                    if (version.isSmallerThan(ProtocolVersion.DSE_V1))
+                        throw new ProtocolException("Continuous paging requires DSE_V1 or higher");
+
+                    pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.CONTINUOUS, pagingState, body.readInt(), body.readInt());
+                }
+                else
+                {
+                    if (!pageSize.isInRows())
+                        throw new ProtocolException("Page size in bytes is only supported with continuous paging");
+
+                    pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.SINGLE, pagingState);
+                }
+
+                options = new SpecificOptions(pagingOptions, serialConsistency, timestamp);
             }
+
             DefaultQueryOptions opts = new DefaultQueryOptions(consistency, values, skipMetadata, options, version);
             return names == null ? opts : new OptionsWithNames(opts, names);
         }
 
         public void encode(QueryOptions options, ByteBuf dest, ProtocolVersion version)
         {
+            PagingOptions pagingOptions = options.getPagingOptions();
+
             CBUtil.writeConsistencyLevel(options.getConsistency(), dest);
 
             EnumSet<Flag> flags = gatherFlags(options);
@@ -459,13 +621,18 @@ public abstract class QueryOptions
             if (flags.contains(Flag.VALUES))
                 CBUtil.writeValueList(options.getValues(), dest);
             if (flags.contains(Flag.PAGE_SIZE))
-                dest.writeInt(options.getPageSize());
+                dest.writeInt(pagingOptions.pageSize().rawSize());
             if (flags.contains(Flag.PAGING_STATE))
-                CBUtil.writeValue(options.getPagingState().serialize(version), dest);
+                CBUtil.writeValue(pagingOptions.state().serialize(version), dest);
             if (flags.contains(Flag.SERIAL_CONSISTENCY))
                 CBUtil.writeConsistencyLevel(options.getSerialConsistency(), dest);
             if (flags.contains(Flag.TIMESTAMP))
                 dest.writeLong(options.getSpecificOptions().timestamp);
+            if (flags.contains(Flag.CONTINUOUS_PAGING))
+            {
+                dest.writeInt(pagingOptions.maxPages);
+                dest.writeInt(pagingOptions.maxPagesPerSecond);
+            }
 
             // Note that we don't really have to bother with NAMES_FOR_VALUES server side,
             // and in fact we never really encode QueryOptions, only decode them, so we
@@ -474,6 +641,7 @@ public abstract class QueryOptions
 
         public int encodedSize(QueryOptions options, ProtocolVersion version)
         {
+            PagingOptions pagingOptions = options.getPagingOptions();
             int size = 0;
 
             size += CBUtil.sizeOfConsistencyLevel(options.getConsistency());
@@ -486,10 +654,12 @@ public abstract class QueryOptions
             if (flags.contains(Flag.PAGE_SIZE))
                 size += 4;
             if (flags.contains(Flag.PAGING_STATE))
-                size += CBUtil.sizeOfValue(options.getPagingState().serializedSize(version));
+                size += CBUtil.sizeOfValue(pagingOptions.state().serializedSize(version));
             if (flags.contains(Flag.SERIAL_CONSISTENCY))
                 size += CBUtil.sizeOfConsistencyLevel(options.getSerialConsistency());
             if (flags.contains(Flag.TIMESTAMP))
+                size += 8;
+            if (flags.contains(Flag.CONTINUOUS_PAGING))
                 size += 8;
 
             return size;
@@ -502,14 +672,22 @@ public abstract class QueryOptions
                 flags.add(Flag.VALUES);
             if (options.skipMetadata())
                 flags.add(Flag.SKIP_METADATA);
-            if (options.getPageSize() >= 0)
+            PagingOptions pagingOptions = options.getPagingOptions();
+            if (pagingOptions != null)
+            {
                 flags.add(Flag.PAGE_SIZE);
-            if (options.getPagingState() != null)
-                flags.add(Flag.PAGING_STATE);
+                if (pagingOptions.pageSize.isInBytes())
+                    flags.add(Flag.PAGE_SIZE_BYTES);
+                if (pagingOptions.state() != null)
+                    flags.add(Flag.PAGING_STATE);
+                if (pagingOptions.isContinuous())
+                    flags.add(Flag.CONTINUOUS_PAGING);
+            }
             if (options.getSerialConsistency() != ConsistencyLevel.SERIAL)
                 flags.add(Flag.SERIAL_CONSISTENCY);
             if (options.getSpecificOptions().timestamp != Long.MIN_VALUE)
                 flags.add(Flag.TIMESTAMP);
+
             return flags;
         }
     }

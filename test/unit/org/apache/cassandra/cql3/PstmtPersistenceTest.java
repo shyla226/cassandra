@@ -50,22 +50,22 @@ public class PstmtPersistenceTest extends CQLTester
         execute("CREATE KEYSPACE IF NOT EXISTS foo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
         execute("CREATE TABLE foo.bar (key text PRIMARY KEY, val int)");
 
-        ClientState clientState = ClientState.forExternalCalls(InetSocketAddress.createUnresolved("127.0.0.1", 1234));
+        ClientState clientState = ClientState.forInternalCalls();
 
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
 
         List<MD5Digest> stmtIds = new ArrayList<>();
         // #0
-        stmtIds.add(QueryProcessor.prepare("SELECT * FROM " + SchemaConstants.SCHEMA_KEYSPACE_NAME + '.' + SchemaKeyspace.TABLES + " WHERE keyspace_name = ?", clientState, false).blockingGet().statementId);
+        stmtIds.add(QueryProcessor.prepare("SELECT * FROM " + SchemaConstants.SCHEMA_KEYSPACE_NAME + '.' + SchemaKeyspace.TABLES + " WHERE keyspace_name = ?", clientState).blockingGet().statementId);
         // #1
-        stmtIds.add(QueryProcessor.prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable() + " WHERE pk = ?", clientState, false).blockingGet().statementId);
+        stmtIds.add(QueryProcessor.prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable() + " WHERE pk = ?", clientState).blockingGet().statementId);
         // #2
-        stmtIds.add(QueryProcessor.prepare("SELECT * FROM foo.bar WHERE key = ?", clientState, false).blockingGet().statementId);
+        stmtIds.add(QueryProcessor.prepare("SELECT * FROM foo.bar WHERE key = ?", clientState).blockingGet().statementId);
         clientState.setKeyspace("foo");
         // #3
-        stmtIds.add(QueryProcessor.prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable() + " WHERE pk = ?", clientState, false).blockingGet().statementId);
+        stmtIds.add(QueryProcessor.prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable() + " WHERE pk = ?", clientState).blockingGet().statementId);
         // #4
-        stmtIds.add(QueryProcessor.prepare("SELECT * FROM foo.bar WHERE key = ?", clientState, false).blockingGet().statementId);
+        stmtIds.add(QueryProcessor.prepare("SELECT * FROM foo.bar WHERE key = ?", clientState).blockingGet().statementId);
 
         Assert.assertEquals(5, stmtIds.size());
         Assert.assertEquals(5, QueryProcessor.preparedStatementsCount());
@@ -97,7 +97,7 @@ public class PstmtPersistenceTest extends CQLTester
         }
 
         // add anther prepared statement and sync it to table
-        QueryProcessor.prepare("SELECT * FROM bar WHERE key = ?", clientState, false);
+        QueryProcessor.prepare("SELECT * FROM bar WHERE key = ?", clientState);
         Assert.assertEquals(6, QueryProcessor.preparedStatementsCount());
         rows = QueryProcessor.executeOnceInternal(queryAll).blockingGet().size();
         Assert.assertEquals(6, rows);

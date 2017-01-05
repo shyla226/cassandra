@@ -70,7 +70,6 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
@@ -408,7 +407,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
         }
 
-        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime).blockingGet())
+        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime, false).blockingGet())
         {
             return asMaterializedMap(iter);
         }
@@ -481,20 +480,18 @@ public abstract class ModificationStatement implements CQLStatement
     {
         List<ByteBuffer> keys = buildPartitionKeyNames(options);
         // We don't support IN for CAS operation so far
-        checkFalse(keys.size() > 1,
+        checkFalse(restrictions.keyIsInRelation(),
                    "IN on the partition key is not supported with conditional %s",
                    type.isUpdate()? "updates" : "deletions");
 
         DecoratedKey key = cfm.decorateKey(keys.get(0));
         long now = options.getTimestamp(queryState);
-        SortedSet<Clustering> clusterings = createClustering(options);
 
-        checkFalse(clusterings.size() > 1,
+        checkFalse(restrictions.clusteringKeyRestrictionsHasIN(),
                    "IN on the clustering key columns is not supported with conditional %s",
                     type.isUpdate()? "updates" : "deletions");
 
-        Clustering clustering = Iterables.getOnlyElement(clusterings);
-
+        Clustering clustering = Iterables.getOnlyElement(createClustering(options));
         CQL3CasRequest request = new CQL3CasRequest(cfm, key, false, conditionColumns(), updatesRegularRows(), updatesStaticRow());
 
         addConditions(clustering, request, options);
@@ -576,7 +573,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         }
 
-        Selection.ResultSetBuilder builder = selection.resultSetBuilder(options, false);
+        ResultSet.Builder builder = ResultSet.makeBuilder(options, false, selection);
         SelectStatement.forSelection(cfm, selection).processPartition(partition,
                                                                       options,
                                                                       builder,
@@ -686,7 +683,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                            queryStartNanoTime);
             for (ByteBuffer key : keys)
             {
-                ThriftValidation.validateKey(cfm, key);
+                Validation.validateKey(cfm, key);
                 DecoratedKey dk = cfm.decorateKey(key);
 
                 PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency());
@@ -703,12 +700,12 @@ public abstract class ModificationStatement implements CQLStatement
 
             for (ByteBuffer key : keys)
             {
-                ThriftValidation.validateKey(cfm, key);
+                Validation.validateKey(cfm, key);
                 DecoratedKey dk = cfm.decorateKey(key);
 
                 PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency());
 
-                if (clusterings.isEmpty())
+                if (!restrictions.hasClusteringColumnsRestriction())
                 {
                     addUpdateForKey(upd, Clustering.EMPTY, params);
                 }
@@ -825,13 +822,13 @@ public abstract class ModificationStatement implements CQLStatement
         {
             VariableSpecifications boundNames = getBoundVariables();
             ModificationStatement statement = prepare(boundNames);
-            CFMetaData cfm = ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
+            CFMetaData cfm = Validation.validateColumnFamily(keyspace(), columnFamily());
             return new ParsedStatement.Prepared(statement, boundNames, boundNames.getPartitionKeyBindIndexes(cfm));
         }
 
         public ModificationStatement prepare(VariableSpecifications boundNames)
         {
-            CFMetaData metadata = ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
+            CFMetaData metadata = Validation.validateColumnFamily(keyspace(), columnFamily());
 
             Attributes preparedAttributes = attrs.prepare(keyspace(), columnFamily());
             preparedAttributes.collectMarkerSpecification(boundNames);
@@ -925,7 +922,7 @@ public abstract class ModificationStatement implements CQLStatement
                 throw new InvalidRequestException(CUSTOM_EXPRESSIONS_NOT_ALLOWED);
 
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return new StatementRestrictions(type, cfm, where, boundNames, applyOnlyToStaticColumns, false, false, false);
+            return new StatementRestrictions(type, cfm, where, boundNames, applyOnlyToStaticColumns, false, false);
         }
 
         /**

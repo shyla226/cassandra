@@ -383,7 +383,7 @@ CSV data from stdin.
 
 See :ref:`shared-copy-options` for options that apply to both ``COPY TO`` and ``COPY FROM``.
 
-Options for ``COPY TO``
+Options for ``COPY FROM``
 ```````````````````````
 
 ``INGESTRATE``
@@ -416,6 +416,21 @@ Options for ``COPY TO``
 
 ``CHUNKSIZE``
   The number of rows that are passed to child worker processes from the main process at a time. Defaults to 1000.
+
+``PREPAREDSTATEMENTS``
+  Whether to use prepared statements when importing, by default True. Set this to
+  False if you don't mind shifting data parsing to the cluster. The cluster will also
+  have to compile every batch statement. For large and oversized clusters
+  this will result in a faster import but for smaller clusters it may generate timeouts.
+
+``TTL``
+  The time to live in seconds, by default data will not expire.
+
+``INSERTNULLFORMISSINGVALUES``
+  By default, CSV null values are inserted as null via tombstones, set this to false
+  in order to leave them unchanged. This option is ignored when prepared statements
+  are not used, which includes counters. For counters missing values will be inserted
+  as zero, which will not change the value of a counter.
 
 .. _shared-copy-options:
 

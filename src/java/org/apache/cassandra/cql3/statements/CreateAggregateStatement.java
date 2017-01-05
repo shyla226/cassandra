@@ -36,7 +36,6 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.ProtocolVersion;
 
@@ -163,7 +162,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         if (!functionName.hasKeyspace())
             throw new InvalidRequestException("Functions must be fully qualified with a keyspace name if a keyspace is not set for the session");
 
-        ThriftValidation.validateKeyspaceNotSystem(functionName.keyspace);
+        Validation.validateKeyspaceNotSystem(functionName.keyspace);
 
         stateFunc = new FunctionName(functionName.keyspace, stateFunc.name);
         if (finalFunc != null)

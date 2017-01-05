@@ -21,6 +21,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.net.InetAddress;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.HashMultimap;
@@ -40,6 +41,7 @@ import org.apache.cassandra.service.DatacenterSyncWriteResponseHandler;
 import org.apache.cassandra.service.DatacenterWriteResponseHandler;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.FBUtilities;
+
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 /**
@@ -73,6 +75,23 @@ public abstract class AbstractReplicationStrategy
     }
 
     private final Map<Token, ArrayList<InetAddress>> cachedEndpoints = new NonBlockingHashMap<Token, ArrayList<InetAddress>>();
+
+    private static final class VersionedRanges
+    {
+        final long ringVersion;
+        final List<Range<Token>> ranges;
+
+        public VersionedRanges(long ringVersion, List<Range<Token>> ranges)
+        {
+            this.ringVersion = ringVersion;
+            this.ranges = ranges;
+        }
+    }
+
+    /** The ranges for the local host, normalized and cached until the ring version changes. We
+     * start with an empty list versioned at -1, so that the first time the ranges are requested we are sure
+     * that they will be created (minimum valid ring version is zero). */
+    private final AtomicReference<VersionedRanges> normalizedLocalRanges = new AtomicReference<>(new VersionedRanges(-1L, Collections.emptyList()));
 
     public ArrayList<InetAddress> getCachedEndpoints(Token t)
     {
@@ -202,6 +221,24 @@ public abstract class AbstractReplicationStrategy
     public Multimap<InetAddress, Range<Token>> getAddressRanges()
     {
         return getAddressRanges(tokenMetadata.cloneOnlyTokenMap());
+    }
+
+    public Collection<Range<Token>> getNormalizedLocalRanges()
+    {
+        long lastVersion = tokenMetadata.getRingVersion();
+        VersionedRanges ret = normalizedLocalRanges.get();
+
+        while (ret.ringVersion < lastVersion)
+        {
+            List<Range<Token>> ranges = Range.normalize(getAddressRanges().get(FBUtilities.getBroadcastAddress()));
+            if (normalizedLocalRanges.compareAndSet(ret, new VersionedRanges(lastVersion, ranges)))
+                return ranges;
+
+            lastVersion = tokenMetadata.getRingVersion();
+            ret = normalizedLocalRanges.get();
+        }
+
+        return ret.ranges;
     }
 
     public Collection<Range<Token>> getPendingAddressRanges(TokenMetadata metadata, Token pendingToken, InetAddress pendingAddress)

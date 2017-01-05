@@ -395,7 +395,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange, final boolean isForThrift)
+    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -406,7 +406,16 @@ public class Memtable implements Comparable<Memtable>
         int endComparison = includeStop ? 0 : -1;
 
         // avoid iterating over the memtable if we purge all tombstones
-        boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
+        if (cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
+            minLocalDeletionTime = findMinLocalDeletionTime(subMap.entrySet().iterator());
+
+        final Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter = subMap.entrySet().iterator();
+
+        return new MemtableUnfilteredPartitionIterator(cfs, iter, minLocalDeletionTime, columnFilter, dataRange);
+    }
+
+    private int findMinLocalDeletionTime(Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iterator)
+    {
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
         // TODO combine sort and filtering into single step to handle small subrange reads efficiently?
@@ -710,24 +719,17 @@ public class Memtable implements Comparable<Memtable>
     {
         private final ColumnFamilyStore cfs;
         private final Iterator<PartitionPosition> iter;
-        private final boolean isForThrift;
         private final int minLocalDeletionTime;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
 
-        public MemtableUnfilteredPartitionIterator(ColumnFamilyStore cfs, Iterator<PartitionPosition> iter, boolean isForThrift, int minLocalDeletionTime, ColumnFilter columnFilter, DataRange dataRange)
+        public MemtableUnfilteredPartitionIterator(ColumnFamilyStore cfs, Iterator<PartitionPosition> iter, int minLocalDeletionTime, ColumnFilter columnFilter, DataRange dataRange)
         {
             this.cfs = cfs;
             this.iter = iter;
-            this.isForThrift = isForThrift;
             this.minLocalDeletionTime = minLocalDeletionTime;
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
-        }
-
-        public boolean isForThrift()
-        {
-            return isForThrift;
         }
 
         public int getMinLocalDeletionTime()

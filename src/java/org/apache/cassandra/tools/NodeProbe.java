@@ -640,9 +640,9 @@ public class NodeProbe implements AutoCloseable
         ssProxy.joinRing();
     }
 
-    public void decommission() throws InterruptedException
+    public void decommission(boolean force) throws InterruptedException
     {
-        ssProxy.decommission();
+        ssProxy.decommission(force);
     }
 
     public void move(String newToken) throws IOException
@@ -976,21 +976,6 @@ public class NodeProbe implements AutoCloseable
     public boolean isGossipRunning()
     {
         return ssProxy.isGossipRunning();
-    }
-
-    public void stopThriftServer()
-    {
-        ssProxy.stopRPCServer();
-    }
-
-    public void startThriftServer()
-    {
-        ssProxy.startRPCServer();
-    }
-
-    public boolean isThriftServerRunning()
-    {
-        return ssProxy.isRPCServerRunning();
     }
 
     public void stopCassandraDaemon()

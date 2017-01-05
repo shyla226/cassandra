@@ -27,9 +27,6 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.transport.*;
-import org.apache.cassandra.thrift.CqlPreparedResult;
-import org.apache.cassandra.thrift.CqlResult;
-import org.apache.cassandra.thrift.CqlResultType;
 import org.apache.cassandra.utils.MD5Digest;
 
 public abstract class ResultMessage extends Message.Response
@@ -80,7 +77,7 @@ public abstract class ResultMessage extends Message.Response
             }
         }
 
-        private Kind(int id, Message.Codec<ResultMessage> subcodec)
+        Kind(int id, Message.Codec<ResultMessage> subcodec)
         {
             this.id = id;
             this.subcodec = subcodec;
@@ -99,11 +96,14 @@ public abstract class ResultMessage extends Message.Response
 
     protected ResultMessage(Kind kind)
     {
-        super(Message.Type.RESULT);
-        this.kind = kind;
+        this(kind, true);
     }
 
-    public abstract CqlResult toThriftResult();
+    protected ResultMessage(Kind kind, boolean sendToClient)
+    {
+        super(Message.Type.RESULT, sendToClient);
+        this.kind = kind;
+    }
 
     public static class Void extends ResultMessage
     {
@@ -131,11 +131,6 @@ public abstract class ResultMessage extends Message.Response
                 return 0;
             }
         };
-
-        public CqlResult toThriftResult()
-        {
-            return new CqlResult(CqlResultType.VOID);
-        }
 
         @Override
         public String toString()
@@ -175,11 +170,6 @@ public abstract class ResultMessage extends Message.Response
             }
         };
 
-        public CqlResult toThriftResult()
-        {
-            return new CqlResult(CqlResultType.VOID);
-        }
-
         @Override
         public String toString()
         {
@@ -215,13 +205,20 @@ public abstract class ResultMessage extends Message.Response
 
         public Rows(ResultSet result)
         {
-            super(Kind.ROWS);
-            this.result = result;
+            this(result, true);
         }
 
-        public CqlResult toThriftResult()
+        public Rows(ResultSet result, boolean sendToClient)
         {
-            return result.toThriftResult();
+            super(Kind.ROWS, sendToClient);
+            this.result = result;
+
+            /**
+             * If sendToClient is false, then this response will never
+             * reach the client, this is only true for continuous paging
+             * and in this case the result set should be empty.
+             */
+            assert sendToClient || result.isEmpty();
         }
 
         @Override
@@ -244,7 +241,7 @@ public abstract class ResultMessage extends Message.Response
                 if (version.isGreaterThan(ProtocolVersion.V1))
                     resultMetadata = ResultSet.ResultMetadata.codec.decode(body, version);
 
-                return new Prepared(id, -1, metadata, resultMetadata);
+                return new Prepared(id, metadata, resultMetadata);
             }
 
             public void encode(ResultMessage msg, ByteBuf dest, ProtocolVersion version)
@@ -282,24 +279,15 @@ public abstract class ResultMessage extends Message.Response
         /** Describes the results of executing this prepared statement */
         public final ResultSet.ResultMetadata resultMetadata;
 
-        // statement id for CQL-over-thrift compatibility. The binary protocol ignore that.
-        private final int thriftStatementId;
-
         public Prepared(MD5Digest statementId, ParsedStatement.Prepared prepared)
         {
-            this(statementId, -1, new ResultSet.PreparedMetadata(prepared.boundNames, prepared.partitionKeyBindIndexes), extractResultMetadata(prepared.statement));
+            this(statementId, new ResultSet.PreparedMetadata(prepared.boundNames, prepared.partitionKeyBindIndexes), extractResultMetadata(prepared.statement));
         }
 
-        public static Prepared forThrift(int statementId, List<ColumnSpecification> names)
-        {
-            return new Prepared(null, statementId, new ResultSet.PreparedMetadata(names, null), ResultSet.ResultMetadata.EMPTY);
-        }
-
-        private Prepared(MD5Digest statementId, int thriftStatementId, ResultSet.PreparedMetadata metadata, ResultSet.ResultMetadata resultMetadata)
+        private Prepared(MD5Digest statementId, ResultSet.PreparedMetadata metadata, ResultSet.ResultMetadata resultMetadata)
         {
             super(Kind.PREPARED);
             this.statementId = statementId;
-            this.thriftStatementId = thriftStatementId;
             this.metadata = metadata;
             this.resultMetadata = resultMetadata;
         }
@@ -312,27 +300,10 @@ public abstract class ResultMessage extends Message.Response
             return ((SelectStatement)statement).getResultMetadata();
         }
 
-        public CqlResult toThriftResult()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public CqlPreparedResult toThriftPreparedResult()
-        {
-            List<String> namesString = new ArrayList<String>(metadata.names.size());
-            List<String> typesString = new ArrayList<String>(metadata.names.size());
-            for (ColumnSpecification name : metadata.names)
-            {
-                namesString.add(name.toString());
-                typesString.add(name.type.toString());
-            }
-            return new CqlPreparedResult(thriftStatementId, metadata.names.size()).setVariable_types(typesString).setVariable_names(namesString);
-        }
-
         @Override
         public String toString()
         {
-            return "RESULT PREPARED " + statementId + " " + metadata + " (resultMetadata=" + resultMetadata + ")";
+            return "RESULT PREPARED " + statementId + ' ' + metadata + " (resultMetadata=" + resultMetadata + ')';
         }
     }
 
@@ -367,11 +338,6 @@ public abstract class ResultMessage extends Message.Response
                 return scm.change.eventSerializedSize(version);
             }
         };
-
-        public CqlResult toThriftResult()
-        {
-            return new CqlResult(CqlResultType.VOID);
-        }
 
         @Override
         public String toString()

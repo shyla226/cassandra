@@ -48,7 +48,7 @@ from cassandra.cluster import Cluster, DefaultConnection
 from cassandra.cqltypes import ReversedType, UserType
 from cassandra.metadata import protect_name, protect_names, protect_value
 from cassandra.policies import RetryPolicy, WhiteListRoundRobinPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
-from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory
+from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory, UNSET_VALUE
 from cassandra.util import Date, Time
 
 from cql3handling import CqlRuleSet
@@ -360,6 +360,8 @@ class CopyTask(object):
         copy_options['maxoutputsize'] = int(opts.pop('maxoutputsize', '-1'))
         copy_options['preparedstatements'] = bool(opts.pop('preparedstatements', 'true').lower() == 'true')
         copy_options['ttl'] = int(opts.pop('ttl', -1))
+        copy_options['insertnullformissingvalues'] = bool(opts.pop('insertnullformissingvalues', 'true')
+                                                          .lower() == 'true')
 
         # Hidden properties, they do not appear in the documentation but can be set in config files
         # or on the cmd line but w/o completion
@@ -1793,6 +1795,7 @@ class ImportConversion(object):
         self.date_time_format = parent.date_time_format.timestamp_format
         self.debug = parent.debug
         self.encoding = parent.encoding
+        self.insert_null_for_missing_values = parent.insert_null_for_missing_values
 
         self.table_meta = table_meta
         self.primary_key_indexes = [self.columns.index(col.name) for col in self.table_meta.primary_key]
@@ -1817,9 +1820,10 @@ class ImportConversion(object):
         # these functions are used for non-prepared statements to protect values with quotes if required
         self.protectors = [self._get_protector(t) for t in self.coltypes]
 
-    def _get_protector(self, t):
+    @staticmethod
+    def _get_protector(t):
         if t in ('ascii', 'text', 'timestamp', 'date', 'time', 'inet'):
-            return lambda v: unicode(protect_value(v), self.encoding)
+            return lambda v: protect_value(v)
         else:
             return lambda v: v
 
@@ -1997,10 +2001,15 @@ class ImportConversion(object):
             an attribute, so we are using named tuples. It must also be hashable,
             so we cannot use dictionaries. Maybe there is a way to instantiate ct
             directly but I could not work it out.
+            Also note that it is possible that the subfield names in the csv are in the
+            wrong order, so we must sort them according to ct.fieldnames, see CASSANDRA-12959.
             """
             vals = [v for v in [split('{%s}' % vv, sep=':') for vv in split(val)]]
-            ret_type = namedtuple(ct.typename, [unprotect(v[0]) for v in vals])
-            return ret_type(*tuple(convert(t, v[1]) for t, v in zip(ct.subtypes, vals)))
+            dict_vals = dict((unprotect(v[0]), v[1]) for v in vals)
+            sorted_converted_vals = [(n, convert(t, dict_vals[n]) if n in dict_vals else self.get_null_val())
+                                     for n, t in zip(ct.fieldnames, ct.subtypes)]
+            ret_type = namedtuple(ct.typename, [v[0] for v in sorted_converted_vals])
+            return ret_type(*tuple(v[1] for v in sorted_converted_vals))
 
         def convert_single_subtype(val, ct=cql_type):
             return converters.get(ct.subtypes[0].typename, convert_unknown)(val, ct=ct.subtypes[0])
@@ -2046,13 +2055,19 @@ class ImportConversion(object):
 
     def get_null_val(self):
         """
-        Return the null value that is inserted for fields that are missing from csv files.
+        Return the value that is inserted for fields that are missing from csv files.
         For counters we should return zero so that the counter value won't be incremented.
-        For everything else we return nulls, this means None if we use prepared statements
-        or "NULL" otherwise. Note that for counters we never use prepared statements, so we
-        only check is_counter when use_prepared_statements is false.
+        For everything else we return UNSET or None for prepared statements and NULL for
+        non-prepared statements. UNSET values will not change any value already existing in
+        Cassandra but they won't generate a tombstone either. By default we use None, which
+        will generate a tombstone, users can change this behavior via INSERTNULLFORMISSINGVALUES.
+        Note that for counters we never use prepared statements, so we only check is_counter
+        when use_prepared_statements is false.
         """
-        return None if self.use_prepared_statements else ("0" if self.is_counter else "NULL")
+        if self.use_prepared_statements:  # no counters when use_prepared_statements is true
+            return None if self.insert_null_for_missing_values else UNSET_VALUE
+
+        return "0" if self.is_counter else "NULL"
 
     def convert_row(self, row):
         """
@@ -2232,7 +2247,7 @@ class ImportProcess(ChildProcess):
         ChildProcess.__init__(self, params=params, target=self.run)
 
         self.skip_columns = params['skip_columns']
-        self.valid_columns = params['valid_columns']
+        self.valid_columns = [c.encode(self.encoding) for c in params['valid_columns']]
         self.skip_column_indexes = [i for i, c in enumerate(self.columns) if c in self.skip_columns]
 
         options = params['options']
@@ -2245,6 +2260,7 @@ class ImportProcess(ChildProcess):
         self.max_inflight_messages = options.copy['maxinflightmessages']
         self.max_backoff_attempts = options.copy['maxbackoffattempts']
         self.request_timeout = options.copy['requesttimeout']
+        self.insert_null_for_missing_values = options.copy['insertnullformissingvalues']
 
         self.dialect_options = options.dialect
         self._session = None

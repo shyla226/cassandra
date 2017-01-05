@@ -271,7 +271,7 @@ public abstract class CassandraIndex implements Index
 
     public long getEstimatedResultRows()
     {
-        return indexCfs.getMeanColumns();
+        return indexCfs.getMeanCells();
     }
 
     /**

@@ -104,7 +104,7 @@ elif webbrowser._tryorder[0] == 'xdg-open' and os.environ.get('XDG_DATA_DIRS', '
     webbrowser._tryorder.remove('xdg-open')
     webbrowser._tryorder.append('xdg-open')
 
-# use bundled libs for python-cql and thrift, if available. if there
+# use bundled lib for python-cql if available. if there
 # is a ../lib dir, use bundled libs there preferentially.
 ZIPLIB_DIRS = [os.path.join(CASSANDRA_PATH, 'lib')]
 myplatform = platform.system()
@@ -1631,6 +1631,11 @@ class Shell(cmd.Cmd):
                                     this will result in a faster import but for smaller clusters it may generate
                                     timeouts.
           TTL=3600                - the time to live in seconds, by default data will not expire
+          INSERTNULLFORMISSINGVALUES=True
+                                  - by default, CSV null values are inserted as null via tombstones, set this to false
+                                    in order to leave them unchanged. This option is ignored when prepared statements
+                                    are not used, which includes counters. For counters missing values will be inserted
+                                    as zero, which will not change the value of a counter.
 
         Available COPY TO options and defaults:
 
@@ -1691,8 +1696,8 @@ class Shell(cmd.Cmd):
         SHOW VERSION
 
           Shows the version and build of the connected Cassandra instance, as
-          well as the versions of the CQL spec and the Thrift protocol that
-          the connected Cassandra instance understands.
+          well as the version of the CQL spec that the connected Cassandra
+          instance understands.
 
         SHOW HOST
 

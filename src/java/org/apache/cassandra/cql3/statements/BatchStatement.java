@@ -96,11 +96,10 @@ public class BatchStatement implements CQLStatement
     public static final BatchMetrics metrics = new BatchMetrics();
 
     /**
-     * Creates a new BatchStatement from a list of statements and a
-     * Thrift consistency level.
+     * Creates a new BatchStatement.
      *
      * @param type       type of the batch
-     * @param statements a list of UpdateStatements
+     * @param statements the list of statements in the batch
      * @param attrs      additional attributes for statement (CL, timestamp, timeToLive)
      */
     public BatchStatement(int boundTerms, Type type, List<ModificationStatement> statements, Attributes attrs)
@@ -438,7 +437,7 @@ public class BatchStatement implements CQLStatement
             QueryOptions statementOptions = options.forStatement(i);
             long timestamp = attrs.getTimestamp(now, statementOptions);
             List<ByteBuffer> pks = statement.buildPartitionKeyNames(statementOptions);
-            if (pks.size() > 1)
+            if (statement.getRestrictions().keyIsInRelation())
                 throw new IllegalArgumentException("Batch with conditions cannot span multiple partitions (you cannot use IN on the partition key)");
             if (key == null)
             {
@@ -450,12 +449,11 @@ public class BatchStatement implements CQLStatement
                 throw new InvalidRequestException("Batch with conditions cannot span multiple partitions");
             }
 
-            SortedSet<Clustering> clusterings = statement.createClustering(statementOptions);
+            checkFalse(statement.getRestrictions().clusteringKeyRestrictionsHasIN(),
+                       "IN on the clustering key columns is not supported with conditional %s",
+                       statement.type.isUpdate()? "updates" : "deletions");
 
-            checkFalse(clusterings.size() > 1,
-                       "IN on the clustering key columns is not supported with conditional updates");
-
-            Clustering clustering = Iterables.getOnlyElement(clusterings);
+            Clustering clustering = Iterables.getOnlyElement(statement.createClustering(statementOptions));
 
             if (statement.hasConditions())
             {

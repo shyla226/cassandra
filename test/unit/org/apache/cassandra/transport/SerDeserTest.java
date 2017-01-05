@@ -32,7 +32,6 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.Event.TopologyChange;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.StatusChange;
@@ -331,10 +330,9 @@ public class SerDeserTest
         assertNotNull(decodedOptions);
         assertEquals(options.getConsistency(), decodedOptions.getConsistency());
         assertEquals(options.getSerialConsistency(), decodedOptions.getSerialConsistency());
-        assertEquals(options.getPageSize(), decodedOptions.getPageSize());
+        assertEquals(options.getPagingOptions(), decodedOptions.getPagingOptions());
         assertEquals(options.getProtocolVersion(), decodedOptions.getProtocolVersion());
         assertEquals(options.getValues(), decodedOptions.getValues());
-        assertEquals(options.getPagingState(), decodedOptions.getPagingState());
         assertEquals(options.skipMetadata(), decodedOptions.skipMetadata());
     }
 }

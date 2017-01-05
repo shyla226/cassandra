@@ -48,6 +48,18 @@ public abstract class UnfilteredPartitionIterators
     public interface MergeListener
     {
         public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions);
+
+        /**
+         * Forces merge listener to be called even when there is only
+         * a single iterator.
+         * <p>
+         * This can be useful for listeners that require seeing all row updates.
+         */
+        public default boolean callOnTrivialMerge()
+        {
+            return true;
+        }
+
         public void close();
     }
 
@@ -113,8 +125,8 @@ public abstract class UnfilteredPartitionIterators
         assert listener != null;
         assert !iterators.isEmpty();
 
-        final boolean isForThrift = iterators.get(0).isForThrift();
         final CFMetaData metadata = iterators.get(0).metadata();
+        final UnfilteredRowIterator emptyIterator = EmptyIterators.unfilteredRow(metadata, null, false);
 
         final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
         {
@@ -137,29 +149,39 @@ public abstract class UnfilteredPartitionIterators
             {
                 UnfilteredRowIterators.MergeListener rowListener = listener.getRowMergeListener(partitionKey, toMerge);
 
-                // Replace nulls by empty iterators
-                for (int i = 0; i < toMerge.size(); i++)
-                    if (toMerge.get(i) == null)
-                        toMerge.set(i, EmptyIterators.unfilteredRow(metadata, partitionKey, isReverseOrder));
+                ((EmptyIterators.EmptyUnfilteredRowIterator)emptyIterator).reuse(partitionKey, isReverseOrder, DeletionTime.LIVE);
 
-                return UnfilteredRowIterators.merge(toMerge, nowInSec, rowListener);
+                // Replace nulls by empty iterators
+                UnfilteredRowIterator nonEmptyRowIterator = null;
+                int numNonEmptyRowIterators = 0;
+
+                for (int i = 0, length = toMerge.size(); i < length; i++)
+                {
+                    UnfilteredRowIterator element = toMerge.get(i);
+                    if (element == null)
+                    {
+                        toMerge.set(i, emptyIterator);
+                    }
+                    else
+                    {
+                        numNonEmptyRowIterators++;
+                        nonEmptyRowIterator = element;
+                    }
+                }
+
+                return numNonEmptyRowIterators == 1 && !listener.callOnTrivialMerge() ? nonEmptyRowIterator : UnfilteredRowIterators.merge(toMerge, nowInSec, rowListener);
             }
 
             protected void onKeyChange()
             {
                 toMerge.clear();
-                for (int i = 0; i < iterators.size(); i++)
+                for (int i = 0, length = iterators.size(); i < length; i++)
                     toMerge.add(null);
             }
         });
 
         return new AbstractUnfilteredPartitionIterator()
         {
-            public boolean isForThrift()
-            {
-                return isForThrift;
-            }
-
             public CFMetaData metadata()
             {
                 return metadata;
@@ -190,7 +212,6 @@ public abstract class UnfilteredPartitionIterators
         if (iterators.size() == 1)
             return iterators.get(0);
 
-        final boolean isForThrift = iterators.get(0).isForThrift();
         final CFMetaData metadata = iterators.get(0).metadata();
 
         final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
@@ -221,11 +242,6 @@ public abstract class UnfilteredPartitionIterators
 
         return new AbstractUnfilteredPartitionIterator()
         {
-            public boolean isForThrift()
-            {
-                return isForThrift;
-            }
-
             public CFMetaData metadata()
             {
                 return metadata;
@@ -301,7 +317,9 @@ public abstract class UnfilteredPartitionIterators
     {
         public void serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out, int version) throws IOException
         {
-            out.writeBoolean(iter.isForThrift());
+            // Previously, a boolean indicating if this was for a thrift query.
+            // Unused since 4.0 but kept on wire for compatibility.
+            out.writeBoolean(false);
             while (iter.hasNext())
             {
                 out.writeBoolean(true);
@@ -315,18 +333,14 @@ public abstract class UnfilteredPartitionIterators
 
         public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final CFMetaData metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
         {
-            final boolean isForThrift = in.readBoolean();
+            // Skip now unused isForThrift boolean
+            in.readBoolean();
 
             return new AbstractUnfilteredPartitionIterator()
             {
                 private UnfilteredRowIterator next;
                 private boolean hasNext;
                 private boolean nextReturned = true;
-
-                public boolean isForThrift()
-                {
-                    return isForThrift;
-                }
 
                 public CFMetaData metadata()
                 {

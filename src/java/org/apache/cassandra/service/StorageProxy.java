@@ -77,24 +77,13 @@ import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.ViewUtils;
-import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Bounds;
-import org.apache.cassandra.dht.RingPosition;
-import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.IsBootstrappingException;
-import org.apache.cassandra.exceptions.OverloadedException;
-import org.apache.cassandra.exceptions.ReadFailureException;
-import org.apache.cassandra.exceptions.ReadTimeoutException;
-import org.apache.cassandra.exceptions.RequestFailureException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.exceptions.RequestTimeoutException;
-import org.apache.cassandra.exceptions.UnavailableException;
-import org.apache.cassandra.exceptions.WriteFailureException;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.dht.*;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.Hint;
@@ -1041,6 +1030,48 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
+    /**
+     * @return true if the range is entirely local.
+     */
+    public static boolean isLocalRange(String keyspaceName, AbstractBounds<PartitionPosition> range)
+    {
+        assert !AbstractBounds.strictlyWrapsAround(range.left, range.right);
+
+        Collection<Range<Token>> localRanges = StorageService.instance.getNormalizedLocalRanges(keyspaceName);
+
+        // We need a range of Tokens for contains() below
+        AbstractBounds<Token> queriedRange = AbstractBounds.bounds(range.left.getToken(),
+                                                                   range.inclusiveLeft(),
+                                                                   range.right.getToken(),
+                                                                   range.inclusiveRight());
+
+        // localRanges is normalized and therefore contains non-overlapping, non-wrapping ranges in token order.
+        // Further, the queried range is a non wrapping one. So it's enough to check that the queried range
+        // is contained by a local one.
+        for (Range<Token> localRange : localRanges)
+        {
+            if (localRange.contains(queriedRange))
+                return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @return true if the token is local.
+     */
+    public static boolean isLocalToken(String keyspaceName, Token token)
+    {
+        Collection<Range<Token>> localRanges = StorageService.instance.getNormalizedLocalRanges(keyspaceName);
+        for (Range<Token> localRange : localRanges)
+        {
+            if (localRange.contains(token))
+                return true;
+        }
+
+        return false;
+    }
+
     public static boolean canDoLocalRequest(InetAddress replica)
     {
         return replica.equals(FBUtilities.getBroadcastAddress());
@@ -1608,7 +1639,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime).blockingGet(), command);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command);
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
@@ -1616,26 +1647,109 @@ public class StorageProxy implements StorageProxyMBean
     {
         // When using serial CL, the ClientState should be provided
         assert !consistencyLevel.isSerialConsistency();
-        return read(group, consistencyLevel, null, queryStartNanoTime).blockingGet();
+        return read(group, consistencyLevel, null, queryStartNanoTime, false).blockingGet();
+    }
+
+    private static void checkNotBootstrappingOrSystemQuery(List<? extends ReadCommand> commands, ClientRequestMetrics ... metrics)
+    throws IsBootstrappingException
+    {
+        if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(commands))
+        {
+            for (ClientRequestMetrics metric : metrics)
+                metric.unavailables.mark();
+
+            throw new IsBootstrappingException();
+        }
     }
 
     /**
      * Performs the actual reading of a row out of the StorageService, fetching
      * a specific set of column names from a given column family.
      */
-    public static Single<PartitionIterator> read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
+    public static Single<PartitionIterator> read(SinglePartitionReadCommand.Group group,
+                                         ConsistencyLevel consistencyLevel,
+                                         ClientState state,
+                                         long queryStartNanoTime,
+                                         boolean forContinuousPaging)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(group.commands))
+        checkNotBootstrappingOrSystemQuery(group.commands, readMetrics, readMetricsMap.get(consistencyLevel));
+
+        if (consistencyLevel.isSerialConsistency())
         {
-            readMetrics.unavailables.mark();
-            readMetricsMap.get(consistencyLevel).unavailables.mark();
-            throw new IsBootstrappingException();
+            assert !forContinuousPaging; // this is not supported
+            return readWithPaxos(group, consistencyLevel, state, queryStartNanoTime);
         }
 
-        return consistencyLevel.isSerialConsistency()
-             ? Single.just(readWithPaxos(group, consistencyLevel, state, queryStartNanoTime))
-             : readRegular(group, consistencyLevel, queryStartNanoTime);
+        return forContinuousPaging && consistencyLevel.isSingleNode() && group.queriesOnlyLocalData()
+             ? readLocalContinuous(group, consistencyLevel, queryStartNanoTime)
+             : readRegular(group, consistencyLevel, queryStartNanoTime, forContinuousPaging);
+    }
+
+    /**
+     * Read data locally, but for an external request. This implements an optimized local read path for data that
+     * is available locally and that has been requested at a consistency level of ONE/LOCAL_ONE. We
+     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * functionality that is required for client requests, such as metrics recording and local query monitoring,
+     * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
+     * are not reported as failed, rather the caller will take care of restarting them.
+     * <p>
+     * <b>Warning:</b> because this return a direct iterator, the returned iterator keeps an {@code ExecutionController}
+     * open and so callers should make sure the iterator is closed on every
+     * path, preferably through the use of a try-with-resources.
+     *
+     * @param group - the group of single partition read commands
+     * @param consistencyLevel - the consistency level, which should be ONE or LOCAL_ONE.
+     * @param queryStartNanoTime - the client request time in nano seconds
+     * @return - the filtered partition iterator
+     */
+    @SuppressWarnings("resource")
+    private static PartitionIterator readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    throws IsBootstrappingException, UnavailableException, ReadFailureException, ReadTimeoutException
+    {
+        assert consistencyLevel.isSingleNode();
+
+        // Not using the controller in a try-with-resource is a bit dodgy, but having to pass it all the way down
+        // the execution path when it's used only in this specific path is annoying, we've made it clear in the
+        // javadoc that the returned iterator must be closed, and we have a good track record of using
+        // PartitionIterator in try-with-resource.
+        ReadExecutionController controller = group.executionController();
+        try
+        {
+            group.monitorLocal(ApproximateTime.currentTimeMillis());
+
+            // We could simply use a close Transformation here. However, we want to make extra sure close() is
+            // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
+            // framework (which is non trivial code) making that not happen.
+            final PartitionIterator iter = group.executeInternal(controller);
+            return new PartitionIterator()
+            {
+                public boolean hasNext()
+                {
+                    return iter.hasNext();
+                }
+
+                public RowIterator next()
+                {
+                    return iter.next();
+                }
+
+                public void close()
+                {
+                    // Make sure we close this as the first thing so it's always called.
+                    controller.close();
+
+                    group.complete();
+                }
+            };
+        }
+        catch (Throwable e)
+        {
+            controller.close();
+            readMetrics.failures.mark();
+            readMetricsMap.get(consistencyLevel).failures.mark();
+            throw e;
+        }
     }
 
     private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
@@ -1703,58 +1817,113 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            long latency = System.nanoTime() - start;
-            readMetrics.addNano(latency);
+            long latency =  recordLatency(group, consistencyLevel, start);
             casReadMetrics.addNano(latency);
-            readMetricsMap.get(consistencyLevel).addNano(latency);
-            Keyspace.open(metadata.ksName).getColumnFamilyStore(metadata.cfName).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
 
         return result;
     }
 
     @SuppressWarnings("resource")
-    private static Single<PartitionIterator> readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static Single<PartitionIterator> readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime, boolean forContinuousPaging)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         long start = System.nanoTime();
         try
         {
-            Single<PartitionIterator> resultObs = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
-            if (group.commands.size() <= 1)
-                return resultObs;
-
+            Single<PartitionIterator> result = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
             // If we have more than one command, then despite each read command honoring the limit, the total result
-            // might not honor it and so we should enforce it
-            return resultObs.map(result -> group.limits().filter(result, group.nowInSec()));
+            // might not honor it and so we should enforce it; For continuous paging however, we know we enforce this
+            // later (by always wrapping in a pager) so don't bother
+            result.map(r -> {
+                if (!forContinuousPaging && group.commands.size() > 1)
+                    return group.limits().filter(r, group.nowInSec());
+
+                return r;
+            }).onErrorResumeNext(e -> {
+                  if (!forContinuousPaging)
+                  {
+                      if (e instanceof UnavailableException)
+                      {
+                          readMetrics.unavailables.mark();
+                          readMetricsMap.get(consistencyLevel).unavailables.mark();
+                      }
+                      else if (e instanceof ReadTimeoutException)
+                      {
+                          readMetrics.timeouts.mark();
+                          readMetricsMap.get(consistencyLevel).timeouts.mark();
+                      }
+                      else if (e instanceof ReadFailureException)
+                      {
+                          
+                      }
+                  }
+
+                  return Single.error(e);
+            });
+                  .doFinally(() -> {
+                if (!forContinuousPaging)
+                    recordLatency(group, consistencyLevel, start);
+            });
         }
         catch (UnavailableException e)
         {
-            readMetrics.unavailables.mark();
-            readMetricsMap.get(consistencyLevel).unavailables.mark();
+            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+            if (!forContinuousPaging)
+            {
+                readMetrics.unavailables.mark();
+                readMetricsMap.get(consistencyLevel).unavailables.mark();
+            }
             throw e;
         }
         catch (ReadTimeoutException e)
         {
-            readMetrics.timeouts.mark();
-            readMetricsMap.get(consistencyLevel).timeouts.mark();
+            if (!forContinuousPaging)
+            {
+                readMetrics.timeouts.mark();
+                readMetricsMap.get(consistencyLevel).timeouts.mark();
+            }
             throw e;
         }
         catch (ReadFailureException e)
         {
-            readMetrics.failures.mark();
-            readMetricsMap.get(consistencyLevel).failures.mark();
+            if (!forContinuousPaging)
+            {
+                readMetrics.failures.mark();
+                readMetricsMap.get(consistencyLevel).failures.mark();
+            }
             throw e;
         }
         finally
         {
-            long latency = System.nanoTime() - start;
-            readMetrics.addNano(latency);
-            readMetricsMap.get(consistencyLevel).addNano(latency);
-            // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
-            for (ReadCommand command : group.commands)
-                Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            if (!forContinuousPaging)
+                recordLatency(group, consistencyLevel, start);
         }
+    }
+
+    /**
+     * Calculate the latency in nano seconds from the start time and update the latency metrics for the single
+     * partition read commands in the group. Return the latency that was recorded in case it needs to be applied
+     * to more metrics, e.g. CAS metrics.
+     *
+     * @param group - the group of read commands
+     * @param consistencyLevel - the consistency level
+     * @param start - the read start time in nanoSeconds
+     *
+     * @return - the latency that was recorded
+     */
+    private static long recordLatency(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long start)
+    {
+        long latency = System.nanoTime() - start;
+
+        readMetrics.addNano(latency);
+        readMetricsMap.get(consistencyLevel).addNano(latency);
+
+        // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
+        for (ReadCommand command : group.commands)
+            Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+
+        return latency;
     }
 
     /**
@@ -1885,7 +2054,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             try
             {
-                command.setMonitoringTime(constructionTime, false, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
+                command.monitor(constructionTime, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout(), false);
 
                 ReadResponse response;
                 try (ReadExecutionController executionController = command.executionController())
@@ -1947,9 +2116,10 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     /**
-     * Estimate the number of result rows (either cql3 rows or "thrift" rows, as called for by the command) per
-     * range in the ring based on our local data.  This assumes that ranges are uniformly distributed across the cluster
-     * and that the queried data is also uniformly distributed.
+     * Estimate the number of result rows per range in the ring based on our local data.
+     * <p>
+     * This assumes that ranges are uniformly distributed across the cluster and
+     * that the queried data is also uniformly distributed.
      */
     private static float estimateResultsPerRange(PartitionRangeReadCommand command, Keyspace keyspace)
     {
@@ -2110,6 +2280,7 @@ public class StorageProxy implements StorageProxyMBean
 
         private final long startTime;
         private final long queryStartNanoTime;
+        private final boolean forContinuousPaging;
         private DataLimits.Counter counter;
         private PartitionIterator sentQueryIterator;
 
@@ -2119,7 +2290,13 @@ public class StorageProxy implements StorageProxyMBean
         private int liveReturned;
         private int rangesQueried;
 
-        public RangeCommandIterator(RangeIterator ranges, PartitionRangeReadCommand command, int concurrencyFactor, Keyspace keyspace, ConsistencyLevel consistency, long queryStartNanoTime)
+        public RangeCommandIterator(RangeIterator ranges,
+                                    PartitionRangeReadCommand command,
+                                    int concurrencyFactor,
+                                    Keyspace keyspace,
+                                    ConsistencyLevel consistency,
+                                    long queryStartNanoTime,
+                                    boolean forContinuousPaging)
         {
             this.command = command;
             this.concurrencyFactor = concurrencyFactor;
@@ -2129,6 +2306,7 @@ public class StorageProxy implements StorageProxyMBean
             this.consistency = consistency;
             this.keyspace = keyspace;
             this.queryStartNanoTime = queryStartNanoTime;
+            this.forContinuousPaging = forContinuousPaging;
         }
 
         public RowIterator computeNext()
@@ -2158,17 +2336,21 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (UnavailableException e)
             {
-                rangeMetrics.unavailables.mark();
+                /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+                if (!forContinuousPaging)
+                    rangeMetrics.unavailables.mark();
                 throw e;
             }
             catch (ReadTimeoutException e)
             {
-                rangeMetrics.timeouts.mark();
+                if (!forContinuousPaging)
+                    rangeMetrics.timeouts.mark();
                 throw e;
             }
             catch (ReadFailureException e)
             {
-                rangeMetrics.failures.mark();
+                if (!forContinuousPaging)
+                    rangeMetrics.failures.mark();
                 throw e;
             }
         }
@@ -2254,16 +2436,51 @@ public class StorageProxy implements StorageProxyMBean
             }
             finally
             {
-                long latency = System.nanoTime() - startTime;
-                rangeMetrics.addNano(latency);
-                Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
+                /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
+                if (!forContinuousPaging)
+                    recordLatency(command, startTime);
             }
         }
     }
 
-    @SuppressWarnings("resource")
+    /**
+     * Calculate the latency in nano seconds from the start time and update the latency metrics for the
+     * partition range read command.
+     *
+     * @param command - the read command
+     * @param start - the read start time in nanoSeconds
+     */
+    private static void recordLatency(PartitionRangeReadCommand command, long start)
+    {
+        long latency = System.nanoTime() - start;
+        rangeMetrics.addNano(latency);
+        Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
+    }
+
+    public static Single<PartitionIterator> getRangeSlice(PartitionRangeReadCommand command,
+                                                  ConsistencyLevel consistencyLevel,
+                                                  long queryStartNanoTime,
+                                                  boolean forContinuousPaging)
+    {
+        return forContinuousPaging && consistencyLevel.isSingleNode() && command.queriesOnlyLocalData()
+             ? getRangeSliceLocalContinuous(command, consistencyLevel, queryStartNanoTime)
+             : getRangeSliceRemote(command, consistencyLevel, queryStartNanoTime, forContinuousPaging);
+    }
+
+
     public static Single<PartitionIterator> getRangeSlice(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     {
+        return getRangeSliceRemote(command, consistencyLevel, queryStartNanoTime, false);
+    }
+
+    @SuppressWarnings("resource")
+    private static Single<PartitionIterator> getRangeSliceRemote(PartitionRangeReadCommand command,
+                                                        ConsistencyLevel consistencyLevel,
+                                                        long queryStartNanoTime,
+                                                        boolean forContinuousPaging)
+    {
+        checkNotBootstrappingOrSystemQuery(Collections.singletonList(command), rangeMetrics);
+
         Tracing.trace("Computing ranges to query");
 
         Callable<PartitionIterator> c = () ->
@@ -2286,11 +2503,80 @@ public class StorageProxy implements StorageProxyMBean
 
             // Note that in general, a RangeCommandIterator will honor the command limit for each range, but will not enforce it globally.
 
-            return command.limits().filter(command.postReconciliationProcessing(new RangeCommandIterator(ranges, command, concurrencyFactor, keyspace, consistencyLevel, queryStartNanoTime)), command.nowInSec());
+            return command.withLimitsAndPostReconciliation(new RangeCommandIterator(ranges, command, concurrencyFactor, keyspace, consistencyLevel, queryStartNanoTime, forContinuousPaging));
         };
 
         return Single.fromCallable(c).observeOn(Schedulers.io());
     }
+
+    /**
+     * Read a range slice locally, but for an external request. This implements an optimized local read path for data that
+     * is available locally and that has been requested at a consistency level of ONE or LOCAL_ONE. We
+     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * functionality that is required for client requests, such as metrics recording and local query monitoring,
+     * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
+     * are not reported as failed, rather the caller will take care of restarting them.
+     * <p>
+     * <b>Warning:</b> because this return a direct iterator, the returned iterator keeps an {@code ExecutionController}
+     * open and so callers should make sure the iterator is closed on every
+     * path, preferably through the use of a try-with-resources.
+     *
+     * @param command - the read command
+     * @param consistencyLevel - the consistency level
+     * @param queryStartNanoTime - the client request time in nano seconds
+     * @return - the filtered partition iterator
+     */
+    @SuppressWarnings("resource")
+    public static Single<PartitionIterator> getRangeSliceLocalContinuous(PartitionRangeReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    {
+        assert consistencyLevel.isSingleNode();
+
+        checkNotBootstrappingOrSystemQuery(Collections.singletonList(command), rangeMetrics);
+
+        Tracing.trace("Querying local ranges");
+
+        // Same reasoning as in readLocalContinuous, see there for details.
+        ReadExecutionController controller = command.executionController();
+        try
+        {
+            command.monitorLocal(ApproximateTime.currentTimeMillis());
+
+            // Same reasoning as in readLocalContinuous, see there for details.
+            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(controller));
+            return Single.just(new PartitionIterator()
+            {
+                public Observable<RowIterator> asObservable()
+                {
+                    return iter.asObservable();
+                }
+
+                public boolean hasNext()
+                {
+                    return iter.hasNext();
+                }
+
+                public RowIterator next()
+                {
+                    return iter.next();
+                }
+
+                public void close()
+                {
+                    // Make sure we close this as the first thing so it's always called.
+                    controller.close();
+
+                    command.complete();
+                }
+            });
+        }
+        catch (Throwable e)
+        {
+            controller.close();
+            rangeMetrics.failures.mark();
+            throw e;
+        }
+    }
+
 
     public Map<String, List<String>> getSchemaVersions()
     {

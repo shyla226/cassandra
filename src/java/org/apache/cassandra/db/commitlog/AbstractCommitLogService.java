@@ -26,6 +26,7 @@ import io.reactivex.subjects.BehaviorSubject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -151,7 +152,7 @@ public abstract class AbstractCommitLogService
         };
 
         shutdown = false;
-        thread = new Thread(runnable, name);
+        thread = NamedThreadFactory.createThread(runnable, name);
         thread.start();
     }
 

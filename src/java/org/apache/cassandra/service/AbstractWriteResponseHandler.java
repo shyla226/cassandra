@@ -168,7 +168,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         logger.trace("Got failure from {}", from);
 
         int n = waitingFor(from)
-              ? failures++
+              ? ++failures
               : failures;
 
         failureReasonByEndpoint.put(from, failureReason);

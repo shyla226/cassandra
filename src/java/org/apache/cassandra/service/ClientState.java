@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,13 +36,14 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.SchemaKeyspace;
-import org.apache.cassandra.thrift.ThriftValidation;
+import org.apache.cassandra.transport.Connection;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.CassandraVersion;
@@ -88,6 +90,8 @@ public class ClientState
     // Current user for the session
     private volatile AuthenticatedUser user;
     private volatile String keyspace;
+    // Whether or not a once-per-connection warning about SASI stability is issued
+    private volatile boolean sasiWarningIssued = false;
 
     private static final QueryHandler cqlQueryHandler;
     static
@@ -117,6 +121,9 @@ public class ClientState
     // The remote address of the client - null for internal clients.
     private final InetSocketAddress remoteAddress;
 
+    // The connection to the remote client - null for internal or thrift clients.
+    public final Connection connection;
+
     // The biggest timestamp that was returned by getTimestamp/assigned to a query. This is global to ensure that the
     // timestamp assigned are strictly monotonic on a node, which is likely what user expect intuitively (more likely,
     // most new user will intuitively expect timestamp to be strictly monotonic cluster-wise, but while that last part
@@ -130,12 +137,14 @@ public class ClientState
     {
         this.isInternal = true;
         this.remoteAddress = null;
+        this.connection = null;
     }
 
-    protected ClientState(InetSocketAddress remoteAddress)
+    protected ClientState(InetSocketAddress remoteAddress, Connection connection)
     {
         this.isInternal = false;
         this.remoteAddress = remoteAddress;
+        this.connection = connection;
         if (!DatabaseDescriptor.getAuthenticator().requireAuthentication())
             this.user = AuthenticatedUser.ANONYMOUS_USER;
     }
@@ -149,11 +158,11 @@ public class ClientState
     }
 
     /**
-     * @return a ClientState object for external clients (thrift/native protocol users).
+     * @return a ClientState object for external clients (native protocol users).
      */
-    public static ClientState forExternalCalls(SocketAddress remoteAddress)
+    public static ClientState forExternalCalls(SocketAddress remoteAddress, Connection connection)
     {
-        return new ClientState((InetSocketAddress)remoteAddress);
+        return new ClientState((InetSocketAddress)remoteAddress, connection);
     }
 
     /**
@@ -291,7 +300,7 @@ public class ClientState
     public void hasColumnFamilyAccess(String keyspace, String columnFamily, Permission perm)
     throws UnauthorizedException, InvalidRequestException
     {
-        ThriftValidation.validateColumnFamily(keyspace, columnFamily);
+        Validation.validateColumnFamily(keyspace, columnFamily);
         hasAccess(keyspace, perm, DataResource.table(keyspace, columnFamily));
     }
 
@@ -418,5 +427,15 @@ public class ClientState
     private Set<Permission> authorize(IResource resource)
     {
         return user.getPermissions(resource);
+    }
+
+    public boolean isSASIWarningIssued()
+    {
+        return sasiWarningIssued;
+    }
+
+    public void setSASIWarningIssued()
+    {
+        sasiWarningIssued = true;
     }
 }

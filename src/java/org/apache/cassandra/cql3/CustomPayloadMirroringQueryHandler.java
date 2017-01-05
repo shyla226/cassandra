@@ -65,11 +65,6 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
         return queryProcessor.getPrepared(id);
     }
 
-    public ParsedStatement.Prepared getPreparedForThrift(Integer id)
-    {
-        return queryProcessor.getPreparedForThrift(id);
-    }
-
     public Single<ResultMessage> processPrepared(CQLStatement statement,
                                                  QueryState state,
                                                  QueryOptions options,

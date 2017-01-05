@@ -20,25 +20,18 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.dht.*;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.thrift.ThriftResultsMerger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -47,13 +40,8 @@ public abstract class ReadResponse
     // Serializer for single partition read response
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
 
-    // This is used only when serializing data responses and we can't it easily in other cases. So this can be null, which is slighly
-    // hacky, but as this hack doesn't escape this class, and it's easy enough to validate that it's not null when we need, it's "good enough".
-    private final ReadCommand command;
-
-    protected ReadResponse(ReadCommand command)
+    protected ReadResponse()
     {
-        this.command = command;
     }
 
     public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
@@ -90,7 +78,7 @@ public abstract class ReadResponse
 
         private DigestResponse(ByteBuffer digest)
         {
-            super(null);
+            super();
             assert digest.hasRemaining();
             this.digest = digest;
         }
@@ -161,7 +149,7 @@ public abstract class ReadResponse
     {
         protected RemoteDataResponse(ByteBuffer data)
         {
-            super(null, data, SerializationHelper.Flag.FROM_REMOTE);
+            super(data, SerializationHelper.Flag.FROM_REMOTE);
         }
     }
 
@@ -172,9 +160,9 @@ public abstract class ReadResponse
         private final ByteBuffer data;
         private final SerializationHelper.Flag flag;
 
-        protected DataResponse(ReadCommand command, ByteBuffer data, SerializationHelper.Flag flag)
+        protected DataResponse(ByteBuffer data, SerializationHelper.Flag flag)
         {
-            super(command);
+            super();
             this.data = data;
             this.flag = flag;
         }

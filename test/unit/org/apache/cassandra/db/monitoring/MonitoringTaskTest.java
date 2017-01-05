@@ -63,17 +63,14 @@ public class MonitoringTaskTest
 
     private static final class TestMonitor extends MonitorableImpl
     {
-        private final String name;
-
         TestMonitor(String name, long timestamp, boolean isCrossNode, long timeout, long slow)
         {
-            this.name = name;
-            setMonitoringTime(timestamp, isCrossNode, timeout, slow);
+            this(name, timestamp, isCrossNode, timeout, slow, false);
         }
 
-        public String name()
+        TestMonitor(String name, long timestamp, boolean isCrossNode, long timeout, long slow, boolean skipReporting)
         {
-            return name;
+            super(name, timestamp, timeout, slow, isCrossNode, skipReporting);
         }
 
         @Override
@@ -224,6 +221,25 @@ public class MonitoringTaskTest
         assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
 
         assertTrue(MonitoringTask.instance.logFailedOperations(ApproximateTime.currentTimeMillis()));
+        assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
+    }
+
+    @Test
+    public void testSkipReporting() throws InterruptedException
+    {
+        Monitorable operation = new TestMonitor("Test skip reporting", System.currentTimeMillis(), false, timeout, slowTimeout, true);
+        waitForOperationsToComplete(operation);
+
+        assertTrue(operation.isSlow());
+        assertTrue(operation.isAborted());
+        assertFalse(operation.isCompleted());
+
+        // skipeReporting = true ensures operations are not logged as slow
+        assertFalse(MonitoringTask.instance.logSlowOperations(ApproximateTime.currentTimeMillis()));
+        assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
+
+        // skipeReporting = true ensures operations are not logged as failed
+        assertFalse(MonitoringTask.instance.logFailedOperations(ApproximateTime.currentTimeMillis()));
         assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
     }
 

@@ -39,6 +39,37 @@ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
  */
 public class SelectTest extends CQLTester
 {
+//    @Test
+//    public void testFilteringOnClusteringColumnsWithLimitAndStaticColumns() throws Throwable
+//    {
+//        createTable("CREATE TABLE %s (a int, b int, s int static, c int, primary key (a, b))");
+//
+//        for (int i = 0; i < 3; i++)
+//        {
+//            execute("INSERT INTO %s (a, s) VALUES (?, ?)", i, i);
+//            for (int j = 0; j < 3; j++)
+//                if (!(i == 0 && j == 1))
+//                    execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", i, j, i + j);
+//        }
+//
+//        assertRows(execute("SELECT * FROM %s"),
+//                   row(1, 0, 1, 1),
+//                   row(1, 1, 1, 2),
+//                   row(1, 2, 1, 3),
+//                   row(0, 0, 0, 0),
+//                   row(0, 2, 0, 2),
+//                   row(2, 0, 2, 2),
+//                   row(2, 1, 2, 3),
+//                   row(2, 2, 2, 4));
+//
+//        assertRows(execute("SELECT * FROM %s WHERE b = 1 ALLOW FILTERING"),
+//                   row(1, 1, 1, 2),
+//                   row(2, 1, 2, 3));
+//
+//        assertRows(execute("SELECT * FROM %s WHERE b = 1 LIMIT 2 ALLOW FILTERING"),
+//                   row(1, 1, 1, 2),
+//                   row(2, 1, 2, 3)); // <-------- FAIL It returns only one row because the static row of partition 0 is counted and filtered out in SELECT statement
+//    }
 
     @Test
     public void testSingleClustering() throws Throwable
@@ -716,11 +747,9 @@ public class SelectTest extends CQLTester
         execute("INSERT INTO %s (kind, time, value1) VALUES ('ev1', ?, ?)", 4, 4);
         execute("INSERT INTO %s (kind, time, value1, value2) VALUES ('ev2', 0, 0, 0)");
 
-        assertRows(execute("SELECT COUNT(*) FROM %s WHERE kind = 'ev1'"),
-                   row(5L));
-
-        assertRows(execute("SELECT COUNT(1) FROM %s WHERE kind IN ('ev1', 'ev2') AND time=0"),
-                   row(2L));
+        assertRows(execute("SELECT COUNT(*) FROM %s WHERE kind = 'ev1'"), row(5L));
+        assertRows(execute("SELECT COUNT(1) FROM %s WHERE kind IN ('ev1', 'ev2') AND time=0"), row(2L));
+        assertRows(execute("SELECT COUNT(*) FROM %s"), row(6L));
     }
 
     /**

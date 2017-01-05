@@ -680,7 +680,6 @@ public class Util
         {
             super(original.isDigestQuery(),
                   original.digestVersion(),
-                  original.isForThrift(),
                   original.metadata(),
                   original.nowInSec(),
                   original.columnFilter(),
@@ -729,7 +728,8 @@ public class Util
         Clustering c = Clustering.make(ByteBufferUtil.bytes("c1"), ByteBufferUtil.bytes(42));
         Row row = BTreeRow.singleCellRow(c, BufferCell.live(def, 0, ByteBufferUtil.EMPTY_BYTE_BUFFER));
         PagingState.RowMark mark = PagingState.RowMark.create(metadata, row, protocolVersion);
-        return new PagingState(pk, mark, 10, 0);
+        boolean inclusive = protocolVersion.isGreaterOrEqualTo(ProtocolVersion.DSE_V1);
+        return new PagingState(pk, mark, 10, 0, inclusive);
     }
 
 }

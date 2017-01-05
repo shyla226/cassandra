@@ -32,7 +32,6 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
-import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.UUIDGen;
@@ -89,9 +88,6 @@ public class QueryMessage extends Message.Request
     {
         try
         {
-            if (options.getPageSize() == 0)
-                throw new ProtocolException("The page size cannot be 0");
-
             UUID tracingId = null;
             if (isTracingRequested())
             {
@@ -107,8 +103,8 @@ public class QueryMessage extends Message.Request
 
                 ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
                 builder.put("query", query);
-                if (options.getPageSize() > 0)
-                    builder.put("page_size", Integer.toString(options.getPageSize()));
+                if (options.getPagingOptions() != null)
+                    builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
                 if(options.getConsistency() != null)
                     builder.put("consistency_level", options.getConsistency().name());
                 if(options.getSerialConsistency() != null)
@@ -146,6 +142,6 @@ public class QueryMessage extends Message.Request
     @Override
     public String toString()
     {
-        return "QUERY " + query + "[pageSize = " + options.getPageSize() + "]";
+        return "QUERY " + query + (options.getPagingOptions() == null ? "" : "[pageSize = " + options.getPagingOptions().pageSize() + "]");
     }
 }

@@ -1096,7 +1096,7 @@ public final class SchemaKeyspace
                                      ? ColumnDefinition.Kind.valueOf(row.getString("kind").toUpperCase())
                                      : ColumnDefinition.Kind.REGULAR;
         assert kind == ColumnDefinition.Kind.REGULAR || kind == ColumnDefinition.Kind.STATIC
-            : "Unexpected dropped column kind: " + kind.toString();
+            : "Unexpected dropped column kind: " + kind;
         return new CFMetaData.DroppedColumn(name, type, droppedTime, kind);
     }
 

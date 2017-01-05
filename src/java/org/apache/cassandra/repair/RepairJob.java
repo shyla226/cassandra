@@ -115,6 +115,7 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
             List<TreeResponse> trees = Futures.allAsList(validations).get();
             InetAddress local = FBUtilities.getLocalAddress();
 
+            SyncTask previous = null;
             // We need to difference all trees one against another
             for (int i = 0; i < trees.size() - 1; ++i)
             {
@@ -125,19 +126,21 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
                     SyncTask task;
                     if (r1.endpoint.equals(local) || r2.endpoint.equals(local))
                     {
-                        task = new LocalSyncTask(desc, r1, r2, repairedAt, session.pullRepair);
+                        task = new LocalSyncTask(desc, r1, r2, repairedAt, session.pullRepair, taskExecutor, previous);
                     }
                     else
                     {
-                        task = new RemoteSyncTask(desc, r1, r2);
-                        // RemoteSyncTask expects SyncComplete message sent back.
-                        // Register task to RepairSession to receive response.
-                        session.waitForSync(Pair.create(desc, new NodePair(r1.endpoint, r2.endpoint)), (RemoteSyncTask) task);
+                        task = new RemoteSyncTask(desc, r1, r2, session, taskExecutor, previous);
                     }
                     syncTasks.add(task);
-                    taskExecutor.submit(task);
+                    previous = task;
                 }
             }
+
+            //run sync tasks sequentially to avoid overloading coordinator (APOLLO-216)
+            //after the stream session is started, it will run in paralell
+            if (previous != null)
+                taskExecutor.submit(previous);
         }
         catch (Throwable t)
         {

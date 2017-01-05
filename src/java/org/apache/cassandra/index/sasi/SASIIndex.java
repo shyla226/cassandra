@@ -60,6 +60,8 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class SASIIndex implements Index, INotificationConsumer
 {
+    public final static String USAGE_WARNING = "SASI index was enabled for '%s.%s'. SASI is still in beta, take extra caution when using it in production.";
+
     private static class SASIIndexBuildingSupport implements IndexBuildingSupport
     {
         public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs,

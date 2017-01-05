@@ -43,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -64,7 +65,6 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
-import org.apache.cassandra.thrift.cassandraConstants;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
 
@@ -162,11 +162,11 @@ public final class SystemKeyspace
                 + "release_version text,"
                 + "rpc_address inet,"
                 + "schema_version uuid,"
-                + "thrift_version text,"
                 + "tokens set<varchar>,"
                 + "token_boundaries list<varchar>,"
                 + "truncated_at map<uuid, blob>,"
-                + "PRIMARY KEY ((key)))");
+                + "PRIMARY KEY ((key)))"
+                ).recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance);
 
     private static final CFMetaData Peers =
         compile(PEERS,
@@ -284,6 +284,7 @@ public final class SystemKeyspace
                 + "query_string text,"
                 + "PRIMARY KEY ((prepared_id)))");
 
+
     private static CFMetaData compile(String name, String description, String schema)
     {
         return CFMetaData.compile(String.format(schema, name), SchemaConstants.SYSTEM_KEYSPACE_NAME)
@@ -348,7 +349,6 @@ public final class SystemKeyspace
                      "cluster_name," +
                      "release_version," +
                      "cql_version," +
-                     "thrift_version," +
                      "native_protocol_version," +
                      "data_center," +
                      "rack," +
@@ -356,7 +356,7 @@ public final class SystemKeyspace
                      "rpc_address," +
                      "broadcast_address," +
                      "listen_address" +
-                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         // TODO make async
         executeOnceInternal(String.format(req, LOCAL),
@@ -364,7 +364,6 @@ public final class SystemKeyspace
                             DatabaseDescriptor.getClusterName(),
                             FBUtilities.getReleaseVersionString(),
                             QueryProcessor.CQL_VERSION.toString(),
-                            cassandraConstants.VERSION,
                             String.valueOf(ProtocolVersion.CURRENT.asInt()),
                             snitch.getDatacenter(FBUtilities.getBroadcastAddress()),
                             snitch.getRack(FBUtilities.getBroadcastAddress()),

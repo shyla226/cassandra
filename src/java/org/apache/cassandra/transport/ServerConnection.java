@@ -39,25 +39,28 @@ public class ServerConnection extends Connection
     public ServerConnection(Channel channel, ProtocolVersion version, Connection.Tracker tracker)
     {
         super(channel, version, tracker);
-        this.clientState = ClientState.forExternalCalls(channel.remoteAddress());
+        this.clientState = ClientState.forExternalCalls(channel.remoteAddress(), this);
         this.state = State.UNINITIALIZED;
     }
 
-    private QueryState getQueryState(int streamId)
+    private QueryState getQueryState(Message.Request request)
     {
+        int streamId = request.getStreamId();
         QueryState qState = queryStates.get(streamId);
         if (qState == null)
         {
             // In theory we shouldn't get any race here, but it never hurts to be careful
-            QueryState newState = new QueryState(clientState);
+            QueryState newState = new QueryState(clientState, request);
             if ((qState = queryStates.putIfAbsent(streamId, newState)) == null)
                 qState = newState;
         }
         return qState;
     }
 
-    public QueryState validateNewMessage(Message.Type type, ProtocolVersion version, int streamId)
+    public QueryState validateNewMessage(Message.Request request, ProtocolVersion version)
     {
+        Message.Type type = request.type;
+
         switch (state)
         {
             case UNINITIALIZED:
@@ -76,7 +79,7 @@ public class ServerConnection extends Connection
             default:
                 throw new AssertionError();
         }
-        return getQueryState(streamId);
+        return getQueryState(request);
     }
 
     public void applyStateTransition(Message.Type requestType, Message.Type responseType)

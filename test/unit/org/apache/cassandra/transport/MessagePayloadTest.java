@@ -295,11 +295,6 @@ public class MessagePayloadTest extends CQLTester
             return QueryProcessor.instance.getPrepared(id);
         }
 
-        public ParsedStatement.Prepared getPreparedForThrift(Integer id)
-        {
-            return QueryProcessor.instance.getPreparedForThrift(id);
-        }
-
         public Single<ResultMessage.Prepared> prepare(String query,
                                                       QueryState state,
                                                       Map<String, ByteBuffer> customPayload)

@@ -49,7 +49,10 @@ if [ -z "$CLASSPATH" ]; then
     exit 1
 fi
 
-"$JAVA" -server -ea -cp "$CLASSPATH" $JVM_OPTS \
+
+PROFILE_OPTS="-XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints -XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile -XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true" 
+
+"$JAVA" -server -ea -cp "$CLASSPATH" $JVM_OPTS $PROFILE_OPTS \
         -Dcassandra.storagedir="$cassandra_storagedir" \
         -Dlogback.configurationFile=logback-tools.xml \
          org.apache.cassandra.stress.CompactionStress $@

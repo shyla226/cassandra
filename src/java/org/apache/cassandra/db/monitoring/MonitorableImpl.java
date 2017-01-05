@@ -18,33 +18,42 @@
 
 package org.apache.cassandra.db.monitoring;
 
-public abstract class MonitorableImpl implements Monitorable
+class MonitorableImpl implements Monitorable
 {
     private MonitoringState state;
     private boolean isSlow;
-    private long constructionTime = -1;
-    private long timeout;
-    private long slowTimeout;
-    private boolean isCrossNode;
-
-    protected MonitorableImpl()
-    {
-        this.state = MonitoringState.IN_PROGRESS;
-        this.isSlow = false;
-    }
+    private final String name;
+    private final long constructionTime;
+    private final long timeout;
+    private final long slowTimeout;
+    private final boolean isCrossNode;
+    private final boolean skipReporting;
 
     /**
-     * This setter is ugly but the construction chain to ReadCommand
-     * is too complex, it would require passing new parameters to all serializers
-     * or specializing the serializers to accept these message properties.
+     * Create a monitorable for the query invoking this constructor.
+     *
+     * @param name - the name of the query, this will be reported in log files by {@link MonitoringTask}
+     * @param constructionTime - the time the query was constructed
+     * @param timeout - the timeout after which the query should be aborted and optionally reported as failed
+     * @param slowTimeout - the timeout after which the query should be reported as slow, if > zero
+     * @param isCrossNode - true if the query originated cross node
+     * @param skipReporting - true if the query should not be reported as failed or slow, but simply aborted
      */
-    public void setMonitoringTime(long constructionTime, boolean isCrossNode, long timeout, long slowTimeout)
+    MonitorableImpl(String name, long constructionTime, long timeout, long slowTimeout, boolean isCrossNode, boolean skipReporting)
     {
-        assert constructionTime >= 0;
+        this.name = name;
         this.constructionTime = constructionTime;
-        this.isCrossNode = isCrossNode;
         this.timeout = timeout;
         this.slowTimeout = slowTimeout;
+        this.state = MonitoringState.IN_PROGRESS;
+        this.isSlow = false;
+        this.isCrossNode = isCrossNode;
+        this.skipReporting = skipReporting;
+    }
+
+    public String name()
+    {
+        return name;
     }
 
     public long constructionTime()
@@ -95,7 +104,7 @@ public abstract class MonitorableImpl implements Monitorable
     {
         if (state == MonitoringState.IN_PROGRESS)
         {
-            if (constructionTime >= 0)
+            if (!skipReporting && constructionTime >= 0)
                 MonitoringTask.addFailedOperation(this, ApproximateTime.currentTimeMillis());
 
             state = MonitoringState.ABORTED;
@@ -109,7 +118,7 @@ public abstract class MonitorableImpl implements Monitorable
     {
         if (state == MonitoringState.IN_PROGRESS)
         {
-            if (isSlow && slowTimeout > 0 && constructionTime >= 0)
+            if (!skipReporting && isSlow && slowTimeout > 0 && constructionTime >= 0)
                 MonitoringTask.addSlowOperation(this, ApproximateTime.currentTimeMillis());
 
             state = MonitoringState.COMPLETED;

@@ -104,9 +104,6 @@ public class ExecuteMessage extends Message.Request
             options.prepare(prepared.boundNames);
             CQLStatement statement = prepared.statement;
 
-            if (options.getPageSize() == 0)
-                throw new ProtocolException("The page size cannot be 0");
-
             UUID tracingId = null;
             if (isTracingRequested())
             {
@@ -119,8 +116,8 @@ public class ExecuteMessage extends Message.Request
                 state.createTracingSession(getCustomPayload());
 
                 ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-                if (options.getPageSize() > 0)
-                    builder.put("page_size", Integer.toString(options.getPageSize()));
+                if (options.getPagingOptions() != null)
+                    builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
                 if(options.getConsistency() != null)
                     builder.put("consistency_level", options.getConsistency().name());
                 if(options.getSerialConsistency() != null)

@@ -228,6 +228,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     // not final since we need to be able to change level on a file.
     protected volatile StatsMetadata sstableMetadata;
 
+    protected final EncodingStats stats;
+
     public final SerializationHeader header;
 
     protected final AtomicLong keyCacheHit = new AtomicLong(0);
@@ -638,6 +640,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         super(desc, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
         this.sstableMetadata = sstableMetadata;
+        this.stats = new EncodingStats(sstableMetadata.minTimestamp, sstableMetadata.minLocalDeletionTime, sstableMetadata.minTTL);
         this.header = header;
         this.maxDataAge = maxDataAge;
         this.openReason = openReason;
@@ -1484,12 +1487,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public RowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
     {
-        return getCachedPosition(new KeyCacheKey(metadata.ksAndCFName, descriptor, key.getKey()), updateStats);
+        if (keyCacheEnabled())
+        {
+            return getCachedPosition(getCacheKey(key), updateStats);
+        }
+        return null;
     }
 
-    protected RowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    public RowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
     {
-        if (keyCache != null && keyCache.getCapacity() > 0 && metadata.params.caching.cacheKeys())
+        if (keyCacheEnabled())
         {
             if (updateStats)
             {
@@ -1508,6 +1515,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             }
         }
         return null;
+    }
+
+    private boolean keyCacheEnabled()
+    {
+        return keyCache != null && keyCache.getCapacity() > 0 && metadata.params.caching.cacheKeys();
     }
 
     /**
@@ -1532,8 +1544,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     protected abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast);
 
-    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, boolean isForThrift);
-    public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed, boolean isForThrift);
+    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
 
     public abstract UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, boolean tombstoneOnly);
 
@@ -1693,7 +1705,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param dataRange filter to use when reading the columns
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public abstract ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, boolean isForThrift);
+    public abstract ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange);
 
     public FileDataInput getFileDataInput(long position)
     {
@@ -2006,9 +2018,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public EncodingStats stats()
     {
-        // We could return sstable.header.stats(), but this may not be as accurate than the actual sstable stats (see
-        // SerializationHeader.make() for details) so we use the latter instead.
-        return new EncodingStats(getMinTimestamp(), getMinLocalDeletionTime(), getMinTTL());
+       return stats;
     }
 
     public Ref<SSTableReader> tryRef()

@@ -36,6 +36,7 @@ import com.google.common.util.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
@@ -93,7 +94,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     // A thread local that tells us if the current thread is owned by the compaction manager. Used
     // by CounterContext to figure out if it should log a warning for invalid counter shards.
-    public static final ThreadLocal<Boolean> isCompactionManager = new ThreadLocal<Boolean>()
+    public static final FastThreadLocal<Boolean> isCompactionManager = new FastThreadLocal<Boolean>()
     {
         @Override
         protected Boolean initialValue()
@@ -363,7 +364,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
 
             @Override
-            public void execute(LifecycleTransaction input) throws IOException
+            public void execute(LifecycleTransaction input)
             {
                 scrubOne(cfs, input, skipCorrupted, checkData);
             }
@@ -567,7 +568,8 @@ public class CompactionManager implements CompactionManagerMBean
     public ListenableFuture<?> submitAntiCompaction(final ColumnFamilyStore cfs,
                                           final Collection<Range<Token>> ranges,
                                           final Refs<SSTableReader> sstables,
-                                          final long repairedAt)
+                                          final long repairedAt,
+                                          final UUID parentRepairSession)
     {
         Runnable runnable = new WrappedRunnable()
         {
@@ -587,7 +589,7 @@ public class CompactionManager implements CompactionManagerMBean
                     sstables.release(compactedSSTables);
                     modifier = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                 }
-                performAnticompaction(cfs, ranges, sstables, modifier, repairedAt);
+                performAnticompaction(cfs, ranges, sstables, modifier, repairedAt, parentRepairSession);
             }
         };
 
@@ -612,6 +614,7 @@ public class CompactionManager implements CompactionManagerMBean
      * @param cfs
      * @param ranges Ranges that the repair was carried out on
      * @param validatedForRepair SSTables containing the repaired ranges. Should be referenced before passing them.
+     * @param parentRepairSession parent repair session ID
      * @throws InterruptedException
      * @throws IOException
      */
@@ -619,10 +622,11 @@ public class CompactionManager implements CompactionManagerMBean
                                       Collection<Range<Token>> ranges,
                                       Refs<SSTableReader> validatedForRepair,
                                       LifecycleTransaction txn,
-                                      long repairedAt) throws InterruptedException, IOException
+                                      long repairedAt,
+                                      UUID parentRepairSession) throws InterruptedException, IOException
     {
-        logger.info("Starting anticompaction for {}.{} on {}/{} sstables", cfs.keyspace.getName(), cfs.getColumnFamilyName(), validatedForRepair.size(), cfs.getLiveSSTables());
-        logger.trace("Starting anticompaction for ranges {}", ranges);
+        logger.info("[repair #{}] Starting anticompaction for {}.{} on {}/{} sstables", parentRepairSession, cfs.keyspace.getName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables());
+        logger.trace("[repair #{}] Starting anticompaction for ranges {}", parentRepairSession, ranges);
         Set<SSTableReader> sstables = new HashSet<>(validatedForRepair);
         Set<SSTableReader> mutatedRepairStatuses = new HashSet<>();
         // we should only notify that repair status changed if it actually did:
@@ -650,7 +654,7 @@ public class CompactionManager implements CompactionManagerMBean
                 {
                     if (r.contains(sstableRange))
                     {
-                        logger.info("SSTable {} fully contained in range {}, mutating repairedAt instead of anticompacting", sstable, r);
+                        logger.info("[repair #{}] SSTable {} fully contained in range {}, mutating repairedAt instead of anticompacting", parentRepairSession, sstable, r);
                         sstable.descriptor.getMetadataSerializer().mutateRepairedAt(sstable.descriptor, repairedAt);
                         sstable.reloadSSTableMetadata();
                         mutatedRepairStatuses.add(sstable);
@@ -662,14 +666,14 @@ public class CompactionManager implements CompactionManagerMBean
                     }
                     else if (sstableRange.intersects(r))
                     {
-                        logger.info("SSTable {} ({}) will be anticompacted on range {}", sstable, sstableRange, r);
+                        logger.info("[repair #{}] SSTable {} ({}) will be anticompacted on range {}", parentRepairSession, sstable, sstableRange, r);
                         shouldAnticompact = true;
                     }
                 }
 
                 if (!shouldAnticompact)
                 {
-                    logger.info("SSTable {} ({}) does not intersect repaired ranges {}, not touching repairedAt.", sstable, sstableRange, normalizedRanges);
+                    logger.info("[repair #{}] SSTable {} ({}) does not intersect repaired ranges {}, not touching repairedAt.", parentRepairSession, sstable, sstableRange, normalizedRanges);
                     nonAnticompacting.add(sstable);
                     sstableIterator.remove();
                 }
@@ -688,7 +692,7 @@ public class CompactionManager implements CompactionManagerMBean
             txn.close();
         }
 
-        logger.info("Completed anticompaction successfully");
+        logger.info("[repair #{}] Completed anticompaction successfully", parentRepairSession);
     }
 
     public void performMaximal(final ColumnFamilyStore cfStore, boolean splitOutput)
@@ -953,7 +957,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
-    private void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData) throws IOException
+    private void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, boolean skipCorrupted, boolean checkData)
     {
         CompactionInfo.Holder scrubInfo = null;
 
@@ -1721,7 +1725,7 @@ public class CompactionManager implements CompactionManagerMBean
     {
         protected CompactionExecutor(int minThreads, int maxThreads, String name, BlockingQueue<Runnable> queue)
         {
-            super(minThreads, maxThreads, 60, TimeUnit.SECONDS, queue, new NamedThreadFactory(name, Thread.MIN_PRIORITY), "internal");
+            super(minThreads, maxThreads, 60, TimeUnit.SECONDS, queue, new NamedThreadFactory(name), "internal");
         }
 
         private CompactionExecutor(int threadCount, String name)

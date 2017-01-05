@@ -32,7 +32,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.*;
@@ -67,15 +66,20 @@ import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.*;
+import org.apache.cassandra.transport.RequestThreadPoolExecutor;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertTrue;
 
 /**
  * Base class for CQL tests.
+ *
+ * TODO: this is now used as a test utility outside of CQL tests, we should really refactor it into a utility class
+ * for things like setting up the network, inserting data, etc.
  */
 public abstract class CQLTester
 {
@@ -354,6 +358,11 @@ public abstract class CQLTester
     // lazy initialization for all tests that require Java Driver
     protected static void requireNetwork() throws ConfigurationException
     {
+        requireNetwork(true);
+    }
+
+    public static void requireNetwork(boolean initClientClusters) throws ConfigurationException
+    {
         if (server != null)
             return;
 
@@ -364,34 +373,45 @@ public abstract class CQLTester
         Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
 
-        server = new NativeTransportService(nativeAddr, nativePort);
+        server = new Server.Builder()
+                 .withHost(nativeAddr)
+                 .withPort(nativePort);
         server.start();
 
-
-        for (ProtocolVersion version : PROTOCOL_VERSIONS)
+        if (initClientClusters)
         {
-            if (clusters.containsKey(version))
-                continue;
-
-            PoolingOptions poolingOpts = new PoolingOptions()
-                                         .setConnectionsPerHost(HostDistance.LOCAL, 1, 1)
-                                         .setMaxRequestsPerConnection(HostDistance.LOCAL, 32000)
-                                         .setNewConnectionThreshold(HostDistance.LOCAL, 100);
-
-
-            Cluster cluster = Cluster.builder()
-                                     .addContactPoints(nativeAddr)
-                                     .withClusterName("Test Cluster")
-                                     .withPort(nativePort)
-                                     .withPoolingOptions(poolingOpts)
-                                     .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()))
-                                     .withoutMetrics()
-                                     .build();
-            clusters.put(version, cluster);
-            sessions.put(version, cluster.connect());
-
-            logger.info("Started Java Driver instance for protocol version {}", version);
+            for (ProtocolVersion version : PROTOCOL_VERSIONS)
+                initClientCluster(version, NettyOptions.DEFAULT_INSTANCE);
         }
+    }
+
+    public static void initClientCluster(ProtocolVersion version, NettyOptions nettyOptions)
+    {
+        if (clusters.containsKey(version))
+            return;
+
+        Cluster cluster = createClientCluster(version, "Test Cluster", nettyOptions);
+        clusters.put(version, cluster);
+        sessions.put(version, cluster.connect());
+
+        logger.info("Started Java Driver instance for protocol version {}", version);
+    }
+
+    public static Cluster createClientCluster(ProtocolVersion version, String clusterName, NettyOptions nettyOptions)
+    {
+        returnCluster.builder()
+                     .addContactPoints(nativeAddr)
+                     .withClusterName(clusterName)
+                     .withPort(nativePort)
+                     .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt())).withoutMetrics()
+                     .withNettyOptions(nettyOptions)
+                     .build();
+            }
+
+    public static void closeClientCluster(Cluster cluster)
+    {
+        cluster.closeAsync().force();
+        logger.info("Closed Java Driver instance for cluster {}", cluster.getClusterName());
     }
 
     protected void dropPerTestKeyspace() throws Throwable
@@ -587,7 +607,7 @@ public abstract class CQLTester
         return currentKeyspace;
     }
 
-    protected String createTable(String query)
+    public String createTable(String query)
     {
         return createTable(KEYSPACE, query);
     }
@@ -756,25 +776,24 @@ public abstract class CQLTester
         return sessionNet(protocolVersion).executeAsync(statement);
     }
 
-
-    protected Session sessionNet()
+    public Session sessionNet()
     {
         return sessionNet(getDefaultVersion());
     }
 
-    protected Session sessionNet(ProtocolVersion protocolVersion)
+    public Session sessionNet(ProtocolVersion protocolVersion)
     {
         requireNetwork();
 
         return sessions.get(protocolVersion);
     }
 
-    protected String formatQuery(String query)
+    public String formatQuery(String query)
     {
         return formatQuery(KEYSPACE, query);
     }
 
-    protected final String formatQuery(String keyspace, String query)
+    public final String formatQuery(String keyspace, String query)
     {
         String currentTable = currentTable();
         return currentTable == null ? query : String.format(query, keyspace + "." + currentTable);
@@ -782,10 +801,10 @@ public abstract class CQLTester
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
     {
-        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls(), false).blockingGet();
+        return QueryProcessor.prepare(formatQuery(query), ClientState.forInternalCalls()).blockingGet();
     }
 
-    protected UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
     {
         return executeFormattedQuery(formatQuery(query), values);
     }
@@ -833,7 +852,27 @@ public abstract class CQLTester
         assertRowsNet(getDefaultVersion(), result, rows);
     }
 
+    public static Comparator<List<ByteBuffer>> RowComparator = (Comparator<List<ByteBuffer>>) (row1, row2) -> {
+        int ret = Integer.compare(row1.size(), row2.size());
+        if (ret != 0)
+            return ret;
+
+        for (int i = 0; i < row1.size(); i++)
+        {
+            ret = row1.get(i).compareTo(row2.get(i));
+            if (ret != 0)
+                return ret;
+        }
+
+        return 0;
+    };
+
     protected void assertRowsNet(ProtocolVersion protocolVersion, ResultSet result, Object[]... rows)
+    {
+        assertRowsNet(protocolVersion, false, result, rows);
+    }
+
+    protected void assertRowsNet(ProtocolVersion protocolVersion, boolean ignoreOrder, ResultSet result, Object[] ... rows)
     {
         // necessary as we need cluster objects to supply CodecRegistry.
         // It's reasonably certain that the network setup has already been done
@@ -848,39 +887,38 @@ public abstract class CQLTester
         }
 
         ColumnDefinitions meta = result.getColumnDefinitions();
-        Iterator<Row> iter = result.iterator();
-        int i = 0;
-        while (iter.hasNext() && i < rows.length)
-        {
-            Object[] expected = rows[i];
-            Row actual = iter.next();
 
+        List<List<ByteBuffer>> expectedRows = new ArrayList<>(rows.length);
+        List<List<ByteBuffer>> actualRows = new ArrayList<>(rows.length);
+
+        com.datastax.driver.core.ProtocolVersion driverVersion = com.datastax.driver.core.ProtocolVersion
+                                                                 .fromInt(protocolVersion.asInt()).fromInt(protocolVersion.asInt());
+
+        Iterator<Row> iter = result.iterator();
+        int i;
+        for (i = 0; i < rows.length; i++)
+        {
             Assert.assertEquals(String.format("Invalid number of (expected) values provided for row %d (using protocol version %s)",
                                               i, protocolVersion),
-                                meta.size(), expected.length);
+                                meta.size(), rows[i].length);
 
+            Assert.assertTrue(String.format("Got fewer rows than epected. Expected %d but got %d", rows.length, i), iter.hasNext());
+            Row actual = iter.next();
+
+            List<ByteBuffer> expectedRow = new ArrayList<>(meta.size());
+            List<ByteBuffer> actualRow = new ArrayList<>(meta.size());
             for (int j = 0; j < meta.size(); j++)
             {
                 DataType type = meta.getType(j);
                 com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
-                                                                                                .getCodecRegistry()
-                                                                                                .codecFor(type);
-                ByteBuffer expectedByteValue = codec.serialize(expected[j], com.datastax.driver.core.ProtocolVersion.fromInt(protocolVersion.asInt()));
-                int expectedBytes = expectedByteValue == null ? -1 : expectedByteValue.remaining();
-                ByteBuffer actualValue = actual.getBytesUnsafe(meta.getName(j));
-                int actualBytes = actualValue == null ? -1 : actualValue.remaining();
-                if (!Objects.equal(expectedByteValue, actualValue))
-                    Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
-                                              "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
-                                              "(using protocol version %s)",
-                                              i, j, meta.getName(j), type,
-                                              codec.format(expected[j]),
-                                              expectedBytes,
-                                              codec.format(codec.deserialize(actualValue, com.datastax.driver.core.ProtocolVersion.fromInt(protocolVersion.asInt()))),
-                                              actualBytes,
-                                              protocolVersion));
+                                                                           .getCodecRegistry()
+                                                                           .codecFor(type);
+                expectedRow.add(codec.serialize(rows[i][j], driverVersion));
+                actualRow.add(actual.getBytesUnsafe(meta.getName(j)));
             }
-            i++;
+
+            expectedRows.add(expectedRow);
+            actualRows.add(actualRow);
         }
 
         if (iter.hasNext())
@@ -890,12 +928,63 @@ public abstract class CQLTester
                 iter.next();
                 i++;
             }
-            Assert.fail(String.format("Got less rows than expected. Expected %d but got %d (using protocol version %s).",
+            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s).",
                                       rows.length, i, protocolVersion));
         }
 
-        Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d (using protocol version %s)",
-                                        rows.length>i ? "less" : "more", rows.length, i, protocolVersion), i == rows.length);
+        if (ignoreOrder)
+        {
+            Collections.sort(expectedRows, RowComparator);
+            Collections.sort(actualRows, RowComparator);
+        }
+
+        for(i = 0; i < expectedRows.size(); i++)
+        {
+            List<ByteBuffer> expected = expectedRows.get(i);
+            List<ByteBuffer> actual = actualRows.get(i);
+
+            for (int j = 0; j < meta.size(); j++)
+            {
+                DataType type = meta.getType(j);
+                com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
+                                                                           .getCodecRegistry()
+                                                                           .codecFor(type);
+
+                if (!Objects.equal(expected.get(j), actual.get(j)))
+                    Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
+                                              "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
+                                              "(using protocol version %d)",
+                                              i, j, meta.getName(j), type,
+                                              codec.format(codec.deserialize(expected.get(j),driverVersion)),
+                                              expected.size(),
+                                              codec.format(codec.deserialize(actual.get(j), driverVersion)),
+                                              actual.size(),
+                                              protocolVersion));
+            }
+        }
+    }
+
+    public Object[][] getRowsNet(Cluster cluster, ColumnDefinitions meta, List<Row> rows)
+    {
+        if (rows == null || rows.isEmpty())
+            return new Object[0][0];
+
+        com.datastax.driver.core.TypeCodec<?>[] codecs = new com.datastax.driver.core.TypeCodec<?>[meta.size()];
+        for (int j = 0; j < meta.size(); j++)
+            codecs[j] = cluster.getConfiguration().getCodecRegistry().codecFor(meta.getType(j));
+
+        Object[][] ret = new Object[rows.size()][];
+        for (int i = 0; i < ret.length; i++)
+        {
+            Row row = rows.get(i);
+            Assert.assertNotNull(row);
+
+            ret[i] = new Object[meta.size()];
+            for (int j = 0; j < meta.size(); j++)
+                ret[i][j] = row.get(j, codecs[j]);
+        }
+
+        return ret;
     }
 
     public static void assertRows(UntypedResultSet result, Object[]... rows)

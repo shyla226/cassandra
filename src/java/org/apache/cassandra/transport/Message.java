@@ -106,6 +106,7 @@ public abstract class Message
 
     public enum Type
     {
+        // Public messages
         ERROR          (0,  Direction.RESPONSE, ErrorMessage.codec),
         STARTUP        (1,  Direction.REQUEST,  StartupMessage.codec),
         READY          (2,  Direction.RESPONSE, ReadyMessage.codec),
@@ -122,7 +123,10 @@ public abstract class Message
         BATCH          (13, Direction.REQUEST,  BatchMessage.codec),
         AUTH_CHALLENGE (14, Direction.RESPONSE, AuthChallenge.codec),
         AUTH_RESPONSE  (15, Direction.REQUEST,  AuthResponse.codec),
-        AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec);
+        AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec),
+
+        // Private messages
+        CANCEL         (255, Direction.REQUEST,  CancelMessage.codec);
 
         public final int opcode;
         public final Direction direction;
@@ -250,12 +254,28 @@ public abstract class Message
         protected UUID tracingId;
         protected List<String> warnings;
 
+        /**
+         * Set this to false if the response should not be sent to the client.
+         * This is a temporary workaround for APOLLO-3, see also APOLLO-267 for more details.
+         * The correct way to fix this would be to change all execute() methods to return an
+         * optional response or null, but we want to do this in a separate ticket, at a time
+         * convenient for DSE, since it would be impacted too, see APOLLO-237.
+         */
+        public final boolean sendToClient;
+
         protected Response(Type type)
+        {
+            this(type, true);
+        }
+
+        protected Response(Type type, boolean sendToClient)
         {
             super(type);
 
             if (type.direction != Direction.RESPONSE)
                 throw new IllegalArgumentException();
+
+            this.sendToClient = sendToClient;
         }
 
         public Message setTracingId(UUID tracingId)
@@ -342,20 +362,38 @@ public abstract class Message
             Connection connection = ctx.channel().attr(Connection.attributeKey).get();
             // The only case the connection can be null is when we send the initial STARTUP message (client side thus)
             ProtocolVersion version = connection == null ? ProtocolVersion.CURRENT : connection.getVersion();
-            EnumSet<Frame.Header.Flag> flags = EnumSet.noneOf(Frame.Header.Flag.class);
-
             Codec<Message> codec = (Codec<Message>)message.type.codec;
+            Frame frame = null;
+            int messageSize = codec.encodedSize(message, version);
+
             try
             {
-                int messageSize = codec.encodedSize(message, version);
-                ByteBuf body;
+                frame = makeFrame(message, messageSize, version);
+                codec.encode(message, frame.body, version);
+                results.add(frame);
+            }
+            catch (Throwable e)
+            {
+                if (frame != null)
+                    frame.body.release();
+
+                throw ErrorMessage.wrap(e, message.getStreamId());
+            }
+        }
+
+        public static Frame makeFrame(Message message, int messageSize, ProtocolVersion version)
+        {
+            EnumSet<Frame.Header.Flag> flags = EnumSet.noneOf(Frame.Header.Flag.class);
+            ByteBuf body = null;
+            try
+            {
                 if (message instanceof Response)
                 {
-                    UUID tracingId = ((Response)message).getTracingId();
+                    UUID tracingId = ((Response) message).getTracingId();
                     Map<String, ByteBuffer> customPayload = message.getCustomPayload();
                     if (tracingId != null)
                         messageSize += CBUtil.sizeOfUUID(tracingId);
-                    List<String> warnings = ((Response)message).getWarnings();
+                    List<String> warnings = ((Response) message).getWarnings();
                     if (warnings != null)
                     {
                         if (version.isSmallerThan(ProtocolVersion.V4))
@@ -388,7 +426,7 @@ public abstract class Message
                 else
                 {
                     assert message instanceof Request;
-                    if (((Request)message).isTracingRequested())
+                    if (((Request) message).isTracingRequested())
                         flags.add(Frame.Header.Flag.TRACING);
                     Map<String, ByteBuffer> payload = message.getCustomPayload();
                     if (payload != null)
@@ -401,30 +439,23 @@ public abstract class Message
                     }
                 }
 
-                try
-                {
-                    codec.encode(message, body, version);
-                }
-                catch (Throwable e)
-                {
-                    body.release();
-                    throw e;
-                }
-
                 // if the driver attempted to connect with a protocol version lower than the minimum supported
                 // version, respond with a protocol error message with the correct frame header for that version
                 ProtocolVersion responseVersion = message.forcedProtocolVersion == null
-                                    ? version
-                                    : message.forcedProtocolVersion;
+                                                  ? version
+                                                  : message.forcedProtocolVersion;
 
                 if (responseVersion.isBeta())
                     flags.add(Frame.Header.Flag.USE_BETA);
 
-                results.add(Frame.create(message.type, message.getStreamId(), responseVersion, flags, body));
+                return Frame.create(message.type, message.getStreamId(), responseVersion, flags, body);
             }
-            catch (Throwable e)
+            catch (Throwable t)
             {
-                throw ErrorMessage.wrap(e, message.getStreamId());
+                if (body != null)
+                    body.release();
+
+                throw t;
             }
         }
     }
@@ -567,7 +598,7 @@ public abstract class Message
             if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
                 ClientWarn.instance.captureWarnings();
 
-            QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion(), request.getStreamId());
+            QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
             //logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
             request.execute(qstate, queryStartNanoTime)

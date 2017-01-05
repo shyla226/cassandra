@@ -49,7 +49,10 @@ public enum ExceptionCode
     INVALID         (0x2200),
     CONFIG_ERROR    (0x2300),
     ALREADY_EXISTS  (0x2400),
-    UNPREPARED      (0x2500);
+    UNPREPARED      (0x2500),
+
+    // 8xx: private error codes
+    CLIENT_WRITE_FAILURE(0x8000);
 
     public final int value;
     private static final Map<Integer, ExceptionCode> valueToCode = new HashMap<>(ExceptionCode.values().length);
@@ -59,7 +62,7 @@ public enum ExceptionCode
             valueToCode.put(code.value, code);
     }
 
-    private ExceptionCode(int value)
+    ExceptionCode(int value)
     {
         this.value = value;
     }
