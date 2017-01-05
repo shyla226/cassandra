@@ -114,6 +114,11 @@ public class OpOrder
         return localOpOrders[coreId].start();
     }
 
+    public TPCOpOrder.Group getCurrent(int coreId)
+    {
+        return localOpOrders[coreId].getCurrent();
+    }
+
     /**
      * Creates a new barrier. The barrier is only a placeholder until barrier.issue() is called on it,
      * after which all new operations will start against a new Group that will not be accepted
@@ -229,6 +234,38 @@ public class OpOrder
             Uninterruptibles.awaitUninterruptibly(latch);
         }
 
+
+        public boolean allPriorOpsAreFinished()
+        {
+            int threads = NettyRxScheduler.getNumNettyThreads();
+            CountDownLatch latch = new CountDownLatch(threads);
+            Integer coreId = NettyRxScheduler.getCoreId();
+
+            boolean allPriorFinished[] = new boolean[threads];
+
+            for (int i = 0; i < threads; i++)
+            {
+                final int fi = i;
+
+                Runnable r = () ->
+                {
+                    allPriorFinished[fi] = tpcBarriers[fi].allPriorOpsAreFinished();
+                    latch.countDown();
+                };
+
+                if (coreId == null || i != coreId)
+                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
+                else
+                    r.run();
+            }
+
+            Uninterruptibles.awaitUninterruptibly(latch);
+            for (int i = 0; i < threads; i++)
+                if (!allPriorFinished[i])
+                    return false;
+
+            return true;
+        }
 
         /**
          * wait for all operations started prior to issuing the barrier to complete

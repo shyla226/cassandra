@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.function.Predicate;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -581,22 +582,15 @@ public abstract class ReadCommand implements ReadQuery
         return Transformation.apply(iter, new TrackOpOrder(group));
     }
 
-
-    protected UnfilteredPartitionIterator withStateTracking(UnfilteredPartitionIterator iter)
-    {
-        return Transformation.apply(iter, new CheckForAbort());
-    }
-
     protected UnfilteredRowIterator withStateTracking(UnfilteredRowIterator iter)
     {
         return Transformation.apply(iter, new CheckForAbort());
     }
 
-        private void maybeDelayForTesting()
-        {
-            if (!metadata.ksName.startsWith("system"))
-                FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
-        }
+    private void maybeDelayForTesting()
+    {
+        if (!metadata.ksName.startsWith("system"))
+            FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
     }
 
     protected UnfilteredPartitionIterator withStateTracking(UnfilteredPartitionIterator iter)

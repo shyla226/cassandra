@@ -55,6 +55,7 @@ import org.apache.cassandra.transport.messages.AuthResponse;
 import org.apache.cassandra.transport.messages.AuthSuccess;
 import org.apache.cassandra.transport.messages.AuthenticateMessage;
 import org.apache.cassandra.transport.messages.BatchMessage;
+import org.apache.cassandra.transport.messages.CancelMessage;
 import org.apache.cassandra.transport.messages.CredentialsMessage;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.EventMessage;
@@ -126,7 +127,7 @@ public abstract class Message
         AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec),
 
         // Private messages
-        CANCEL         (255, Direction.REQUEST,  CancelMessage.codec);
+        CANCEL         (255, Direction.REQUEST, CancelMessage.codec);
 
         public final int opcode;
         public final Direction direction;
@@ -610,6 +611,12 @@ public abstract class Message
                     // onSuccess
                     response -> {
                         response.setStreamId(request.getStreamId());
+
+                        if (!response.sendToClient)
+                        {
+                            request.getSourceFrame().release();
+                            return;
+                        }
 
                         response.setWarnings(ClientWarn.instance.getWarnings());
                         response.attach(connection);

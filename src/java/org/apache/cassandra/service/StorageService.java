@@ -4469,18 +4469,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 totalCFs += keyspace.getColumnFamilyStores().size();
             remainingCFs = totalCFs;
             // flush
-            List<Observable<CommitLogPosition>> flushes = new ArrayList<>();
+            List<Single<CommitLogPosition>> flushes = new ArrayList<>();
             for (Keyspace keyspace : Keyspace.nonSystem())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--).toObservable());
+                    flushes.add(cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--));
             }
             // wait for the flushes.
             // TODO this is a godawful way to track progress, since they flush in parallel.  a long one could
             // thus make several short ones "instant" if we wait for them later.try
             try
             {
-                Observable.merge(flushes).blockingLast(CommitLogPosition.NONE);
+                Single.merge(flushes).blockingLast(CommitLogPosition.NONE);
             }
             catch (Throwable t)
             {
@@ -4500,9 +4500,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Keyspace keyspace : Keyspace.system())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush().toObservable());
+                    flushes.add(cfs.forceFlush());
             }
-            Observable.merge(flushes).blockingLast();
+            Single.merge(flushes).blockingLast(CommitLogPosition.NONE);
 
             HintsService.instance.shutdownBlocking();
 

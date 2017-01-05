@@ -573,10 +573,8 @@ public class SecondaryIndexManager implements IndexRegistry
             while (!pager.isExhausted())
             {
                 try (ReadExecutionController controller = cmd.executionController();
-                     OpOrder.Group writeGroup = Keyspace.writeOrder.start();
-                     RowIterator partition =
-                        PartitionIterators.getOnlyElement(pager.fetchPageInternal(pageSize, controller),
-                                                          cmd))
+                     TPCOpOrder.Group writeGroup = Keyspace.writeOrder.start();
+                     RowIterator partition = PartitionIterators.getOnlyElement(pager.fetchPageInternal(pageSize, controller).blockingGet(), cmd))
                 {
                     Set<Index.Indexer> indexers = indexes.stream()
                                                          .map(index -> index.indexerFor(key,

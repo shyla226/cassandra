@@ -110,7 +110,6 @@ public abstract class ReadResponse
 
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
-            super(command);
             this.iter = iter;
         }
 

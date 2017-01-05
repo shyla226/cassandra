@@ -893,7 +893,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 }
                 publisher.onComplete();
             });
-            return publisher.singleOrError().observeOn(Schedulers.io());
+            return publisher.single(CommitLogPosition.NONE).observeOn(Schedulers.io());
         }
     }
 
@@ -975,11 +975,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         BehaviorSubject<CommitLogPosition> publisher = BehaviorSubject.create();
         postFlushExecutor.execute(() -> {
             logger.debug("forceFlush requested but everything is clean in {}", name);
-            publisher.onNext(current.getCommitLogLowerBound());
+            CommitLogPosition pos = current.getCommitLogLowerBound();
+            publisher.onNext(pos == null ? CommitLogPosition.NONE : pos);
             publisher.onComplete();
         });
 
-        return publisher.singleOrError().observeOn(Schedulers.io());
+        return publisher.single(CommitLogPosition.NONE).observeOn(Schedulers.io());
     }
 
     public CommitLogPosition forceBlockingFlush()

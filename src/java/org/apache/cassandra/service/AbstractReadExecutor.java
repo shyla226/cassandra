@@ -135,8 +135,6 @@ public abstract class AbstractReadExecutor
         MessagingService.Verb verb = MessagingService.Verb.READ;
         try
         {
-            command.setMonitoringTime(constructionTime, false, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
-
             ReadResponse response;
             try (ReadExecutionController executionController = command.executionController())
             {

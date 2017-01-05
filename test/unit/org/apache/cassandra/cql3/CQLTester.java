@@ -66,14 +66,12 @@ import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.*;
-import org.apache.cassandra.transport.RequestThreadPoolExecutor;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static junit.framework.Assert.assertNotNull;
-import static junit.framework.Assert.assertTrue;
 
 /**
  * Base class for CQL tests.
@@ -373,9 +371,7 @@ public abstract class CQLTester
         Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
 
-        server = new Server.Builder()
-                 .withHost(nativeAddr)
-                 .withPort(nativePort);
+        server = new NativeTransportService(nativeAddr, nativePort);
         server.start();
 
         if (initClientClusters)
@@ -399,14 +395,14 @@ public abstract class CQLTester
 
     public static Cluster createClientCluster(ProtocolVersion version, String clusterName, NettyOptions nettyOptions)
     {
-        returnCluster.builder()
-                     .addContactPoints(nativeAddr)
-                     .withClusterName(clusterName)
-                     .withPort(nativePort)
-                     .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt())).withoutMetrics()
-                     .withNettyOptions(nettyOptions)
-                     .build();
-            }
+        return Cluster.builder()
+                      .addContactPoints(nativeAddr)
+                      .withClusterName(clusterName)
+                      .withPort(nativePort)
+                      .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt())).withoutMetrics()
+                      .withNettyOptions(nettyOptions)
+                      .build();
+    }
 
     public static void closeClientCluster(Cluster cluster)
     {

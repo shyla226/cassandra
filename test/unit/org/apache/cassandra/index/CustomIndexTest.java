@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.QueryValidationException;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -913,9 +914,9 @@ public class CustomIndexTest extends CQLTester
         ColumnFamilyStore baseCfs;
         AtomicInteger indexedRowCount = new AtomicInteger(0);
 
-        OpOrder.Group readOrderingAtStart = null;
-        OpOrder.Group readOrderingAtFinish = null;
-        Set<OpOrder.Group> writeGroups = new HashSet<>();
+        TPCOpOrder.Group readOrderingAtStart = null;
+        TPCOpOrder.Group readOrderingAtFinish = null;
+        Set<TPCOpOrder.Group> writeGroups = new HashSet<>();
         List<OpOrder.Barrier> barriers = new ArrayList<>();
 
         static final int ROWS_IN_PARTITION = 1000;
@@ -943,11 +944,11 @@ public class CustomIndexTest extends CQLTester
         public Indexer indexerFor(final DecoratedKey key,
                                   PartitionColumns columns,
                                   int nowInSec,
-                                  OpOrder.Group opGroup,
+                                  TPCOpOrder.Group opGroup,
                                   IndexTransaction.Type transactionType)
         {
             if (readOrderingAtStart == null)
-                readOrderingAtStart = baseCfs.readOrdering.getCurrent();
+                readOrderingAtStart = baseCfs.readOrdering.getCurrent(opGroup.coreId);
 
             writeGroups.add(opGroup);
 
@@ -978,7 +979,7 @@ public class CustomIndexTest extends CQLTester
                     // grab the read OpOrder.Group for the base CFS so
                     // we can compare it with the starting group
                     if (indexedRowCount.get() < ROWS_IN_PARTITION)
-                        readOrderingAtFinish = baseCfs.readOrdering.getCurrent();
+                        readOrderingAtFinish = baseCfs.readOrdering.getCurrent(opGroup.coreId);
                 }
 
                 public void partitionDelete(DeletionTime deletionTime) { }

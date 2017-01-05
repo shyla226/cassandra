@@ -44,6 +44,7 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
@@ -427,6 +428,12 @@ public class Keyspace
         }
     }
 
+    public Completable apply(final Mutation mutation,
+                      final boolean writeCommitLog)
+    {
+        return apply(mutation, writeCommitLog, true, true);
+    }
+
     /**
      * If apply is blocking, apply must not be deferred
      * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
@@ -444,7 +451,7 @@ public class Keyspace
                       boolean updateIndexes,
                       boolean isDroppable)
     {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable, false, null);
+        return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable, false);
     }
 
 
@@ -461,7 +468,7 @@ public class Keyspace
      private Completable applyInternal(final Mutation mutation,
                                  final boolean writeCommitLog,
                                  boolean updateIndexes,
-                                 boolean isClReplay,
+                                 boolean isDroppable,
                                  boolean isDeferrable)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
@@ -650,28 +657,6 @@ public class Keyspace
     public AbstractReplicationStrategy getReplicationStrategy()
     {
         return replicationStrategy;
-    }
-
-    /**
-     * @param key row to index
-     * @param cfs ColumnFamily to index partition in
-     * @param indexes the indexes to submit the row to
-     */
-    public static void indexPartition(DecoratedKey key, ColumnFamilyStore cfs, Set<Index> indexes)
-    {
-        if (logger.isTraceEnabled())
-            logger.trace("Indexing partition {} ", cfs.metadata.getKeyValidator().getString(key.getKey()));
-
-        SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata,
-                                                                                      FBUtilities.nowInSeconds(),
-                                                                                      key);
-
-        try (ReadExecutionController controller = cmd.executionController();
-             UnfilteredRowIterator partition = cmd.queryMemtableAndDisk(cfs, controller);
-             TPCOpOrder.Group writeGroup = cfs.keyspace.writeOrder.start())
-        {
-            cfs.indexManager.indexPartition(partition, writeGroup, indexes, cmd.nowInSec());
-        }
     }
 
     public List<Single<CommitLogPosition>> flush()

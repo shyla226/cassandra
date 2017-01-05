@@ -837,11 +837,9 @@ public class SinglePartitionReadCommand extends ReadCommand
             try (UnfilteredRowIterator iter = result.unfilteredIterator(columnFilter(), Slices.ALL, false))
             {
                 final Mutation mutation = new Mutation(PartitionUpdate.fromIterator(iter, columnFilter()));
-                StageManager.getStage(Stage.MUTATION).execute(() -> {
-                    // skipping commitlog and index updates is fine since we're just de-fragmenting existing data
-                    // TODO make this async
-                    Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false).blockingGet();
-                });
+                // skipping commitlog and index updates is fine since we're just de-fragmenting existing data
+                // Fire and forget
+                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false, true);
             }
         }
 

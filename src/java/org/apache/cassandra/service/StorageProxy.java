@@ -1704,7 +1704,7 @@ public class StorageProxy implements StorageProxyMBean
      * @return - the filtered partition iterator
      */
     @SuppressWarnings("resource")
-    private static PartitionIterator readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static Single<PartitionIterator> readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws IsBootstrappingException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         assert consistencyLevel.isSingleNode();
@@ -1722,8 +1722,13 @@ public class StorageProxy implements StorageProxyMBean
             // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
             // framework (which is non trivial code) making that not happen.
             final PartitionIterator iter = group.executeInternal(controller);
-            return new PartitionIterator()
+            return Single.just(new PartitionIterator()
             {
+                public Observable<RowIterator> asObservable()
+                {
+                    return iter.asObservable().doFinally(() -> close());
+                }
+
                 public boolean hasNext()
                 {
                     return iter.hasNext();
@@ -1738,10 +1743,10 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     // Make sure we close this as the first thing so it's always called.
                     controller.close();
-
                     group.complete();
+                    iter.close();
                 }
-            };
+            });
         }
         catch (Throwable e)
         {
@@ -1752,7 +1757,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static PartitionIterator readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
+    private static Single<PartitionIterator> readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         assert state != null;
@@ -1821,7 +1826,7 @@ public class StorageProxy implements StorageProxyMBean
             casReadMetrics.addNano(latency);
         }
 
-        return result;
+        return Single.just(result);
     }
 
     @SuppressWarnings("resource")
@@ -1829,76 +1834,45 @@ public class StorageProxy implements StorageProxyMBean
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         long start = System.nanoTime();
-        try
-        {
-            Single<PartitionIterator> result = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
-            // If we have more than one command, then despite each read command honoring the limit, the total result
-            // might not honor it and so we should enforce it; For continuous paging however, we know we enforce this
-            // later (by always wrapping in a pager) so don't bother
-            result.map(r -> {
-                if (!forContinuousPaging && group.commands.size() > 1)
-                    return group.limits().filter(r, group.nowInSec());
+        Single<PartitionIterator> result = fetchRows(group.commands, consistencyLevel, queryStartNanoTime);
+        // If we have more than one command, then despite each read command honoring the limit, the total result
+        // might not honor it and so we should enforce it; For continuous paging however, we know we enforce this
+        // later (by always wrapping in a pager) so don't bother
+        return result.map(r ->
+                          {
+                              if (!forContinuousPaging && group.commands.size() > 1)
+                                  return group.limits().filter(r, group.nowInSec());
 
-                return r;
-            }).onErrorResumeNext(e -> {
-                  if (!forContinuousPaging)
-                  {
-                      if (e instanceof UnavailableException)
-                      {
-                          readMetrics.unavailables.mark();
-                          readMetricsMap.get(consistencyLevel).unavailables.mark();
-                      }
-                      else if (e instanceof ReadTimeoutException)
-                      {
-                          readMetrics.timeouts.mark();
-                          readMetricsMap.get(consistencyLevel).timeouts.mark();
-                      }
-                      else if (e instanceof ReadFailureException)
-                      {
-                          
-                      }
-                  }
+                              return r;
+                          })
+                     .onErrorResumeNext(e ->
+                                        {
+                                            if (!forContinuousPaging)
+                                            {
+                                                if (e instanceof UnavailableException)
+                                                {
+                                                    readMetrics.unavailables.mark();
+                                                    readMetricsMap.get(consistencyLevel).unavailables.mark();
+                                                }
+                                                else if (e instanceof ReadTimeoutException)
+                                                {
+                                                    readMetrics.timeouts.mark();
+                                                    readMetricsMap.get(consistencyLevel).timeouts.mark();
+                                                }
+                                                else if (e instanceof ReadFailureException)
+                                                {
+                                                    readMetrics.failures.mark();
+                                                    readMetricsMap.get(consistencyLevel).failures.mark();
+                                                }
+                                            }
 
-                  return Single.error(e);
-            });
-                  .doFinally(() -> {
-                if (!forContinuousPaging)
-                    recordLatency(group, consistencyLevel, start);
-            });
-        }
-        catch (UnavailableException e)
-        {
-            /** continuous paging requests use different metrics, see {@link ContinuousPagingMetrics}. */
-            if (!forContinuousPaging)
-            {
-                readMetrics.unavailables.mark();
-                readMetricsMap.get(consistencyLevel).unavailables.mark();
-            }
-            throw e;
-        }
-        catch (ReadTimeoutException e)
-        {
-            if (!forContinuousPaging)
-            {
-                readMetrics.timeouts.mark();
-                readMetricsMap.get(consistencyLevel).timeouts.mark();
-            }
-            throw e;
-        }
-        catch (ReadFailureException e)
-        {
-            if (!forContinuousPaging)
-            {
-                readMetrics.failures.mark();
-                readMetricsMap.get(consistencyLevel).failures.mark();
-            }
-            throw e;
-        }
-        finally
-        {
-            if (!forContinuousPaging)
-                recordLatency(group, consistencyLevel, start);
-        }
+                                            return Single.error(e);
+                                        })
+                     .doFinally(() ->
+                                {
+                                    if (!forContinuousPaging)
+                                        recordLatency(group, consistencyLevel, start);
+                                });
     }
 
     /**
@@ -2547,7 +2521,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 public Observable<RowIterator> asObservable()
                 {
-                    return iter.asObservable();
+                    return iter.asObservable().doFinally(() -> close());
                 }
 
                 public boolean hasNext()
@@ -2564,7 +2538,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     // Make sure we close this as the first thing so it's always called.
                     controller.close();
-
+                    iter.close();
                     command.complete();
                 }
             });

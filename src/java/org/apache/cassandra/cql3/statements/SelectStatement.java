@@ -31,6 +31,8 @@ import java.util.Optional;
 import java.util.SortedSet;
 
 import com.google.common.base.MoreObjects;
+
+import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,10 +47,13 @@ import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.cql3.PagingResult;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService;
@@ -447,7 +452,6 @@ public class SelectStatement implements CQLStatement
         Single<ResultMessage.Rows> msg;
         Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStartNanoTime);
 
-
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
         msg = processResults(page, options, nowInSec, userLimit).map(r -> {
@@ -490,10 +494,8 @@ public class SelectStatement implements CQLStatement
         {
             if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
             {
-                try (PartitionIterator data = query.executeInternal(executionController))
-                {
-                    return Single.just(new ResultMessage.Rows(processSync(data, options, nowInSec, userLimit)));
-                }
+                PartitionIterator data = query.executeInternal(executionController);
+                return processResults(Single.just(data), options, nowInSec, userLimit);
             }
             else
             {
@@ -512,7 +514,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private ResultMessage.Rows execute(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         int userLimit = getLimit(options);
@@ -538,7 +540,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private ResultMessage.Rows executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ContinuousPagingService.metrics.requests.mark();
@@ -556,7 +558,7 @@ public class SelectStatement implements CQLStatement
         ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
 
         executor.schedule(options.getPagingOptions().state(), builder);
-        return new ResultMessage.Rows(new ResultSet(getResultMetadata().copy(), Collections.emptyList()), false);
+        return Single.just(new ResultMessage.Rows(new ResultSet(getResultMetadata().copy(), Collections.emptyList()), false));
     }
 
     /**
@@ -604,8 +606,7 @@ public class SelectStatement implements CQLStatement
 
         public void retrieveMultiplePages(PagingState pagingState, ResultBuilder builder)
         {
-            // update the metrics with how long we were waiting since scheduling this task
-            ContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNano);
+            // update the metrics with how long we were waiting since scheduling this taskContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNano);
 
             if (logger.isTraceEnabled())
                 logger.trace("{}.{} - retrieving multiple pages with paging state {}",
@@ -614,57 +615,46 @@ public class SelectStatement implements CQLStatement
             assert pager == null;
             assert !builder.isCompleted();
 
-            try
-            {
-                pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()),
-                                             consistencyLevel,
-                                             state.getClientState(),
-                                             true);
+
+            pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()),
+                                         consistencyLevel,
+                                         state.getClientState(),
+                                         true);
 
 
-                // non-local queries span only one page at a time in SP, and each page is monitored starting from
-                // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
-                // instead of queryStartNanoTime for distirbuted queries
-                // local queries, on the other hand, are not monitored against the RPC timeout and we want to record
-                // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
-                // should query all available data, not just page size rows
-                int pageSize = isLocalQuery ? pager.maxRemaining() : this.pageSize;
-                long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
+            // non-local queries span only one page at a time in SP, and each page is monitored starting from
+            // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
+            // instead of queryStartNanoTime for distirbuted queries
+            // local queries, on the other hand, are not monitored against the RPC timeout and we want to record
+            // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
+            // should query all available data, not just page size rows
+            int pageSize = isLocalQuery ? pager.maxRemaining() : this.pageSize;
+            long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
 
-                try (PartitionIterator page = pager.fetchPage(pageSize, queryStart))
-                {
-                    process(page, builder);
-                }
+            Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStart);
 
-                maybeReschedule(builder);
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                logger.error("Failed to process multiple pages with error: {}", t.getMessage(), t);
+            page.map(pi ->
+                     {
+                         Observable<RowIterator> it = pi.asObservable();
+                         it.takeWhile((p) -> !builder.isCompleted())
+                           .map(p -> {
+                                    statement.processPartition(p, options, builder, query.nowInSec());
+                                    return p;
+                                })
+                           .doFinally(() -> pi.close()).subscribe();
 
-                builder.complete(t);
-            }
-        }
+                         return pi;
+                     })
+                .onErrorResumeNext(t ->
+                                   {
+                                       JVMStabilityInspector.inspectThrowable(t);
+                                       logger.error("Failed to process multiple pages with error: {}", t.getMessage(), t);
 
-        /**
-         * Iterate the results and pass them to the builder by calling statement.processPartition().
-         *
-         * @param partitions - the partitions to iterate.
-         * @throws InvalidRequestException
-         */
-        void process(PartitionIterator partitions, ResultBuilder builder) throws InvalidRequestException
-        {
-            while (partitions.hasNext())
-            {
-                try (RowIterator partition = partitions.next())
-                {
-                    statement.processPartition(partition, options, builder, query.nowInSec());
-                }
+                                       builder.complete(t);
 
-                if (builder.isCompleted())
-                    break;
-            }
+                                       return Single.error(t);
+                                   })
+                .doFinally(() -> maybeReschedule(builder)).subscribe();
         }
 
         /**
@@ -1052,10 +1042,7 @@ public class SelectStatement implements CQLStatement
 
         return partitions.map(partitionIterator -> {
             // TODO more efficient way to do this?
-            partitionIterator.forEachRemaining(rowIterator -> {
-                processPartition(rowIterator, options, result, nowInSec);
-                rowIterator.close();
-            });
+            partitionIterator.forEachRemaining(rowIterator -> processPartition(rowIterator, options, result, nowInSec));
             partitionIterator.close();
             return 1;
         }).map(v -> {
@@ -1064,31 +1051,6 @@ public class SelectStatement implements CQLStatement
             cqlRows.trim(userLimit);
             return cqlRows;
         });
-    }
-
-    private ResultSet processSync(PartitionIterator partitions,
-                                  QueryOptions options,
-                                  int nowInSec,
-                                  int userLimit) throws InvalidRequestException
-    {
-        final Selection.ResultSetBuilder result = selection.resultSetBuilder(options, parameters.isJson, aggregationSpec);
-        while (partitions.hasNext())
-        {
-            try (RowIterator rowIterator = partitions.next())
-            {
-                processPartition(rowIterator, options, result, nowInSec);
-            }
-        }
-
-        return postQueryProcessing(result, userLimit);
-    }
-
-    private ResultSet postQueryProcessing(ResultSet.Builder result, int userLimit)
-    {
-        ResultSet cqlRows = result.build();
-        orderResults(cqlRows);
-        cqlRows.trim(userLimit);
-        return cqlRows;
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)
@@ -1120,17 +1082,45 @@ public class SelectStatement implements CQLStatement
     void processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
     throws InvalidRequestException
     {
-        ProtocolVersion protocolVersion = options.getProtocolVersion();
-
-        ByteBuffer[] keyComponents = getComponents(cfm, partition.partitionKey());
-
-        Row staticRow = partition.staticRow();
-        // If there is no rows, we include the static content if we should and we're done.
-        if (!partition.hasNext())
+        try
         {
-            if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
+
+            ProtocolVersion protocolVersion = options.getProtocolVersion();
+
+            ByteBuffer[] keyComponents = getComponents(cfm, partition.partitionKey());
+
+            Row staticRow = partition.staticRow();
+            // If there is no rows, we include the static content if we should and we're done.
+            if (!partition.hasNext())
             {
-                result.newRow(partition.partitionKey(), staticRow.clustering());
+                if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
+                {
+                    result.newRow(partition.partitionKey(), staticRow.clustering());
+                    for (ColumnDefinition def : selection.getColumns())
+                    {
+                        switch (def.kind)
+                        {
+                            case PARTITION_KEY:
+                                result.add(keyComponents[def.position()]);
+                                break;
+                            case STATIC:
+                                addValue(result, def, staticRow, nowInSec, protocolVersion);
+                                break;
+                            default:
+                                result.add(null);
+                        }
+                    }
+                }
+                return;
+            }
+            if (result.isCompleted())
+                return;
+
+            while (partition.hasNext())
+            {
+                Row row = partition.next();
+                result.newRow(partition.partitionKey(), row.clustering());
+                // Respect selection order
                 for (ColumnDefinition def : selection.getColumns())
                 {
                     switch (def.kind)
@@ -1138,45 +1128,25 @@ public class SelectStatement implements CQLStatement
                         case PARTITION_KEY:
                             result.add(keyComponents[def.position()]);
                             break;
+                        case CLUSTERING:
+                            result.add(row.clustering().get(def.position()));
+                            break;
+                        case REGULAR:
+                            addValue(result, def, row, nowInSec, protocolVersion);
+                            break;
                         case STATIC:
                             addValue(result, def, staticRow, nowInSec, protocolVersion);
                             break;
-                        default:
-                            result.add(null);
                     }
                 }
+
+                if (result.isCompleted())
+                    break;
             }
-            return;
         }
-        if (result.isCompleted())
-            return;
-
-        while (partition.hasNext())
+        finally
         {
-            Row row = partition.next();
-            result.newRow(partition.partitionKey(), row.clustering());
-            // Respect selection order
-            for (ColumnDefinition def : selection.getColumns())
-            {
-                switch (def.kind)
-                {
-                    case PARTITION_KEY:
-                        result.add(keyComponents[def.position()]);
-                        break;
-                    case CLUSTERING:
-                        result.add(row.clustering().get(def.position()));
-                        break;
-                    case REGULAR:
-                        addValue(result, def, row, nowInSec, protocolVersion);
-                        break;
-                    case STATIC:
-                        addValue(result, def, staticRow, nowInSec, protocolVersion);
-                        break;
-                }
-            }
-
-            if (result.isCompleted())
-                break;
+            partition.close();
         }
     }
 

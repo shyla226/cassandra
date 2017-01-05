@@ -24,6 +24,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
@@ -88,7 +89,13 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
         else
         {
             // the common path - the node is both the destination and a valid replica for the hint.
-            hint.applyFuture().thenAccept(o -> reply(id, message.from)).exceptionally(e -> {logger.debug("Failed to apply hint", e); return null;});
+            hint.applyFuture()
+                .doOnComplete(() -> reply(id, message.from))
+                .onErrorComplete(e ->
+                                 {
+                                     logger.debug("Failed to apply hint", e);
+                                     return true;
+                                 });
         }
     }
 

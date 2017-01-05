@@ -406,16 +406,7 @@ public class Memtable implements Comparable<Memtable>
         int endComparison = includeStop ? 0 : -1;
 
         // avoid iterating over the memtable if we purge all tombstones
-        if (cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
-            minLocalDeletionTime = findMinLocalDeletionTime(subMap.entrySet().iterator());
-
-        final Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iter = subMap.entrySet().iterator();
-
-        return new MemtableUnfilteredPartitionIterator(cfs, iter, minLocalDeletionTime, columnFilter, dataRange);
-    }
-
-    private int findMinLocalDeletionTime(Iterator<Map.Entry<PartitionPosition, AtomicBTreePartition>> iterator)
-    {
+        boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
         // TODO combine sort and filtering into single step to handle small subrange reads efficiently?
@@ -448,7 +439,7 @@ public class Memtable implements Comparable<Memtable>
         }
         Collections.sort(keysInRange);
 
-        return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), isForThrift, minLocalDeletionTime, columnFilter, dataRange);
+        return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), minLocalDeletionTime, columnFilter, dataRange);
     }
 
     private Pair<List<Integer>, List<PartitionPosition>> getSortedKeySubrange(PartitionPosition from, PartitionPosition to)

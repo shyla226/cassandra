@@ -77,7 +77,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     }
 
     @SuppressWarnings("resource")
-    public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime)
+    public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
     {
         return innerFetch(pageSize, (pageCommand) -> pageCommand.execute(consistency, clientState, queryStartNanoTime, forContinuousPaging));
     }
@@ -85,10 +85,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     @SuppressWarnings("resource")
     public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
     {
-        return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal(executionController));
+        return innerFetch(pageSize, (pageCommand) -> Single.just(pageCommand.executeInternal(executionController)));
     }
 
-    private Single<PartitionIterator> innerFetch(int pageSize, Function<ReadCommand, PartitionIterator> itSupplier)
+    private Single<PartitionIterator> innerFetch(int pageSize, Function<ReadCommand, Single<PartitionIterator>> itSupplier)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
@@ -98,8 +98,8 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
         internalPager = new Pager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        PartitionIterator iter = itSupplier.apply(pageCommand);
-        return Single.just(Transformation.apply(iter, internalPager));
+        Single<PartitionIterator> iter = itSupplier.apply(pageCommand);
+        return iter.map(it -> Transformation.apply(it, internalPager));
     }
 
     /**

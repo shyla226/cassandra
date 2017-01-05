@@ -152,6 +152,11 @@ public class TPCOpOrder
         }
     }
 
+    public Group getCurrent()
+    {
+        return current;
+    }
+
     /**
      * Creates a new barrier. The barrier is only a placeholder until barrier.issue() is called on it,
      * after which all new operations will start against a new Group that will not be accepted

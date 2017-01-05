@@ -144,7 +144,7 @@ public class QueryPagerTest
     {
         Map<DecoratedKey, List<Row>> ret = new HashMap<>();
         try (ReadExecutionController executionController = pager.executionController();
-             PartitionIterator iterator = pager.fetchPageInternal(pageSize, executionController))
+             PartitionIterator iterator = pager.fetchPageInternal(pageSize, executionController).blockingGet())
         {
             while (iterator.hasNext())
             {

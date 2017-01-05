@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -85,7 +86,7 @@ public final class Hint
     /**
      * Applies the contained mutation unless it's expired, filtering out any updates for truncated tables
      */
-    CompletableFuture<?> applyFuture()
+    Completable applyFuture()
     {
         if (isLive())
         {
@@ -96,17 +97,17 @@ public final class Hint
                     filtered = filtered.without(id);
 
             if (!filtered.isEmpty())
-                return filtered.applyFuture();
+                return filtered.applyAsync();
         }
 
-        return CompletableFuture.completedFuture(null);
+        return Completable.complete();
     }
 
     void apply()
     {
         try
         {
-            applyFuture().get();
+            applyFuture().blockingAwait();
         }
         catch (Exception e)
         {

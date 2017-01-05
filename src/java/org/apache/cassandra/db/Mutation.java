@@ -218,7 +218,7 @@ public class Mutation implements IMutation
     private Completable applyAsync(boolean durableWrites, boolean isDroppable)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, durableWrites, isDroppable);
+        return ks.apply(this, durableWrites, true, isDroppable);
     }
 
     public Completable applyAsync()
@@ -228,12 +228,12 @@ public class Mutation implements IMutation
 
     public void apply(boolean durableWrites, boolean isDroppable)
     {
-        Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable);
+        Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable).blockingAwait();
     }
 
     public void apply(boolean durableWrites)
     {
-        applyAsync(durableWrites, true).blockingGet();
+        applyAsync(durableWrites, true).blockingAwait();
     }
 
     /*
