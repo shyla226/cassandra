@@ -136,7 +136,7 @@ public abstract class PartitionIterators
 
         public Observable<RowIterator> asObservable()
         {
-            return Observable.just(iterator);
+            return Observable.just(iterator).doFinally(() -> close());
         }
 
         public void close()

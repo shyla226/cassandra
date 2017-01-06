@@ -337,12 +337,14 @@ public final class AggregationQueryPager implements QueryPager
 
         public Observable<RowIterator> asObservable()
         {
-            return Observable.create(observableEmitter -> {
+            Observable<RowIterator> observable =  Observable.create(observableEmitter -> {
                 while (hasNext())
                     observableEmitter.onNext(next());
 
                 observableEmitter.onComplete();
             });
+
+            return observable.doFinally(() -> close());
         }
 
         private class GroupByRowIterator implements RowIterator

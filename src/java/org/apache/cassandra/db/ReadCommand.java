@@ -352,7 +352,7 @@ public abstract class ReadCommand implements ReadQuery
      * @return an iterator over the result of executing this command locally.
      */
     @SuppressWarnings("resource") // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
-                                  // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
+    // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
     {
         long startTimeNanos = System.nanoTime();

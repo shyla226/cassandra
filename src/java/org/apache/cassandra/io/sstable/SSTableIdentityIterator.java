@@ -231,11 +231,13 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
 
     public Observable<Unfiltered> asObservable()
     {
-        return Observable.create(observableEmitter -> {
+        Observable<Unfiltered> observable = Observable.create(observableEmitter -> {
             while (hasNext())
                 observableEmitter.onNext(next());
 
             observableEmitter.onComplete();
         });
+
+        return observable.doFinally(() -> close());
     }
 }

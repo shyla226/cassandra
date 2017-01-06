@@ -1726,7 +1726,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 public Observable<RowIterator> asObservable()
                 {
-                    return iter.asObservable().doFinally(() -> close());
+                    return iter.asObservable();
                 }
 
                 public boolean hasNext()
@@ -1744,7 +1744,6 @@ public class StorageProxy implements StorageProxyMBean
                     // Make sure we close this as the first thing so it's always called.
                     controller.close();
                     group.complete();
-                    iter.close();
                 }
             });
         }
@@ -2538,7 +2537,6 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     // Make sure we close this as the first thing so it's always called.
                     controller.close();
-                    iter.close();
                     command.complete();
                 }
             });

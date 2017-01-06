@@ -73,11 +73,13 @@ final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> i
 
     public Observable<Unfiltered> asObservable()
     {
-        return Observable.create(observableEmitter -> {
+        Observable<Unfiltered> observable = Observable.create(observableEmitter -> {
             while (hasNext())
                 observableEmitter.onNext(next());
 
             observableEmitter.onComplete();
         });
+
+        return observable.doFinally(() -> close());
     }
 }

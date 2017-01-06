@@ -636,12 +636,13 @@ public class SelectStatement implements CQLStatement
             page.map(pi ->
                      {
                          Observable<RowIterator> it = pi.asObservable();
+
                          it.takeWhile((p) -> !builder.isCompleted())
                            .map(p -> {
                                     statement.processPartition(p, options, builder, query.nowInSec());
                                     return p;
                                 })
-                           .doFinally(() -> pi.close()).subscribe();
+                           .subscribe();
 
                          return pi;
                      })
