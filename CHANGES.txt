@@ -38,6 +38,7 @@ Merged from DSE 5.0.x
 
 
 3.12
+ * Use new token allocation for non bootstrap case as well (CASSANDRA-13080)
  * Avoid byte-array copy when key cache is disabled (CASSANDRA-13084)
  * More fixes to the TokenAllocator (CASSANDRA-12990)
  * Require forceful decommission if number of nodes is less than replication factor (CASSANDRA-12510)
@@ -55,6 +56,8 @@ Merged from DSE 5.0.x
  * cqlsh auto completion: refactor definition of compaction strategy options (CASSANDRA-12946)
  * Add support for arithmetic operators (CASSANDRA-11935)
  * Tables in system_distributed should not use gcgs of 0 (CASSANDRA-12954)
+Merged from 3.0:
+ * Remove support for non-JavaScript UDFs (CASSANDRA-12883)
 
 
 3.10
@@ -169,6 +172,7 @@ Merged from DSE 5.0.x
  * Restore resumable hints delivery (CASSANDRA-11960)
  * Properly record CAS contention (CASSANDRA-12626)
 Merged from 3.0:
+ * Replace empty strings with null values if they cannot be converted (CASSANDRA-12794)
  * Fix deserialization of 2.x DeletedCells (CASSANDRA-12620)
  * Add parent repair session id to anticompaction log message (CASSANDRA-12186)
  * Improve contention handling on failure to acquire MV lock for streaming and hints (CASSANDRA-12905)

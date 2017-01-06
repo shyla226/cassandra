@@ -21,7 +21,7 @@ package org.apache.cassandra.metrics;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLongArray;
@@ -51,7 +51,7 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  * add up to 1.000.000 * 60 * pow(2, 30) which can be represented with 56 bits giving us some head room in a signed
  * 64 bit long.
  *
- * Internally two reservoirs are maintained, one with decay and one without decay. All public getters in a {@Snapshot}
+ * Internally two reservoirs are maintained, one with decay and one without decay. All public getters in a {@link Snapshot}
  * will expose the decay functionality with the exception of the {@link Snapshot#getValues()} which will return values
  * from the reservoir without decay. This makes it possible for the caller to maintain precise deltas in an interval of
  * its choise.
@@ -502,7 +502,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
 
         public void dump(OutputStream output)
         {
-            try (PrintWriter out = new PrintWriter(new OutputStreamWriter(output, UTF_8)))
+            try (PrintWriter out = new PrintWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8)))
             {
                 int length = decayingBuckets.length;
 
