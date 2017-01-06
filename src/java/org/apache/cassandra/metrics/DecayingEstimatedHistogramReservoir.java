@@ -287,8 +287,6 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     }
 
 
-    private static final Charset UTF_8 = Charset.forName("UTF-8");
-
     public long getCount()
     {
         long sum = 0L;
