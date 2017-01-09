@@ -195,6 +195,9 @@ public abstract class CQLTester
         Keyspace.setInitialized();
         SystemKeyspace.persistLocalMetadata();
         isServerPrepared = true;
+
+        //Required for TPC
+        requireNetwork();
     }
 
     public static void cleanupAndLeaveDirs() throws IOException
