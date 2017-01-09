@@ -406,12 +406,14 @@ public class Memtable implements Comparable<Memtable>
         // avoid iterating over the memtable if we purge all tombstones
         boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
         int minLocalDeletionTime = Integer.MAX_VALUE;
+        boolean allRange = keyRange.left.compareTo(keyRange.right) == 0;
 
         ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
         for (int i = 1; i < partitions.size(); i++)
         {
             TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
-            SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange = memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
+            SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
+            trimmedMemtableSubrange = allRange ? memtableSubrange : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
             if (findMinLocalDeletionTime)
             {
