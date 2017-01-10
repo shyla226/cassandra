@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +42,7 @@ import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -166,6 +168,13 @@ public class NettyRxScheduler extends Scheduler
         // force all system table operations to go through a single core
         if (isStartup)
             return ImmediateThinScheduler.INSTANCE;
+
+        // Convert OP partitions to top level partitioner
+        // Needed for 2i and System tables
+        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
+        {
+            key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
+        }
 
         List<PartitionPosition> keyspaceRanges = getRangeList(keyspaceName);
 
@@ -321,4 +330,13 @@ public class NettyRxScheduler extends Scheduler
             return sr;
         }
     }
+
+    public static void initRx()
+    {
+        final Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
+        RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
+        RxJavaPlugins.initIoScheduler(() -> ioScheduler);
+        RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
+    }
+
 }

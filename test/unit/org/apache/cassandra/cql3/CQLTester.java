@@ -42,6 +42,7 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -170,6 +171,8 @@ public abstract class CQLTester
             return;
 
         DatabaseDescriptor.daemonInitialization();
+
+        NettyRxScheduler.initRx();
 
         // Cleanup first
         try

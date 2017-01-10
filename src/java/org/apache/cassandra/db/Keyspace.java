@@ -648,7 +648,8 @@ public class Keyspace
                                                         else
                                                             return Completable.merge(memtablePutObservables);
                                                     }
-                                                }).doOnComplete(() -> opGroup.close());
+                                                })
+                                       .doOnComplete(() -> opGroup.close());
                             })
                           //Route the work to the correct core
                           .subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));

@@ -168,6 +168,9 @@ public class Murmur3Partitioner implements IPartitioner
 
         public int compareTo(Token o)
         {
+            if (!(o instanceof LongToken))
+                System.err.println("SJAKJ");
+
             return Long.compare(token, ((LongToken) o).token);
         }
 

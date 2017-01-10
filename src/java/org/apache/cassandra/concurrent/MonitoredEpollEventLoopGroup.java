@@ -42,7 +42,9 @@ import io.netty.util.concurrent.RejectedExecutionHandlers;
 
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
 
@@ -353,23 +355,40 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             int processed = 0;
 
-            if (delayedNanosDeadline > 0)
+            try
             {
-                fetchFromDelayedQueue(delayedNanosDeadline);
-                delayedNanosDeadline = -1;
-            }
+                if (delayedNanosDeadline > 0)
+                {
+                    fetchFromDelayedQueue(delayedNanosDeadline);
+                    delayedNanosDeadline = -1;
+                }
 
-            Runnable r;
-            while ((r = internalQueue.poll()) != null && processed < Short.MAX_VALUE)
-            {
-                r.run();
-                ++processed;
-            }
+                Runnable r;
+                while ((r = internalQueue.poll()) != null && processed < Short.MAX_VALUE)
+                {
+                    r.run();
+                    ++processed;
+                }
 
-            while ((r = externalQueue.relaxedPoll()) != null && processed < Short.MAX_VALUE * 2)
+                while ((r = externalQueue.relaxedPoll()) != null && processed < Short.MAX_VALUE * 2)
+                {
+                    r.run();
+                    ++processed;
+                }
+            }
+            catch (Throwable t)
             {
-                r.run();
-                ++processed;
+                JVMStabilityInspector.inspectThrowable(t);
+
+                logger.error("Task exception encountered: ", t);
+                try
+                {
+                    RxJavaPlugins.getErrorHandler().accept(t);
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
             }
 
             return processed;

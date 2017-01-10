@@ -13,7 +13,7 @@ commitlog_directory: build/test/cassandra/commitlog
 cdc_raw_directory: build/test/cassandra/cdc_raw
 cdc_enabled: false
 hints_directory: build/test/cassandra/hints
-partitioner: org.apache.cassandra.dht.ByteOrderedPartitioner
+partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 listen_address: 127.0.0.1
 storage_port: 7010
 start_native_transport: true

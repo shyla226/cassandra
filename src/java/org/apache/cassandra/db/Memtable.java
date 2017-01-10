@@ -190,10 +190,14 @@ public class Memtable implements Comparable<Memtable>
         return partitionMapContainer;
     }
 
-    private TreeMap<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(PartitionPosition key)
+    private TreeMap<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(DecoratedKey key)
     {
         if (!hasSplits)
             return partitions.get(0);
+
+        // Deal with localPartitioner tables
+        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
+            key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
 
         PartitionPosition rangeStart = rangeList.get(0);
         for (int i = 1; i < rangeList.size(); i++)
@@ -654,7 +658,7 @@ public class Memtable implements Comparable<Memtable>
             DecoratedKey key = (DecoratedKey)position;
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(position).get(position));
+            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position));
         }
     }
 

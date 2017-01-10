@@ -32,14 +32,12 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.nio.NioEventLoopGroup;
 
-import net.openhft.affinity.AffinitySupport;
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.concurrent.NettyRxScheduler.NUM_NETTY_THREADS;
 
@@ -54,7 +52,6 @@ public class NativeTransportService
     private EventLoopGroup workerGroup;
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
 
     private boolean initialized = false;
     private boolean tpcInitialized = false;
@@ -163,15 +160,7 @@ public class NativeTransportService
             EventLoop loop = workerGroup.next();
             loop.schedule(() -> {
                 NettyRxScheduler.register(loop, cpuId);
-
-                if (affinity)
-                {
-                    logger.info("Locking {} netty thread to {}", cpuId, Thread.currentThread().getName());
-                    AffinitySupport.setAffinity(1L << cpuId);
-                }
-                {
-                    logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
-                }
+                logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
 
                 ready.countDown();
             }, 0, TimeUnit.SECONDS);
