@@ -842,7 +842,7 @@ public class StorageProxy implements StorageProxyMBean
                         && pendingEndpoints.isEmpty() && StorageService.instance.isJoined())
                     {
                         Completable completable = mutation.applyAsync(writeCommitLog, true);
-                        completable.doOnError(exc ->
+                        completable = completable.doOnError(exc ->
                                 logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation, exc));
                         completables.add(completable);
                     }
