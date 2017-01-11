@@ -1,6 +1,7 @@
 DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
+ * Set javac encoding to utf-8 (CASSANDRA-11077)
  * Replace empty strings with null values if they cannot be converted (CASSANDRA-12794)
  * Fixed flacky SSTableRewriterTest: check file counts before calling validateCFS (CASSANDRA-12348)
  * Fix deserialization of 2.x DeletedCells (CASSANDRA-12620)
@@ -9,6 +10,8 @@ Merged from 3.0.X
  * Fix DELETE and UPDATE queries with empty IN restrictions (CASSANDRA-12829)
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
 Merged from 2.2:
+ * Fix race causing infinite loop if Thrift server is stopped before it starts listening (CASSANDRA-12856)
+ * CompactionTasks now correctly drops sstables out of compaction when not enough disk space is available (CASSANDRA-12979)
  * Remove support for non-JavaScript UDFs (CASSANDRA-12883)
  * cqlsh copy-from: encode column names to avoid primary key parsing errors (CASSANDRA-12909)
  * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
@@ -43,6 +46,7 @@ Merged from 2.2:
  * Fix leak on skipped SSTables in sstableupgrade (CASSANDRA-12899)
  * Avoid blocking gossip during pending range calculation (CASSANDRA-12281)
  * Fix purgeability of tombstones with max timestamp (CASSANDRA-12792)
+
  * Fail repair if participant dies during sync or anticompaction (CASSANDRA-12901)
 
 
