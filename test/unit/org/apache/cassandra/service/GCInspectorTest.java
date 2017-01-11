@@ -72,6 +72,7 @@ public class GCInspectorTest
     @Test(expected=IllegalArgumentException.class)
     public void ensureLogLessThanWarn()
     {
+        gcInspector.setGcWarnThresholdInMs(1000);
         gcInspector.setGcLogThresholdInMs(gcInspector.getGcWarnThresholdInMs() + 1);
     }
     

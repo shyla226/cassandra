@@ -911,7 +911,13 @@ public abstract class CQLTester
 
     protected TableMetadata currentTableMetadata()
     {
-        return Schema.instance.getTableMetadata(KEYSPACE, currentTable());
+        return tableMetadata(KEYSPACE, currentTable());
+    }
+
+    protected TableMetadata tableMetadata(String ks, String name)
+    {
+        assert tables.contains(name);
+        return Schema.instance.getTableMetadata(ks, name);
     }
 
     protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable

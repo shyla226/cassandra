@@ -23,31 +23,46 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Completable;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.net.Response;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.utils.concurrent.Accumulator;
 import org.apache.cassandra.utils.flow.Flow;
 
-public abstract class ResponseResolver
+public abstract class ResponseResolver<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger(ResponseResolver.class);
 
-    protected final Keyspace keyspace;
-    protected final ReadCommand command;
-    protected final ConsistencyLevel consistency;
+    final ReadCommand command;
+    final ReadContext ctx;
 
     // Accumulator gives us non-blocking thread-safety with optimal algorithmic constraints
     protected final Accumulator<Response<ReadResponse>> responses;
 
-    public ResponseResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount)
+    ResponseResolver(ReadCommand command, ReadContext ctx, int maxResponseCount)
     {
-        this.keyspace = keyspace;
+        // It's a programming error to pass a command here created through ReadCommand.createDigestCommand(). Those digest
+        // commands should be created late when sending request, so only to be passed to Verbs.READ.READ.newRequest(),
+        // but no resolver applies _only_ to digest queries so keeping the raw command here is logical and more intuitive.
+        // The reason this matter is that with speculative retries and read repairs, the command passed here might be
+        // used to generate new requests, and the assumption when we do so is that we won't get digest queries that way:
+        // if we want digest query then, we can simply call createDigestCommand() then, but getting digest queries
+        // silently is error prone.
+        assert !command.isDigestQuery() : "Shouldn't create a response resolver with a digest command; cmd=" + command;
         this.command = command;
-        this.consistency = consistency;
+        this.ctx = ctx;
         this.responses = new Accumulator<>(maxResponseCount);
     }
 
-    public abstract Flow<FlowablePartition> getData();
-    public abstract Flow<FlowablePartition> resolve() throws DigestMismatchException;
+    ConsistencyLevel consistency()
+    {
+        return ctx.consistencyLevel;
+    }
+
+    public abstract Flow<T> getData();
+    public abstract Flow<T> resolve() throws DigestMismatchException;
     public abstract Completable completeOnReadRepairAnswersReceived();
 
     /**
@@ -72,5 +87,45 @@ public abstract class ResponseResolver
     public Iterable<Response<ReadResponse>> getMessages()
     {
         return responses;
+    }
+
+    /**
+     * Simple utility that returns the iterator corresponding to a single response, for use when no resolving has to
+     * happen.
+     * <p>
+     * The main purpose of this method is to properly call the {@link ReadReconciliationObserver} methods if an observer
+     * is set.
+     *
+     * @param response the response to return.
+     * @return the content of {@code response} as a {@code PartitionIterator}.
+     */
+    protected Flow<FlowableUnfilteredPartition> fromSingleResponse(ReadResponse response)
+    {
+        Flow<FlowableUnfilteredPartition> result = response.data(command);
+        return ctx.readObserver == null
+               ? result
+               : result.map(p ->
+                            {
+                                ctx.readObserver.onPartition(p.partitionKey());
+
+                                if (!p.partitionLevelDeletion().isLive())
+                                    ctx.readObserver.onPartitionDeletion(p.partitionLevelDeletion(), true);
+
+                                if (!p.staticRow.isEmpty())
+                                    ctx.readObserver.onRow(p.staticRow, true);
+
+                                return p.mapContent(u -> {
+                                    if (u.isRow())
+                                        ctx.readObserver.onRow((Row)u, true);
+                                    else
+                                        ctx.readObserver.onRangeTombstoneMarker((RangeTombstoneMarker)u, true);
+                                    return u;
+                                });
+                            });
+    }
+
+    protected Flow<FlowablePartition> fromSingleResponseFiltered(ReadResponse response)
+    {
+        return FlowablePartitions.filterAndSkipEmpty(fromSingleResponse(response), command.nowInSec());
     }
 }

@@ -418,7 +418,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         Flow<FlowablePartition> partitions = local
                                                ? group.executeInternal()
-                                               : group.execute(cl, null, queryStartNanoTime, false);
+                                               : group.execute(ReadContext.builder(group, cl).build(queryStartNanoTime));
 
         return partitions.flatMap(p -> FilteredPartition.create(p))
                          .reduceToRxSingle(new HashMap<DecoratedKey, Partition>(),

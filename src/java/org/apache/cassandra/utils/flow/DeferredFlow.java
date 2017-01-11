@@ -53,20 +53,20 @@ public abstract class DeferredFlow<T> extends Flow<T>
      */
     public static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
     {
-        return create(System.nanoTime() + timeoutNanos, TimeoutException::new);
+        return create(System.nanoTime() + timeoutNanos, () -> Flow.error(new TimeoutException()));
     }
 
     /**
-     * Create a deferred flow that will throw the exception provided by the timeout supplier
-     * after the deadline given as {@code deadlineNanos} has expired.
+     * Create a deferred flow that, if no source is provided before the given {@code deadlineNanos} expired, will use
+     * the flow returned by the provided supplier as source.
      *
      * @param deadlineNanos - the deadline in nano seconds (corresponding to System.nanoTime)
-     * @param timeoutSupplier - a function that will supply a timeout exception when and if required
+     * @param timeoutSupplier - a function that will supply a source when and if required.
      * @param <T> - the type of flow items
      *
      * @return a deferred flow implementation
      */
-    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<Throwable> timeoutSupplier)
+    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<Flow<T>> timeoutSupplier)
     {
         return new DeferredFlowImpl<>(deadlineNanos, timeoutSupplier);
     }

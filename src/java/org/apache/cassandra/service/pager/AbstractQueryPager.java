@@ -26,8 +26,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.Flow;
@@ -76,17 +74,17 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             logger.trace("{} - created with {}/{}/{}", hashCode(), limits, remaining, remainingInPartition);
     }
 
-    public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
     {
-        return innerFetch(pageSize, (pageCommand) -> pageCommand.execute(consistency, clientState, queryStartNanoTime, forContinuousPaging));
+        return innerFetch(pageSize, (pageCommand) -> pageCommand.execute(ctx));
     }
 
     public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     {
-        return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal());
+        return innerFetch(pageSize, ReadQuery::executeInternal);
     }
 
-    public Flow<FlowableUnfilteredPartition> fetchPageUnfiltered(int pageSize, TableMetadata metadata)
+    public Flow<FlowableUnfilteredPartition> fetchPageUnfiltered(int pageSize)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 

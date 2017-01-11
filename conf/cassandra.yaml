@@ -1186,3 +1186,8 @@ max_memory_to_lock_fraction: 0.20
 
 # # Can also be specified as a maximum in MB; the fraction value is ignored if this is set to a non-zero value.
 #max_memory_to_lock_mb: 1337
+
+# NodeSync settings.
+nodesync:
+    # The (maximum) rate (in kilobytes per second) for data validation.
+    rate_in_kb: 1024

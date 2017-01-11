@@ -105,6 +105,7 @@ public class TableStatsPrinter
                     out.println("\t\tAverage tombstones per slice (last five minutes): " + table.averageTombstonesPerSliceLastFiveMinutes);
                     out.println("\t\tMaximum tombstones per slice (last five minutes): " + table.maximumTombstonesPerSliceLastFiveMinutes);
                     out.println("\t\tDropped Mutations: " + table.droppedMutations);
+                    out.println("\t\tFailed Replication Count: " + table.failedReplicationCount);
                     out.println("");
                 }
                 out.println("----------------");

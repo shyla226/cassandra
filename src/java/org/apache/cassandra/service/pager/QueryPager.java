@@ -17,12 +17,11 @@
  */
 package org.apache.cassandra.service.pager;
 
-import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.ReadContext;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -48,7 +47,7 @@ public interface QueryPager
 {
     QueryPager EMPTY = new QueryPager()
     {
-        public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
+        public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx) throws RequestValidationException, RequestExecutionException
         {
             return Flow.empty();
         }
@@ -83,19 +82,10 @@ public interface QueryPager
      * Fetches the next page.
      *
      * @param pageSize the maximum number of elements to return in the next page.
-     * @param consistency the consistency level to achieve for the query.
-     * @param clientState the {@code ClientState} for the query. In practice, this can be null unless
-     * {@code consistency} is a serial consistency.
-     * @param forContinuousPaging this serves the same purpose (and is delegated to) than the similarly
-     * named argument to {@link org.apache.cassandra.db.ReadQuery#execute(ConsistencyLevel, ClientState, long, boolean)}.
-     *
+     * @param ctx the read context for the underlying query
      * @return he page of result as an asynchronous flow of partitions
      */
-    public Flow<FlowablePartition> fetchPage(int pageSize,
-                                             ConsistencyLevel consistency,
-                                             ClientState clientState,
-                                             long queryStartNanoTime,
-                                             boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ReadContext ctx)
     throws RequestValidationException, RequestExecutionException;
 
     /**

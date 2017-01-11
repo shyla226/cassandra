@@ -84,6 +84,7 @@ import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.repair.*;
+import com.datastax.apollo.nodesync.NodeSyncService;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -227,6 +228,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private final StreamStateStore streamStateStore = new StreamStateStore();
 
     private final AtomicBoolean doneAuthSetup = new AtomicBoolean(false);
+
+    public final NodeSyncService nodeSyncService = new NodeSyncService();
 
     /** This method updates the local token on disk  */
     public void setTokens(Collection<Token> tokens)
@@ -898,7 +901,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     {
                         throw new AssertionError(e);
                     }
-
                 }
                 setMode(Mode.JOINING, "Replacing a node with token(s): " + bootstrapTokens, true);
             }
@@ -1478,7 +1480,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Bootstrap node by fetching data from other nodes.
      * If node is bootstrapping as a new node, then this also announces bootstrapping to the cluster.
-     *
+     * <p>
      * This blocks until streaming is done.
      *
      * @param tokens bootstrapping tokens
@@ -1494,7 +1496,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // if not an existing token then bootstrap
             List<Pair<ApplicationState, VersionedValue>> states = new ArrayList<>();
             states.add(Pair.create(ApplicationState.TOKENS, valueFactory.tokens(tokens)));
-            states.add(Pair.create(ApplicationState.STATUS, replacing?
+            states.add(Pair.create(ApplicationState.STATUS, replacing ?
                                                             valueFactory.bootReplacing(DatabaseDescriptor.getReplaceAddress()) :
                                                             valueFactory.bootstrapping(tokens)));
             Gossiper.instance.addLocalApplicationStates(states);
@@ -1638,6 +1640,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * for a keyspace, return the ranges and corresponding listen addresses.
+     *
      * @param keyspace
      * @return the endpoint map
      */
@@ -1645,7 +1648,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         /* All the ranges for the tokens */
         Map<List<String>, List<String>> map = new HashMap<>();
-        for (Map.Entry<Range<Token>,List<InetAddress>> entry : getRangeToAddressMap(keyspace).entrySet())
+        for (Map.Entry<Range<Token>, List<InetAddress>> entry : getRangeToAddressMap(keyspace).entrySet())
         {
             map.put(entry.getKey().asList(), stringify(entry.getValue()));
         }
@@ -1654,6 +1657,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * Return the rpc address associated with an endpoint as a string.
+     *
      * @param endpoint The endpoint to get rpc address for
      * @return the rpc address
      */
@@ -1669,6 +1673,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * for a keyspace, return the ranges and corresponding RPC addresses for a given keyspace.
+     *
      * @param keyspace
      * @return the endpoint map
      */
@@ -1679,7 +1684,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         for (Map.Entry<Range<Token>, List<InetAddress>> entry : getRangeToAddressMap(keyspace).entrySet())
         {
             List<String> rpcaddrs = new ArrayList<>(entry.getValue().size());
-            for (InetAddress endpoint: entry.getValue())
+            for (InetAddress endpoint : entry.getValue())
             {
                 rpcaddrs.add(getRpcaddress(endpoint));
             }
@@ -1765,7 +1770,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * The same as {@code describeRing(String)} but converts TokenRange to the String for JMX compatibility
      *
      * @param keyspace The keyspace to fetch information about
-     *
      * @return a List of TokenRange(s) converted to String for the given keyspace
      */
     public List<String> describeRingJMX(String keyspace) throws IOException
@@ -1791,9 +1795,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * The TokenRange for a given keyspace.
      *
      * @param keyspace The keyspace to fetch information about
-     *
      * @return a List of TokenRange(s) for the given keyspace
-     *
      * @throws InvalidRequestException if there is no ring information available about keyspace
      */
     public List<TokenRange> describeRing(String keyspace) throws InvalidRequestException
@@ -1879,9 +1881,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Construct the range to endpoint mapping based on the true view
      * of the world.
+     *
      * @param ranges
      * @return mapping of ranges to the replicas responsible for them.
-    */
+     */
     private Map<Range<Token>, List<InetAddress>> constructRangeToEndpointMap(String keyspace, List<Range<Token>> ranges)
     {
         Map<Range<Token>, List<InetAddress>> rangeToEndpointMap = new HashMap<>(ranges.size());
@@ -2435,7 +2438,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Handle node leaving the ring. This will happen when a node is decommissioned
      *
      * @param endpoint If reason for leaving is decommission, endpoint is the leaving node.
-     * @param pieces STATE_LEFT,token
+     * @param pieces   STATE_LEFT,token
      */
     private void handleStateLeft(InetAddress endpoint, String[] pieces)
     {
@@ -2452,7 +2455,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Handle node moving inside the ring.
      *
      * @param endpoint moving endpoint address
-     * @param pieces STATE_MOVING, token
+     * @param pieces   STATE_MOVING, token
      */
     private void handleStateMoving(InetAddress endpoint, String[] pieces)
     {
@@ -2471,7 +2474,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Handle notification that a node being actively removed from the ring via 'removenode'
      *
      * @param endpoint node
-     * @param pieces either REMOVED_TOKEN (node is gone) or REMOVING_TOKEN (replicas need to be restored)
+     * @param pieces   either REMOVED_TOKEN (node is gone) or REMOVING_TOKEN (replicas need to be restored)
      */
     private void handleStateRemoving(InetAddress endpoint, String[] pieces)
     {
@@ -2545,7 +2548,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         excise(tokens, endpoint);
     }
 
-    /** unlike excise we just need this endpoint gone without going through any notifications **/
+    /**
+     * unlike excise we just need this endpoint gone without going through any notifications
+     **/
     private void removeEndpoint(InetAddress endpoint)
     {
         Gossiper.instance.removeEndpoint(endpoint);
@@ -2569,7 +2574,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Finds living endpoints responsible for the given ranges
      *
      * @param keyspaceName the keyspace ranges belong to
-     * @param ranges the ranges to find sources for
+     * @param ranges       the ranges to find sources for
      * @return multimap of addresses to ranges the address is responsible for
      */
     private Multimap<InetAddress, Range<Token>> getNewSourceRanges(String keyspaceName, Set<Range<Token>> ranges)
@@ -2636,7 +2641,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Called when an endpoint is removed from the ring. This function checks
      * whether this node becomes responsible for new ranges as a
      * consequence and streams data if needed.
-     *
+     * <p>
      * This is rather ineffective, but it does not matter so much
      * since this is called very seldom
      *
@@ -2790,7 +2795,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public Map<String, String> getLoadMap()
     {
         Map<String, String> map = new HashMap<>();
-        for (Map.Entry<InetAddress,Double> entry : LoadBroadcaster.instance.getLoadInfo().entrySet())
+        for (Map.Entry<InetAddress, Double> entry : LoadBroadcaster.instance.getLoadInfo().entrySet())
         {
             map.put(entry.getKey().getHostAddress(), FileUtils.stringifyFileSize(entry.getValue()));
         }
@@ -3024,12 +3029,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    public int relocateSSTables(String keyspaceName, String ... columnFamilies) throws IOException, ExecutionException, InterruptedException
+    public int relocateSSTables(String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException
     {
         return relocateSSTables(0, keyspaceName, columnFamilies);
     }
 
-    public int relocateSSTables(int jobs, String keyspaceName, String ... columnFamilies) throws IOException, ExecutionException, InterruptedException
+    public int relocateSSTables(int jobs, String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException
     {
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
         for (ColumnFamilyStore cfs : getValidColumnFamilies(false, false, keyspaceName, columnFamilies))
@@ -3041,7 +3046,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return status.statusCode;
     }
 
-    public int garbageCollect(String tombstoneOptionString, int jobs, String keyspaceName, String ... columnFamilies) throws IOException, ExecutionException, InterruptedException
+    public int garbageCollect(String tombstoneOptionString, int jobs, String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException
     {
         TombstoneOption tombstoneOption = TombstoneOption.valueOf(tombstoneOptionString);
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
@@ -3057,12 +3062,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Takes the snapshot of a multiple column family from different keyspaces. A snapshot name must be specified.
      *
-     * @param tag
-     *            the tag given to the snapshot; may not be null or empty
-     * @param options
-     *            Map of options (skipFlush is the only supported option for now)
-     * @param entities
-     *            list of keyspaces / tables in the form of empty | ks1 ks2 ... | ks1.cf1,ks2.cf2,...
+     * @param tag      the tag given to the snapshot; may not be null or empty
+     * @param options  Map of options (skipFlush is the only supported option for now)
+     * @param entities list of keyspaces / tables in the form of empty | ks1 ks2 ... | ks1.cf1,ks2.cf2,...
      */
     @Override
     public void takeSnapshot(String tag, Map<String, String> options, String... entities) throws IOException
@@ -3083,15 +3085,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Takes the snapshot of a specific table. A snapshot name must be
      * specified.
      *
-     * @param keyspaceName
-     *            the keyspace which holds the specified table
-     * @param tableName
-     *            the table to snapshot
-     * @param tag
-     *            the tag given to the snapshot; may not be null or empty
+     * @param keyspaceName the keyspace which holds the specified table
+     * @param tableName    the table to snapshot
+     * @param tag          the tag given to the snapshot; may not be null or empty
      */
     public void takeTableSnapshot(String keyspaceName, String tableName, String tag)
-            throws IOException
+    throws IOException
     {
         takeMultipleTableSnapshot(tag, false, keyspaceName + "." + tableName);
     }
@@ -3109,7 +3108,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Takes the snapshot for the given keyspaces. A snapshot name must be specified.
      *
-     * @param tag the tag given to the snapshot; may not be null or empty
+     * @param tag           the tag given to the snapshot; may not be null or empty
      * @param keyspaceNames the names of the keyspaces to snapshot; empty means "all."
      */
     public void takeSnapshot(String tag, String... keyspaceNames) throws IOException
@@ -3120,13 +3119,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Takes the snapshot of a multiple column family from different keyspaces. A snapshot name must be specified.
      *
-     * @param tag
-     *            the tag given to the snapshot; may not be null or empty
-     * @param tableList
-     *            list of tables from different keyspace in the form of ks1.cf1 ks2.cf2
+     * @param tag       the tag given to the snapshot; may not be null or empty
+     * @param tableList list of tables from different keyspace in the form of ks1.cf1 ks2.cf2
      */
     public void takeMultipleTableSnapshot(String tag, String... tableList)
-            throws IOException
+    throws IOException
     {
         takeMultipleTableSnapshot(tag, false, tableList);
     }
@@ -3134,8 +3131,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Takes the snapshot for the given keyspaces. A snapshot name must be specified.
      *
-     * @param tag the tag given to the snapshot; may not be null or empty
-     * @param skipFlush Skip blocking flush of memtable
+     * @param tag           the tag given to the snapshot; may not be null or empty
+     * @param skipFlush     Skip blocking flush of memtable
      * @param keyspaceNames the names of the keyspaces to snapshot; empty means "all."
      */
     private void takeSnapshot(String tag, boolean skipFlush, String... keyspaceNames) throws IOException
@@ -3172,16 +3169,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Takes the snapshot of a multiple column family from different keyspaces. A snapshot name must be specified.
      *
-     *
-     * @param tag
-     *            the tag given to the snapshot; may not be null or empty
-     * @param skipFlush
-     *            Skip blocking flush of memtable
-     * @param tableList
-     *            list of tables from different keyspace in the form of ks1.cf1 ks2.cf2
+     * @param tag       the tag given to the snapshot; may not be null or empty
+     * @param skipFlush Skip blocking flush of memtable
+     * @param tableList list of tables from different keyspace in the form of ks1.cf1 ks2.cf2
      */
     private void takeMultipleTableSnapshot(String tag, boolean skipFlush, String... tableList)
-            throws IOException
+    throws IOException
     {
         Map<Keyspace, List<String>> keyspaceColumnfamily = new HashMap<Keyspace, List<String>>();
         for (String table : tableList)
@@ -3217,12 +3210,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 // Add Keyspace columnfamily to map in order to support atomicity for snapshot process.
                 // So no snapshot should happen if any one of the above conditions fail for any keyspace or columnfamily
                 keyspaceColumnfamily.get(keyspace).add(tableName);
-
             }
             else
             {
                 throw new IllegalArgumentException(
-                        "Cannot take a snapshot on secondary index or invalid column family name. You must supply a column family name in the form of keyspace.columnfamily");
+                                                  "Cannot take a snapshot on secondary index or invalid column family name. You must supply a column family name in the form of keyspace.columnfamily");
             }
         }
 
@@ -3232,7 +3224,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (String table : entry.getValue())
                 snapshotted.addAll(entry.getKey().snapshot(tag, table, skipFlush, snapshotted));
         }
-
     }
 
     private Keyspace getValidKeyspace(String keyspaceName) throws IOException
@@ -3250,13 +3241,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public void clearSnapshot(String tag, String... keyspaceNames) throws IOException
     {
-        if(tag == null)
+        if (tag == null)
             tag = "";
 
         Set<String> keyspaces = new HashSet<>();
         for (String dataDir : DatabaseDescriptor.getAllDataFileLocations())
         {
-            for(String keyspaceDir : new File(dataDir).list())
+            for (String keyspaceDir : new File(dataDir).list())
             {
                 // Only add a ks if it has been specified as a param, assuming params were actually provided.
                 if (keyspaceNames.length > 0 && !Arrays.asList(keyspaceNames).contains(keyspaceDir))
@@ -3282,9 +3273,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             for (ColumnFamilyStore cfStore : keyspace.getColumnFamilyStores())
             {
-                for (Map.Entry<String, Pair<Long,Long>> snapshotDetail : cfStore.getSnapshotDetails().entrySet())
+                for (Map.Entry<String, Pair<Long, Long>> snapshotDetail : cfStore.getSnapshotDetails().entrySet())
                 {
-                    TabularDataSupport data = (TabularDataSupport)snapshotMap.get(snapshotDetail.getKey());
+                    TabularDataSupport data = (TabularDataSupport) snapshotMap.get(snapshotDetail.getKey());
                     if (data == null)
                     {
                         data = new TabularDataSupport(SnapshotDetailsTabularData.TABULAR_TYPE);
@@ -3321,10 +3312,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * @param allowIndexes Allow index CF names to be passed in
+     * @param allowIndexes   Allow index CF names to be passed in
      * @param autoAddIndexes Automatically add secondary indexes if a CF has them
-     * @param keyspaceName keyspace
-     * @param cfNames CFs
+     * @param keyspaceName   keyspace
+     * @param cfNames        CFs
      * @throws java.lang.IllegalArgumentException when given CF name does not exist
      */
     public Iterable<ColumnFamilyStore> getValidColumnFamilies(boolean allowIndexes, boolean autoAddIndexes, String keyspaceName, String... cfNames) throws IOException
@@ -3335,6 +3326,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * Flush all memtables for a keyspace and column families.
+     *
      * @param keyspaceName
      * @param tableNames
      * @throws IOException
@@ -3382,7 +3374,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Create collection of ranges that match ring layout from given tokens.
      *
      * @param beginToken beginning token of the range
-     * @param endToken end token of the range
+     * @param endToken   end token of the range
      * @return collection of ranges that match ring layout in TokenMetadata
      */
     @VisibleForTesting
@@ -3407,9 +3399,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Collections.sort(tokens);
 
         int start = tokens.indexOf(parsedBeginToken), end = tokens.indexOf(parsedEndToken);
-        for (int i = start; i != end; i = (i+1) % tokens.size())
+        for (int i = start; i != end; i = (i + 1) % tokens.size())
         {
-            Range<Token> range = new Range<>(tokens.get(i), tokens.get((i+1) % tokens.size()));
+            Range<Token> range = new Range<>(tokens.get(i), tokens.get((i + 1) % tokens.size()));
             repairingRange.add(range);
         }
 
@@ -3456,7 +3448,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * by {@link AbstractReplicationStrategy#calculateNaturalEndpoints}.
      *
      * @param keyspace Keyspace name to check primary ranges
-     * @param ep endpoint we are interested in.
+     * @param ep       endpoint we are interested in.
      * @return primary ranges for the specified endpoint.
      */
     public Collection<Range<Token>> getPrimaryRangesForEndpoint(String keyspace, InetAddress ep)
@@ -3476,10 +3468,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Get the "primary ranges" within local DC for the specified keyspace and endpoint.
      *
-     * @see #getPrimaryRangesForEndpoint(String, java.net.InetAddress)
-     * @param keyspace Keyspace name to check primary ranges
+     * @param keyspace          Keyspace name to check primary ranges
      * @param referenceEndpoint endpoint we are interested in.
      * @return primary ranges within local DC for the specified endpoint.
+     * @see #getPrimaryRangesForEndpoint(String, java.net.InetAddress)
      */
     public Collection<Range<Token>> getPrimaryRangeForEndpointWithinDC(String keyspace, InetAddress referenceEndpoint)
     {
@@ -3510,6 +3502,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * Get all ranges an endpoint is responsible for (by keyspace)
+     *
      * @param ep endpoint we are interested in.
      * @return ranges for the specified endpoint.
      */
@@ -3522,8 +3515,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Get all ranges that span the ring given a set
      * of tokens. All ranges are in sorted order of
      * ranges.
+     *
      * @return ranges in sorted order
-    */
+     */
     public List<Range<Token>> getAllRanges(List<Token> sortedTokens)
     {
         if (logger.isTraceEnabled())
@@ -3549,8 +3543,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * specified key i.e for replication.
      *
      * @param keyspaceName keyspace name also known as keyspace
-     * @param cf Column family name
-     * @param key key for which we need to find the endpoint
+     * @param cf           Column family name
+     * @param key          key for which we need to find the endpoint
      * @return the endpoint responsible for this key
      */
     public List<InetAddress> getNaturalEndpoints(String keyspaceName, String cf, String key)
@@ -3576,12 +3570,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * specified key i.e for replication.
      *
      * @param keyspaceName keyspace name also known as keyspace
-     * @param pos position for which we need to find the endpoint
+     * @param pos          position for which we need to find the endpoint
      * @return the endpoint responsible for this token
      */
     public List<InetAddress> getNaturalEndpoints(String keyspaceName, RingPosition pos)
     {
-        return Keyspace.open(keyspaceName).getReplicationStrategy().getNaturalEndpoints(pos);
+        return getNaturalEndpoints(Keyspace.open(keyspaceName), pos);
+    }
+
+    public List<InetAddress> getNaturalEndpoints(Keyspace keyspace, RingPosition pos)
+    {
+        return keyspace.getReplicationStrategy().getNaturalEndpoints(pos);
     }
 
     /**
@@ -3597,7 +3596,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * specified key i.e for replication.
      *
      * @param keyspace keyspace name also known as keyspace
-     * @param key key for which we need to find the endpoint
+     * @param key      key for which we need to find the endpoint
      * @return the endpoint responsible for this key
      */
     public List<InetAddress> getLiveNaturalEndpoints(Keyspace keyspace, ByteBuffer key)
@@ -3625,16 +3624,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         ch.qos.logback.classic.Logger logBackLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(classQualifier);
 
         // if both classQualifer and rawLevel are empty, reload from configuration
-        if (StringUtils.isBlank(classQualifier) && StringUtils.isBlank(rawLevel) )
+        if (StringUtils.isBlank(classQualifier) && StringUtils.isBlank(rawLevel))
         {
             JMXConfiguratorMBean jmxConfiguratorMBean = JMX.newMBeanProxy(ManagementFactory.getPlatformMBeanServer(),
-                    new ObjectName("ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator"),
-                    JMXConfiguratorMBean.class);
+                                                                          new ObjectName("ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator"),
+                                                                          JMXConfiguratorMBean.class);
             jmxConfiguratorMBean.reloadDefaultConfiguration();
             return;
         }
         // classQualifer is set, but blank level given
-        else if (StringUtils.isNotBlank(classQualifier) && StringUtils.isBlank(rawLevel) )
+        else if (StringUtils.isNotBlank(classQualifier) && StringUtils.isBlank(rawLevel))
         {
             if (logBackLogger.getLevel() != null || hasAppenders(logBackLogger))
                 logBackLogger.setLevel(null);
@@ -3650,13 +3649,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * @return the runtime logging levels for all the configured loggers
      */
     @Override
-    public Map<String,String>getLoggingLevels()
+    public Map<String, String> getLoggingLevels()
     {
         Map<String, String> logLevelMaps = Maps.newLinkedHashMap();
         LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
         for (ch.qos.logback.classic.Logger logger : lc.getLoggerList())
         {
-            if(logger.getLevel() != null || hasAppenders(logger))
+            if (logger.getLevel() != null || hasAppenders(logger))
                 logLevelMaps.put(logger.getName(), logger.getLevel().toString());
         }
         return logLevelMaps;
@@ -3670,7 +3669,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * @return list of Token ranges (_not_ keys!) together with estimated key count,
-     *      breaking up the data this node is responsible for into pieces of roughly keysPerSplit
+     * breaking up the data this node is responsible for into pieces of roughly keysPerSplit
      */
     public List<Pair<Range<Token>, Long>> getSplits(String keyspaceName, String cfName, Range<Token> range, int keysPerSplit)
     {
@@ -3683,7 +3682,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // splitCount should be much smaller than number of key samples, to avoid huge sampling error
         int minSamplesPerSplit = 4;
         int maxSplitCount = keys.size() / minSamplesPerSplit + 1;
-        int splitCount = Math.max(1, Math.min(maxSplitCount, (int)(totalRowCountEstimate / keysPerSplit)));
+        int splitCount = Math.max(1, Math.min(maxSplitCount, (int) (totalRowCountEstimate / keysPerSplit)));
 
         List<Token> tokens = keysToTokens(range, keys);
         return getSplits(tokens, splitCount, cfs);
@@ -3837,7 +3836,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         tokenMetadata.removeEndpoint(FBUtilities.getBroadcastAddress());
         PendingRangeCalculatorService.instance.update();
 
-        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.left(getLocalTokens(),Gossiper.computeExpireTime()));
+        Gossiper.instance.addLocalApplicationState(ApplicationState.STATUS, valueFactory.left(getLocalTokens(), Gossiper.computeExpireTime()));
         int delay = Math.max(RING_DELAY, Gossiper.intervalInMillis * 2);
         logger.info("Announcing that I have left the ring for {}ms", delay);
         Uninterruptibles.sleepUninterruptibly(delay, TimeUnit.MILLISECONDS);
@@ -3930,7 +3929,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * move the node to new token or find a new token to boot to according to load
      *
      * @param newToken new token to boot to, or if null, find balanced token to boot to
-     *
      * @throws IOException on any I/O operation error
      */
     private void move(Token newToken) throws IOException
@@ -4084,7 +4082,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
                             InetAddress sourceIp = addressList.iterator().next();
                             if (Gossiper.instance.isEnabled() && !Gossiper.instance.getEndpointStateForEndpoint(sourceIp).isAlive())
-                                throw new RuntimeException("A node required to move the data consistently is down ("+sourceIp+").  If you wish to move the data from a potentially inconsistent replica, restart the node with -Dcassandra.consistent.rangemovement=false");
+                                throw new RuntimeException("A node required to move the data consistently is down (" + sourceIp + ").  If you wish to move the data from a potentially inconsistent replica, restart the node with -Dcassandra.consistent.rangemovement=false");
                         }
                     }
 
@@ -4198,7 +4196,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new UnsupportedOperationException("Node to be removed is not a member of the token ring");
 
         if (endpoint.equals(myAddress))
-             throw new UnsupportedOperationException("Cannot remove self");
+            throw new UnsupportedOperationException("Cannot remove self");
 
         if (Gossiper.instance.getLiveMembers().contains(endpoint))
             throw new UnsupportedOperationException("Node " + endpoint + " is alive and owns this ID. Use decommission command to remove it from the ring");
@@ -4736,13 +4734,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         IEndpointSnitch oldSnitch = DatabaseDescriptor.getEndpointSnitch();
 
         // new snitch registers mbean during construction
-        if(epSnitchClassName != null)
+        if (epSnitchClassName != null)
         {
 
             // need to unregister the mbean _before_ the new dynamic snitch is instantiated (and implicitly initialized
             // and its mbean registered)
             if (oldSnitch instanceof DynamicEndpointSnitch)
-                ((DynamicEndpointSnitch)oldSnitch).close();
+                ((DynamicEndpointSnitch) oldSnitch).close();
 
             IEndpointSnitch newSnitch;
             try
@@ -4757,7 +4755,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (newSnitch instanceof DynamicEndpointSnitch)
             {
                 logger.info("Created new dynamic snitch {} with update-interval={}, reset-interval={}, badness-threshold={}",
-                            ((DynamicEndpointSnitch)newSnitch).subsnitch.getClass().getName(), DatabaseDescriptor.getDynamicUpdateInterval(),
+                            ((DynamicEndpointSnitch) newSnitch).subsnitch.getClass().getName(), DatabaseDescriptor.getDynamicUpdateInterval(),
                             DatabaseDescriptor.getDynamicResetInterval(), DatabaseDescriptor.getDynamicBadnessThreshold());
             }
             else
@@ -4777,10 +4775,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (oldSnitch instanceof DynamicEndpointSnitch)
             {
                 logger.info("Applying config change to dynamic snitch {} with update-interval={}, reset-interval={}, badness-threshold={}",
-                            ((DynamicEndpointSnitch)oldSnitch).subsnitch.getClass().getName(), DatabaseDescriptor.getDynamicUpdateInterval(),
+                            ((DynamicEndpointSnitch) oldSnitch).subsnitch.getClass().getName(), DatabaseDescriptor.getDynamicUpdateInterval(),
                             DatabaseDescriptor.getDynamicResetInterval(), DatabaseDescriptor.getDynamicBadnessThreshold());
 
-                DynamicEndpointSnitch snitch = (DynamicEndpointSnitch)oldSnitch;
+                DynamicEndpointSnitch snitch = (DynamicEndpointSnitch) oldSnitch;
                 snitch.applyConfigChanges();
             }
         }
@@ -4869,7 +4867,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public Pair<Set<Range<Token>>, Set<Range<Token>>> calculateStreamAndFetchRanges(Collection<Range<Token>> current, Collection<Range<Token>> updated)
     {
         Set<Range<Token>> toStream = new HashSet<>();
-        Set<Range<Token>> toFetch  = new HashSet<>();
+        Set<Range<Token>> toFetch = new HashSet<>();
 
 
         for (Range<Token> r1 : current)
@@ -5040,13 +5038,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
-    /** Returns the name of the cluster */
+    /**
+     * Returns the name of the cluster
+     */
     public String getClusterName()
     {
         return DatabaseDescriptor.getClusterName();
     }
 
-    /** Returns the cluster partitioner */
+    /**
+     * Returns the cluster partitioner
+     */
     public String getPartitionerName()
     {
         return DatabaseDescriptor.getPartitionerName();
@@ -5138,11 +5140,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     /**
      * Returns a list of disk boundaries, the result will differ depending on whether vnodes are enabled or not.
-     *
+     * <p>
      * What is returned are upper bounds for the disks, meaning everything from partitioner.minToken up to
      * getDiskBoundaries(..).get(0) should be on the first disk, everything between 0 to 1 should be on the second disk
      * etc.
-     *
+     * <p>
      * The final entry in the returned list will always be the partitioner maximum tokens upper key bound
      */
     public static List<PartitionPosition> getDiskBoundaries(List<Range<Token>> localRanges, IPartitioner partitioner, Directories.DataDirectory[] dataDirectories)

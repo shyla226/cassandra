@@ -40,6 +40,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.cql3.statements.CreateTypeStatement;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionHistoryTabularData;
@@ -333,7 +334,12 @@ public final class SystemKeyspace
 
     private static TableMetadata.Builder parse(String table, String description, String cql)
     {
-        return CreateTableStatement.parse(format(cql, table), SchemaConstants.SYSTEM_KEYSPACE_NAME)
+        return parse(table, description, cql, Collections.emptyList());
+    }
+
+    private static TableMetadata.Builder parse(String table, String description, String cql, Collection<UserType> types)
+    {
+        return CreateTableStatement.parse(format(cql, table), SchemaConstants.SYSTEM_KEYSPACE_NAME, types)
                                    .id(TableId.forSystemTable(SchemaConstants.SYSTEM_KEYSPACE_NAME, table))
                                    .dcLocalReadRepairChance(0.0)
                                    .gcGraceSeconds(0)

@@ -19,7 +19,6 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
@@ -33,17 +32,15 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DigestVersion;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadVerbs;
+import org.apache.cassandra.db.ReadContext;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.flow.Flow;
 
@@ -61,26 +58,45 @@ public abstract class AbstractReadExecutor
 
     protected final ReadCommand command;
     protected final List<InetAddress> targetReplicas;
-    protected final ReadCallback handler;
+    protected final ReadCallback<FlowablePartition> handler;
     protected final DigestVersion digestVersion;
     protected final ColumnFamilyStore cfs;
 
-    AbstractReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
+    AbstractReadExecutor(ColumnFamilyStore cfs, ReadCommand command, List<InetAddress> targetReplicas, ReadContext ctx)
     {
+        this.cfs = cfs;
         this.command = command;
         this.targetReplicas = targetReplicas;
-        this.handler = new ReadCallback(new DigestResolver(keyspace, command, consistencyLevel, targetReplicas.size()), consistencyLevel, command, targetReplicas, queryStartNanoTime);
-        this.cfs = cfs;
-
-        // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
-        // knows how to produce older digest but the reverse is not true.
-        MessagingVersion minVersion = MessagingService.current_version;
-        for (InetAddress replica : targetReplicas)
-            minVersion = MessagingVersion.min(minVersion, MessagingService.instance().getVersion(replica));
-        this.digestVersion = minVersion.<ReadVerbs.ReadVersion>groupVersion(Verbs.Group.READS).digestVersion;
+        this.handler = ReadCallback.forInitialRead(command, targetReplicas, ctx);
+        this.digestVersion = DigestVersion.forReplicas(targetReplicas);
     }
 
-    protected Completable makeDataRequests(List<InetAddress> endpoints)
+    /**
+     * Create and send actual requests.
+     *
+     * @param endpoints the endpoints to which to send the request.
+     * @param minDataRead the minimal number of data read to include if digests are enabled. That is, if digests are
+     *                    enabled, the first {@code minDataRead} nodes from {@code endpoints} will be sent a data read,
+     *                    while the rest will be sent a digest one. If digest is not enabled, all nodes will obviously
+     *                    get a data read. For convenience, a value lower than {@code endpoints.size()} is allowed, in
+     *                    which case this is equivalent to passing {@code endpoints.size()}. This must be strictly
+     *                    positive.
+     */
+    protected Completable makeRequests(List<InetAddress> endpoints, int minDataRead)
+    {
+        assert minDataRead > 0 : "Asked for only digest reads, which makes no sense";
+        if (handler.readContext().withDigests && minDataRead < endpoints.size())
+        {
+            return makeDataRequests(endpoints.subList(0, minDataRead))
+                   .concatWith(makeDigestRequests(endpoints.subList(minDataRead, endpoints.size())));
+        }
+        else
+        {
+            return makeDataRequests(endpoints);
+        }
+    }
+
+    private Completable makeDataRequests(List<InetAddress> endpoints)
     {
         assert !endpoints.isEmpty();
         Tracing.trace("Reading data from {}", endpoints);
@@ -88,7 +104,7 @@ public abstract class AbstractReadExecutor
         return makeRequests(command, endpoints);
     }
 
-    protected Completable makeDigestRequests(List<InetAddress> endpoints)
+    private Completable makeDigestRequests(List<InetAddress> endpoints)
     {
         assert !endpoints.isEmpty();
         Tracing.trace("Reading digests from {}", endpoints);
@@ -134,71 +150,52 @@ public abstract class AbstractReadExecutor
 
     }
 
-    private static ReadRepairDecision newReadRepairDecision(TableMetadata metadata)
-    {
-        if (metadata.params.readRepairChance > 0d ||
-            metadata.params.dcLocalReadRepairChance > 0)
-        {
-            double chance = ThreadLocalRandom.current().nextDouble();
-            if (metadata.params.readRepairChance > chance)
-                return ReadRepairDecision.GLOBAL;
-
-            if (metadata.params.dcLocalReadRepairChance > chance)
-                return ReadRepairDecision.DC_LOCAL;
-        }
-
-        return ReadRepairDecision.NONE;
-    }
-
     /**
      * @return an executor appropriate for the configured speculative read policy
      */
-    public static AbstractReadExecutor getReadExecutor(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime) throws UnavailableException
+    public static AbstractReadExecutor getReadExecutor(SinglePartitionReadCommand command, ReadContext ctx) throws UnavailableException
     {
-        Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
+        Keyspace keyspace = ctx.keyspace;
+        ConsistencyLevel consistencyLevel = ctx.consistencyLevel;
         List<InetAddress> allReplicas = StorageProxy.getLiveSortedEndpoints(keyspace, command.partitionKey());
-        // 11980: Excluding EACH_QUORUM reads from potential RR, so that we do not miscount DC responses
-        ReadRepairDecision repairDecision = consistencyLevel == ConsistencyLevel.EACH_QUORUM
-                                            ? ReadRepairDecision.NONE
-                                            : newReadRepairDecision(command.metadata());
-        List<InetAddress> targetReplicas = consistencyLevel.filterForQuery(keyspace, allReplicas, repairDecision);
+        List<InetAddress> targetReplicas = ctx.filterForQuery(allReplicas);
 
         // Throw UAE early if we don't have enough replicas.
         consistencyLevel.assureSufficientLiveNodes(keyspace, targetReplicas);
 
-        if (repairDecision != ReadRepairDecision.NONE)
+        if (ctx.readRepairDecision != ReadRepairDecision.NONE)
         {
-            Tracing.trace("Read-repair {}", repairDecision);
+            Tracing.trace("Read-repair {}", ctx.readRepairDecision);
             ReadRepairMetrics.attempted.mark();
         }
 
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
         SpeculativeRetryParam retry = cfs.metadata().params.speculativeRetry;
 
-        // Speculative retry is disabled *OR*
+        // Speculative retry is disabled
         // 11980: Disable speculative retry if using EACH_QUORUM in order to prevent miscounting DC responses
         if (retry.equals(SpeculativeRetryParam.NONE)
             | consistencyLevel == ConsistencyLevel.EACH_QUORUM)
-            return new NeverSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime, false);
+            return new NeverSpeculatingReadExecutor(cfs, command, targetReplicas, ctx, false);
 
         // There are simply no extra replicas to speculate.
         // Handle this separately so it can log failed attempts to speculate due to lack of replicas
         if (consistencyLevel.blockFor(keyspace) == allReplicas.size())
-            return new NeverSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime, true);
+            return new NeverSpeculatingReadExecutor(cfs, command, targetReplicas, ctx, true);
 
         if (targetReplicas.size() == allReplicas.size())
         {
             // CL.ALL, RRD.GLOBAL or RRD.DC_LOCAL and a single-DC.
             // We are going to contact every node anyway, so ask for 2 full data requests instead of 1, for redundancy
             // (same amount of requests in total, but we turn 1 digest request into a full blown data request).
-            return new AlwaysSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            return new AlwaysSpeculatingReadExecutor(cfs, command, targetReplicas, ctx);
         }
 
         // RRD.NONE or RRD.DC_LOCAL w/ multiple DCs.
         InetAddress extraReplica = allReplicas.get(targetReplicas.size());
         // With repair decision DC_LOCAL all replicas/target replicas may be in different order, so
         // we might have to find a replacement that's not already in targetReplicas.
-        if (repairDecision == ReadRepairDecision.DC_LOCAL && targetReplicas.contains(extraReplica))
+        if (ctx.readRepairDecision == ReadRepairDecision.DC_LOCAL && targetReplicas.contains(extraReplica))
         {
             for (InetAddress address : allReplicas)
             {
@@ -212,9 +209,9 @@ public abstract class AbstractReadExecutor
         targetReplicas.add(extraReplica);
 
         if (retry.equals(SpeculativeRetryParam.ALWAYS))
-            return new AlwaysSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            return new AlwaysSpeculatingReadExecutor(cfs, command, targetReplicas, ctx);
         else // PERCENTILE or CUSTOM.
-            return new SpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            return new SpeculatingReadExecutor(cfs, command, targetReplicas, ctx);
     }
 
     /**
@@ -241,19 +238,15 @@ public abstract class AbstractReadExecutor
          */
         private final boolean logFailedSpeculation;
 
-        public NeverSpeculatingReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime, boolean logFailedSpeculation)
+        public NeverSpeculatingReadExecutor(ColumnFamilyStore cfs, ReadCommand command, List<InetAddress> targetReplicas, ReadContext ctx, boolean logFailedSpeculation)
         {
-            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            super(cfs, command, targetReplicas, ctx);
             this.logFailedSpeculation = logFailedSpeculation;
         }
 
         public Completable executeAsync()
         {
-            Completable result = makeDataRequests(targetReplicas.subList(0, 1));
-            if (targetReplicas.size() > 1)
-                result = result.concatWith(makeDigestRequests(targetReplicas.subList(1, targetReplicas.size())));
-
-            return result;
+            return makeRequests(targetReplicas, 1);
         }
 
         public Completable maybeTryAdditionalReplicas()
@@ -285,14 +278,12 @@ public abstract class AbstractReadExecutor
     {
         private volatile boolean speculated = false;
 
-        public SpeculatingReadExecutor(Keyspace keyspace,
-                                       ColumnFamilyStore cfs,
+        public SpeculatingReadExecutor(ColumnFamilyStore cfs,
                                        ReadCommand command,
-                                       ConsistencyLevel consistencyLevel,
                                        List<InetAddress> targetReplicas,
-                                       long queryStartNanoTime)
+                                       ReadContext ctx)
         {
-            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            super(cfs, command, targetReplicas, ctx);
         }
 
         public Completable executeAsync()
@@ -301,26 +292,19 @@ public abstract class AbstractReadExecutor
             // that the last replica in our list is "extra."
             List<InetAddress> initialReplicas = targetReplicas.subList(0, targetReplicas.size() - 1);
 
-            Completable result;
             if (handler.blockFor() < initialReplicas.size())
             {
                 // We're hitting additional targets for read repair.  Since our "extra" replica is the least-
                 // preferred by the snitch, we do an extra data read to start with against a replica more
                 // likely to reply; better to let RR fail than the entire query.
-                result = makeDataRequests(initialReplicas.subList(0, 2));
-                if (initialReplicas.size() > 2)
-                    result = result.concatWith(makeDigestRequests(initialReplicas.subList(2, initialReplicas.size())));
+                return makeRequests(initialReplicas, 2);
             }
             else
             {
                 // not doing read repair; all replies are important, so it doesn't matter which nodes we
                 // perform data reads against vs digest.
-                result = makeDataRequests(initialReplicas.subList(0, 1));
-                if (initialReplicas.size() > 1)
-                    result = result.concatWith(makeDigestRequests(initialReplicas.subList(1, initialReplicas.size())));
+                return makeRequests(initialReplicas, 1);
             }
-
-            return result;
         }
 
         public Completable maybeTryAdditionalReplicas()
@@ -339,7 +323,7 @@ public abstract class AbstractReadExecutor
                            cfs.metric.speculativeRetries.inc();
                            // Could be waiting on the data, or on enough digests.
                            ReadCommand retryCommand = command;
-                           if (handler.resolver.isDataPresent())
+                           if (handler.resolver.isDataPresent() && (handler.resolver instanceof DigestResolver))
                                retryCommand = command.createDigestCommand(digestVersion);
 
                            InetAddress extraReplica = Iterables.getLast(targetReplicas);
@@ -372,14 +356,12 @@ public abstract class AbstractReadExecutor
 
     private static class AlwaysSpeculatingReadExecutor extends AbstractReadExecutor
     {
-        public AlwaysSpeculatingReadExecutor(Keyspace keyspace,
-                                             ColumnFamilyStore cfs,
+        public AlwaysSpeculatingReadExecutor(ColumnFamilyStore cfs,
                                              ReadCommand command,
-                                             ConsistencyLevel consistencyLevel,
                                              List<InetAddress> targetReplicas,
-                                             long queryStartNanoTime)
+                                             ReadContext ctx)
         {
-            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            super(cfs, command, targetReplicas, ctx);
         }
 
         public Completable maybeTryAdditionalReplicas()
@@ -396,12 +378,8 @@ public abstract class AbstractReadExecutor
         @Override
         public Completable executeAsync()
         {
-            Completable result = makeDataRequests(targetReplicas.subList(0, targetReplicas.size() > 1 ? 2 : 1));
-            if (targetReplicas.size() > 2)
-                result = result.concatWith(makeDigestRequests(targetReplicas.subList(2, targetReplicas.size())));
-
             cfs.metric.speculativeRetries.inc();
-            return result;
+            return makeRequests(targetReplicas, 2);
         }
 
         @Override

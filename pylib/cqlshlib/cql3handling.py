@@ -63,6 +63,8 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
             ('sstable_compression', 'chunk_length_kb', 'crc_check_chance')),
         ('caching', None,
             ('rows_per_partition', 'keys')),
+        ('nodesync', None,
+            ('enabled')),
     )
 
     obsolete_cf_options = ()
@@ -499,6 +501,8 @@ def cf_prop_val_completer(ctxt, cass):
         return ["{'class': '"]
     if this_opt == 'caching':
         return ["{'keys': '"]
+    if this_opt == 'nodesync':
+        return ["{'enabled': '"]
     if any(this_opt == opt[0] for opt in CqlRuleSet.obsolete_cf_options):
         return ["'<obsolete_option>'"]
     if this_opt in ('read_repair_chance', 'bloom_filter_fp_chance',
@@ -522,9 +526,7 @@ def cf_prop_val_mapkey_completer(ctxt, cass):
     keysseen = map(dequote_value, ctxt.get_binding('propmapkey', ()))
     valsseen = map(dequote_value, ctxt.get_binding('propmapval', ()))
     pairsseen = dict(zip(keysseen, valsseen))
-    if optname == 'compression':
-        return map(escape_value, set(subopts).difference(keysseen))
-    if optname == 'caching':
+    if optname == 'compression' or optname == 'caching' or optname == 'nodesync':
         return map(escape_value, set(subopts).difference(keysseen))
     if optname == 'compaction':
         opts = set(subopts)
@@ -562,6 +564,9 @@ def cf_prop_val_mapval_completer(ctxt, cass):
             return ["'ALL'", "'NONE'", Hint('#rows_per_partition')]
         elif key == 'keys':
             return ["'ALL'", "'NONE'"]
+    elif opt == 'nodesync':
+        if key == 'enabled':
+            return ["'true'", "'false'"]
     return ()
 
 

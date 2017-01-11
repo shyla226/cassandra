@@ -78,6 +78,11 @@ public class ReadExecutorTest
         DatabaseDescriptor.setReadRpcTimeout(rpcTimeout);
     }
 
+    private ReadContext ctx(ReadCommand command, ConsistencyLevel cl)
+    {
+        return ReadContext.builder(command, cl).build(System.nanoTime());
+    }
+
     /**
      * If speculation would have been beneficial but could not be attempted due to lack of replicas
      * count that it occurred
@@ -88,7 +93,7 @@ public class ReadExecutorTest
         assertEquals(0, cfs.metric.speculativeInsufficientReplicas.getCount());
         assertEquals(0, ks.metric.speculativeInsufficientReplicas.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
-        AbstractReadExecutor executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime(), true);
+        AbstractReadExecutor executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(cfs, command, targets, ctx(command, ConsistencyLevel.LOCAL_QUORUM), true);
         executor.executeAsync().subscribe();
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
@@ -114,11 +119,7 @@ public class ReadExecutorTest
 
         //Shouldn't increment
         command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
-        executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime(), false);
-
-        executor.executeAsync().subscribe();
-        executor.maybeTryAdditionalReplicas().blockingAwait();
-
+        executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(cfs, command, targets, ctx(command, ConsistencyLevel.LOCAL_QUORUM), false);
         try
         {
             executor.result().blockingSingle();
@@ -145,7 +146,7 @@ public class ReadExecutorTest
         assertEquals(0, ks.metric.speculativeRetries.getCount());
         assertEquals(0, ks.metric.speculativeFailedRetries.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
-        AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime());
+        AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(cfs, command, targets, ctx(command, ConsistencyLevel.LOCAL_QUORUM));
         DatabaseDescriptor.setReadRpcTimeout(TimeUnit.DAYS.toMillis(365));
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
@@ -187,7 +188,7 @@ public class ReadExecutorTest
         assertEquals(0, ks.metric.speculativeRetries.getCount());
         assertEquals(0, ks.metric.speculativeFailedRetries.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
-        AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime());
+        AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(cfs, command, targets, ctx(command, ConsistencyLevel.LOCAL_QUORUM));
         executor.maybeTryAdditionalReplicas().blockingAwait();
         try
         {

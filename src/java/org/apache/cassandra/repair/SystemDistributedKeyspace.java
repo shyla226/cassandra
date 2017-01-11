@@ -25,10 +25,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
@@ -41,36 +44,57 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.cql3.statements.CreateTypeStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import com.datastax.apollo.nodesync.ValidationInfo;
+import com.datastax.apollo.nodesync.NodeSyncRecord;
+import com.datastax.apollo.nodesync.Segment;
 import org.apache.cassandra.repair.messages.RepairOption;
+import org.apache.cassandra.schema.Functions;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
+import org.apache.cassandra.schema.Types;
+import org.apache.cassandra.schema.Views;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.String.format;
 
+import static org.apache.cassandra.schema.SchemaConstants.DISTRIBUTED_KEYSPACE_NAME;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 public final class SystemDistributedKeyspace
 {
+    // Some piece of string we include in all NodeSync messages error messages below.
+    private static final String NODESYNC_ERROR_IMPACT_MSG = "this won't prevent NodeSync but may lead to ranges being validated more often than necessary";
+
     private SystemDistributedKeyspace()
     {
     }
 
     private static final Logger logger = LoggerFactory.getLogger(SystemDistributedKeyspace.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 5L, TimeUnit.MINUTES);
 
     public static final String REPAIR_HISTORY = "repair_history";
 
     public static final String PARENT_REPAIR_HISTORY = "parent_repair_history";
 
     public static final String VIEW_BUILD_STATUS = "view_build_status";
+
+    public static final String NODESYNC_VALIDATION = "nodesync_validation";
+    public static final String NODESYNC_STATUS = "nodesync_status";
 
     private static final TableMetadata RepairHistory =
         parse(REPAIR_HISTORY,
@@ -89,7 +113,8 @@ public final class SystemDistributedKeyspace
               + "status text,"
               + "started_at timestamp,"
               + "finished_at timestamp,"
-              + "PRIMARY KEY ((keyspace_name, columnfamily_name), id))");
+              + "PRIMARY KEY ((keyspace_name, columnfamily_name), id))")
+        .build();
 
     private static final TableMetadata ParentRepairHistory =
         parse(PARENT_REPAIR_HISTORY,
@@ -105,7 +130,8 @@ public final class SystemDistributedKeyspace
               + "requested_ranges set<text>,"
               + "successful_ranges set<text>,"
               + "options map<text, text>,"
-              + "PRIMARY KEY (parent_id))");
+              + "PRIMARY KEY (parent_id))")
+        .build();
 
     private static final TableMetadata ViewBuildStatus =
         parse(VIEW_BUILD_STATUS,
@@ -115,20 +141,83 @@ public final class SystemDistributedKeyspace
               + "view_name text,"
               + "host_id uuid,"
               + "status text,"
-              + "PRIMARY KEY ((keyspace_name, view_name), host_id))");
+              + "PRIMARY KEY ((keyspace_name, view_name), host_id))")
+        .build();
 
-    private static TableMetadata parse(String table, String description, String cql)
+    public static final UserType NodeSyncValidation =
+        parseType(NODESYNC_VALIDATION,
+                  "CREATE TYPE %s ("
+                  + "started_at timestamp,"
+                  + "outcome tinyint,"
+                  + "missing_nodes set<inet>)");
+
+    // We want to be able to query the following NodeSync table for a given sub-range, so we use the token as
+    // clustering but we also should ensure we use the proper sorting, so we're extracting the type of tokens for this
+    // cluster (which depends on the partitioner, but is global and immutable for the cluster lifetime).
+    private static final String tokenType = DatabaseDescriptor.getPartitioner().getTokenValidator().asCQL3Type().toString();
+    private static final TableMetadata NodeSyncStatus =
+        parse(NODESYNC_STATUS,
+              "Tracks NodeSync recent validations",
+              "CREATE TABLE %s ("
+              + "keyspace_name text,"
+              + "table_name text,"
+              + "range_group blob,"  // first byte of start_token, used to distribute segments more evenly on the cluster.
+              // TODO(Sylvain): I dislike this, this is ugly and inefficient. In a perfect world,
+              // we'd want to use start_token as the token of the row, as this would 1) remove that
+              // column, 2) ensure a replica stores locally the range it is a replica for,
+              // 3) make reading the table much easier and 4) distribute things better on large
+              // cluster (we're currently splitting in 256 buckets "only"; we could have more
+              // buckets but that would be annoying/less efficient to read).
+              // Making start_token the partition key doesn't work though obviously since it'll
+              // get re-hashed. My preferred solution would be to allow configurable (probably
+              // only internally initially) per-table tokenizing functions (something I've been
+              // advocating for more than once in the past) so this table can just use start_token
+              // as its token directly as we want. While simple on principle, this means passing
+              // TableMetadata everywhere we call decorateKey basically so it's a bit involved in
+              // terms of code-line changes. Anyway, if I can get that in for 6.0, I'll try it,
+              // but for now we'll stick to the lame-but-probably-not-horrible solution.
+              + "start_token " + tokenType + ','
+              + "end_token " + tokenType + ','
+              + "last_successful_validation frozen<" + NODESYNC_VALIDATION + ">,"
+              + "last_unsuccessful_validation frozen<" + NODESYNC_VALIDATION + ">,"
+              + "locked_by inet,"
+              + "PRIMARY KEY ((keyspace_name, table_name, range_group), start_token, end_token))",
+              Collections.singleton(NodeSyncValidation))
+        .defaultTimeToLive((int)TimeUnit.DAYS.toSeconds(28))
+        .build();
+
+
+    private static TableMetadata.Builder parse(String table, String description, String cql)
     {
-        return CreateTableStatement.parse(format(cql, table), SchemaConstants.DISTRIBUTED_KEYSPACE_NAME)
-                                   .id(TableId.forSystemTable(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, table))
+        return parse(table, description, cql, Collections.emptyList());
+    }
+
+    private static TableMetadata.Builder parse(String table, String description, String cql, Collection<UserType> types)
+    {
+        return CreateTableStatement.parse(format(cql, table), DISTRIBUTED_KEYSPACE_NAME, types)
+                                   .id(TableId.forSystemTable(DISTRIBUTED_KEYSPACE_NAME, table))
                                    .dcLocalReadRepairChance(0.0)
-                                   .comment(description)
-                                   .build();
+                                   .comment(description);
+    }
+
+    private static UserType parseType(String name, String cql)
+    {
+        return CreateTypeStatement.parse(format(cql, name), DISTRIBUTED_KEYSPACE_NAME);
     }
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, KeyspaceParams.simple(3), Tables.of(RepairHistory, ParentRepairHistory, ViewBuildStatus));
+        return KeyspaceMetadata.create(DISTRIBUTED_KEYSPACE_NAME,
+                                       KeyspaceParams.simple(3),
+                                       Tables.of(RepairHistory, ParentRepairHistory, ViewBuildStatus, NodeSyncStatus),
+                                       Views.none(),
+                                       types(),
+                                       Functions.none());
+    }
+
+    private static Types types()
+    {
+        return Types.of(NodeSyncValidation);
     }
 
     public static void startParentRepair(UUID parent_id, String keyspaceName, String[] cfnames, RepairOption options)
@@ -137,7 +226,7 @@ public final class SystemDistributedKeyspace
         String query = "INSERT INTO %s.%s (parent_id, keyspace_name, columnfamily_names, requested_ranges, started_at,          options)"+
                                  " VALUES (%s,        '%s',          { '%s' },           { '%s' },          toTimestamp(now()), { %s })";
         String fmtQry = format(query,
-                                      SchemaConstants.DISTRIBUTED_KEYSPACE_NAME,
+                                      DISTRIBUTED_KEYSPACE_NAME,
                                       PARENT_REPAIR_HISTORY,
                                       parent_id.toString(),
                                       keyspaceName,
@@ -172,7 +261,7 @@ public final class SystemDistributedKeyspace
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
         t.printStackTrace(pw);
-        String fmtQuery = format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, parent_id.toString());
+        String fmtQuery = format(query, DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, parent_id.toString());
         String message = t.getMessage();
         processSilent(fmtQuery, message != null ? message : "", sw.toString());
     }
@@ -180,7 +269,7 @@ public final class SystemDistributedKeyspace
     public static void successfulParentRepair(UUID parent_id, Collection<Range<Token>> successfulRanges)
     {
         String query = "UPDATE %s.%s SET finished_at = toTimestamp(now()), successful_ranges = {'%s'} WHERE parent_id=%s";
-        String fmtQuery = format(query, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, Joiner.on("','").join(successfulRanges), parent_id.toString());
+        String fmtQuery = format(query, DISTRIBUTED_KEYSPACE_NAME, PARENT_REPAIR_HISTORY, Joiner.on("','").join(successfulRanges), parent_id.toString());
         processSilent(fmtQuery);
     }
 
@@ -318,10 +407,276 @@ public final class SystemDistributedKeyspace
         }
     }
 
+    private static <T> T withNodeSyncExceptionHandling(Callable<T> callable, T defaultOnError, String operationDescription)
+    {
+        try
+        {
+            return callable.call();
+        }
+        catch (UnavailableException e)
+        {
+            noSpamLogger.warn("No replica available for {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
+            return defaultOnError;
+        }
+        catch (RequestTimeoutException e)
+        {
+            noSpamLogger.warn("Timeout while {}: {}", operationDescription, NODESYNC_ERROR_IMPACT_MSG);
+            return defaultOnError;
+        }
+        catch (Throwable t)
+        {
+            logger.error(String.format("Unexpected error while %s; %s", operationDescription, NODESYNC_ERROR_IMPACT_MSG), t);
+            return defaultOnError;
+        }
+    }
+
+    /**
+     * Retrieves the recorded NodeSync validations that cover a specific {@code segment}.
+     * <p>
+     * Note that we're interested in the status for a single segment, but the ranges stored in the table may be of
+     * different granularity than the one we're interested of, so in practice we return a list of all records that
+     * intersect with the segment of interest. In most case though, we consolidate those records into one to make it
+     * easier to work with using {@link NodeSyncRecord#consolidate}.
+     *
+     * @param segment the segment for which to retrieve the records.
+     * @return the NodeSync records that cover {@code segment} fully.
+     */
+    public static List<NodeSyncRecord> nodeSyncRecords(Segment segment)
+    {
+        Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
+
+        Callable<List<NodeSyncRecord>> callable = () ->
+        {
+            List<NodeSyncRecord> ranges = new ArrayList<>();
+            Iterator<UntypedResultSet> iter = queryNodeSyncRecords(segment, tkf);
+            while (iter.hasNext())
+            {
+                for (UntypedResultSet.Row row : iter.next())
+                {
+                    try
+                    {
+                        Token start = tkf.fromByteArray(row.getBytes("start_token"));
+                        Token end = tkf.fromByteArray(row.getBytes("end_token"));
+                        Range<Token> range = new Range<>(start, end);
+                        ValidationInfo lastSuccessfulValidation = row.has("last_successful_validation")
+                                                                  ? ValidationInfo.fromBytes(row.getBytes("last_successful_validation"))
+                                                                  : null;
+                        ValidationInfo lastUnsuccessfulValidation = row.has("last_unsuccessful_validation")
+                                                                    ? ValidationInfo.fromBytes(row.getBytes("last_unsuccessful_validation"))
+                                                                    : null;
+                        // The last validation is the last successful one if either there is no unsuccessful one recorded or there is one but
+                        // it is older than the last successful one (the later case shouldn't really happen since we remove the last unsuccessful
+                        // on a successful one, but no harm in handling that properly if that ever change).
+                        ValidationInfo lastValidation = lastUnsuccessfulValidation == null || (lastSuccessfulValidation != null && lastSuccessfulValidation.isMoreRecentThan(lastUnsuccessfulValidation))
+                                                        ? lastSuccessfulValidation
+                                                        : lastUnsuccessfulValidation;
+                        InetAddress lockedBy = row.has("locked_by") ? row.getInetAddress("locked_by") : null;
+                        ranges.add(new NodeSyncRecord(new Segment(segment.table, range), lastValidation, lastSuccessfulValidation, lockedBy));
+                    }
+                    catch (RuntimeException e)
+                    {
+                        // Log the issue, but simply ignore the specific record otherwise
+                        noSpamLogger.warn("Unexpected error (msg: {}) reading NodeSync record: {}", e.getMessage(), NODESYNC_ERROR_IMPACT_MSG);
+                    }
+                }
+            }
+            return ranges;
+        };
+        return withNodeSyncExceptionHandling(callable,
+                                             Collections.emptyList(),
+                                             "reading NodeSync records");
+    }
+
+    // See the table definition for why we have this and more comments on it that you really want
+    private static int rangeGroupFor(Token token)
+    {
+        int val = token.asByteComparableSource().next();
+        assert val >= 0 : "Got END_OF_STREAM (" + val + ") as first byte of token";
+        return val;
+    }
+
+    private static Iterator<UntypedResultSet> queryNodeSyncRecords(Segment segment, Token.TokenFactory tkf)
+    {
+        Token start = segment.range.left;
+        Token end = segment.range.right;
+
+        String qBase = "SELECT start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by"
+                       + " FROM %s.%s"
+                       + " WHERE keyspace_name = ? AND table_name = ?"
+                       + " AND range_group = ?";
+
+        // Even though segment ranges can't be wrapping, the "last" range will still have the min token as "right" bound,
+        // which throws off a 'start_token < ?' condition against it and so we should special case.
+        if (end.isMinimum())
+        {
+            final int startGroup = rangeGroupFor(start);
+            final int endGroup = 255; // Groups are the first byte of the token, so they go from 0 to 255.
+
+            // Same thing than in the else branch, but we just don't limit the end.
+            String q = qBase + " AND start_token >= ?";
+
+            return new AbstractIterator<UntypedResultSet>()
+            {
+                private int nextGroup = startGroup;
+
+                protected UntypedResultSet computeNext()
+                {
+                    if (nextGroup > endGroup)
+                        return endOfData();
+
+                    return QueryProcessor.execute(String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS),
+                                                  ConsistencyLevel.ONE,
+                                                  segment.table.keyspace,
+                                                  segment.table.name,
+                                                  ByteBufferUtil.bytes((byte)nextGroup++),
+                                                  tkf.toByteArray(start));
+                }
+            };
+
+        }
+        else
+        {
+            final int startGroup = rangeGroupFor(start);
+            final int endGroup = rangeGroupFor(end);
+
+            // Queries all ranges that cover the requested one. Note that we can have a strict inequality on the end of our
+            // queried interval (i.e. 'start_token < ?' below) because range are start exclusive, so any stored range that
+            // start exactly where our range stops doesn't really intersect.
+            String q = qBase + " AND start_token >= ? AND start_token < ?";
+
+            return new AbstractIterator<UntypedResultSet>()
+            {
+                private int nextGroup = startGroup;
+
+                protected UntypedResultSet computeNext()
+                {
+                    if (nextGroup > endGroup)
+                        return endOfData();
+
+                    return QueryProcessor.execute(String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS),
+                                                  ConsistencyLevel.ONE,
+                                                  segment.table.keyspace,
+                                                  segment.table.name,
+                                                  ByteBufferUtil.bytes((byte)nextGroup++),
+                                                  tkf.toByteArray(start),
+                                                  tkf.toByteArray(end));
+                }
+            };
+        }
+    }
+
+    /**
+     * Record that a {@code Segment} is being currently validated by NodeSync on this node (locking it temporarily).
+     * <p>
+     * See {@link NodeSyncRecord#lockedBy} for details on how we use the segment "lock".
+     *
+     * @param segment the segment that is currently being validated.
+     * @param timeout the timeout to set on the record (so as to not "lock" the range indefinitely if the node dies
+     *                while validating the range).
+     * @param timeoutUnit the unit for timeout.
+     */
+    public static void lockNodeSyncSegment(Segment segment, long timeout, TimeUnit timeoutUnit)
+    {
+        Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
+        String q = "INSERT INTO %s.%s (keyspace_name, table_name, range_group, start_token, end_token, locked_by)"
+                   + " VALUES (?, ?, ?, ?, ?, ?)"
+                   + " USING TTL ?";
+
+        String query = String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);
+        withNodeSyncExceptionHandling(() ->
+                                      QueryProcessor.execute(query,
+                                                             ConsistencyLevel.ONE,
+                                                             segment.table.keyspace,
+                                                             segment.table.name,
+                                                             ByteBufferUtil.bytes((byte)rangeGroupFor(segment.range.left)),
+                                                             tkf.toByteArray(segment.range.left),
+                                                             tkf.toByteArray(segment.range.right),
+                                                             FBUtilities.getBroadcastAddress(),
+                                                             (int)timeoutUnit.toSeconds(timeout)),
+                                      null,
+                                      "recording ongoing NodeSync validation");
+    }
+
+    /**
+     * Removes the lock set on a {@code Segment} by {@link #lockNodeSyncSegment}.
+     * <p>
+     * Note that 1) this is mainly used to release the lock on failure, as on normal completion {@link #recordNodeSyncValidation}
+     * release the lock directly and we don't have to call this method, and 2) this doesn't perform any check that we
+     * do hold the lock, so this shouldn't be called unless we know we do (but reminder that our locking is an
+     * optimization in the first place so we don't have to work too hard around races either).
+     *
+     * @param segment the segment on which to remove the lock.
+     */
+    public static void forceReleaseNodeSyncSegmentLock(Segment segment)
+    {
+        Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
+        String q = "DELETE locked_by FROM %s.%s"
+                   + " WHERE keyspace_name=? AND table_name=?"
+                   + " AND range_group=?"
+                   + " AND start_token=? AND end_token=?";
+        String query = String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);
+        withNodeSyncExceptionHandling(() ->
+                                      QueryProcessor.execute(query,
+                                                             ConsistencyLevel.ONE,
+                                                             segment.table.keyspace,
+                                                             segment.table.name,
+                                                             ByteBufferUtil.bytes((byte)rangeGroupFor(segment.range.left)),
+                                                             tkf.toByteArray(segment.range.left),
+                                                             tkf.toByteArray(segment.range.right)),
+                                      null,
+                                      "releasing NodeSync lock");
+    }
+
+    /**
+     * Records the completion (successful or not) of the validation by NodeSync of the provided table {@code segment} on
+     * this node.
+     *
+     * @param segment the segment that has been validated.
+     * @param info the information regarding the NodeSync validation to record.
+     */
+    public static void recordNodeSyncValidation(Segment segment, ValidationInfo info)
+    {
+        Token.TokenFactory tkf = segment.table.partitioner.getTokenFactory();
+
+        // Note that we always clean the "lock" when saving a validation
+        String q = "INSERT INTO %s.%s (keyspace_name, table_name, range_group, start_token, end_token, last_successful_validation, last_unsuccessful_validation, locked_by) "
+                   + "VALUES (?, ?, ?, ?, ?, ?, ?, null)";
+
+        String query = String.format(q, DISTRIBUTED_KEYSPACE_NAME, NODESYNC_STATUS);
+        ByteBuffer lastSuccessfulValidation, lastUnsuccessfulValidation;
+        if (info.wasSuccessful())
+        {
+            // If the validation is successful, we record it as such and remove the last unsuccessful one to save space
+            // (we only want to record the last unsuccessful one if it's more recent than the last successful one,
+            // otherwise it's no useful enough to be worth the bytes).
+            lastSuccessfulValidation = info.toBytes();
+            lastUnsuccessfulValidation = null;
+        }
+        else
+        {
+            // Otherwise, it's unsuccessful so record it as such, but don't touch the last successful one
+            lastSuccessfulValidation = ByteBufferUtil.UNSET_BYTE_BUFFER;
+            lastUnsuccessfulValidation = info.toBytes();
+        }
+        withNodeSyncExceptionHandling(() ->
+                                      QueryProcessor.execute(query,
+                                                             ConsistencyLevel.ONE,
+                                                             segment.table.keyspace,
+                                                             segment.table.name,
+                                                             ByteBufferUtil.bytes((byte)rangeGroupFor(segment.range.left)),
+                                                             tkf.toByteArray(segment.range.left),
+                                                             tkf.toByteArray(segment.range.right),
+                                                             lastSuccessfulValidation,
+                                                             lastUnsuccessfulValidation),
+                                      null,
+                                      "recording NodeSync validation"
+        );
+    }
+
     public static void forceBlockingFlush(String table)
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
-            Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush().blockingGet();
+            Keyspace.open(DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(table).forceFlush().blockingGet();
     }
 
     private enum RepairState

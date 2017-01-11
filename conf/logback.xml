@@ -72,7 +72,7 @@ appender reference in the root level section below.
     <includeCallerData>true</includeCallerData>
     <appender-ref ref="DEBUGLOG" />
   </appender>
-
+  
   <!-- STDOUT console appender to stdout (INFO level) -->
 
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
@@ -98,4 +98,5 @@ appender reference in the root level section below.
   </root>
 
   <logger name="org.apache.cassandra" level="DEBUG"/>
+  <logger name="com.datastax.apollo" level="DEBUG"/>
 </configuration>

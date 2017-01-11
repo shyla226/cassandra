@@ -84,6 +84,9 @@ public final class TableAttributes extends PropertyDefinitions
         if (hasOption(Option.CACHING))
             builder.caching(CachingParams.fromMap(getMap(Option.CACHING)));
 
+        if (hasOption(Option.CDC))
+            builder.cdc(getBoolean(Option.CDC.toString(), false));
+
         if (hasOption(Option.COMMENT))
             builder.comment(getString(Option.COMMENT));
 
@@ -103,6 +106,9 @@ public final class TableAttributes extends PropertyDefinitions
             builder.compression(CompressionParams.fromMap(getMap(Option.COMPRESSION)));
         }
 
+        if (hasOption(Option.CRC_CHECK_CHANCE))
+            builder.crcCheckChance(getDouble(Option.CRC_CHECK_CHANCE));
+
         if (hasOption(Option.DCLOCAL_READ_REPAIR_CHANCE))
             builder.dcLocalReadRepairChance(getDouble(Option.DCLOCAL_READ_REPAIR_CHANCE));
 
@@ -121,17 +127,14 @@ public final class TableAttributes extends PropertyDefinitions
         if (hasOption(Option.MIN_INDEX_INTERVAL))
             builder.minIndexInterval(getInt(Option.MIN_INDEX_INTERVAL));
 
+        if (hasOption(Option.NODESYNC))
+            builder.nodeSync(NodeSyncParams.fromUserProvidedParameters(getMap(Option.NODESYNC)));
+
         if (hasOption(Option.READ_REPAIR_CHANCE))
             builder.readRepairChance(getDouble(Option.READ_REPAIR_CHANCE));
 
         if (hasOption(Option.SPECULATIVE_RETRY))
             builder.speculativeRetry(SpeculativeRetryParam.fromString(getString(Option.SPECULATIVE_RETRY)));
-
-        if (hasOption(Option.CRC_CHECK_CHANCE))
-            builder.crcCheckChance(getDouble(Option.CRC_CHECK_CHANCE));
-
-        if (hasOption(Option.CDC))
-            builder.cdc(getBoolean(Option.CDC.toString(), false));
 
         return builder.build();
     }

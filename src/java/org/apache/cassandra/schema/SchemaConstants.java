@@ -79,4 +79,9 @@ public final class SchemaConstants
     {
         return SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
     }
+
+    public static boolean isReplicatedSystemKeyspace(String keyspaceName)
+    {
+        return REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
+    }
 }

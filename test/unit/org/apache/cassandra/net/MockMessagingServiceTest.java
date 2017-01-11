@@ -24,6 +24,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -40,6 +41,7 @@ public class MockMessagingServiceTest
     public static void initCluster() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
+        SystemKeyspace.finishStartup();
         StorageService.instance.initServer();
     }
 

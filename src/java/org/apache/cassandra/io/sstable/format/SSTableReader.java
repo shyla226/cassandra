@@ -982,7 +982,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         List<Pair<Long,Long>> positions = new ArrayList<>();
         for (Range<Token> range : Range.normalize(ranges))
         {
-            assert !range.isWrapAround() || range.right.isMinimum();
+            assert !range.isTrulyWrapAround();
             // truncate the range so it at most covers the sstable
             AbstractBounds<PartitionPosition> bounds = Range.makeRowRange(range);
             PartitionPosition leftBound = bounds.left.compareTo(first) > 0 ? bounds.left : first.getToken().minKeyBound();

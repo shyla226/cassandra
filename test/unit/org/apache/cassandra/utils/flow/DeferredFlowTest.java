@@ -188,7 +188,8 @@ public class DeferredFlowTest
     @Test
     public void testTimeout() throws Exception
     {
-        final DeferredFlow<Integer> deferred = DeferredFlow.create(System.nanoTime() + TimeUnit.SECONDS.toNanos(1), TimeoutException::new);
+        final DeferredFlow<Integer> deferred = DeferredFlow.create(System.nanoTime() + TimeUnit.SECONDS.toNanos(1),
+                                                                   () -> Flow.error(new TimeoutException()));
 
         try
         {

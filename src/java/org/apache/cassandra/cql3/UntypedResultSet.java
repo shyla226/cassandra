@@ -55,7 +55,12 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
     public static UntypedResultSet create(SelectStatement select, QueryPager pager, int pageSize)
     {
-        return new FromPager(select, pager, pageSize);
+        return create(select, pager, pageSize, null);
+    }
+
+    public static UntypedResultSet create(SelectStatement select, QueryPager pager, int pageSize, ReadContext params)
+    {
+        return new FromPager(select, pager, pageSize, params);
     }
 
     public boolean isEmpty()
@@ -171,13 +176,15 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         private final QueryPager pager;
         private final int pageSize;
         private final List<ColumnSpecification> metadata;
+        private final ReadContext params;
 
-        private FromPager(SelectStatement select, QueryPager pager, int pageSize)
+        private FromPager(SelectStatement select, QueryPager pager, int pageSize, ReadContext params)
         {
             this.select = select;
             this.pager = pager;
             this.pageSize = pageSize;
             this.metadata = select.getResultMetadata().requestNames();
+            this.params = params;
         }
 
         public int size()
@@ -273,7 +280,9 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                         if (pager.isExhausted())
                             return endOfData();
 
-                        Flow<FlowablePartition> iter = pager.fetchPageInternal(pageSize);
+                        Flow<FlowablePartition> iter = params == null
+                                                       ? pager.fetchPageInternal(pageSize)
+                                                       : pager.fetchPage(pageSize, params);
                         currentPage = select.process(iter, nowInSec).blockingGet().rows.iterator(); // iter will be closed by select.process()
 
                     }

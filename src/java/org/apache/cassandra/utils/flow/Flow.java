@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -59,6 +60,7 @@ import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
+import org.psjava.algo.math.ThomasWangHash32Bit;
 
 /**
  * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
@@ -508,7 +510,7 @@ public abstract class Flow<T>
     }
 
     /**
-     * Take only the items from from the flow until the tester fails for the first time, not including that item.
+     * Take only the items from the flow until the tester fails for the first time, not including that item.
      *
      * This applies on the onNext phase of execution, after the item has been produced. If the item holds resources,
      * tester must release these resources as the item will not be passed on downstream.
@@ -1163,10 +1165,9 @@ public abstract class Flow<T>
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> CompletableFuture<O> reduceToFuture(O seed, ReduceFunction<O, T> reducer)
+    public <O> Future<O> reduceToFuture(O seed, ReduceFunction<O, T> reducer)
     {
-        CompletableFuture<O> result = new CompletableFuture<>();
-
+        Future<O> future = new Future<>();
         class ReduceToFutureSubscription extends ReduceSubscriber<T, O>
         {
             ReduceToFutureSubscription(O seed, Flow<T> source, ReduceFunction<O, T> reducer) throws Exception
@@ -1176,33 +1177,14 @@ public abstract class Flow<T>
 
             public void onComplete()
             {
-                try
-                {
-                    close();
-                }
-                catch (Throwable t)
-                {
-                    result.completeExceptionally(t);
-                    return;
-                }
-
-                result.complete(current);
+                future.completeInternal(current);
             }
 
             protected void onErrorInternal(Throwable t)
             {
-                try
-                {
-                    close();
-                }
-                catch (Throwable e)
-                {
-                    t = Throwables.merge(t, e);
-                }
-
-                result.completeExceptionally(t);
+                future.completeExceptionallyInternal(t);
             }
-        };
+        }
 
         ReduceToFutureSubscription s;
         try
@@ -1211,12 +1193,102 @@ public abstract class Flow<T>
         }
         catch (Exception e)
         {
-            result.completeExceptionally(e);
-            return result;
+            future.completeExceptionallyInternal(e);
+            return future;
         }
 
+        future.sub = s;
         s.request();
-        return result;
+
+        return future;
+    }
+
+    /**
+     * A future that is linked to the completion of an underlying flow.
+     * <p>
+     * This extends and behave like a {@link CompletableFuture}, with the exception that one cannot call the
+     * {@link #complete(Object)} and {@link #completeExceptionally(Throwable)} (they throw {@link UnsupportedOperationException}):
+     * those are called when the flow this is future on completes. It is however possible to cancel() this future, which
+     * will close the underlying flow.
+     */
+    // Implementation note: the initial reason why this sub-class exists (versus using CompletableFuture directly) is
+    // to handle cancellation properly. But adding a new class also allows to protect against misuses by disabling the
+    // completion methods, which is nice.
+    public static class Future<T> extends CompletableFuture<T>
+    {
+        // Note: we have a chicken-and-egg problem with the underlying subscription: the subscription needs to signal
+        // the future on completion, but the future needs to know the subscription. So one has to be created before
+        // the other and we create the Future first, after which the subscription is manually set. Which is why the
+        // field is not final.
+        private FlowSubscription sub;
+
+        @Override
+        public boolean complete(T t)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean completeExceptionally(Throwable throwable)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        private void completeInternal(T t)
+        {
+            try
+            {
+
+                sub.close();
+                super.complete(t);
+            }
+            catch (Exception e)
+            {
+                super.completeExceptionally(e);
+            }
+        }
+
+        private void completeExceptionallyInternal(Throwable throwable)
+        {
+            try
+            {
+                // In general, we rely on sub before set first thing and thus not being null, but we do call this
+                // without sub being set in case of an error creating the subscription.
+                if (sub != null)
+                    sub.close();
+            }
+            catch (Throwable e)
+            {
+                throwable = Throwables.merge(throwable, e);
+            }
+            super.completeExceptionally(throwable);
+        }
+
+        @Override
+        public boolean cancel(boolean b)
+        {
+            if (isDone())
+                return false;
+
+            try
+            {
+                sub.close();
+                return super.cancel(b);
+            }
+            catch (Exception e)
+            {
+                super.completeExceptionally(new ErrorDuringCancellationException(e));
+                return false;
+            }
+        }
+
+        private static class ErrorDuringCancellationException extends RuntimeException
+        {
+            private ErrorDuringCancellationException(Exception e)
+            {
+                super(e);
+            }
+        }
     }
 
     public Flow<T> last()
@@ -1446,6 +1518,20 @@ public abstract class Flow<T>
     public Completable processToRxCompletable()
     {
         return processToRxCompletable(v -> {});
+    }
+
+    /**
+     * Subscribe to this flow and return a future on the completion of this flow.
+     * <p>
+     * Note that the elements of the flow itself are ignored by the underlying subscriber this method creates (which
+     * usually suggests some operations with side-effects have been applied to the flow and we now only want to
+     * subscribe and wait for completion).
+     *
+     * @return a future on the completion of this this flow.
+     */
+    public Future<Void> processToFuture()
+    {
+        return reduceToFuture(null, (v, t) -> null);
     }
 
     /**

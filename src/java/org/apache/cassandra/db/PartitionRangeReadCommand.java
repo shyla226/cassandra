@@ -47,7 +47,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
@@ -108,6 +107,17 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              Optional.empty());
     }
 
+    public static PartitionRangeReadCommand fullRangeRead(TableMetadata metadata, DataRange range, int nowInSec)
+    {
+        return new PartitionRangeReadCommand(metadata,
+                                             nowInSec,
+                                             ColumnFilter.all(metadata),
+                                             RowFilter.NONE,
+                                             DataLimits.NONE,
+                                             range,
+                                             Optional.empty());
+    }
+
     public DataRange dataRange()
     {
         return dataRange;
@@ -116,11 +126,6 @@ public class PartitionRangeReadCommand extends ReadCommand
     public ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key)
     {
         return dataRange.clusteringIndexFilter(key);
-    }
-
-    public boolean isNamesQuery()
-    {
-        return dataRange.isNamesQuery();
     }
 
     /**
@@ -193,14 +198,14 @@ public class PartitionRangeReadCommand extends ReadCommand
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    public Flow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+    public Flow<FlowablePartition> execute(ReadContext ctx) throws RequestExecutionException
     {
-        return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime, forContinuousPaging);
+        return StorageProxy.getRangeSlice(this, ctx);
     }
 
     public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
     {
-            return new PartitionRangeQueryPager(this, pagingState, protocolVersion);
+        return new PartitionRangeQueryPager(this, pagingState, protocolVersion);
     }
 
     protected void recordLatency(TableMetrics metric, long latencyNanos)

@@ -101,7 +101,7 @@ public class PagingState
 
     public ByteBuffer serialize(ProtocolVersion protocolVersion)
     {
-        assert rowMark == null || protocolVersion == rowMark.protocolVersion;
+        assert rowMark == null || protocolVersion == rowMark.protocolVersion : String.format("rowMark = %s protocolVersion = %d", rowMark, protocolVersion);
         try (DataOutputBuffer out = new DataOutputBufferFixed(serializedSize(protocolVersion)))
         {
             ByteBuffer pk = partitionKey == null ? ByteBufferUtil.EMPTY_BYTE_BUFFER : partitionKey;

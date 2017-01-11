@@ -1062,6 +1062,7 @@
         <filesets>
           <fileset dir="${build.src.java}" defaultexcludes="yes">
             <include name="org/apache/**/*.java"/>
+            <include name="com/datastax/**/*.java"/>
           </fileset>
           <fileset dir="${build.src.gen-java}" defaultexcludes="yes">
             <include name="org/apache/**/*.java"/>
@@ -1083,6 +1084,7 @@
       <jar jarfile="${build.dir}/${final.name}-sources.jar">
         <fileset dir="${build.src.java}" defaultexcludes="yes">
           <include name="org/apache/**/*.java"/>
+          <include name="com/datastax/**/*.java"/>
         </fileset>
         <fileset dir="${build.src.gen-java}" defaultexcludes="yes">
           <include name="org/apache/**/*.java"/>
@@ -1733,6 +1735,7 @@
       <filesets>
         <fileset dir="${build.src.java}" defaultexcludes="yes">
           <include name="org/apache/**/*.java"/>
+          <include name="com/datastax/**/*.java"/>
         </fileset>
       </filesets>
     </create-javadoc>
