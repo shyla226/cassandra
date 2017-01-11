@@ -296,17 +296,14 @@ public class CreateViewStatement extends SchemaAlteringStatement
                                                        whereClauseText,
                                                        viewCfm);
 
-        try
-        {
-            return MigrationManager.announceNewView(definition, isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceNewView(definition, isLocalOnly)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
+                .onErrorResumeNext(exc -> {
+                    if (exc instanceof AlreadyExistsException && ifNotExists)
+                        return Single.just(Event.SchemaChange.NONE);
+                    else
+                        return Single.error(exc);
+                });
     }
 
     private static boolean getColumnIdentifier(CFMetaData cfm,

@@ -67,7 +67,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         if (!triggers.get(triggerName).isPresent())
         {
             if (ifExists)
-                return null;
+                return Single.just(Event.SchemaChange.NONE);
             else
                 return error(String.format("Trigger %s was not found", triggerName));
         }

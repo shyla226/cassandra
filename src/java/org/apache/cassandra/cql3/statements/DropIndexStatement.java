@@ -78,7 +78,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
     {
         CFMetaData cfm = lookupIndexedTable();
         if (cfm == null)
-            return null;
+            return Single.just(Event.SchemaChange.NONE);
 
         CFMetaData updatedCfm = cfm.copy();
         updatedCfm.indexes(updatedCfm.getIndexes().without(indexName));

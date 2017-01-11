@@ -62,45 +62,42 @@ public class DropTableStatement extends SchemaAlteringStatement
 
     public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
-        try
+        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
+        if (ksm == null)
+            return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+
+        CFMetaData cfm = ksm.getTableOrViewNullable(columnFamily());
+        if (cfm != null)
         {
-            KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
-            if (ksm == null)
-                return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+            if (cfm.isView())
+                return error("Cannot use DROP TABLE on Materialized View");
 
-            CFMetaData cfm = ksm.getTableOrViewNullable(columnFamily());
-            if (cfm != null)
+            boolean rejectDrop = false;
+            StringBuilder messageBuilder = new StringBuilder();
+            for (ViewDefinition def : ksm.views)
             {
-                if (cfm.isView())
-                    return error("Cannot use DROP TABLE on Materialized View");
-
-                boolean rejectDrop = false;
-                StringBuilder messageBuilder = new StringBuilder();
-                for (ViewDefinition def : ksm.views)
+                if (def.baseTableId.equals(cfm.cfId))
                 {
-                    if (def.baseTableId.equals(cfm.cfId))
-                    {
-                        if (rejectDrop)
-                            messageBuilder.append(',');
-                        rejectDrop = true;
-                        messageBuilder.append(def.viewName);
-                    }
-                }
-                if (rejectDrop)
-                {
-                    return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
-                                               keyspace(), messageBuilder.toString()));
+                    if (rejectDrop)
+                        messageBuilder.append(',');
+                    rejectDrop = true;
+                    messageBuilder.append(def.viewName);
                 }
             }
+            if (rejectDrop)
+            {
+                return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
+                                           keyspace(), messageBuilder.toString()));
+            }
+        }
 
-            return MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (ConfigurationException e)
-        {
-            if (ifExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
+                .onErrorResumeNext(exc -> {
+                    if (exc instanceof ConfigurationException && ifExists)
+                        return Single.just(Event.SchemaChange.NONE);
+                    else
+                        return Single.error(exc);
+                });
     }
 }

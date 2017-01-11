@@ -55,8 +55,7 @@ public class DropViewStatement extends SchemaAlteringStatement
 
     public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
-        try
-        {
+        // TODO figure out why this is commented out, and what still needs to be done here
 //            ViewDefinition view = Schema.instance.getViewDefinition(keyspace(), columnFamily());
 //            if (view == null)
 //            {
@@ -75,14 +74,13 @@ public class DropViewStatement extends SchemaAlteringStatement
 //                    throw new InvalidRequestException(String.format("View '%s' could not be found in any of the tables of keyspace '%s'", cfName, keyspace()));
 //            }
 
-            return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (ConfigurationException e)
-        {
-            if (ifExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
+                .onErrorResumeNext(exc -> {
+                    if (exc instanceof ConfigurationException && ifExists)
+                        return Single.just(Event.SchemaChange.NONE);
+                    else
+                        return Single.error(exc);
+                });
     }
 }

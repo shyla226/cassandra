@@ -127,7 +127,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
 
         // Can happen with ifNotExists
         if (ksm.types.get(name.getUserTypeName()).isPresent())
-            return null;
+            return Single.just(Event.SchemaChange.NONE);
 
         UserType type = createType();
         String duplicate = haveDuplicateName(type);
