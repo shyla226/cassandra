@@ -386,26 +386,11 @@ public class KeyspaceMetrics
         });
     }
 
-    static class KeyspaceMetricNameFactory implements MetricNameFactory
+    private static class KeyspaceMetricNameFactory extends AbstractMetricNameFactory
     {
-        private final String keyspaceName;
-
-        KeyspaceMetricNameFactory(Keyspace ks)
+        private KeyspaceMetricNameFactory(Keyspace ks)
         {
-            this.keyspaceName = ks.getName();
-        }
-
-        public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
-        {
-            String groupName = TableMetrics.class.getPackage().getName();
-
-            StringBuilder mbeanName = new StringBuilder();
-            mbeanName.append(groupName).append(":");
-            mbeanName.append("type=Keyspace");
-            mbeanName.append(",keyspace=").append(keyspaceName);
-            mbeanName.append(",name=").append(metricName);
-
-            return new CassandraMetricsRegistry.MetricName(groupName, "keyspace", metricName, keyspaceName, mbeanName.toString());
+            super(TableMetrics.class.getPackage().getName(), "Keyspace", ks.getName(), null, null);
         }
     }
 }

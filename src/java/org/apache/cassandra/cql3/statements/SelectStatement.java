@@ -304,10 +304,10 @@ public class SelectStatement implements CQLStatement
         {
             checkNotNull(state.getConnection(), "Continuous paging should only be used for external queries");
             checkFalse(cl.isSerialConsistency(), "Continuous paging does not support serial reads");
-            return executeContinuous(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
+            return executeContinuous(state, options, FBUtilities.nowInSeconds(), queryStartNanoTime);
         }
 
-        return execute(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
+        return execute(state, options, FBUtilities.nowInSeconds(), queryStartNanoTime);
     }
 
     public Scheduler getScheduler()
@@ -364,9 +364,7 @@ public class SelectStatement implements CQLStatement
                               int nowInSec,
                               DataLimits limit)
     {
-        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing();
-
-        if (isPartitionRangeQuery)
+        if (isPartitionRangeQuery())
             return getRangeCommand(queryState, options, columnFilter, limit, nowInSec);
 
         return getSliceCommands(options, columnFilter, limit, nowInSec);
@@ -374,14 +372,18 @@ public class SelectStatement implements CQLStatement
 
     private Single<ResultMessage.Rows> execute(ReadQuery query,
                                                QueryOptions options,
-                                               QueryState state,
+                                               ReadContext ctx,
                                                Selectors selectors,
                                                int nowInSec,
-                                               int userLimit,
-                                               long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+                                               int userLimit) throws RequestValidationException, RequestExecutionException
     {
-        Flow<FlowablePartition> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime, false);
+        Flow<FlowablePartition> data = query.execute(ctx);
         return processResults(data, options, selectors, nowInSec, userLimit, null);
+    }
+
+    private boolean isPartitionRangeQuery()
+    {
+        return restrictions.isKeyRange() || restrictions.usesSecondaryIndexing();
     }
 
     /**
@@ -403,9 +405,9 @@ public class SelectStatement implements CQLStatement
             return new InternalPager(pager);
         }
 
-        public static Pager forNormalQuery(QueryPager pager, ConsistencyLevel consistency, ClientState clientState, boolean forContinuousPaging)
+        public static Pager forNormalQuery(QueryPager pager, ReadContext.Builder paramsBuilder)
         {
-            return new NormalPager(pager, consistency, clientState, forContinuousPaging);
+            return new NormalPager(pager, paramsBuilder);
         }
 
         public boolean isExhausted()
@@ -430,21 +432,17 @@ public class SelectStatement implements CQLStatement
          */
         public static class NormalPager extends Pager
         {
-            private final ConsistencyLevel consistency;
-            private final ClientState clientState;
-            private final boolean forContinuousPaging;
+            private final ReadContext.Builder paramsBuilder;
 
-            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState clientState, boolean forContinuousPaging)
+            private NormalPager(QueryPager pager, ReadContext.Builder paramsBuilder)
             {
                 super(pager);
-                this.consistency = consistency;
-                this.clientState = clientState;
-                this.forContinuousPaging = forContinuousPaging;
+                this.paramsBuilder = paramsBuilder;
             }
 
             public Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
             {
-                return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
+                return pager.fetchPage(pageSize, paramsBuilder.build(queryStartNanoTime));
             }
         }
 
@@ -563,7 +561,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         Selectors selectors = selection.newSelectors(options);
@@ -576,12 +574,15 @@ public class SelectStatement implements CQLStatement
 
         ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, limit);
 
+        ReadContext.Builder builder = ReadContext.builder(query, options.getConsistency())
+                                                 .state(state.getClientState());
+
         if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
-            return execute(query, options, state, selectors, nowInSec, userLimit, queryStartNanoTime);
+            return execute(query, options, builder.build(queryStartNanoTime), selectors, nowInSec, userLimit);
 
         QueryPager pager = getPager(query, options);
 
-        return execute(Pager.forNormalQuery(pager, cl, state.getClientState(), false),
+        return execute(Pager.forNormalQuery(pager, builder),
                        options,
                        selectors,
                        pageSize,
@@ -601,7 +602,7 @@ public class SelectStatement implements CQLStatement
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private Single<ResultMessage.Rows> executeContinuous(QueryState state, QueryOptions options, int nowInSec, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> executeContinuous(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ContinuousPagingService.metrics.requests.mark();
@@ -619,7 +620,7 @@ public class SelectStatement implements CQLStatement
         DataLimits limit = getDataLimits(userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
 
         ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, limit);
-        ContinuousPagingExecutor executor = new ContinuousPagingExecutor(this, options, state, cl, query, queryStartNanoTime, pageSize);
+        ContinuousPagingExecutor executor = new ContinuousPagingExecutor(this, options, state, query, queryStartNanoTime, pageSize);
         ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
 
         executor.schedule(options.getPagingOptions().state(), builder);
@@ -633,8 +634,8 @@ public class SelectStatement implements CQLStatement
     {
         final SelectStatement statement;
         final QueryOptions options;
-        final QueryState state;
-        final ConsistencyLevel consistencyLevel;
+        final ReadContext.Builder paramsBuilder;
+
         final int pageSize;
         final ReadQuery query;
         final boolean isLocalQuery;
@@ -649,18 +650,18 @@ public class SelectStatement implements CQLStatement
         private ContinuousPagingExecutor(SelectStatement statement,
                                          QueryOptions options,
                                          QueryState state,
-                                         ConsistencyLevel consistencyLevel,
                                          ReadQuery query,
                                          long queryStartNanoTime,
                                          int pageSize)
         {
             this.statement = statement;
             this.options = options;
-            this.state = state;
-            this.consistencyLevel = consistencyLevel;
+            this.paramsBuilder = ReadContext.builder(query, options.getConsistency())
+                                            .state(state.getClientState())
+                                            .forContinuousPaging();
             this.pageSize = pageSize;
             this.query = query;
-            this.isLocalQuery = consistencyLevel.isSingleNode() && query.queriesOnlyLocalData();
+            this.isLocalQuery = options.getConsistency().isSingleNode() && query.queriesOnlyLocalData();
             this.queryStartNanoTime = queryStartNanoTime;
         }
 
@@ -681,11 +682,7 @@ public class SelectStatement implements CQLStatement
             assert pager == null;
             assert !builder.isCompleted();
 
-            pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()),
-                                         consistencyLevel,
-                                         state.getClientState(),
-                                         true);
-
+            pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()), paramsBuilder);
 
             // non-local queries span only one page at a time in SP, and each page is monitored starting from
             // queryStartNanoTime and will fail once RPC read timeout has elapsed, so we must use System.nanoTime()
@@ -868,11 +865,11 @@ public class SelectStatement implements CQLStatement
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options);
         if (keys.isEmpty())
-            return new ReadQuery.EmptyQuery(table);
+            return ReadQuery.empty(table);
 
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter);
         if (filter == null)
-            return new ReadQuery.EmptyQuery(table);
+            return ReadQuery.empty(table);
 
         RowFilter rowFilter = getRowFilter(options);
 
@@ -940,7 +937,7 @@ public class SelectStatement implements CQLStatement
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter);
         if (clusteringIndexFilter == null)
-            return new ReadQuery.EmptyQuery(table);
+            return ReadQuery.empty(table);
 
         RowFilter rowFilter = getRowFilter(options);
 
@@ -948,7 +945,7 @@ public class SelectStatement implements CQLStatement
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
         AbstractBounds<PartitionPosition> keyBounds = restrictions.getPartitionKeyBounds(options);
         if (keyBounds == null)
-            return new ReadQuery.EmptyQuery(table);
+            return ReadQuery.empty(table);
 
         PartitionRangeReadCommand command = new PartitionRangeReadCommand(table,
                                                                           nowInSec,

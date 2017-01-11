@@ -303,21 +303,14 @@ public class ColumnFamilyStoreCQLHelper
         StringBuilder builder = new StringBuilder();
 
         builder.append("bloom_filter_fp_chance = ").append(tableParams.bloomFilterFpChance);
-        builder.append("\n\tAND dclocal_read_repair_chance = ").append(tableParams.dcLocalReadRepairChance);
-        builder.append("\n\tAND crc_check_chance = ").append(tableParams.crcCheckChance);
-        builder.append("\n\tAND default_time_to_live = ").append(tableParams.defaultTimeToLive);
-        builder.append("\n\tAND gc_grace_seconds = ").append(tableParams.gcGraceSeconds);
-        builder.append("\n\tAND min_index_interval = ").append(tableParams.minIndexInterval);
-        builder.append("\n\tAND max_index_interval = ").append(tableParams.maxIndexInterval);
-        builder.append("\n\tAND memtable_flush_period_in_ms = ").append(tableParams.memtableFlushPeriodInMs);
-        builder.append("\n\tAND read_repair_chance = ").append(tableParams.readRepairChance);
-        builder.append("\n\tAND speculative_retry = '").append(tableParams.speculativeRetry).append("'");
-        builder.append("\n\tAND comment = ").append(singleQuote(tableParams.comment));
         builder.append("\n\tAND caching = ").append(toCQL(tableParams.caching.asMap()));
+        builder.append("\n\tAND cdc = ").append(tableParams.cdc);
+        builder.append("\n\tAND comment = ").append(singleQuote(tableParams.comment));
         builder.append("\n\tAND compaction = ").append(toCQL(tableParams.compaction.asMap()));
         builder.append("\n\tAND compression = ").append(toCQL(tableParams.compression.asMap()));
-        builder.append("\n\tAND cdc = ").append(tableParams.cdc);
-
+        builder.append("\n\tAND crc_check_chance = ").append(tableParams.crcCheckChance);
+        builder.append("\n\tAND dclocal_read_repair_chance = ").append(tableParams.dcLocalReadRepairChance);
+        builder.append("\n\tAND default_time_to_live = ").append(tableParams.defaultTimeToLive);
         builder.append("\n\tAND extensions = { ");
         for (Map.Entry<String, ByteBuffer> entry : tableParams.extensions.entrySet())
         {
@@ -326,6 +319,14 @@ public class ColumnFamilyStoreCQLHelper
             builder.append("0x").append(ByteBufferUtil.bytesToHex(entry.getValue()));
         }
         builder.append(" }");
+        builder.append("\n\tAND gc_grace_seconds = ").append(tableParams.gcGraceSeconds);
+        builder.append("\n\tAND max_index_interval = ").append(tableParams.maxIndexInterval);
+        builder.append("\n\tAND memtable_flush_period_in_ms = ").append(tableParams.memtableFlushPeriodInMs);
+        builder.append("\n\tAND min_index_interval = ").append(tableParams.minIndexInterval);
+        builder.append("\n\tAND nodesync = ").append(toCQL(tableParams.nodeSync.asMap()));
+        builder.append("\n\tAND read_repair_chance = ").append(tableParams.readRepairChance);
+        builder.append("\n\tAND speculative_retry = '").append(tableParams.speculativeRetry).append("'");
+
         return builder.toString();
     }
 

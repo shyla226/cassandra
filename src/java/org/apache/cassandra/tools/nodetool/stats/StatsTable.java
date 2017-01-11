@@ -62,5 +62,6 @@ public class StatsTable
     public double averageTombstonesPerSliceLastFiveMinutes;
     public long maximumTombstonesPerSliceLastFiveMinutes;
     public String droppedMutations;
+    public String failedReplicationCount;
     public List<String> sstablesInEachLevel = new ArrayList<>();
 }

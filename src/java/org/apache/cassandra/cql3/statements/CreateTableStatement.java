@@ -116,13 +116,16 @@ public class CreateTableStatement extends SchemaAlteringStatement
         }
     }
 
-    /**
-     */
     public static TableMetadata.Builder parse(String cql, String keyspace)
+    {
+        return parse(cql, keyspace, Collections.emptyList());
+    }
+
+    public static TableMetadata.Builder parse(String cql, String keyspace, Collection<UserType> types)
     {
         CreateTableStatement.RawStatement raw = CQLFragmentParser.parseAny(CqlParser::createTableStatement, cql, "CREATE TABLE");
         raw.prepareKeyspace(keyspace);
-        CreateTableStatement prepared = (CreateTableStatement) raw.prepare(Types.none()).statement;
+        CreateTableStatement prepared = (CreateTableStatement) raw.prepare(Types.of(types)).statement;
         return prepared.builder();
     }
 

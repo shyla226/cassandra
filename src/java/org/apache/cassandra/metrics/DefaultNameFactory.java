@@ -21,12 +21,9 @@ package org.apache.cassandra.metrics;
 /**
  * MetricNameFactory that generates default MetricName of metrics.
  */
-public class DefaultNameFactory implements MetricNameFactory
+public class DefaultNameFactory extends AbstractMetricNameFactory
 {
     public static final String GROUP_NAME = "org.apache.cassandra.metrics";
-
-    private final String type;
-    private final String scope;
 
     public DefaultNameFactory(String type)
     {
@@ -35,36 +32,11 @@ public class DefaultNameFactory implements MetricNameFactory
 
     public DefaultNameFactory(String type, String scope)
     {
-        this.type = type;
-        this.scope = scope;
-    }
-
-    public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
-    {
-        return createMetricName(type, metricName, scope);
+        super(GROUP_NAME, type, scope);
     }
 
     public static CassandraMetricsRegistry.MetricName createMetricName(String type, String metricName, String scope)
     {
-        return new CassandraMetricsRegistry.MetricName(GROUP_NAME, type, metricName, scope, createDefaultMBeanName(type, metricName, scope));
-    }
-
-    protected static String createDefaultMBeanName(String type, String name, String scope)
-    {
-        final StringBuilder nameBuilder = new StringBuilder();
-        nameBuilder.append(GROUP_NAME);
-        nameBuilder.append(":type=");
-        nameBuilder.append(type);
-        if (scope != null)
-        {
-            nameBuilder.append(",scope=");
-            nameBuilder.append(scope);
-        }
-        if (name.length() > 0)
-        {
-            nameBuilder.append(",name=");
-            nameBuilder.append(name);
-        }
-        return nameBuilder.toString();
+        return createMetricName(GROUP_NAME, type, null, null, scope, metricName);
     }
 }

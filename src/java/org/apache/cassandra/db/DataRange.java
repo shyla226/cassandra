@@ -351,7 +351,7 @@ public class DataRange
 
             // When using a paging range, we don't allow wrapped ranges, as it's unclear how to handle them properly.
             // This is ok for now since we only need this in range queries, and the range are "unwrapped" in that case.
-            assert !(range instanceof Range) || !((Range<?>)range).isWrapAround() || range.right.isMinimum() : range;
+            assert !(range instanceof Range) || !((Range<?>)range).isTrulyWrapAround() : range;
             assert lastReturned != null;
 
             this.comparator = comparator;

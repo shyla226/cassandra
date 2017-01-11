@@ -320,6 +320,8 @@ public class DatabaseDescriptor
         applySeedProvider();
 
         applyEncryptionContext();
+
+        conf.nodesync.validate();
     }
 
     private static void applySimpleConfig()
@@ -2399,5 +2401,10 @@ public class DatabaseDescriptor
         // which in turns causes initialization problems when running the micro benchmarks directly from the jar, e.g.
         // java -jar build/test/benchmarks.jar MyBench
         return conf == null || conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
+    }
+
+    public static NodeSyncConfig getNodeSyncConfig()
+    {
+        return conf.nodesync;
     }
 }

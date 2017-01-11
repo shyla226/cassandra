@@ -20,6 +20,7 @@ package org.apache.cassandra.dht;
 import java.io.Serializable;
 import java.util.*;
 
+import com.google.common.collect.ImmutableList;
 import org.apache.commons.lang3.ObjectUtils;
 
 import org.apache.cassandra.db.PartitionPosition;
@@ -236,21 +237,19 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
         return true;
     }
 
-    public List<Range<T>> unwrap()
+    public ImmutableList<Range<T>> unwrap()
     {
         T minValue = right.minValue();
-        if (!isWrapAround() || right.equals(minValue))
-            return Arrays.asList(this);
-        List<Range<T>> unwrapped = new ArrayList<Range<T>>(2);
-        unwrapped.add(new Range<T>(left, minValue));
-        unwrapped.add(new Range<T>(minValue, right));
-        return unwrapped;
+        if (!isTrulyWrapAround())
+            return ImmutableList.of(this);
+
+        return ImmutableList.of(new Range<>(left, minValue), new Range<>(minValue, right));
     }
 
     /**
      * Tells if the given range is a wrap around.
      */
-    public static <T extends RingPosition<T>> boolean isWrapAround(T left, T right)
+    private static <T extends RingPosition<T>> boolean isWrapAround(T left, T right)
     {
        return left.compareTo(right) >= 0;
     }
@@ -417,6 +416,27 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
     public boolean isWrapAround()
     {
         return isWrapAround(left, right);
+    }
+
+    /**
+     * Checks if the range truly wraps around.
+     *
+     * This exists only because {@link #isWrapAround()} is a tad dumb and return true if right is the minimum token,
+     * no matter what left is, but for most intent and purposes, such range doesn't truly warp around (unwrap produces
+     * the identity in thise case).
+     * <p>
+     * Also note that it could be that the remaining uses of {@link #isWrapAround()} could be replaced by this method,
+     * but that is to be checked carefully at some other time (Sylvain).
+     * <p>
+     * The one thing this method guarantees is that if it's true, then {@link #unwrap()} will return a list with
+     * exactly 2 ranges, never one.
+     *
+     * @return whether the range "true" wraps around.
+     */
+    public boolean isTrulyWrapAround()
+    {
+        T minValue = right.minValue();
+        return isWrapAround(left, right) && !right.equals(minValue);
     }
 
     /**

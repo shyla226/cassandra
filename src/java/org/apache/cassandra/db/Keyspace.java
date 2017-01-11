@@ -45,6 +45,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
+import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -221,7 +222,7 @@ public class Keyspace
     {
         ColumnFamilyStore cfs = columnFamilyStores.get(id);
         if (cfs == null)
-            throw new IllegalArgumentException("Unknown CF " + id);
+            throw new UnknownTableException("Cannot find table, it may have been dropped",id);
         return cfs;
     }
 

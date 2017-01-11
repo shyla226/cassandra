@@ -361,6 +361,8 @@ public class Config
     /** How often histograms used by JMX metrics are updated, in milliseconds */
     public int metrics_histogram_update_interval_millis = 1000;
 
+    public NodeSyncConfig nodesync = new NodeSyncConfig();
+
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
      */

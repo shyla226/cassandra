@@ -123,7 +123,7 @@ public class SchemaKeyspaceTest
         UntypedResultSet.Row tableRow = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.TABLES),
                                                                  UnfilteredRowIterators.filter(serializedCf.unfilteredIterator(), FBUtilities.nowInSeconds()))
                                                       .one();
-        TableParams params = SchemaKeyspace.createTableParamsFromRow(tableRow);
+        TableParams params = SchemaKeyspace.createTableParamsFromRow(metadata.keyspace, metadata.name, tableRow);
 
         UntypedResultSet columnsRows = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspace.COLUMNS),
                                                                 UnfilteredRowIterators.filter(serializedCD.unfilteredIterator(), FBUtilities.nowInSeconds()));

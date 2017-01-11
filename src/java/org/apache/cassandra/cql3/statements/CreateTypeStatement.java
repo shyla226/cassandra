@@ -56,6 +56,12 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             name.setKeyspace(state.getKeyspace());
     }
 
+    public static UserType parse(String cql, String keyspace)
+    {
+        return CQLFragmentParser.parseAny(CqlParser::createTypeStatement, cql, "CREATE TYPE")
+                                .createType(keyspace, Types.none());
+    }
+
     public void addDefinition(FieldIdentifier name, CQL3Type.Raw type)
     {
         columnNames.add(name);
@@ -114,11 +120,19 @@ public class CreateTypeStatement extends SchemaAlteringStatement
 
     public UserType createType() throws InvalidRequestException
     {
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace());
+        if (ksm == null)
+            throw new ConfigurationException(String.format("Keyspace %s doesn't exist", keyspace()));
+        return createType(keyspace(), ksm.types);
+    }
+
+    public UserType createType(String keyspace, Types keyspaceTypes) throws InvalidRequestException
+    {
         List<AbstractType<?>> types = new ArrayList<>(columnTypes.size());
         for (CQL3Type.Raw type : columnTypes)
-            types.add(type.prepare(keyspace()).getType());
+            types.add(type.prepare(keyspace, keyspaceTypes).getType());
 
-        return new UserType(name.getKeyspace(), name.getUserTypeName(), columnNames, types, true);
+        return new UserType(keyspace, name.getUserTypeName(), columnNames, types, true);
     }
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException

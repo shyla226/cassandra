@@ -304,13 +304,7 @@ public class QueryProcessor implements QueryHandler
         if (prepared.boundNames.size() != values.length)
             throw new IllegalArgumentException(String.format("Invalid number of values. Expecting %d but got %d", prepared.boundNames.size(), values.length));
 
-        List<ByteBuffer> boundValues = new ArrayList<ByteBuffer>(values.length);
-        for (int i = 0; i < values.length; i++)
-        {
-            Object value = values[i];
-            AbstractType type = prepared.boundNames.get(i).type;
-            boundValues.add(value instanceof ByteBuffer || value == null ? (ByteBuffer)value : type.decompose(value));
-        }
+        List<ByteBuffer> boundValues = createBoundValues(prepared, values);
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
@@ -399,6 +393,18 @@ public class QueryProcessor implements QueryHandler
         SelectStatement select = (SelectStatement)prepared.statement;
         QueryPager pager = select.getQuery(QueryState.forInternalCalls(), makeInternalOptions(prepared, values), FBUtilities.nowInSeconds()).getPager(null, ProtocolVersion.CURRENT);
         return UntypedResultSet.create(select, pager, pageSize);
+    }
+
+    private static List<ByteBuffer> createBoundValues(ParsedStatement.Prepared prepared, Object ... values)
+    {
+        List<ByteBuffer> boundValues = new ArrayList<>(values.length);
+        for (int i = 0; i < values.length; i++)
+        {
+            Object value = values[i];
+            AbstractType type = prepared.boundNames.get(i).type;
+            boundValues.add(value instanceof ByteBuffer || value == null ? (ByteBuffer)value : type.decompose(value));
+        }
+        return boundValues;
     }
 
     /**

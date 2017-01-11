@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Maps;
 
@@ -37,7 +38,6 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.TopKSampler;
@@ -178,6 +178,12 @@ public class TableMetrics
 
     /** Dropped Mutations Count */
     public final Counter droppedMutations;
+
+    /** Failed Replication Count */
+    public final Counter failedReplicationCount;
+
+    /** NodeSync metrics */
+    public final NodeSyncMetrics nodeSyncMetrics;
 
     private final MetricNameFactory factory;
     private final MetricNameFactory aliasFactory;
@@ -727,6 +733,7 @@ public class TableMetrics
         rowCacheHit = createTableCounter("RowCacheHit");
         rowCacheMiss = createTableCounter("RowCacheMiss");
         droppedMutations = createTableCounter("DroppedMutations");
+        failedReplicationCount = createTableCounter("FailedReplicationCount");
 
         casPrepare = new LatencyMetrics(factory, aliasFactory, "CasPrepare", cfs.keyspace.metric.casPrepare);
         casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);
@@ -751,6 +758,8 @@ public class TableMetrics
                 return bytesMutated / (bytesAnticomp + bytesMutated);
             return 0.0;
         });
+
+        nodeSyncMetrics = new NodeSyncMetrics(factory, "NodeSync");
     }
 
     public void updateSSTableIterated(int count)
@@ -784,6 +793,7 @@ public class TableMetrics
         Metrics.remove(factory.createMetricName("CoordinatorReadLatency"), aliasFactory.createMetricName("CoordinatorReadLatency"));
         Metrics.remove(factory.createMetricName("CoordinatorScanLatency"), aliasFactory.createMetricName("CoordinatorScanLatency"));
         Metrics.remove(factory.createMetricName("WaitingOnFreeMemtableSpace"), aliasFactory.createMetricName("WaitingOnFreeMemtableSpace"));
+        nodeSyncMetrics.release();
     }
 
 
@@ -947,53 +957,23 @@ public class TableMetrics
         return ret;
     }
 
-    static class TableMetricNameFactory implements MetricNameFactory
+    private static class TableMetricNameFactory extends AbstractMetricNameFactory
     {
-        private final String keyspaceName;
-        private final String tableName;
-        private final boolean isIndex;
-        private final String type;
-
-        TableMetricNameFactory(ColumnFamilyStore cfs, String type)
+        private TableMetricNameFactory(ColumnFamilyStore cfs, String type)
         {
-            this.keyspaceName = cfs.keyspace.getName();
-            this.tableName = cfs.name;
-            this.isIndex = cfs.isIndex();
-            this.type = type;
-        }
-
-        public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
-        {
-            String groupName = TableMetrics.class.getPackage().getName();
-            String type = isIndex ? "Index" + this.type : this.type;
-
-            StringBuilder mbeanName = new StringBuilder();
-            mbeanName.append(groupName).append(":");
-            mbeanName.append("type=").append(type);
-            mbeanName.append(",keyspace=").append(keyspaceName);
-            mbeanName.append(",scope=").append(tableName);
-            mbeanName.append(",name=").append(metricName);
-
-            return new CassandraMetricsRegistry.MetricName(groupName, type, metricName, keyspaceName + "." + tableName, mbeanName.toString());
+            super(TableMetrics.class.getPackage().getName(),
+                  cfs.isIndex() ? "Index" + type : type,
+                  cfs.keyspace.getName(),
+                  null,
+                  cfs.name);
         }
     }
 
-    static class AllTableMetricNameFactory implements MetricNameFactory
+    private static class AllTableMetricNameFactory extends AbstractMetricNameFactory
     {
-        private final String type;
-        public AllTableMetricNameFactory(String type)
+        private AllTableMetricNameFactory(String type)
         {
-            this.type = type;
-        }
-
-        public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
-        {
-            String groupName = TableMetrics.class.getPackage().getName();
-            StringBuilder mbeanName = new StringBuilder();
-            mbeanName.append(groupName).append(":");
-            mbeanName.append("type=").append(type);
-            mbeanName.append(",name=").append(metricName);
-            return new CassandraMetricsRegistry.MetricName(groupName, type, metricName, "all", mbeanName.toString());
+            super(TableMetrics.class.getPackage().getName(), type);
         }
     }
 

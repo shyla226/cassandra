@@ -50,7 +50,8 @@ public final class TableParams
         READ_REPAIR_CHANCE,
         SPECULATIVE_RETRY,
         CRC_CHECK_CHANCE,
-        CDC;
+        CDC,
+        NODESYNC;
 
         @Override
         public String toString()
@@ -85,6 +86,7 @@ public final class TableParams
     public final CompressionParams compression;
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
+    public final NodeSyncParams nodeSync;
 
     private TableParams(Builder builder)
     {
@@ -106,6 +108,7 @@ public final class TableParams
         compression = builder.compression;
         extensions = builder.extensions;
         cdc = builder.cdc;
+        nodeSync = builder.nodeSync;
     }
 
     public static Builder builder()
@@ -130,7 +133,8 @@ public final class TableParams
                             .readRepairChance(params.readRepairChance)
                             .speculativeRetry(params.speculativeRetry)
                             .extensions(params.extensions)
-                            .cdc(params.cdc);
+                            .cdc(params.cdc)
+                            .nodeSync(params.nodeSync);
     }
 
     public Builder unbuild()
@@ -212,21 +216,22 @@ public final class TableParams
         TableParams p = (TableParams) o;
 
         return comment.equals(p.comment)
-            && readRepairChance == p.readRepairChance
-            && dcLocalReadRepairChance == p.dcLocalReadRepairChance
-            && bloomFilterFpChance == p.bloomFilterFpChance
-            && crcCheckChance == p.crcCheckChance
-            && gcGraceSeconds == p.gcGraceSeconds
-            && defaultTimeToLive == p.defaultTimeToLive
-            && memtableFlushPeriodInMs == p.memtableFlushPeriodInMs
-            && minIndexInterval == p.minIndexInterval
-            && maxIndexInterval == p.maxIndexInterval
-            && speculativeRetry.equals(p.speculativeRetry)
-            && caching.equals(p.caching)
-            && compaction.equals(p.compaction)
-            && compression.equals(p.compression)
-            && extensions.equals(p.extensions)
-            && cdc == p.cdc;
+               && readRepairChance == p.readRepairChance
+               && dcLocalReadRepairChance == p.dcLocalReadRepairChance
+               && bloomFilterFpChance == p.bloomFilterFpChance
+               && crcCheckChance == p.crcCheckChance
+               && gcGraceSeconds == p.gcGraceSeconds
+               && defaultTimeToLive == p.defaultTimeToLive
+               && memtableFlushPeriodInMs == p.memtableFlushPeriodInMs
+               && minIndexInterval == p.minIndexInterval
+               && maxIndexInterval == p.maxIndexInterval
+               && speculativeRetry.equals(p.speculativeRetry)
+               && caching.equals(p.caching)
+               && compaction.equals(p.compaction)
+               && compression.equals(p.compression)
+               && extensions.equals(p.extensions)
+               && cdc == p.cdc
+               && nodeSync.equals(p.nodeSync);
     }
 
     @Override
@@ -247,7 +252,8 @@ public final class TableParams
                                 compaction,
                                 compression,
                                 extensions,
-                                cdc);
+                                cdc,
+                                nodeSync);
     }
 
     @Override
@@ -270,6 +276,7 @@ public final class TableParams
                           .add(Option.COMPRESSION.toString(), compression)
                           .add(Option.EXTENSIONS.toString(), extensions)
                           .add(Option.CDC.toString(), cdc)
+                          .add(Option.NODESYNC.toString(), nodeSync)
                           .toString();
     }
 
@@ -291,8 +298,9 @@ public final class TableParams
         private CompressionParams compression = CompressionParams.DEFAULT;
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
+        private NodeSyncParams nodeSync = NodeSyncParams.DEFAULT;
 
-        public Builder()
+        private Builder()
         {
         }
 
@@ -388,6 +396,12 @@ public final class TableParams
         public Builder cdc(boolean val)
         {
             cdc = val;
+            return this;
+        }
+
+        public Builder nodeSync(NodeSyncParams val)
+        {
+            nodeSync = val;
             return this;
         }
 

@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.concurrent.TimeoutException;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -165,8 +166,6 @@ public class CassandraDaemon
         try
         {
             jmxServer = JMXServerUtils.createJMXServer(Integer.parseInt(jmxPort), localOnly);
-            if (jmxServer == null)
-                return;
         }
         catch (IOException e)
         {
@@ -500,6 +499,9 @@ public class CassandraDaemon
         }
         else
             logger.info("Not starting native transport as requested. Use JMX (StorageService->startNativeTransport()) or nodetool (enablebinary) to start it");
+
+        if (DatabaseDescriptor.getNodeSyncConfig().isEnabled())
+            StorageService.instance.nodeSyncService.enable();
     }
 
     /**
@@ -531,6 +533,15 @@ public class CassandraDaemon
             {
                 logger.error("Error shutting down local JMX server: ", e);
             }
+        }
+
+        try
+        {
+            StorageService.instance.nodeSyncService.disable(false, 2, TimeUnit.MINUTES);
+        }
+        catch (TimeoutException e)
+        {
+            logger.error("Timed-out (after 2 minutes) while waiting on the NodeSync service to stop");
         }
     }
 
