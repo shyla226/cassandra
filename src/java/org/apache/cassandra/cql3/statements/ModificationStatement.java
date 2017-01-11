@@ -35,6 +35,7 @@ import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -432,28 +433,48 @@ public abstract class ModificationStatement implements CQLStatement
     }
 
     public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    throws RequestExecutionException
     {
         if (options.getConsistency() == null)
-            throw new InvalidRequestException("Invalid empty consistency level");
+            return Single.error(new InvalidRequestException("Invalid empty consistency level"));
 
-        return hasConditions()
-             ? Single.just(executeWithCondition(queryState, options, queryStartNanoTime))
-             : executeWithoutCondition(queryState, options, queryStartNanoTime);
+        if (!hasConditions())
+            return executeWithoutCondition(queryState, options, queryStartNanoTime);
+
+        // Paxos is already slow, so for now, just execute it in a blocking way on a different thread
+        return Single.defer(() -> {
+            try
+            {
+                return Single.just(executeWithCondition(queryState, options, queryStartNanoTime));
+            }
+            catch (Throwable t)
+            {
+                return Single.error(t);
+            }
+        }).subscribeOn(Schedulers.io());
     }
 
     private Single<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    throws RequestExecutionException
     {
         ConsistencyLevel cl = options.getConsistency();
-        if (isCounter())
-            cl.validateCounterForWrite(cfm);
-        else
-            cl.validateForWrite(cfm.ksName);
+        try
+        {
+            if (isCounter())
+                cl.validateCounterForWrite(cfm);
+            else
+                cl.validateForWrite(cfm.ksName);
+        }
+        catch (InvalidRequestException exc)
+        {
+            return Single.error(exc);
+        }
 
         Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState), queryStartNanoTime);
         if (!mutations.isEmpty())
+        {
             return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
+        }
 
         return Single.just(new ResultMessage.Void());
     }
