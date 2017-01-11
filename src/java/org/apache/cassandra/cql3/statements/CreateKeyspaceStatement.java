@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.regex.Pattern;
 
+import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
@@ -102,17 +103,14 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
     public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
-        try
-        {
-            return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace()));
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace()))
+                .onErrorResumeNext(exc -> {
+                    if (exc instanceof AlreadyExistsException && ifNotExists)
+                        return Single.just(Event.SchemaChange.NONE);
+                    else
+                        return Single.error(exc);
+                });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

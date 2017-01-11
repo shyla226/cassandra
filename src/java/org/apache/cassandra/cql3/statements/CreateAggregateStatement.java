@@ -217,7 +217,7 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         if (replaced)
         {
             if (ifNotExists)
-                return null;
+                return Single.just(Event.SchemaChange.NONE);
             if (!orReplace)
                 return error(String.format("Function %s already exists", old));
             if (!(old instanceof AggregateFunction))

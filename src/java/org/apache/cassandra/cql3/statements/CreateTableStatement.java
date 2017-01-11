@@ -87,17 +87,14 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
     public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
-        try
-        {
-            return MigrationManager.announceNewColumnFamily(getCFMetaData(), isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceNewColumnFamily(getCFMetaData(), isLocalOnly)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
+                .onErrorResumeNext(exc -> {
+                    if (exc instanceof AlreadyExistsException && ifNotExists)
+                        return Single.just(Event.SchemaChange.NONE);
+                    else
+                        return Single.error(exc);
+                });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

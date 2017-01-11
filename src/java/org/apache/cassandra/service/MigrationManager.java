@@ -337,10 +337,11 @@ public class MigrationManager
 
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(cfm.ksName);
         if (ksm == null)
-            throw new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.cfName, cfm.ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.cfName, cfm.ksName)));
+
         // If we have a table or a view which has the same name, we can't add a new one
         else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.cfName) != null)
-            throw new AlreadyExistsException(cfm.ksName, cfm.cfName);
+            return Completable.error(new AlreadyExistsException(cfm.ksName, cfm.cfName));
 
         logger.info("Create new table: {}", cfm);
         return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, FBUtilities.timestampMicros()), announceLocally);
@@ -352,9 +353,9 @@ public class MigrationManager
 
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(view.ksName);
         if (ksm == null)
-            throw new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.viewName, view.ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.viewName, view.ksName)));
         else if (ksm.getTableOrViewNullable(view.viewName) != null)
-            throw new AlreadyExistsException(view.ksName, view.viewName);
+            return Completable.error(new AlreadyExistsException(view.ksName, view.viewName));
 
         logger.info("Create new view: {}", view);
         return announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
@@ -391,7 +392,7 @@ public class MigrationManager
 
         KeyspaceMetadata oldKsm = Schema.instance.getKSMetaData(ksm.name);
         if (oldKsm == null)
-            throw new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name));
+            return Completable.error(new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name)));
 
         logger.info("Update Keyspace '{}' From {} To {}", ksm.name, oldKsm, ksm);
         return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
@@ -408,7 +409,8 @@ public class MigrationManager
 
         CFMetaData oldCfm = Schema.instance.getCFMetaData(cfm.ksName, cfm.cfName);
         if (oldCfm == null)
-            throw new ConfigurationException(String.format("Cannot update non existing table '%s' in keyspace '%s'.", cfm.cfName, cfm.ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot update non existing table '%s' in keyspace '%s'.", cfm.cfName, cfm.ksName)));
+
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(cfm.ksName);
 
         oldCfm.validateCompatibility(cfm);
@@ -423,7 +425,8 @@ public class MigrationManager
 
         ViewDefinition oldView = Schema.instance.getView(view.ksName, view.viewName);
         if (oldView == null)
-            throw new ConfigurationException(String.format("Cannot update non existing materialized view '%s' in keyspace '%s'.", view.viewName, view.ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot update non existing materialized view '%s' in keyspace '%s'.", view.viewName, view.ksName)));
+
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(view.ksName);
 
         oldView.metadata.validateCompatibility(view.metadata);
@@ -447,7 +450,7 @@ public class MigrationManager
     {
         KeyspaceMetadata oldKsm = Schema.instance.getKSMetaData(ksName);
         if (oldKsm == null)
-            throw new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName)));
 
         logger.info("Drop Keyspace '{}'", oldKsm.name);
         return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
@@ -462,7 +465,7 @@ public class MigrationManager
     {
         CFMetaData oldCfm = Schema.instance.getCFMetaData(ksName, cfName);
         if (oldCfm == null)
-            throw new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName)));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
 
         logger.info("Drop table '{}/{}'", oldCfm.ksName, oldCfm.cfName);
@@ -473,7 +476,7 @@ public class MigrationManager
     {
         ViewDefinition view = Schema.instance.getView(ksName, viewName);
         if (view == null)
-            throw new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName));
+            return Completable.error(new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName)));
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
 
         logger.info("Drop table '{}/{}'", view.ksName, view.viewName);

@@ -101,6 +101,9 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
         // * the configured IAuthorizer supports granting of permissions (not all do, AllowAllAuthorizer doesn't and
         //   custom external implementations may not)
         return ce.map(event -> {
+            if (event == Event.SchemaChange.NONE)
+                return new ResultMessage.Void();
+
             AuthenticatedUser user = state.getClientState().getUser();
             if (user != null && !user.isAnonymous() && event.change == Event.SchemaChange.Change.CREATED)
             {

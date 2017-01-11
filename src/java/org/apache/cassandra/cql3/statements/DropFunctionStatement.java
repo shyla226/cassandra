@@ -134,9 +134,9 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         if (old == null)
         {
             if (ifExists)
-                return null;
+                return Single.just(Event.SchemaChange.NONE);
             else
-                throw new InvalidRequestException(getMissingFunctionError());
+                return error(getMissingFunctionError());
         }
 
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(old.name().keyspace);

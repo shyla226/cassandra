@@ -59,16 +59,13 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
 
     public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
-        try
-        {
-            return MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace()));
-        }
-        catch(ConfigurationException e)
-        {
-            if (ifExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly)
+                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace()))
+                .onErrorResumeNext(exc -> {
+                    if (exc instanceof ConfigurationException && ifExists)
+                        return Single.just(Event.SchemaChange.NONE);
+                    else
+                        return Single.error(exc);
+                });
     }
 }

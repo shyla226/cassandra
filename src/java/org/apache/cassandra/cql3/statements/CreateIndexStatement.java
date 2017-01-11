@@ -201,7 +201,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         if (Schema.instance.getKSMetaData(keyspace()).existingIndexNames(null).contains(acceptedName))
         {
             if (ifNotExists)
-                return null;
+                return Single.just(Event.SchemaChange.NONE);
             else
                 return error(String.format("Index %s already exists", acceptedName));
         }
