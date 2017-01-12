@@ -247,7 +247,8 @@ public class MigrationManager
             throw new AlreadyExistsException(cfm.ksName, cfm.cfName);
 
         logger.info(String.format("Create new ColumnFamily: %s", cfm));
-        announce(addSerializedKeyspace(cfm.toSchema(FBUtilities.timestampMicros()), cfm.ksName), announceLocally);
+        long timestamp = FBUtilities.timestampMicros();
+        announce(addSerializedKeyspace(ksm, cfm.toSchema(timestamp), timestamp), announceLocally);
     }
 
     public static void announceNewType(UserType newType)
@@ -257,7 +258,9 @@ public class MigrationManager
 
     public static void announceNewType(UserType newType, boolean announceLocally)
     {
-        announce(addSerializedKeyspace(UTMetaData.toSchema(newType, FBUtilities.timestampMicros()), newType.keyspace), announceLocally);
+        KSMetaData ksm = Schema.instance.getKSMetaData(newType.keyspace);
+        long timestamp = FBUtilities.timestampMicros();
+        announce(addSerializedKeyspace(ksm, UTMetaData.toSchema(newType, timestamp), timestamp), announceLocally);
     }
 
     public static void announceKeyspaceUpdate(KSMetaData ksm) throws ConfigurationException
@@ -293,7 +296,10 @@ public class MigrationManager
         oldCfm.validateCompatility(cfm);
 
         logger.info(String.format("Update ColumnFamily '%s/%s' From %s To %s", cfm.ksName, cfm.cfName, oldCfm, cfm));
-        announce(addSerializedKeyspace(oldCfm.toSchemaUpdate(cfm, FBUtilities.timestampMicros(), fromThrift), cfm.ksName), announceLocally);
+
+        KSMetaData ksm = Schema.instance.getKSMetaData(cfm.ksName);
+        long timestamp = FBUtilities.timestampMicros();
+        announce(addSerializedKeyspace(ksm, oldCfm.toSchemaUpdate(cfm, timestamp, fromThrift), timestamp), announceLocally);
     }
 
     public static void announceTypeUpdate(UserType updatedType)
@@ -331,15 +337,17 @@ public class MigrationManager
         CFMetaData oldCfm = Schema.instance.getCFMetaData(ksName, cfName);
         if (oldCfm == null)
             throw new ConfigurationException(String.format("Cannot drop non existing column family '%s' in keyspace '%s'.", cfName, ksName));
+        KSMetaData ksm = Schema.instance.getKSMetaData(ksName);
 
         logger.info(String.format("Drop ColumnFamily '%s/%s'", oldCfm.ksName, oldCfm.cfName));
-        announce(addSerializedKeyspace(oldCfm.dropFromSchema(FBUtilities.timestampMicros()), ksName), announceLocally);
+        long timestamp = FBUtilities.timestampMicros();
+        announce(addSerializedKeyspace(ksm, oldCfm.dropFromSchema(timestamp), timestamp), announceLocally);
     }
 
     // Include the serialized keyspace for when a target node missed the CREATE KEYSPACE migration (see #5631).
-    private static Mutation addSerializedKeyspace(Mutation migration, String ksName)
+    private static Mutation addSerializedKeyspace(KSMetaData ksm, Mutation migration, long timestamp)
     {
-        migration.add(SystemKeyspace.readSchemaRow(SystemKeyspace.SCHEMA_KEYSPACES_CF, ksName).cf);
+        migration.addAll(ksm.toSchema(timestamp, false));
         return migration;
     }
 
@@ -350,7 +358,9 @@ public class MigrationManager
 
     public static void announceTypeDrop(UserType droppedType, boolean announceLocally)
     {
-        announce(addSerializedKeyspace(UTMetaData.dropFromSchema(droppedType, FBUtilities.timestampMicros()), droppedType.keyspace), announceLocally);
+        KSMetaData ksm = Schema.instance.getKSMetaData(droppedType.keyspace);
+        long timestamp = FBUtilities.timestampMicros();
+        announce(addSerializedKeyspace(ksm, UTMetaData.dropFromSchema(droppedType, timestamp), timestamp), announceLocally);
     }
 
     /**

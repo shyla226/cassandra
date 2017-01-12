@@ -249,6 +249,11 @@ public final class KSMetaData
 
     public Mutation toSchema(long timestamp)
     {
+        return toSchema(timestamp, true);
+    }
+
+    public Mutation toSchema(long timestamp, boolean includeCFsAndTypes)
+    {
         Mutation mutation = new Mutation(Keyspace.SYSTEM_KS, SystemKeyspace.getSchemaKSKey(name));
         ColumnFamily cf = mutation.addOrGet(CFMetaData.SchemaKeyspacesCf);
         CFRowAdder adder = new CFRowAdder(cf, CFMetaData.SchemaKeyspacesCf.comparator.builder().build(), timestamp);
@@ -257,10 +262,14 @@ public final class KSMetaData
         adder.add("strategy_class", strategyClass.getName());
         adder.add("strategy_options", json(strategyOptions));
 
-        for (CFMetaData cfm : cfMetaData.values())
-            cfm.toSchema(mutation, timestamp);
+        if (includeCFsAndTypes)
+        {
+            for (CFMetaData cfm : cfMetaData.values())
+                cfm.toSchema(mutation, timestamp);
 
-        userTypes.toSchema(mutation, timestamp);
+            userTypes.toSchema(mutation, timestamp);
+        }
+
         return mutation;
     }
 
