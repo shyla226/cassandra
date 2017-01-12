@@ -45,7 +45,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // will not be called if the request timeout, but this is ok
         // because the coordinator of the counter mutation will timeout on
         // it's own in that case.
-        StorageProxy.applyCounterMutationOnLeader(cm, localDataCenter, queryStartNanoTime).get().subscribe(v -> {
+        StorageProxy.applyCounterMutation(cm, localDataCenter, queryStartNanoTime).get().subscribe(v -> {
             MessagingService.instance().sendReply(WriteResponse.createMessage(), id, message.from);
         });
     }

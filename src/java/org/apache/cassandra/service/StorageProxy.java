@@ -54,10 +54,8 @@ import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Completable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
 import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -127,10 +125,6 @@ public class StorageProxy implements StorageProxyMBean
 
     public static final String UNREACHABLE = "UNREACHABLE";
 
-    private static final WritePerformer standardWritePerformer;
-    private static final WritePerformer counterWritePerformer;
-    private static final WritePerformer counterWriteOnCoordinatorPerformer;
-
     public static final StorageProxy instance = new StorageProxy();
 
     private static volatile int maxHintsInProgress = 128 * FBUtilities.getAvailableProcessors();
@@ -170,51 +164,6 @@ public class StorageProxy implements StorageProxyMBean
 
         HintsService.instance.registerMBean();
         HintedHandOffManager.instance.registerMBean();
-
-        standardWritePerformer = new WritePerformer()
-        {
-            public void apply(IMutation mutation,
-                              Iterable<InetAddress> targets,
-                              AbstractWriteResponseHandler<IMutation> responseHandler,
-                              String localDataCenter,
-                              ConsistencyLevel consistency_level)
-            throws OverloadedException
-            {
-                assert mutation instanceof Mutation;
-                sendToHintedEndpoints((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION);
-            }
-        };
-
-        /*
-         * We execute counter writes in 2 places: either directly in the coordinator node if it is a replica, or
-         * in CounterMutationVerbHandler on a replica othewise. The write must be executed on the COUNTER_MUTATION stage
-         * but on the latter case, the verb handler already run on the COUNTER_MUTATION stage, so we must not execute the
-         * underlying on the stage otherwise we risk a deadlock. Hence two different performer.
-         */
-        counterWritePerformer = new WritePerformer()
-        {
-            public void apply(IMutation mutation,
-                              Iterable<InetAddress> targets,
-                              AbstractWriteResponseHandler<IMutation> responseHandler,
-                              String localDataCenter,
-                              ConsistencyLevel consistencyLevel)
-            {
-                counterWriteTask(mutation, targets, responseHandler, localDataCenter).run();
-            }
-        };
-
-        counterWriteOnCoordinatorPerformer = new WritePerformer()
-        {
-            public void apply(IMutation mutation,
-                              Iterable<InetAddress> targets,
-                              AbstractWriteResponseHandler<IMutation> responseHandler,
-                              String localDataCenter,
-                              ConsistencyLevel consistencyLevel)
-            {
-                StageManager.getStage(Stage.COUNTER_MUTATION)
-                            .execute(counterWriteTask(mutation, targets, responseHandler, localDataCenter));
-            }
-        };
 
         for(ConsistencyLevel level : ConsistencyLevel.values())
         {
@@ -636,7 +585,7 @@ public class StorageProxy implements StorageProxyMBean
                 catch (Exception ex)
                 {
                     if (!(ex instanceof WriteTimeoutException))
-                        logger.error("Failed to apply paxos commit locally : {}", ex);
+                        logger.error("Failed to apply paxos commit locally", ex);
                     responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
             }
@@ -679,7 +628,7 @@ public class StorageProxy implements StorageProxyMBean
             else
             {
                 WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-                singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, standardWritePerformer, wt, queryStartNanoTime).get();
+                singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, wt, queryStartNanoTime).get();
             }
 
             if (singles == null)
@@ -1145,22 +1094,16 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     /**
-     * Perform the write of a mutation given a WritePerformer.
      * Gather the list of write endpoints, apply locally and/or forward the mutation to
-     * said write endpoint (deletaged to the actual WritePerformer) and wait for the
-     * responses based on consistency level.
+     * said write endpoint and wait for the responses based on consistency level.
      *
      * @param mutation the mutation to be applied
      * @param consistency_level the consistency level for the write operation
-     * @param performer the WritePerformer in charge of appliying the mutation
-     * given the list of write endpoints (either standardWritePerformer for
-     * standard writes or counterWritePerformer for counter writes).
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
     public static AbstractWriteResponseHandler<IMutation> performWrite(IMutation mutation,
                                                                        ConsistencyLevel consistency_level,
                                                                        String localDataCenter,
-                                                                       WritePerformer performer,
                                                                        WriteType writeType,
                                                                        long queryStartNanoTime)
     throws UnavailableException, OverloadedException
@@ -1177,7 +1120,12 @@ public class StorageProxy implements StorageProxyMBean
         // exit early if we can't fulfill the CL at this time
         responseHandler.assureSufficientLiveNodes();
 
-        performer.apply(mutation, Iterables.concat(naturalEndpoints, pendingEndpoints), responseHandler, localDataCenter, consistency_level);
+        Iterable<InetAddress> targets = Iterables.concat(naturalEndpoints, pendingEndpoints);
+        if (writeType == WriteType.COUNTER)
+            executeCounterWrite(mutation, targets, responseHandler, localDataCenter);
+        else
+            sendToHintedEndpoints((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION);
+
         return responseHandler;
     }
 
@@ -1521,7 +1469,7 @@ public class StorageProxy implements StorageProxyMBean
 
         if (endpoint.equals(FBUtilities.getBroadcastAddress()))
         {
-            return applyCounterMutationOnCoordinator(cm, localDataCenter, queryStartNanoTime);
+            return applyCounterMutation(cm, localDataCenter, queryStartNanoTime);
         }
         else
         {
@@ -1580,43 +1528,37 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    // Must be called on a replica of the mutation. This replica becomes the
-    // leader of this mutation.
-    public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
+    public static AbstractWriteResponseHandler<IMutation> applyCounterMutation(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return performWrite(cm, cm.consistency(), localDataCenter, counterWritePerformer, WriteType.COUNTER, queryStartNanoTime);
+        return performWrite(cm, cm.consistency(), localDataCenter, WriteType.COUNTER, queryStartNanoTime);
     }
 
-    // Same as applyCounterMutationOnLeader but must with the difference that it use the MUTATION stage to execute the write (while
-    // applyCounterMutationOnLeader assumes it is on the MUTATION stage already)
-    public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
-    throws UnavailableException, OverloadedException
+    private static void executeCounterWrite(IMutation mutation,
+                                            Iterable<InetAddress> targets,
+                                            AbstractWriteResponseHandler<IMutation> responseHandler,
+                                            String localDataCenter)
     {
-        return performWrite(cm, cm.consistency(), localDataCenter, counterWriteOnCoordinatorPerformer, WriteType.COUNTER, queryStartNanoTime);
-    }
+        assert mutation instanceof CounterMutation;
 
-    private static Runnable counterWriteTask(final IMutation mutation,
-                                             final Iterable<InetAddress> targets,
-                                             final AbstractWriteResponseHandler<IMutation> responseHandler,
-                                             final String localDataCenter)
-    {
-        return new DroppableRunnable(MessagingService.Verb.COUNTER_MUTATION)
-        {
-            @Override
-            public void runMayThrow() throws OverloadedException, WriteTimeoutException
-            {
-                assert mutation instanceof CounterMutation;
+        Single<Mutation> single = ((CounterMutation) mutation).applyCounterMutation();
+        single.subscribe(
+                // onComplete
+                result -> {
+                    responseHandler.response(null);
+                    Set<InetAddress> remotes = Sets.difference(ImmutableSet.copyOf(targets),
+                            ImmutableSet.of(FBUtilities.getBroadcastAddress()));
+                    if (!remotes.isEmpty())
+                        sendToHintedEndpoints(result, remotes, responseHandler, localDataCenter, Stage.COUNTER_MUTATION);
+                },
 
-                Mutation result = ((CounterMutation) mutation).applyCounterMutation();
-                responseHandler.response(null);
-
-                Set<InetAddress> remotes = Sets.difference(ImmutableSet.copyOf(targets),
-                                                           ImmutableSet.of(FBUtilities.getBroadcastAddress()));
-                if (!remotes.isEmpty())
-                    sendToHintedEndpoints(result, remotes, responseHandler, localDataCenter, Stage.COUNTER_MUTATION);
-            }
-        };
+                // onError
+                exc -> {
+                    if (!(exc instanceof WriteTimeoutException))
+                        logger.error("Failed to apply counter update locally:", exc);
+                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                }
+        );
     }
 
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)
@@ -2794,15 +2736,6 @@ public class StorageProxy implements StorageProxyMBean
     private static boolean isAnyStorageHostDown()
     {
         return !Gossiper.instance.getUnreachableTokenOwners().isEmpty();
-    }
-
-    public interface WritePerformer
-    {
-        public void apply(IMutation mutation,
-                          Iterable<InetAddress> targets,
-                          AbstractWriteResponseHandler<IMutation> responseHandler,
-                          String localDataCenter,
-                          ConsistencyLevel consistencyLevel) throws OverloadedException;
     }
 
     /**
