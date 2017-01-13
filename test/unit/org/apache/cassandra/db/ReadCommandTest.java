@@ -255,13 +255,13 @@ public class ReadCommandTest
             ReadQuery query = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
             try (ReadExecutionController executionController = query.executionController();
-                 UnfilteredPartitionIterator iter = query.executeLocally(executionController);
+                 UnfilteredPartitionIterator iter = query.executeLocally(executionController).blockingGet();
                  DataOutputBuffer buffer = new DataOutputBuffer())
             {
                 UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter,
                                                                                 columnFilter,
                                                                                 buffer,
-                                                                                MessagingService.current_version);
+                                                                                MessagingService.current_version).blockingGet();
                 buffers.add(buffer.buffer());
             }
         }
@@ -307,7 +307,7 @@ public class ReadCommandTest
             while (partitionIterator.hasNext())
             {
                 numPartitions++;
-                try(RowIterator rowIterator = partitionIterator.next())
+                try(RowIterator rowIterator = partitionIterator.next().blockingGet())
                 {
                     while (rowIterator.hasNext())
                     {

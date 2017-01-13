@@ -22,6 +22,9 @@ import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.*;
 
+import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -31,7 +34,6 @@ import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.MergeIterator;
 
 /**
@@ -41,7 +43,7 @@ public abstract class UnfilteredPartitionIterators
 {
     private static final Serializer serializer = new Serializer();
 
-    private static final Comparator<UnfilteredRowIterator> partitionComparator = (p1, p2) -> p1.partitionKey().compareTo(p2.partitionKey());
+    private static final Comparator<UnfilteredRowIterator> partitionComparator = Comparator.comparing(BaseRowIterator::partitionKey);
 
     private UnfilteredPartitionIterators() {}
 
@@ -64,15 +66,15 @@ public abstract class UnfilteredPartitionIterators
     }
 
     @SuppressWarnings("resource") // The created resources are returned right away
-    public static UnfilteredRowIterator getOnlyElement(final UnfilteredPartitionIterator iter, SinglePartitionReadCommand command)
+    public static Single<UnfilteredRowIterator> getOnlyElement(final UnfilteredPartitionIterator iter, SinglePartitionReadCommand command)
     {
         // If the query has no results, we'll get an empty iterator, but we still
         // want a RowIterator out of this method, so we return an empty one.
-        UnfilteredRowIterator toReturn = iter.hasNext()
+        Single<UnfilteredRowIterator> toReturn = iter.hasNext()
                               ? iter.next()
-                              : EmptyIterators.unfilteredRow(command.metadata(),
+                              : Single.just(EmptyIterators.unfilteredRow(command.metadata(),
                                                              command.partitionKey(),
-                                                             command.clusteringIndexFilter().isReversed());
+                                                             command.clusteringIndexFilter().isReversed()));
 
         // Note that in general, we should wrap the result so that it's close method actually
         // close the whole UnfilteredPartitionIterator.
@@ -87,7 +89,7 @@ public abstract class UnfilteredPartitionIterators
                 assert !hadNext;
             }
         }
-        return Transformation.apply(toReturn, new Close());
+        return toReturn.map(t -> Transformation.apply(t, new Close()));
     }
 
     public static UnfilteredPartitionIterator concat(final List<UnfilteredPartitionIterator> iterators)
@@ -135,14 +137,16 @@ public abstract class UnfilteredPartitionIterators
             private DecoratedKey partitionKey;
             private boolean isReverseOrder;
 
-            public void reduce(int idx, UnfilteredRowIterator current)
+            public void reduce(int idx, Single<UnfilteredRowIterator> current)
             {
-                partitionKey = current.partitionKey();
-                isReverseOrder = current.isReverseOrder();
+                UnfilteredRowIterator it = current.blockingGet();
+
+                partitionKey = it.partitionKey();
+                isReverseOrder = it.isReverseOrder();
 
                 // Note that because the MergeListener cares about it, we want to preserve the index of the iterator.
                 // Non-present iterator will thus be set to empty in getReduced.
-                toMerge.set(idx, current);
+                toMerge.set(idx, it);
             }
 
             protected UnfilteredRowIterator getReduced()
@@ -192,9 +196,9 @@ public abstract class UnfilteredPartitionIterators
                 return merged.hasNext();
             }
 
-            public UnfilteredRowIterator next()
+            public Single<UnfilteredRowIterator> next()
             {
-                return merged.next();
+                return Single.just(merged.next());
             }
 
             @Override
@@ -218,20 +222,22 @@ public abstract class UnfilteredPartitionIterators
         {
             private final List<UnfilteredRowIterator> toMerge = new ArrayList<>(iterators.size());
 
-            public void reduce(int idx, UnfilteredRowIterator current)
+            public void reduce(int idx, Single<UnfilteredRowIterator> current)
             {
-                toMerge.add(current);
+                toMerge.add(current.blockingGet());
             }
 
             protected UnfilteredRowIterator getReduced()
             {
-                return new LazilyInitializedUnfilteredRowIterator(toMerge.get(0).partitionKey())
+                LazilyInitializedUnfilteredRowIterator it = new LazilyInitializedUnfilteredRowIterator(toMerge.get(0).partitionKey())
                 {
                     protected UnfilteredRowIterator initializeIterator()
                     {
                         return UnfilteredRowIterators.merge(toMerge, nowInSec);
                     }
                 };
+
+                return it;
             }
 
             protected void onKeyChange()
@@ -252,9 +258,9 @@ public abstract class UnfilteredPartitionIterators
                 return merged.hasNext();
             }
 
-            public UnfilteredRowIterator next()
+            public Single<UnfilteredRowIterator> next()
             {
-                return merged.next();
+                return Single.just(merged.next());
             }
 
             @Override
@@ -272,18 +278,12 @@ public abstract class UnfilteredPartitionIterators
      * @param digest the {@code MessageDigest} to use for the digest.
      * @param version the messaging protocol to use when producing the digest.
      */
-    public static void digest(UnfilteredPartitionIterator iterator, MessageDigest digest, int version)
+    public static Completable digest(UnfilteredPartitionIterator iterator, MessageDigest digest, int version)
     {
-        try (UnfilteredPartitionIterator iter = iterator)
-        {
-            while (iter.hasNext())
-            {
-                try (UnfilteredRowIterator partition = iter.next())
-                {
-                    UnfilteredRowIterators.digest(partition, digest, version);
-                }
-            }
-        }
+        return iterator.asObservable().flatMapCompletable(i -> {
+            UnfilteredRowIterators.digest(i, digest, version);
+            return CompletableObserver::onComplete;
+        });
     }
 
     public static Serializer serializerForIntraNode()
@@ -315,20 +315,20 @@ public abstract class UnfilteredPartitionIterators
      */
     public static class Serializer
     {
-        public void serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out, int version) throws IOException
+        public Completable serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out, int version) throws IOException
         {
             // Previously, a boolean indicating if this was for a thrift query.
             // Unused since 4.0 but kept on wire for compatibility.
-            out.writeBoolean(false);
-            while (iter.hasNext())
-            {
-                out.writeBoolean(true);
-                try (UnfilteredRowIterator partition = iter.next())
-                {
-                    UnfilteredRowIteratorSerializer.serializer.serialize(partition, selection, out, version);
-                }
-            }
-            out.writeBoolean(false);
+
+            return Completable.fromAction(() -> out.writeBoolean(false))
+                              .concatWith(iter.asObservable()
+                                              .flatMapCompletable(partition ->
+                                                                  {
+                                                                      out.writeBoolean(true);
+                                                                      UnfilteredRowIteratorSerializer.serializer.serialize(partition, selection, out, version);
+                                                                      return CompletableObserver::onComplete;
+                                                                  }))
+                              .concatWith(Completable.fromAction(() -> out.writeBoolean(false)));
         }
 
         public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final CFMetaData metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
@@ -369,7 +369,7 @@ public abstract class UnfilteredPartitionIterators
                     }
                 }
 
-                public UnfilteredRowIterator next()
+                public Single<UnfilteredRowIterator> next()
                 {
                     if (nextReturned && !hasNext())
                         throw new NoSuchElementException();
@@ -378,7 +378,7 @@ public abstract class UnfilteredPartitionIterators
                     {
                         nextReturned = true;
                         next = UnfilteredRowIteratorSerializer.serializer.deserialize(in, version, metadata, selection, flag);
-                        return next;
+                        return Single.just(next);
                     }
                     catch (IOException e)
                     {

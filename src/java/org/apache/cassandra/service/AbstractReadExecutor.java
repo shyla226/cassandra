@@ -138,7 +138,7 @@ public abstract class AbstractReadExecutor
             ReadResponse response;
             try (ReadExecutionController executionController = command.executionController())
             {
-                UnfilteredPartitionIterator iterator = command.executeLocally(executionController);
+                UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet();
                 response = command.createResponse(iterator);
             }
 

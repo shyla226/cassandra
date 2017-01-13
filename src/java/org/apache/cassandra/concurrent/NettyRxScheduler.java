@@ -49,6 +49,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -337,6 +338,7 @@ public class NettyRxScheduler extends Scheduler
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
+       // RxSubscriptionDebugger.enable();
     }
 
 }

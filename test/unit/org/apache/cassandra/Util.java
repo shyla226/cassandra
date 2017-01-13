@@ -39,6 +39,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -290,11 +291,11 @@ public class Util
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
         try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
+             UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet())
         {
             if (iterator.hasNext())
             {
-                try (UnfilteredRowIterator partition = iterator.next())
+                try (UnfilteredRowIterator partition = iterator.next().blockingGet())
                 {
                     throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().getKeyValidator().getString(partition.partitionKey().getKey()));
                 }
@@ -305,11 +306,11 @@ public class Util
     public static void assertEmpty(ReadCommand command)
     {
         try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
         {
             if (iterator.hasNext())
             {
-                try (RowIterator partition = iterator.next())
+                try (RowIterator partition = iterator.next().blockingGet())
                 {
                     throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().getKeyValidator().getString(partition.partitionKey().getKey()));
                 }
@@ -321,11 +322,11 @@ public class Util
     {
         List<ImmutableBTreePartition> results = new ArrayList<>();
         try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
+             UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet())
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator partition = iterator.next())
+                try (UnfilteredRowIterator partition = iterator.next().blockingGet())
                 {
                     results.add(ImmutableBTreePartition.create(partition));
                 }
@@ -338,11 +339,11 @@ public class Util
     {
         List<FilteredPartition> results = new ArrayList<>();
         try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
         {
             while (iterator.hasNext())
             {
-                try (RowIterator partition = iterator.next())
+                try (RowIterator partition = iterator.next().blockingGet())
                 {
                     results.add(FilteredPartition.create(partition));
                 }
@@ -354,10 +355,10 @@ public class Util
     public static Row getOnlyRowUnfiltered(ReadCommand cmd)
     {
         try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
-            try (UnfilteredRowIterator partition = iterator.next())
+            try (UnfilteredRowIterator partition = iterator.next().blockingGet())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
 
@@ -372,10 +373,10 @@ public class Util
     public static Row getOnlyRow(ReadCommand cmd)
     {
         try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController))
+             PartitionIterator iterator = cmd.executeInternal(executionController).blockingGet())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
-            try (RowIterator partition = iterator.next())
+            try (RowIterator partition = iterator.next().blockingGet())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
                 assert partition.hasNext() : "Expecting one row in one partition but got an empty partition";
@@ -389,10 +390,10 @@ public class Util
     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
         try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
-            try (UnfilteredRowIterator partition = iterator.next())
+            try (UnfilteredRowIterator partition = iterator.next().blockingGet())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
                 return ImmutableBTreePartition.create(partition);
@@ -403,10 +404,10 @@ public class Util
     public static FilteredPartition getOnlyPartition(ReadCommand cmd)
     {
         try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController))
+             PartitionIterator iterator = cmd.executeInternal(executionController).blockingGet())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
-            try (RowIterator partition = iterator.next())
+            try (RowIterator partition = iterator.next().blockingGet())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
                 return FilteredPartition.create(partition);
@@ -455,7 +456,7 @@ public class Util
         while (iter.hasNext())
         {
             ++size;
-            iter.next().close();
+            iter.next().blockingGet().close();
         }
         return size;
     }
@@ -666,7 +667,7 @@ public class Util
         }
     }
 
-    public static UnfilteredPartitionIterator executeLocally(PartitionRangeReadCommand command,
+    public static Single<UnfilteredPartitionIterator> executeLocally(PartitionRangeReadCommand command,
                                                              ColumnFamilyStore cfs,
                                                              ReadExecutionController controller)
     {
@@ -689,8 +690,8 @@ public class Util
                   Optional.empty());
         }
 
-        private UnfilteredPartitionIterator queryStorageInternal(ColumnFamilyStore cfs,
-                                                                 ReadExecutionController controller)
+        private Single<UnfilteredPartitionIterator> queryStorageInternal(ColumnFamilyStore cfs,
+                                                                         ReadExecutionController controller)
         {
             return queryStorage(cfs, controller);
         }

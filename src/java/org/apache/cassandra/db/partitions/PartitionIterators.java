@@ -19,7 +19,9 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.*;
 
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.rows.RowIterator;
@@ -34,15 +36,15 @@ public abstract class PartitionIterators
     private PartitionIterators() {}
 
     @SuppressWarnings("resource") // The created resources are returned right away
-    public static RowIterator getOnlyElement(final PartitionIterator iter, SinglePartitionReadCommand command)
+    public static Single<RowIterator> getOnlyElement(final PartitionIterator iter, SinglePartitionReadCommand command)
     {
         // If the query has no results, we'll get an empty iterator, but we still
         // want a RowIterator out of this method, so we return an empty one.
-        RowIterator toReturn = iter.hasNext()
-                             ? iter.next()
-                             : EmptyIterators.row(command.metadata(),
-                                                  command.partitionKey(),
-                                                  command.clusteringIndexFilter().isReversed());
+        Single<RowIterator> toReturn = iter.hasNext()
+                                       ? iter.next()
+                                       : Single.just(EmptyIterators.row(command.metadata(),
+                                                                        command.partitionKey(),
+                                                                        command.clusteringIndexFilter().isReversed()));
 
         // Note that in general, we should wrap the result so that it's close method actually
         // close the whole PartitionIterator.
@@ -57,7 +59,7 @@ public abstract class PartitionIterators
                 assert !hadNext;
             }
         }
-        return Transformation.apply(toReturn, new Close());
+        return toReturn.map(t -> Transformation.apply(t, new Close()));
     }
 
     @SuppressWarnings("resource") // The created resources are returned right away
@@ -84,18 +86,6 @@ public abstract class PartitionIterators
         return new SingletonPartitionIterator(iterator);
     }
 
-    public static void consume(PartitionIterator iterator)
-    {
-        while (iterator.hasNext())
-        {
-            try (RowIterator partition = iterator.next())
-            {
-                while (partition.hasNext())
-                    partition.next();
-            }
-        }
-    }
-
     /**
      * Wraps the provided iterator so it logs the returned rows for debugging purposes.
      * <p>
@@ -115,7 +105,7 @@ public abstract class PartitionIterators
         return Transformation.apply(iterator, new Logger());
     }
 
-    private static class SingletonPartitionIterator extends AbstractIterator<RowIterator> implements PartitionIterator
+    private static class SingletonPartitionIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
     {
         private final RowIterator iterator;
         private boolean returned;
@@ -125,18 +115,18 @@ public abstract class PartitionIterators
             this.iterator = iterator;
         }
 
-        protected RowIterator computeNext()
+        protected Single<RowIterator> computeNext()
         {
             if (returned)
                 return endOfData();
 
             returned = true;
-            return iterator;
+            return Single.just(iterator);
         }
 
-        public Observable<RowIterator> asObservable()
+        public Flowable<RowIterator> asObservable()
         {
-            return Observable.just(iterator).doFinally(() -> close());
+            return Flowable.just(iterator); //.usin(() -> close());
         }
 
         public void close()

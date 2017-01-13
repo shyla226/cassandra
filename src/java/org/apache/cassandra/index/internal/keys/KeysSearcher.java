@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
@@ -45,16 +46,16 @@ public class KeysSearcher extends CassandraIndexSearcher
         super(command, expression, indexer);
     }
 
-    protected UnfilteredPartitionIterator queryDataFromIndex(final DecoratedKey indexKey,
-                                                             final RowIterator indexHits,
-                                                             final ReadCommand command,
-                                                             final ReadExecutionController executionController)
+    protected Single<UnfilteredPartitionIterator> queryDataFromIndex(final DecoratedKey indexKey,
+                                                                     final RowIterator indexHits,
+                                                                     final ReadCommand command,
+                                                                     final ReadExecutionController executionController)
     {
         assert indexHits.staticRow() == Rows.EMPTY_STATIC_ROW;
 
-        return new UnfilteredPartitionIterator()
+        UnfilteredPartitionIterator iter = new UnfilteredPartitionIterator()
         {
-            private UnfilteredRowIterator next;
+            private Single<UnfilteredRowIterator> next;
 
             public CFMetaData metadata()
             {
@@ -66,12 +67,12 @@ public class KeysSearcher extends CassandraIndexSearcher
                 return prepareNext();
             }
 
-            public UnfilteredRowIterator next()
+            public Single<UnfilteredRowIterator> next()
             {
                 if (next == null)
                     prepareNext();
 
-                UnfilteredRowIterator toReturn = next;
+                Single<UnfilteredRowIterator> toReturn = next;
                 next = null;
                 return toReturn;
             }
@@ -95,22 +96,19 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                                                            command.clusteringIndexFilter(key));
 
                     @SuppressWarnings("resource") // filterIfStale closes it's iterator if either it materialize it or if it returns null.
-                                                  // Otherwise, we close right away if empty, and if it's assigned to next it will be called either
-                                                  // by the next caller of next, or through closing this iterator is this come before.
-                    UnfilteredRowIterator dataIter = filterIfStale(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
-                                                                   hit,
-                                                                   indexKey.getKey(),
-                                                                   executionController.writeOpOrderGroup(),
-                                                                   command.nowInSec());
+                    // Otherwise, we close right away if empty, and if it's assigned to next it will be called either
+                    // by the next caller of next, or through closing this iterator is this come before.
+                    Single<UnfilteredRowIterator> dataIter = dataCmd.queryMemtableAndDisk(index.baseCfs, executionController)
+                                                                    .map(i -> filterIfStale(i,
+                                                                                                hit,
+                                                                                                indexKey.getKey(),
+                                                                                                executionController.writeOpOrderGroup(),
+                                                                                                command.nowInSec()));
 
                     if (dataIter != null)
-                    {
-                        if (dataIter.isEmpty())
-                            dataIter.close();
-                        else
-                            next = dataIter;
-                    }
+                        next = dataIter;
                 }
+
                 return next != null;
             }
 
@@ -122,10 +120,10 @@ public class KeysSearcher extends CassandraIndexSearcher
             public void close()
             {
                 indexHits.close();
-                if (next != null)
-                    next.close();
             }
         };
+
+        return Single.just(iter).doOnError(t -> iter.close());
     }
 
     private ColumnFilter getExtendedFilter(ColumnFilter initialFilter)

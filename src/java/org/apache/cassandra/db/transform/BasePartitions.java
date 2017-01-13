@@ -29,7 +29,7 @@ import org.apache.cassandra.utils.Throwables;
 import static org.apache.cassandra.utils.Throwables.merge;
 
 public abstract class BasePartitions<R extends BaseRowIterator<?>, I extends BasePartitionIterator<? extends BaseRowIterator<?>>>
-extends BaseIterator<BaseRowIterator<?>, I, R>
+extends RxBaseIterator<BaseRowIterator<?>, I, R>
 implements BasePartitionIterator<R>
 {
 
@@ -82,8 +82,7 @@ implements BasePartitionIterator<R>
         BaseRowIterator<?> next = null;
         try
         {
-
-            Stop stop = this.stop;
+            BaseIterator.Stop stop = this.stop;
             while (this.next == null)
             {
                 Transformation[] fs = stack;
@@ -91,7 +90,7 @@ implements BasePartitionIterator<R>
 
                 while (!stop.isSignalled && input.hasNext())
                 {
-                    next = input.next();
+                    next = input.next().blockingGet();
                     for (int i = 0 ; next != null & i < len ; i++)
                         next = fs[i].applyToPartition(next);
 

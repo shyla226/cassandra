@@ -19,7 +19,9 @@ package org.apache.cassandra.index.sasi.disk;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Stream;
 
+import io.reactivex.Single;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sasi.utils.AbstractIterator;
 import org.apache.cassandra.index.sasi.utils.CombinedValue;
@@ -31,6 +33,7 @@ import com.carrotsearch.hppc.LongOpenHashSet;
 import com.carrotsearch.hppc.LongSet;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
@@ -379,31 +382,31 @@ public class TokenTree
 
         public Iterator<DecoratedKey> iterator()
         {
-            List<Iterator<DecoratedKey>> keys = new ArrayList<>(info.size());
+            List<Iterator<Single<DecoratedKey>>> keys = new ArrayList<>(info.size());
 
             for (TokenInfo i : info)
-                keys.add(i.iterator());
+                keys.add(i.rxiterator());
 
             if (!loadedKeys.isEmpty())
-                keys.add(loadedKeys.iterator());
+                keys.add(loadedKeys.stream().map(k -> Single.just(k)).iterator());
 
             return MergeIterator.get(keys, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey, DecoratedKey>()
             {
-                DecoratedKey reduced = null;
+                Single<DecoratedKey> reduced = null;
 
                 public boolean trivialReduceIsTrivial()
                 {
                     return true;
                 }
 
-                public void reduce(int idx, DecoratedKey current)
+                public void reduce(int idx, Single<DecoratedKey> current)
                 {
                     reduced = current;
                 }
 
                 protected DecoratedKey getReduced()
                 {
-                    return reduced;
+                    return reduced.blockingGet();
                 }
             });
         }
@@ -451,6 +454,11 @@ public class TokenTree
         public Iterator<DecoratedKey> iterator()
         {
             return new KeyIterator(keyFetcher, fetchOffsets());
+        }
+
+        public Iterator<Single<DecoratedKey>> rxiterator()
+        {
+            return Iterators.transform(iterator(), k -> Single.just(k));
         }
 
         public int hashCode()

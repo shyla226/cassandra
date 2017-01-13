@@ -1336,7 +1336,7 @@ public class SASIIndexTest
 
         try (ReadExecutionController controller = command.executionController())
         {
-            Set<String> rows = getKeys(new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller));
+            Set<String> rows = getKeys(new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller).blockingGet());
             Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2", "key3", "key4" }, rows.toArray(new String[rows.size()])));
         }
     }
@@ -2347,7 +2347,7 @@ public class SASIIndexTest
 
             while (currentPage.hasNext())
             {
-                try (UnfilteredRowIterator row = currentPage.next())
+                try (UnfilteredRowIterator row = currentPage.next().blockingGet())
                 {
                     uniqueKeys.add(row.partitionKey());
                     lastKey = row.partitionKey();
@@ -2380,7 +2380,7 @@ public class SASIIndexTest
                                                             range,
                                                             Optional.empty());
 
-        return command.executeLocally(command.executionController());
+        return command.executeLocally(command.executionController()).blockingGet();
     }
 
     private static Mutation newMutation(String key, String firstName, String lastName, int age, long timestamp)
@@ -2407,7 +2407,7 @@ public class SASIIndexTest
             {{
                 while (rows.hasNext())
                 {
-                    try (UnfilteredRowIterator row = rows.next())
+                    try (UnfilteredRowIterator row = rows.next().blockingGet())
                     {
                         if (!row.isEmpty())
                             add(AsciiType.instance.compose(row.partitionKey().getKey()));

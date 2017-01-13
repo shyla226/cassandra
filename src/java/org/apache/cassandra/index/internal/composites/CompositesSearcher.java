@@ -19,8 +19,17 @@ package org.apache.cassandra.index.internal.composites;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.Lists;
+
+import io.reactivex.Completable;
+import io.reactivex.Observable;
+import io.reactivex.ObservableEmitter;
+import io.reactivex.ObservableOnSubscribe;
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
@@ -57,18 +66,19 @@ public class CompositesSearcher extends CassandraIndexSearcher
         return index.getIndexedColumn().isStatic();
     }
 
-    protected UnfilteredPartitionIterator queryDataFromIndex(final DecoratedKey indexKey,
-                                                             final RowIterator indexHits,
-                                                             final ReadCommand command,
-                                                             final ReadExecutionController executionController)
+    protected Single<UnfilteredPartitionIterator> queryDataFromIndex(final DecoratedKey indexKey,
+                                                                         final RowIterator indexHits,
+                                                                         final ReadCommand command,
+                                                                         final ReadExecutionController executionController)
     {
         assert indexHits.staticRow() == Rows.EMPTY_STATIC_ROW;
 
-        return new UnfilteredPartitionIterator()
+
+        UnfilteredPartitionIterator iter = new UnfilteredPartitionIterator()
         {
             private IndexEntry nextEntry;
 
-            private UnfilteredRowIterator next;
+            private Single<UnfilteredRowIterator> next;
 
             public CFMetaData metadata()
             {
@@ -80,12 +90,12 @@ public class CompositesSearcher extends CassandraIndexSearcher
                 return prepareNext();
             }
 
-            public UnfilteredRowIterator next()
+            public Single<UnfilteredRowIterator> next()
             {
                 if (next == null)
                     prepareNext();
 
-                UnfilteredRowIterator toReturn = next;
+                Single<UnfilteredRowIterator> toReturn = next;
                 next = null;
                 return toReturn;
             }
@@ -160,21 +170,13 @@ public class CompositesSearcher extends CassandraIndexSearcher
 
                     @SuppressWarnings("resource") // We close right away if empty, and if it's assign to next it will be called either
                     // by the next caller of next, or through closing this iterator is this come before.
-                    UnfilteredRowIterator dataIter =
-                        filterStaleEntries(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
-                                           indexKey.getKey(),
-                                           entries,
-                                           executionController.writeOpOrderGroup(),
-                                           command.nowInSec());
+                    Single<UnfilteredRowIterator> dataIter = dataCmd.queryMemtableAndDisk(index.baseCfs, executionController)
+                                                                    .flatMap(i -> filterStaleEntries(i, indexKey.getKey(), entries,
+                                                                                                     executionController.writeOpOrderGroup(),
+                                                                                                     command.nowInSec()));
 
-                    if (dataIter.isEmpty())
-                    {
-                        dataIter.close();
-                        continue;
-                    }
-
-                    next = dataIter;
-                    return true;
+                    if (dataIter != null)
+                        next = dataIter;
                 }
             }
 
@@ -186,23 +188,24 @@ public class CompositesSearcher extends CassandraIndexSearcher
             public void close()
             {
                 indexHits.close();
-                if (next != null)
-                    next.close();
             }
         };
+
+        return Single.just(iter).doOnError(t -> iter.close());
     }
 
-    private void deleteAllEntries(final List<IndexEntry> entries, final TPCOpOrder.Group writeOp, final int nowInSec)
+    private Completable deleteAllEntries(final List<IndexEntry> entries, final TPCOpOrder.Group writeOp, final int nowInSec)
     {
-        entries.forEach(entry ->
-            index.deleteStaleEntry(entry.indexValue,
-                                   entry.indexClustering,
-                                   new DeletionTime(entry.timestamp, nowInSec),
-                                   writeOp));
+        return Completable.merge(entries.stream()
+                                        .map(entry -> index.deleteStaleEntry(entry.indexValue,
+                                                                             entry.indexClustering,
+                                                                             new DeletionTime(entry.timestamp, nowInSec),
+                                                                             writeOp))
+                                        .collect(Collectors.toList()));
     }
 
     // We assume all rows in dataIter belong to the same partition.
-    private UnfilteredRowIterator filterStaleEntries(UnfilteredRowIterator dataIter,
+    private Single<UnfilteredRowIterator> filterStaleEntries(UnfilteredRowIterator dataIter,
                                                      final ByteBuffer indexValue,
                                                      final List<IndexEntry> entries,
                                                      final TPCOpOrder.Group writeOp,
@@ -222,24 +225,25 @@ public class CompositesSearcher extends CassandraIndexSearcher
             });
         }
 
-        UnfilteredRowIterator iteratorToReturn = null;
         if (isStaticColumn())
         {
             if (entries.size() != 1)
                 throw new AssertionError("A partition should have at most one index within a static column index");
 
-            iteratorToReturn = dataIter;
             if (index.isStale(dataIter.staticRow(), indexValue, nowInSec))
             {
                 // The entry is staled, we return no rows in this partition.
                 staleEntries.addAll(entries);
-                iteratorToReturn = UnfilteredRowIterators.noRowsIterator(dataIter.metadata(),
+                UnfilteredRowIterator iteratorToReturn = UnfilteredRowIterators.noRowsIterator(dataIter.metadata(),
                                                                          dataIter.partitionKey(),
                                                                          Rows.EMPTY_STATIC_ROW,
                                                                          dataIter.partitionLevelDeletion(),
                                                                          dataIter.isReverseOrder());
+
+                return deleteAllEntries(staleEntries, writeOp, nowInSec).andThen(Single.just(iteratorToReturn));
             }
-            deleteAllEntries(staleEntries, writeOp, nowInSec);
+
+            return Single.just(dataIter);
         }
         else
         {
@@ -286,12 +290,13 @@ public class CompositesSearcher extends CassandraIndexSearcher
                 @Override
                 public void onPartitionClose()
                 {
-                    deleteAllEntries(staleEntries, writeOp, nowInSec);
+                    //This is purely a optimization
+                    // if it fails we don't really care
+                    deleteAllEntries(staleEntries, writeOp, nowInSec).subscribe();
                 }
             }
-            iteratorToReturn = Transformation.apply(dataIter, new Transform());
-        }
 
-        return iteratorToReturn;
+            return Single.just(Transformation.apply(dataIter, new Transform()));
+        }
     }
 }

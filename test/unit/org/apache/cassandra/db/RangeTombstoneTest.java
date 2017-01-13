@@ -535,7 +535,7 @@ public class RangeTombstoneTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         try (UnfilteredPartitionIterator scanner = sstable.getScanner())
         {
-            try (UnfilteredRowIterator iter = scanner.next())
+            try (UnfilteredRowIterator iter = scanner.next().blockingGet())
             {
                 // after compaction, we should have a single RT with a single row (the row 8)
                 Unfiltered u1 = iter.next();

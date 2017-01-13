@@ -169,7 +169,7 @@ public class RealTransactionsTest extends SchemaLoader
                                                            txn));
                 while (ci.hasNext())
                 {
-                    rewriter.append(ci.next());
+                    rewriter.append(ci.next().blockingGet());
 
                     if (System.nanoTime() - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                     {

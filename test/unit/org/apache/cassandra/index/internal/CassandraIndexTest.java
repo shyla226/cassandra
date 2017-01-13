@@ -504,7 +504,7 @@ public class CassandraIndexTest extends CQLTester
                                                                                ColumnFilter.all(indexCfs.metadata),
                                                                                filter);
         try (ReadExecutionController executionController = command.executionController();
-             UnfilteredRowIterator iter = command.queryMemtableAndDisk(indexCfs, executionController))
+             UnfilteredRowIterator iter = command.queryMemtableAndDisk(indexCfs, executionController).blockingGet())
         {
             while( iter.hasNext())
             {

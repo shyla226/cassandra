@@ -19,8 +19,10 @@ package org.apache.cassandra.index.sasi.plan;
 
 import java.util.*;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -63,12 +65,12 @@ public class QueryPlan
         }
     }
 
-    public UnfilteredPartitionIterator execute(ReadExecutionController executionController) throws RequestTimeoutException
+    public Single<UnfilteredPartitionIterator> execute(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        return new ResultIterator(analyze(), controller, executionController);
+        return Single.just(new ResultIterator(analyze(), controller, executionController));
     }
 
-    private static class ResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    private static class ResultIterator extends AbstractIterator<Single<UnfilteredRowIterator>> implements UnfilteredPartitionIterator
     {
         private final AbstractBounds<PartitionPosition> keyRange;
         private final Operation operationTree;
@@ -87,7 +89,7 @@ public class QueryPlan
                 operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
         }
 
-        protected UnfilteredRowIterator computeNext()
+        protected Single<UnfilteredRowIterator> computeNext()
         {
             if (operationTree == null)
                 return endOfData();
@@ -110,21 +112,25 @@ public class QueryPlan
                     if (!keyRange.right.isMinimum() && keyRange.right.compareTo(key) < 0)
                         return endOfData();
 
-                    try (UnfilteredRowIterator partition = controller.getPartition(key, executionController))
-                    {
-                        Row staticRow = partition.staticRow();
+                    Single<UnfilteredRowIterator> partition = controller.getPartition(key, executionController);
+
+                    //TPC TODO: Not sure how to avoid returning empty iterators
+                    return partition.map(p -> {
+                        Row staticRow = p.staticRow();
                         List<Unfiltered> clusters = new ArrayList<>();
 
-                        while (partition.hasNext())
+                        while (p.hasNext())
                         {
-                            Unfiltered row = partition.next();
+                            Unfiltered row = p.next();
                             if (operationTree.satisfiedBy(row, staticRow, true))
                                 clusters.add(row);
                         }
 
                         if (!clusters.isEmpty())
-                            return new PartitionIterator(partition, clusters);
-                    }
+                            return new PartitionIterator(p, clusters);
+
+                        return EmptyIterators.unfilteredRow(p.metadata(), p.partitionKey(), false);
+                    });
                 }
             }
         }

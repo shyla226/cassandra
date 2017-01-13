@@ -20,6 +20,7 @@
  */
 package org.apache.cassandra.db.transform;
 
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionColumns;
@@ -69,17 +70,5 @@ final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> i
     public boolean isEmpty()
     {
         return staticRow().isEmpty() && partitionLevelDeletion().isLive() && !hasNext();
-    }
-
-    public Observable<Unfiltered> asObservable()
-    {
-        Observable<Unfiltered> observable = Observable.create(observableEmitter -> {
-            while (hasNext())
-                observableEmitter.onNext(next());
-
-            observableEmitter.onComplete();
-        });
-
-        return observable.doFinally(() -> close());
     }
 }

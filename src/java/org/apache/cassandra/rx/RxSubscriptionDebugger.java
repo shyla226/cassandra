@@ -64,6 +64,8 @@ public class RxSubscriptionDebugger
             RxJavaPlugins.setOnFlowableSubscribe(RxSubscriptionDebugger::onSubscribe);
 
             startWatcher();
+
+            System.err.println("SYARTED");
         }
     }
 

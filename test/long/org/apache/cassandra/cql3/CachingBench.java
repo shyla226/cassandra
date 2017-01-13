@@ -359,7 +359,7 @@ public class CachingBench extends CQLTester
         {
             while (partitions.hasNext())
             {
-                try (UnfilteredRowIterator iter = partitions.next())
+                try (UnfilteredRowIterator iter = partitions.next().blockingGet())
                 {
                     while (iter.hasNext())
                     {

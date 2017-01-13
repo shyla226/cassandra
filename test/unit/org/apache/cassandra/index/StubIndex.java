@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -108,29 +109,34 @@ public class StubIndex implements Index
             {
             }
 
-            public void partitionDelete(DeletionTime deletionTime)
+            public Completable partitionDelete(DeletionTime deletionTime)
             {
                 partitionDeletions.add(deletionTime);
+                return Completable.complete();
             }
 
-            public void rangeTombstone(RangeTombstone tombstone)
+            public Completable rangeTombstone(RangeTombstone tombstone)
             {
                 rangeTombstones.add(tombstone);
+                return Completable.complete();
             }
 
-            public void insertRow(Row row)
+            public Completable insertRow(Row row)
             {
                 rowsInserted.add(row);
+                return Completable.complete();
             }
 
-            public void removeRow(Row row)
+            public Completable removeRow(Row row)
             {
                 rowsDeleted.add(row);
+                return Completable.complete();
             }
 
-            public void updateRow(Row oldRowData, Row newRowData)
+            public Completable updateRow(Row oldRowData, Row newRowData)
             {
                 rowsUpdated.add(Pair.create(oldRowData, newRowData));
+                return Completable.complete();
             }
 
             public void finish()

@@ -19,19 +19,21 @@ package org.apache.cassandra.utils;
 
 import java.util.*;
 
+import io.reactivex.Single;
+
 /** Merges sorted input iterators which individually contain unique items. */
 public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implements IMergeIterator<In, Out>
 {
     protected final Reducer<In,Out> reducer;
-    protected final List<? extends Iterator<In>> iterators;
+    protected final List<? extends Iterator<Single<In>>> iterators;
 
-    protected MergeIterator(List<? extends Iterator<In>> iters, Reducer<In, Out> reducer)
+    protected MergeIterator(List<? extends Iterator<Single<In>>> iters, Reducer<In, Out> reducer)
     {
         this.iterators = iters;
         this.reducer = reducer;
     }
 
-    public static <In, Out> MergeIterator<In, Out> get(List<? extends Iterator<In>> sources,
+    public static <In, Out> MergeIterator<In, Out> get(List<? extends Iterator<Single<In>>> sources,
                                                        Comparator<? super In> comparator,
                                                        Reducer<In, Out> reducer)
     {
@@ -44,7 +46,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
         return new ManyToOne<>(sources, comparator, reducer);
     }
 
-    public Iterable<? extends Iterator<In>> iterators()
+    public Iterable<? extends Iterator<Single<In>>> iterators()
     {
         return iterators;
     }
@@ -53,7 +55,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
     {
         for (int i = 0, length = this.iterators.size(); i < length; i++)
         {
-            Iterator<In> iterator = iterators.get(i);
+            Iterator<Single<In>> iterator = iterators.get(i);
             try
             {
                 if (iterator instanceof AutoCloseable)
@@ -134,7 +136,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          */
         static final int SORTED_SECTION_SIZE = 4;
 
-        public ManyToOne(List<? extends Iterator<In>> iters, Comparator<? super In> comp, Reducer<In, Out> reducer)
+        public ManyToOne(List<? extends Iterator<Single<In>>> iters, Comparator<? super In> comp, Reducer<In, Out> reducer)
         {
             super(iters, reducer);
 
@@ -145,7 +147,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
 
             for (int i = 0; i < iters.size(); i++)
             {
-                Candidate<In> candidate = new Candidate<>(i, iters.get(i), comp);
+                Candidate<In> candidate = new Candidate<In>(i, iters.get(i), comp);
                 heap[size++] = candidate;
             }
             needingAdvance = size;
@@ -348,14 +350,14 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
     // Holds and is comparable by the head item of an iterator it owns
     protected static final class Candidate<In> implements Comparable<Candidate<In>>
     {
-        private final Iterator<? extends In> iter;
+        private final Iterator<? extends Single<In>> iter;
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
         private In lowerBound;
         boolean equalParent;
 
-        public Candidate(int idx, Iterator<? extends In> iter, Comparator<? super In> comp)
+        public Candidate(int idx, Iterator<? extends Single<In>> iter, Comparator<? super In> comp)
         {
             this.iter = iter;
             this.comp = comp;
@@ -375,7 +377,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
             if (!iter.hasNext())
                 return null;
 
-            item = iter.next();
+            item = iter.next().blockingGet();
             return this;
         }
 
@@ -406,7 +408,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
             }
             else
             {
-                reducer.reduce(idx, item);
+                reducer.reduce(idx, Single.just(item));
                 item = null;
             }
         }
@@ -432,7 +434,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          * combine this object with the previous ones.
          * intermediate state is up to your implementation.
          */
-        public abstract void reduce(int idx, In current);
+        public abstract void reduce(int idx, Single<In> current);
 
         /** @return The last object computed by reduce */
         protected abstract Out getReduced();
@@ -451,9 +453,9 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
 
     private static class OneToOne<In, Out> extends MergeIterator<In, Out>
     {
-        private final Iterator<In> source;
+        private final Iterator<Single<In>> source;
 
-        public OneToOne(List<? extends Iterator<In>> sources, Reducer<In, Out> reducer)
+        public OneToOne(List<? extends Iterator<Single<In>>> sources, Reducer<In, Out> reducer)
         {
             super(sources, reducer);
             source = sources.get(0);
@@ -471,9 +473,9 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
 
     private static class TrivialOneToOne<In, Out> extends MergeIterator<In, Out>
     {
-        private final Iterator<In> source;
+        private final Iterator<Single<In>> source;
 
-        public TrivialOneToOne(List<? extends Iterator<In>> sources, Reducer<In, Out> reducer)
+        public TrivialOneToOne(List<? extends Iterator<Single<In>>> sources, Reducer<In, Out> reducer)
         {
             super(sources, reducer);
             source = sources.get(0);

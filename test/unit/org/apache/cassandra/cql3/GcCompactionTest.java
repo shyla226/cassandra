@@ -348,7 +348,7 @@ public class GcCompactionTest extends CQLTester
         {
             while (partitions.hasNext())
             {
-                try (UnfilteredRowIterator iter = partitions.next())
+                try (UnfilteredRowIterator iter = partitions.next().blockingGet())
                 {
                     instances += partitionPredicate.apply(iter);
                     while (iter.hasNext())

@@ -117,10 +117,10 @@ public class SecondaryIndexTest
 
         Index.Searcher searcher = cfs.indexManager.getBestIndexFor(rc).searcherFor(rc);
         try (ReadExecutionController executionController = rc.executionController();
-             UnfilteredPartitionIterator pi = searcher.search(executionController))
+             UnfilteredPartitionIterator pi = searcher.search(executionController).blockingGet())
         {
             assertTrue(pi.hasNext());
-            pi.next().close();
+            pi.next().blockingGet().close();
         }
 
         // Verify gt on idx scan
@@ -528,7 +528,7 @@ public class SecondaryIndexTest
             assertNotNull(searcher);
 
         try (ReadExecutionController executionController = rc.executionController();
-             PartitionIterator iter = UnfilteredPartitionIterators.filter(searcher.search(executionController),
+             PartitionIterator iter = UnfilteredPartitionIterators.filter(searcher.search(executionController).blockingGet(),
                                                                           FBUtilities.nowInSeconds()))
         {
             assertEquals(count, Util.size(iter));
@@ -539,7 +539,7 @@ public class SecondaryIndexTest
     {
         PartitionRangeReadCommand command = (PartitionRangeReadCommand)Util.cmd(indexCfs).build();
         try (ReadExecutionController controller = command.executionController();
-             PartitionIterator iter = UnfilteredPartitionIterators.filter(Util.executeLocally(command, indexCfs, controller),
+             PartitionIterator iter = UnfilteredPartitionIterators.filter(Util.executeLocally(command, indexCfs, controller).blockingGet(),
                                                                           FBUtilities.nowInSeconds()))
         {
             assertFalse(iter.hasNext());

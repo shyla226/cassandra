@@ -319,12 +319,13 @@ public final class SchemaKeyspace
                 continue;
 
             ReadCommand cmd = getReadCommandForTableSchema(table);
-            try (ReadExecutionController executionController = cmd.executionController();
-                 PartitionIterator schema = cmd.executeInternal(executionController))
+            try (ReadExecutionController executionController = cmd.executionController())
             {
+
+                PartitionIterator schema = cmd.executeInternal(executionController).blockingGet();
                 while (schema.hasNext())
                 {
-                    try (RowIterator partition = schema.next())
+                    try (RowIterator partition = schema.next().blockingGet())
                     {
                         if (!isSystemKeyspaceSchemaPartition(partition.partitionKey()))
                             RowIterators.digest(partition, digest);
@@ -367,12 +368,13 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iter = cmd.executeLocally(executionController))
+        try (ReadExecutionController executionController = cmd.executionController())
         {
+
+            UnfilteredPartitionIterator iter = cmd.executeLocally(executionController).blockingGet();
             while (iter.hasNext())
             {
-                try (UnfilteredRowIterator partition = iter.next())
+                try (UnfilteredRowIterator partition = iter.next().blockingGet())
                 {
                     if (isSystemKeyspaceSchemaPartition(partition.partitionKey()))
                         continue;

@@ -1,5 +1,4 @@
 /*
- *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -8,19 +7,16 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.apache.cassandra.db.transform;
 
-import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 import io.reactivex.Single;
@@ -31,21 +27,14 @@ import org.apache.cassandra.utils.RxIterator;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 
-abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> extends Stack implements AutoCloseable, Iterator<O>
+abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V> extends Stack implements AutoCloseable, RxIterator<O>
 {
     I input;
     V next;
-    Stop stop; // applies at the end of the current next()
-
-    public static class Stop
-    {
-        // TODO: consider moving "next" into here, so that a stop() when signalled outside of a function call (e.g. in attach)
-        // can take effect immediately; this doesn't seem to be necessary at the moment, but it might cause least surprise in future
-        boolean isSignalled;
-    }
+    BaseIterator.Stop stop; // applies at the end of the current next()
 
     // responsibility for initialising next lies with the subclass
-    BaseIterator(BaseIterator<? extends V, ? extends I, ?> copyFrom)
+    RxBaseIterator(RxBaseIterator<? extends V, ? extends I, ?> copyFrom)
     {
         super(copyFrom);
         this.input = copyFrom.input;
@@ -53,10 +42,10 @@ abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> ext
         this.stop = copyFrom.stop;
     }
 
-    BaseIterator(I input)
+    RxBaseIterator(I input)
     {
         this.input = input;
-        this.stop = new Stop();
+        this.stop = new BaseIterator.Stop();
     }
 
     /**
@@ -90,14 +79,14 @@ abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> ext
         maybeFail(fail);
     }
 
-    public final O next()
+    public final Single<O> next()
     {
         if (next == null && !hasNext())
             throw new NoSuchElementException();
 
         O next = (O) this.next;
         this.next = null;
-        return next;
+        return Single.just(next);
     }
 
     // may set next != null if the next contents are a transforming iterator that already has data to return,
@@ -123,11 +112,11 @@ abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> ext
 
             input = newContents;
             Stack prefix = EMPTY;
-            if (newContents instanceof BaseIterator)
+            if (newContents instanceof RxBaseIterator)
             {
                 // we're refilling with transformed contents, so swap in its internals directly
                 // TODO: ensure that top-level data is consistent. i.e. staticRow, partitionlevelDeletion etc are same?
-                BaseIterator abstr = (BaseIterator) newContents;
+                RxBaseIterator abstr = (RxBaseIterator) newContents;
                 prefix = abstr;
                 input = (I) abstr.input;
                 next = apply((V)abstr.next, holder.length); // must apply all remaining functions to the next, if any

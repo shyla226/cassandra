@@ -533,7 +533,7 @@ public class DataResolver extends ResponseResolver
                 //FIXME: Need to rewrite this for the special tombstone case.
                 // handler.awaitResults();
                 assert resolver.responses.size() == 1;
-                return UnfilteredPartitionIterators.getOnlyElement(resolver.responses.get(0).payload.makeIterator(command), retryCommand);
+                return UnfilteredPartitionIterators.getOnlyElement(resolver.responses.get(0).payload.makeIterator(command), retryCommand).blockingGet();
             }
         }
     }

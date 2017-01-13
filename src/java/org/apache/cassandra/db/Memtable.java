@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.Pair;
@@ -650,7 +651,7 @@ public class Memtable implements Comparable<Memtable>
             return iter.hasNext();
         }
 
-        public UnfilteredRowIterator next()
+        public Single<UnfilteredRowIterator> next()
         {
             PartitionPosition position = iter.next();
             // Actual stored key should be true DecoratedKey
@@ -658,7 +659,12 @@ public class Memtable implements Comparable<Memtable>
             DecoratedKey key = (DecoratedKey)position;
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position));
+            return Single.just(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)));
+        }
+
+        public void close()
+        {
+
         }
     }
 

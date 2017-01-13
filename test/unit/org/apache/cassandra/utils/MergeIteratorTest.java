@@ -21,6 +21,7 @@ package org.apache.cassandra.utils;
 import java.util.Arrays;
 import java.util.Iterator;
 
+import io.reactivex.Single;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
@@ -51,7 +52,7 @@ public class MergeIteratorTest
             String concatted = "";
 
             @Override
-            public void reduce(int idx, String current)
+            public void reduce(int idx, Single<String> current)
             {
                 concatted += current;
             }
@@ -72,7 +73,7 @@ public class MergeIteratorTest
     }
 
     // closeable list iterator
-    public static class CLI<E> extends AbstractIterator<E> implements CloseableIterator<E>
+    public static class CLI<E> extends AbstractIterator<Single<E>> implements CloseableIterator<Single<E>>
     {
         Iterator<E> iter;
         boolean closed = false;
@@ -81,10 +82,10 @@ public class MergeIteratorTest
             this.iter = Arrays.asList(items).iterator();
         }
 
-        protected E computeNext()
+        protected Single<E> computeNext()
         {
             if (!iter.hasNext()) return endOfData();
-            return iter.next();
+            return Single.just(iter.next());
         }
 
         public void close()

@@ -106,7 +106,7 @@ public class NeverPurgeTest extends CQLTester
         {
             while (scanner.hasNext())
             {
-                try (UnfilteredRowIterator iter = scanner.next())
+                try (UnfilteredRowIterator iter = scanner.next().blockingGet())
                 {
                     if (!iter.partitionLevelDeletion().isLive())
                         tombstoneCount++;

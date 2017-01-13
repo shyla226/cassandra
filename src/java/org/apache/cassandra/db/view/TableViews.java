@@ -136,9 +136,10 @@ public class TableViews extends AbstractCollection<View>
         long start = System.nanoTime();
         Collection<Mutation> mutations;
         try (ReadExecutionController orderGroup = command.executionController();
-             UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeLocally(orderGroup), command);
              UnfilteredRowIterator updates = update.unfilteredIterator())
         {
+            UnfilteredRowIterator existings = command.executeLocally(orderGroup).map(r -> UnfilteredPartitionIterators.getOnlyElement(r, command)).blockingGet().blockingGet();
+
             mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
         }
         Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);

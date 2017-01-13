@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.*;
 
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
@@ -42,7 +43,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     private Row staticRow;
 
     public SSTableIdentityIterator(SSTableReader sstable, DecoratedKey key, DeletionTime partitionLevelDeletion,
-            FileDataInput dfile, SSTableSimpleIterator iterator) throws IOException
+                                   FileDataInput dfile, SSTableSimpleIterator iterator) throws IOException
     {
         super();
         this.sstable = sstable;
@@ -79,8 +80,8 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             DeletionTime partitionLevelDeletion = DeletionTime.serializer.deserialize(dfile);
             SerializationHelper helper = new SerializationHelper(sstable.metadata, sstable.descriptor.version.correspondingMessagingVersion(), SerializationHelper.Flag.LOCAL);
             SSTableSimpleIterator iterator = tombstoneOnly
-                    ? SSTableSimpleIterator.createTombstoneOnly(sstable.metadata, dfile, sstable.header, helper, partitionLevelDeletion)
-                    : SSTableSimpleIterator.create(sstable.metadata, dfile, sstable.header, helper, partitionLevelDeletion);
+                                             ? SSTableSimpleIterator.createTombstoneOnly(sstable.metadata, dfile, sstable.header, helper, partitionLevelDeletion)
+                                             : SSTableSimpleIterator.create(sstable.metadata, dfile, sstable.header, helper, partitionLevelDeletion);
             return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, dfile, iterator);
         }
         catch (IOException e)
@@ -92,15 +93,14 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
 
     /**
      * Allows reuse of this iterator by moving to the next Key in the iteration.
-     *
+     * <p>
      * Since we walk the datafile start to finish we can just update the
      * data from the next partition in the file and iterate.  We can also
      * use the index to jump to the start of a particular partition.
-     *
+     * <p>
      * It's required the caller must have set the datafile position to
      * the start of the passed partition key and have skipped over the
      * partition key.
-     *
      */
     public SSTableIdentityIterator reuse(DecoratedKey key) throws IOException
     {
@@ -170,7 +170,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             if (e.getCause() instanceof IOException)
             {
                 sstable.markSuspect();
-                throw new CorruptSSTableException((Exception)e.getCause(), filename);
+                throw new CorruptSSTableException((Exception) e.getCause(), filename);
             }
             else
             {
@@ -195,7 +195,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             if (e.getCause() instanceof IOException)
             {
                 sstable.markSuspect();
-                throw new CorruptSSTableException((Exception)e.getCause(), filename);
+                throw new CorruptSSTableException((Exception) e.getCause(), filename);
             }
             else
             {
@@ -229,15 +229,8 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         return key.compareTo(o.key);
     }
 
-    public Observable<Unfiltered> asObservable()
+    public Flowable<Unfiltered> asObservable()
     {
-        Observable<Unfiltered> observable = Observable.create(observableEmitter -> {
-            while (hasNext())
-                observableEmitter.onNext(next());
-
-            observableEmitter.onComplete();
-        });
-
-        return observable.doFinally(() -> close());
+        return Flowable.fromIterable(() -> this).doAfterTerminate(() -> close());
     }
 }

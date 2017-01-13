@@ -16,12 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db;
+package org.apache.cassandra.utils;
 
+import java.io.Closeable;
+import java.util.Iterator;
+
+import com.google.common.collect.Iterables;
 
 import io.reactivex.Flowable;
+import io.reactivex.Single;
+import io.reactivex.SingleSource;
+import org.apache.cassandra.db.AsObservable;
 
-public interface AsObservable<T>
+public interface RxIterator<T> extends Iterator<Single<T>>, AsObservable<T>, Closeable
 {
-    Flowable<T> asObservable();
+    public default Flowable<T> asObservable()
+    {
+        return Single.merge(Iterables.transform(() -> this, s -> (SingleSource<T>) s))
+                     .doOnTerminate(() -> close());
+    }
 }

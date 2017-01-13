@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -90,7 +91,7 @@ public class QueryController
     }
 
 
-    public UnfilteredRowIterator getPartition(DecoratedKey key, ReadExecutionController executionController)
+    public Single<UnfilteredRowIterator> getPartition(DecoratedKey key, ReadExecutionController executionController)
     {
         if (key == null)
             throw new NullPointerException();

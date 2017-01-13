@@ -46,6 +46,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -573,9 +574,11 @@ public class SecondaryIndexManager implements IndexRegistry
             while (!pager.isExhausted())
             {
                 try (ReadExecutionController controller = cmd.executionController();
-                     TPCOpOrder.Group writeGroup = Keyspace.writeOrder.start();
-                     RowIterator partition = PartitionIterators.getOnlyElement(pager.fetchPageInternal(pageSize, controller).blockingGet(), cmd))
+                     TPCOpOrder.Group writeGroup = Keyspace.writeOrder.start())
                 {
+
+                    RowIterator partition = PartitionIterators.getOnlyElement(pager.fetchPageInternal(pageSize, controller).blockingGet(), cmd).blockingGet();
+
                     Set<Index.Indexer> indexers = indexes.stream()
                                                          .map(index -> index.indexerFor(key,
                                                                                         partition.columns(),
@@ -877,25 +880,37 @@ public class SecondaryIndexManager implements IndexRegistry
                 indexer.begin();
         }
 
-        public void onPartitionDeletion(DeletionTime deletionTime)
+        public Completable onPartitionDeletion(DeletionTime deletionTime)
         {
+            Completable r = Completable.complete();
+
             for (Index.Indexer indexer : indexers)
-                indexer.partitionDelete(deletionTime);
+                r = r.concatWith(indexer.partitionDelete(deletionTime));
+
+            return r;
         }
 
-        public void onRangeTombstone(RangeTombstone tombstone)
+        public Completable onRangeTombstone(RangeTombstone tombstone)
         {
+            Completable r = Completable.complete();
+
             for (Index.Indexer indexer : indexers)
-                indexer.rangeTombstone(tombstone);
+                r = r.mergeWith(indexer.rangeTombstone(tombstone));
+
+            return r;
         }
 
-        public void onInserted(Row row)
+        public Completable onInserted(Row row)
         {
+            Completable r = Completable.complete();
+
             for (Index.Indexer indexer : indexers)
-                indexer.insertRow(row);
+                r = r.mergeWith(indexer.insertRow(row));
+
+            return r;
         }
 
-        public void onUpdated(Row existing, Row updated)
+        public Completable onUpdated(Row existing, Row updated)
         {
             final Row.Builder toRemove = BTreeRow.sortedBuilder();
             toRemove.newRow(existing.clustering());
@@ -933,8 +948,13 @@ public class SecondaryIndexManager implements IndexRegistry
             Rows.diff(diffListener, updated, existing);
             Row oldRow = toRemove.build();
             Row newRow = toInsert.build();
+
+            Completable r = Completable.complete();
+
             for (Index.Indexer indexer : indexers)
-                indexer.updateRow(oldRow, newRow);
+                r = r.mergeWith(indexer.updateRow(oldRow, newRow));
+
+            return r;
         }
 
         public void commit()
@@ -1054,7 +1074,7 @@ public class SecondaryIndexManager implements IndexRegistry
                     indexer.begin();
                     for (Row row : rows)
                         if (row != null)
-                            indexer.removeRow(row);
+                            indexer.removeRow(row).blockingGet();
                     indexer.finish();
                 }
             }
@@ -1118,10 +1138,10 @@ public class SecondaryIndexManager implements IndexRegistry
                     indexer.begin();
 
                     if (partitionDelete != null)
-                        indexer.partitionDelete(partitionDelete);
+                        indexer.partitionDelete(partitionDelete).blockingGet();
 
                     if (row != null)
-                        indexer.removeRow(row);
+                        indexer.removeRow(row).blockingGet();
 
                     indexer.finish();
                 }

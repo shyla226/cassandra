@@ -30,6 +30,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractRow;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -177,12 +178,12 @@ public class RepairedDataTombstonesTest extends CQLTester
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
         int partitionsFound = 0;
         try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
         {
             while (iterator.hasNext())
             {
                 partitionsFound++;
-                try (UnfilteredRowIterator rowIter = iterator.next())
+                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
                 {
                     int val = ByteBufferUtil.toInt(rowIter.partitionKey().getKey());
                     assertTrue("val=" + val, val >= 10 && val < 20);
@@ -241,12 +242,12 @@ public class RepairedDataTombstonesTest extends CQLTester
         int foundRows = 0;
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
-             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController) :
-                                cmd.executeLocally(executionController))
+             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController).blockingGet() :
+                                cmd.executeLocally(executionController).blockingGet())
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator rowIter = iterator.next())
+                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
                 {
                     if (!rowIter.partitionKey().equals(Util.dk(ByteBufferUtil.bytes(999)))) // partition key 999 is 'live' and used to avoid sstables from being dropped
                     {
@@ -264,6 +265,7 @@ public class RepairedDataTombstonesTest extends CQLTester
                 }
             }
         }
+
         assertEquals(expectedRows, foundRows);
     }
 
@@ -283,12 +285,12 @@ public class RepairedDataTombstonesTest extends CQLTester
         int foundRows = 0;
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
-             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController) :
-                                cmd.executeLocally(executionController))
+             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController).blockingGet() :
+                                cmd.executeLocally(executionController).blockingGet())
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator rowIter = iterator.next())
+                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
                 {
                     while (rowIter.hasNext())
                     {

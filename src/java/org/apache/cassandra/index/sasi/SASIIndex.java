@@ -23,6 +23,7 @@ import java.util.function.BiFunction;
 
 import com.googlecode.concurrenttrees.common.Iterables;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.Operator;
@@ -68,9 +69,7 @@ public class SASIIndex implements Index, INotificationConsumer
                                                        Set<Index> indexes,
                                                        Collection<SSTableReader> sstablesToRebuild)
         {
-            NavigableMap<SSTableReader, Map<ColumnDefinition, ColumnIndex>> sstables = new TreeMap<>((a, b) -> {
-                return Integer.compare(a.descriptor.generation, b.descriptor.generation);
-            });
+            NavigableMap<SSTableReader, Map<ColumnDefinition, ColumnIndex>> sstables = new TreeMap<>(Comparator.comparingInt(a -> a.descriptor.generation));
 
             indexes.stream()
                    .filter((i) -> i instanceof SASIIndex)
@@ -246,25 +245,33 @@ public class SASIIndex implements Index, INotificationConsumer
             public void begin()
             {}
 
-            public void partitionDelete(DeletionTime deletionTime)
-            {}
+            public Completable partitionDelete(DeletionTime deletionTime)
+            {
+                return Completable.complete();
+            }
 
-            public void rangeTombstone(RangeTombstone tombstone)
-            {}
+            public Completable rangeTombstone(RangeTombstone tombstone)
+            {
+                return Completable.complete();
+            }
 
-            public void insertRow(Row row)
+            public Completable insertRow(Row row)
             {
                 if (isNewData())
-                    adjustMemtableSize(index.index(key, row), opGroup);
+                    return adjustMemtableSize(index.index(key, row), opGroup);
+
+                return Completable.complete();
             }
 
-            public void updateRow(Row oldRow, Row newRow)
+            public Completable updateRow(Row oldRow, Row newRow)
             {
-                insertRow(newRow);
+                return insertRow(newRow);
             }
 
-            public void removeRow(Row row)
-            {}
+            public Completable removeRow(Row row)
+            {
+                return Completable.complete();
+            }
 
             public void finish()
             {}
@@ -276,9 +283,10 @@ public class SASIIndex implements Index, INotificationConsumer
                 return transactionType == IndexTransaction.Type.UPDATE;
             }
 
-            public void adjustMemtableSize(long additionalSpace, TPCOpOrder.Group opGroup)
+            public Completable adjustMemtableSize(long additionalSpace, TPCOpOrder.Group opGroup)
             {
                 baseCfs.getTracker().getView().getCurrentMemtable().getAllocator().onHeap().allocate(additionalSpace, opGroup);
+                return Completable.complete();
             }
         };
     }

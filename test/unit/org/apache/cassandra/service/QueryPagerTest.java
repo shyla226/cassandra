@@ -127,7 +127,7 @@ public class QueryPagerTest
         {
             while (iterator.hasNext())
             {
-                try (RowIterator rowIter = iterator.next())
+                try (RowIterator rowIter = iterator.next().blockingGet())
                 {
                     FilteredPartition partition = FilteredPartition.create(rowIter);
                     sb.append(partition);
@@ -148,7 +148,7 @@ public class QueryPagerTest
         {
             while (iterator.hasNext())
             {
-                try (RowIterator partition = iterator.next())
+                try (RowIterator partition = iterator.next().blockingGet())
                 {
                     List<Row> rows = new ArrayList<>();
                     Row staticRow = partition.staticRow();

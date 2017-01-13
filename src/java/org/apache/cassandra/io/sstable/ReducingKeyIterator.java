@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
+import io.reactivex.Single;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -56,9 +57,9 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
                     return true;
                 }
 
-                public void reduce(int idx, DecoratedKey current)
+                public void reduce(int idx, Single<DecoratedKey> current)
                 {
-                    reduced = current;
+                    reduced = current.blockingGet();
                 }
 
                 protected DecoratedKey getReduced()
@@ -80,7 +81,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         maybeInit();
 
         long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
+        for (Iterator<Single<DecoratedKey>> iter : mi.iterators())
         {
             m += ((KeyIterator) iter).getTotalBytes();
         }
@@ -92,7 +93,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         maybeInit();
 
         long m = 0;
-        for (Iterator<DecoratedKey> iter : mi.iterators())
+        for (Iterator<Single<DecoratedKey>> iter : mi.iterators())
         {
             m += ((KeyIterator) iter).getBytesRead();
         }

@@ -31,4 +31,5 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 public interface UnfilteredPartitionIterator extends BasePartitionIterator<UnfilteredRowIterator>
 {
     public CFMetaData metadata();
+    public void close();
 }

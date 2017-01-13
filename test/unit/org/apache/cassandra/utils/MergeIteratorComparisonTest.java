@@ -23,6 +23,8 @@ import java.util.*;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
+
+import io.reactivex.Single;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
@@ -502,12 +504,12 @@ public class MergeIteratorComparisonTest
         System.out.format("%15s time %5dms; comparisons: %d\n", type, time, comparator.count);
     }
 
-    public <T> List<CloseableIterator<T>> closeableIterators(List<List<T>> iterators)
+    public <T> List<CLI<T>> closeableIterators(List<List<T>> iterators)
     {
-        return Lists.transform(iterators, new Function<List<T>, CloseableIterator<T>>() {
+        return Lists.transform(iterators, new Function<List<T>, CLI<T>>() {
 
             @Override
-            public CloseableIterator<T> apply(List<T> arg)
+            public CLI<T> apply(List<T> arg)
             {
                 return new CLI<T>(arg.iterator());
             }
@@ -543,10 +545,10 @@ public class MergeIteratorComparisonTest
         boolean read = true;
 
         @Override
-        public void reduce(int idx, T next)
+        public void reduce(int idx, Single<T> next)
         {
             if (current == null)
-                current = new Counted<T>(next);
+                current = new Counted<T>(next.blockingGet());
             assert current.item.equals(next);
             ++current.count;
         }
@@ -592,13 +594,13 @@ public class MergeIteratorComparisonTest
         boolean read = true;
 
         @Override
-        public void reduce(int idx, KeyedSet<K, V> next)
+        public void reduce(int idx, Single<KeyedSet<K, V>> next)
         {
             if (current == null)
-                current = new KeyedSet<>(next.left, next.right);
+                current = new KeyedSet<>(next.blockingGet().left, next.blockingGet().right);
             else {
-                assert current.left.equals(next.left);
-                current.right.addAll(next.right);
+                assert current.left.equals(next.blockingGet().left);
+                current.right.addAll(next.blockingGet().right);
             }
         }
 
@@ -620,7 +622,7 @@ public class MergeIteratorComparisonTest
     }
     
     // closeable list iterator
-    public static class CLI<E> extends AbstractIterator<E> implements CloseableIterator<E>
+    public static class CLI<E> extends AbstractIterator<Single<E>> implements CloseableIterator<Single<E>>
     {
         Iterator<E> iter;
         boolean closed = false;
@@ -629,10 +631,10 @@ public class MergeIteratorComparisonTest
             this.iter = items;
         }
 
-        protected E computeNext()
+        protected Single<E> computeNext()
         {
             if (!iter.hasNext()) return endOfData();
-            return iter.next();
+            return Single.just(iter.next());
         }
 
         public void close()
@@ -651,7 +653,7 @@ public class MergeIteratorComparisonTest
         // TODO: if we had our own PriorityQueue implementation we could stash items
         // at the end of its array, so we wouldn't need this storage
         protected final ArrayDeque<CandidatePQ<In>> candidates;
-        public MergeIteratorPQ(List<? extends Iterator<In>> iters, Comparator<In> comp, Reducer<In, Out> reducer)
+        public MergeIteratorPQ(List<? extends Iterator<Single<In>>> iters, Comparator<In> comp, Reducer<In, Out> reducer)
         {
             super(iters, reducer);
             this.queue = new PriorityQueue<>(Math.max(1, iters.size()));
@@ -683,7 +685,7 @@ public class MergeIteratorComparisonTest
             {
                 candidate = queue.poll();
                 candidates.push(candidate);
-                reducer.reduce(candidate.idx, candidate.item);
+                reducer.reduce(candidate.idx, Single.just(candidate.item));
             }
             while (queue.peek() != null && queue.peek().compareTo(candidate) == 0);
             return reducer.getReduced();
@@ -702,13 +704,13 @@ public class MergeIteratorComparisonTest
     // Holds and is comparable by the head item of an iterator it owns
     protected static final class CandidatePQ<In> implements Comparable<CandidatePQ<In>>
     {
-        private final Iterator<? extends In> iter;
+        private final Iterator<? extends Single<In>> iter;
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
         boolean equalParent;
 
-        public CandidatePQ(int idx, Iterator<? extends In> iter, Comparator<? super In> comp)
+        public CandidatePQ(int idx, Iterator<? extends Single<In>> iter, Comparator<? super In> comp)
         {
             this.iter = iter;
             this.comp = comp;
@@ -720,7 +722,7 @@ public class MergeIteratorComparisonTest
         {
             if (!iter.hasNext())
                 return false;
-            item = iter.next();
+            item = iter.next().blockingGet();
             return true;
         }
 

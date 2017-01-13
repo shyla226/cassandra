@@ -29,7 +29,7 @@ import io.reactivex.ObservableOnSubscribe;
 import org.apache.cassandra.db.AsObservable;
 import org.reactivestreams.Subscription;
 
-public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterator<V>, AsObservable<V>
+public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterator<V>
 {
 
     private static enum State { MUST_FETCH, HAS_NEXT, DONE, FAILED }
@@ -43,16 +43,6 @@ public abstract class AbstractIterator<V> implements Iterator<V>, PeekingIterato
     }
 
     protected abstract V computeNext();
-
-    public Observable<V> asObservable()
-    {
-        return Observable.create(observableEmitter -> {
-            while (hasNext())
-                observableEmitter.onNext(next());
-
-            observableEmitter.onComplete();
-        });
-    }
 
     public boolean hasNext()
     {

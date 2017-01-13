@@ -26,6 +26,9 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
+import io.reactivex.Completable;
+import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.Operator;
@@ -37,6 +40,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
 import org.apache.cassandra.index.transactions.IndexTransaction;
@@ -45,7 +49,6 @@ import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * Consisting of a top level Index interface and two sub-interfaces which handle read and write operations,
@@ -422,7 +425,7 @@ public interface Index
          * Notification of a top level partition delete.
          * @param deletionTime
          */
-        public void partitionDelete(DeletionTime deletionTime);
+        public Completable partitionDelete(DeletionTime deletionTime);
 
         /**
          * Notification of a RangeTombstone.
@@ -430,7 +433,7 @@ public interface Index
          * and a notification will be passed for each of them.
          * @param tombstone
          */
-        public void rangeTombstone(RangeTombstone tombstone);
+        public Completable rangeTombstone(RangeTombstone tombstone);
 
         /**
          * Notification that a new row was inserted into the Memtable holding the partition.
@@ -440,7 +443,7 @@ public interface Index
          *
          * @param row the Row being inserted into the base table's Memtable.
          */
-        public void insertRow(Row row);
+        public Completable insertRow(Row row);
 
         /**
          * Notification of a modification to a row in the base table's Memtable.
@@ -461,7 +464,7 @@ public interface Index
          * @param newRowData data that was not present in the existing row and is being inserted
          *                   into the base table's Memtable
          */
-        public void updateRow(Row oldRowData, Row newRowData);
+        public Completable updateRow(Row oldRowData, Row newRowData);
 
         /**
          * Notification that a row was removed from the partition.
@@ -479,7 +482,7 @@ public interface Index
          *
          * @param row data being removed from the base table
          */
-        public void removeRow(Row row);
+        public Completable removeRow(Row row);
 
         /**
          * Notification of the end of the partition update.
@@ -545,6 +548,6 @@ public interface Index
          * @param executionController the collection of OpOrder.Groups which the ReadCommand is being performed under.
          * @return partitions from the base table matching the criteria of the search.
          */
-        public UnfilteredPartitionIterator search(ReadExecutionController executionController);
+        public Single<UnfilteredPartitionIterator> search(ReadExecutionController executionController);
     }
 }

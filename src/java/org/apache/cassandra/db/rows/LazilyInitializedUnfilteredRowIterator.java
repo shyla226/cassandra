@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.utils.AbstractIterator;
 
 import org.apache.cassandra.config.CFMetaData;

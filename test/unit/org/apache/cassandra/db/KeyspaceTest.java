@@ -136,9 +136,9 @@ public class KeyspaceTest extends CQLTester
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, key, filter, limit);
 
         try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
         {
-            try (RowIterator rowIterator = iterator.next())
+            try (RowIterator rowIterator = iterator.next().blockingGet())
             {
                 if (reversed)
                 {
@@ -210,9 +210,9 @@ public class KeyspaceTest extends CQLTester
             ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(Slices.ALL, false);
             SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", filter, null);
             try (ReadExecutionController executionController = command.executionController();
-                 PartitionIterator iterator = command.executeInternal(executionController))
+                 PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
             {
-                try (RowIterator rowIterator = iterator.next())
+                try (RowIterator rowIterator = iterator.next().blockingGet())
                 {
                     Row row = rowIterator.next();
                     Cell cell = row.getCell(cfs.metadata.getColumnDefinition(new ColumnIdentifier("c", false)));
@@ -225,16 +225,16 @@ public class KeyspaceTest extends CQLTester
     private static void assertRowsInResult(ColumnFamilyStore cfs, SinglePartitionReadCommand command, int ... columnValues)
     {
         try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController))
+             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
         {
             if (columnValues.length == 0)
             {
                 if (iterator.hasNext())
-                    fail("Didn't expect any results, but got rows starting with: " + iterator.next().next().toString(cfs.metadata));
+                    fail("Didn't expect any results, but got rows starting with: " + iterator.next().blockingGet().next().toString(cfs.metadata));
                 return;
             }
 
-            try (RowIterator rowIterator = iterator.next())
+            try (RowIterator rowIterator = iterator.next().blockingGet())
             {
                 for (int expected : columnValues)
                 {

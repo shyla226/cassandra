@@ -19,8 +19,9 @@ package org.apache.cassandra.utils;
 
 import java.util.Iterator;
 
+import io.reactivex.Single;
+
 public interface IMergeIterator<In, Out> extends CloseableIterator<Out>
 {
-
-    Iterable<? extends Iterator<In>> iterators();
+    Iterable<? extends Iterator<Single<In>>> iterators();
 }

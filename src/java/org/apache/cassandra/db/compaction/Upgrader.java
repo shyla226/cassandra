@@ -90,7 +90,7 @@ public class Upgrader
         {
             writer.switchWriter(createCompactionWriter(sstable.getSSTableMetadata().repairedAt));
             while (iter.hasNext())
-                writer.append(iter.next());
+                writer.append(iter.next().blockingGet());
 
             writer.finish();
             outputHandler.output("Upgrade of " + sstable + " complete.");

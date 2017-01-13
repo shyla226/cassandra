@@ -85,7 +85,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     @SuppressWarnings("resource")
     public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
     {
-        return innerFetch(pageSize, (pageCommand) -> Single.just(pageCommand.executeInternal(executionController)));
+        return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal(executionController));
     }
 
     private Single<PartitionIterator> innerFetch(int pageSize, Function<ReadCommand, Single<PartitionIterator>> itSupplier)

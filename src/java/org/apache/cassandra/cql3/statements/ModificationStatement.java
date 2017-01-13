@@ -401,7 +401,7 @@ public abstract class ModificationStatement implements CQLStatement
         if (local)
         {
             try (ReadExecutionController executionController = group.executionController();
-                 PartitionIterator iter = group.executeInternal(executionController))
+                 PartitionIterator iter = group.executeInternal(executionController).blockingGet())
             {
                 return asMaterializedMap(iter);
             }
@@ -418,7 +418,7 @@ public abstract class ModificationStatement implements CQLStatement
         Map<DecoratedKey, Partition> map = new HashMap<>();
         while (iterator.hasNext())
         {
-            try (RowIterator partition = iterator.next())
+            try (RowIterator partition = iterator.next().blockingGet())
             {
                 map.put(partition.partitionKey(), FilteredPartition.create(partition));
             }
@@ -622,9 +622,9 @@ public abstract class ModificationStatement implements CQLStatement
         SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
         FilteredPartition current;
         try (ReadExecutionController executionController = readCommand.executionController();
-             PartitionIterator iter = readCommand.executeInternal(executionController))
+             PartitionIterator iter = readCommand.executeInternal(executionController).blockingGet())
         {
-            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
+            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand).blockingGet());
         }
 
         if (!request.appliesTo(current))
