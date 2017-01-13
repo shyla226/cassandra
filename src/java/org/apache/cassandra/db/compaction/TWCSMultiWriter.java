@@ -133,6 +133,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
         return new BucketIndexer(buckets, tmpMinBucket, tmpMaxBucket);
     }
 
+    @SuppressWarnings("resource") // writers are added to the writers array and closed later
     public boolean append(UnfilteredRowIterator partition)
     {
         UnfilteredRowIterator [] iterators = splitPartitionOnTime(partition, bucketIndex, new TWCSConfig(windowTimeUnit, windowTimeSize, timestampResolution));
