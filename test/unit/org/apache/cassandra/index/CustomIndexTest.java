@@ -975,13 +975,15 @@ public class CustomIndexTest extends CQLTester
                     return Completable.complete();
                 }
 
-                public void finish()
+                public Completable finish()
                 {
                     // we've indexed all rows in the target partition,
                     // grab the read OpOrder.Group for the base CFS so
                     // we can compare it with the starting group
                     if (indexedRowCount.get() < ROWS_IN_PARTITION)
                         readOrderingAtFinish = baseCfs.readOrdering.getCurrent(opGroup.coreId);
+
+                    return Completable.complete();
                 }
 
                 public Completable partitionDelete(DeletionTime deletionTime)

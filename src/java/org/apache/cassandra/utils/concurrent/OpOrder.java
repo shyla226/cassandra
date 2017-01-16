@@ -193,7 +193,8 @@ public class OpOrder
                     }
                     catch (Throwable e)
                     {
-                        e.printStackTrace();
+                        logger.error("Deadlocking OpOrder issue : ", e);
+                        throw new RuntimeException(e);
                     }
                 };
 

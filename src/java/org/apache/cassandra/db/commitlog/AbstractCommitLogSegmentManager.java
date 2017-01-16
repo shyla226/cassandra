@@ -291,7 +291,7 @@ public abstract class AbstractCommitLogSegmentManager
         Observable<CommitLogPosition> observable = flushDataFrom(segmentsToRecycle, true);
         try
         {
-            observable.blockingFirst(CommitLogPosition.NONE);
+            observable.blockingLast(CommitLogPosition.NONE);
 
             for (CommitLogSegment segment : activeSegments)
                 for (UUID cfId : droppedCfs)
@@ -395,7 +395,7 @@ public abstract class AbstractCommitLogSegmentManager
             }
         }
 
-        return Observable.merge(flushes.values());
+        return Observable.concat(flushes.values());
     }
 
     /**

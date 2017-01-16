@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import io.reactivex.Completable;
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
@@ -85,7 +86,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         return name.getKeyspace();
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         if (ksm == null)
@@ -102,7 +103,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         }
         catch (InvalidRequestException exc)
         {
-            return Single.error(exc);
+            return Maybe.error(exc);
         }
 
         // Now, we need to announce the type update to basically change it for new tables using this type,
@@ -147,7 +148,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         }
 
         return Completable.merge(migrations)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));
     }
 
     private boolean updateDefinition(CFMetaData cfm, ColumnDefinition def, String keyspace, ByteBuffer toReplace, UserType updated)

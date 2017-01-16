@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.Schema;
@@ -76,7 +77,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
     {
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Collection<Function> olds = Schema.instance.getFunctions(functionName);
 
@@ -130,8 +131,8 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
 
         final Function oldFinal = old;
         return MigrationManager.announceAggregateDrop((UDAggregate)old, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
-                                      oldFinal.name().keyspace, oldFinal.name().name, AbstractType.asCQLTypeStringList(oldFinal.argTypes())));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
+                                      oldFinal.name().keyspace, oldFinal.name().name, AbstractType.asCQLTypeStringList(oldFinal.argTypes()))));
 
     }
 

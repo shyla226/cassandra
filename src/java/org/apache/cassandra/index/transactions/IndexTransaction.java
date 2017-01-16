@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.transactions;
 
+import io.reactivex.Completable;
+
 /**
  * Base interface for the handling of index updates.
  * There are 3 types of transaction where indexes are updated to stay in sync with the base table, each represented by
@@ -53,5 +55,9 @@ public interface IndexTransaction
     }
 
     void start();
-    void commit();
+
+    /*
+     * Once the returned completable is completed all outstanding work is done.
+     */
+    Completable commit();
 }

@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.regex.Pattern;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
+
+import io.reactivex.Maybe;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.commons.lang3.StringUtils;
@@ -85,19 +87,17 @@ public class CreateTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
-        try
-        {
-            return MigrationManager.announceNewColumnFamily(getCFMetaData(), isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceNewColumnFamily(getCFMetaData(), isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof AlreadyExistsException && ifNotExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

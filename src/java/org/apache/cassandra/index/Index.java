@@ -488,7 +488,7 @@ public interface Index
          * Notification of the end of the partition update.
          * This event always occurs after all others for the particular update.
          */
-        public void finish();
+        public Completable finish();
     }
 
     /*

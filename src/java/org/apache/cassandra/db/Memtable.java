@@ -317,7 +317,7 @@ public class Memtable implements Comparable<Memtable>
      *
      * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
      */
-    long put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
+    Single<Long> put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
         TreeMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
@@ -337,13 +337,19 @@ public class Memtable implements Comparable<Memtable>
             previous = empty;
         }
 
-        long[] pair = previous.addAllWithSizeDelta(update, opGroup, indexer);
-        minTimestamp = Math.min(minTimestamp, previous.stats().minTimestamp);
-        liveDataSize.addAndGet(initialSize + pair[0]);
-        columnsCollector.update(update.columns());
-        statsCollector.update(update.stats());
-        currentOperations.addAndGet(update.operationCount());
-        return pair[1];
+        final AtomicBTreePartition finalPrevious = previous;
+        final long size = initialSize;
+        return previous.addAllWithSizeDelta(update, opGroup, indexer)
+                                      .map(p ->
+                                           {
+                                               minTimestamp = Math.min(minTimestamp, finalPrevious.stats().minTimestamp);
+                                               liveDataSize.addAndGet(size + p[0]);
+                                               columnsCollector.update(update.columns());
+                                               statsCollector.update(update.stats());
+                                               currentOperations.addAndGet(update.operationCount());
+
+                                               return p[1];
+                                           });
     }
 
     public int partitionCount()

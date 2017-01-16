@@ -429,8 +429,9 @@ public abstract class CassandraIndex implements Index
                 }
             }
 
-            public void finish()
+            public Completable finish()
             {
+                return Completable.complete();
             }
 
             private Completable indexCells(Clustering clustering, Iterable<Cell> cells)

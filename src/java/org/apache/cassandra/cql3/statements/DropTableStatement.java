@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
@@ -60,47 +61,46 @@ public class DropTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
-        try
+
+        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
+        if (ksm == null)
+            return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+
+        CFMetaData cfm = ksm.getTableOrViewNullable(columnFamily());
+        if (cfm != null)
         {
-            KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
-            if (ksm == null)
-                return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+            if (cfm.isView())
+                return error("Cannot use DROP TABLE on Materialized View");
 
-            CFMetaData cfm = ksm.getTableOrViewNullable(columnFamily());
-            if (cfm != null)
+            boolean rejectDrop = false;
+            StringBuilder messageBuilder = new StringBuilder();
+            for (ViewDefinition def : ksm.views)
             {
-                if (cfm.isView())
-                    return error("Cannot use DROP TABLE on Materialized View");
-
-                boolean rejectDrop = false;
-                StringBuilder messageBuilder = new StringBuilder();
-                for (ViewDefinition def : ksm.views)
+                if (def.baseTableId.equals(cfm.cfId))
                 {
-                    if (def.baseTableId.equals(cfm.cfId))
-                    {
-                        if (rejectDrop)
-                            messageBuilder.append(',');
-                        rejectDrop = true;
-                        messageBuilder.append(def.viewName);
-                    }
-                }
-                if (rejectDrop)
-                {
-                    return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
-                                               keyspace(), messageBuilder.toString()));
+                    if (rejectDrop)
+                        messageBuilder.append(',');
+                    rejectDrop = true;
+                    messageBuilder.append(def.viewName);
                 }
             }
+            if (rejectDrop)
+            {
+                return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
+                                           keyspace(), messageBuilder.toString()));
+            }
+        }
 
-            return MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (ConfigurationException e)
-        {
-            if (ifExists)
-                return null;
-            return Single.error(e);
-        }
+        return MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof ConfigurationException && ifExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 }

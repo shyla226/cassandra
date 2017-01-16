@@ -368,8 +368,9 @@ public class CustomCassandraIndex implements Index
                 return result;
             }
 
-            public void finish()
+            public Completable finish()
             {
+                return Completable.complete();
             }
 
             private Completable indexCells(Clustering clustering, Iterable<Cell> cells)

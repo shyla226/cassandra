@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -53,10 +54,9 @@ public class DropViewStatement extends SchemaAlteringStatement
         // validated in findIndexedCf()
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
-        try
-        {
+
 //            ViewDefinition view = Schema.instance.getViewDefinition(keyspace(), columnFamily());
 //            if (view == null)
 //            {
@@ -76,13 +76,14 @@ public class DropViewStatement extends SchemaAlteringStatement
 //            }
 
             return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
-        }
-        catch (ConfigurationException e)
-        {
-            if (ifExists)
-                return null;
-            return Single.error(e);
-        }
+                    .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                                   .onErrorResumeNext(e ->
+                                                      {
+                                                          if (e instanceof ConfigurationException && ifExists)
+                                                              return Maybe.empty();
+
+                                                          return Maybe.error(e);
+                                                      });
+
     }
 }

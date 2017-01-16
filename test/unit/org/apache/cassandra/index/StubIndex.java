@@ -139,8 +139,9 @@ public class StubIndex implements Index
                 return Completable.complete();
             }
 
-            public void finish()
+            public Completable finish()
             {
+                return Completable.complete();
             }
         };
     }

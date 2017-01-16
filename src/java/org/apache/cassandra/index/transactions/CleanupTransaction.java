@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.transactions;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.rows.Row;
 
@@ -47,6 +48,9 @@ public interface CleanupTransaction extends IndexTransaction
         public void start(){}
         public void onPartitionDeletion(DeletionTime deletionTime){}
         public void onRowDelete(Row row){}
-        public void commit(){}
+        public Completable commit()
+        {
+            return Completable.complete();
+        }
     };
 }

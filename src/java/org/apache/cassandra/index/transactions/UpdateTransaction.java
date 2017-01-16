@@ -61,37 +61,33 @@ import org.apache.cassandra.db.rows.Row;
  */
 public interface UpdateTransaction extends IndexTransaction
 {
-
-    FIXME (Make transaction track the completables)
-
-    Completable onPartitionDeletion(DeletionTime deletionTime);
-    Completable onRangeTombstone(RangeTombstone rangeTombstone);
-    Completable onInserted(Row row);
-    Completable onUpdated(Row existing, Row updated);
+    void onPartitionDeletion(DeletionTime deletionTime);
+    void onRangeTombstone(RangeTombstone rangeTombstone);
+    void onInserted(Row row);
+    void onUpdated(Row existing, Row updated);
 
     UpdateTransaction NO_OP = new UpdateTransaction()
     {
         public void start(){}
-        public Completable onPartitionDeletion(DeletionTime deletionTime)
+        public void onPartitionDeletion(DeletionTime deletionTime)
+        {
+        }
+
+        public void onRangeTombstone(RangeTombstone rangeTombstone)
+        {
+        }
+
+        public void onInserted(Row row)
+        {
+        }
+
+        public void onUpdated(Row existing, Row updated)
+        {
+        }
+
+        public Completable commit()
         {
             return Completable.complete();
         }
-
-        public Completable onRangeTombstone(RangeTombstone rangeTombstone)
-        {
-            return Completable.complete();
-        }
-
-        public Completable onInserted(Row row)
-        {
-            return Completable.complete();
-        }
-
-        public Completable onUpdated(Row existing, Row updated)
-        {
-            return Completable.complete();
-        }
-
-        public void commit(){}
     };
 }

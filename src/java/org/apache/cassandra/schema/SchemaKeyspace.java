@@ -22,7 +22,11 @@ import java.nio.charset.CharacterCodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.LockSupport;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
@@ -43,6 +47,7 @@ import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -53,6 +58,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.Locks;
 
 import static java.lang.String.format;
 
@@ -73,6 +79,7 @@ public final class SchemaKeyspace
     private static final Logger logger = LoggerFactory.getLogger(SchemaKeyspace.class);
 
     private static final boolean FLUSH_SCHEMA_TABLES = Boolean.parseBoolean(System.getProperty("cassandra.test.flush_local_schema_changes", "true"));
+    private static final Semaphore schemaLock = new Semaphore(1, true);
 
     public static final String KEYSPACES = "keyspaces";
     public static final String TABLES = "tables";
@@ -289,7 +296,7 @@ public final class SchemaKeyspace
             for (String table : ALL)
                 flushes.add(getSchemaCFS(table).forceFlush().flatMapCompletable(position -> Completable.complete()));
 
-            return Completable.merge(flushes);
+            return Completable.concat(flushes);
         }
 
         return Completable.complete();
@@ -1343,8 +1350,9 @@ public final class SchemaKeyspace
         for (Mutation mutation : mutations)
             writes.add(mutation.applyAsync());
 
-        return Completable.merge(writes)
-                          .andThen(Completable.defer(() -> FLUSH_SCHEMA_TABLES ? flush() : Completable.complete()))
+        return Completable.fromAction(schemaLock::acquireUninterruptibly)
+                          .concatWith(Completable.concat(writes))
+                          .andThen(Completable.defer(() -> FLUSH_SCHEMA_TABLES ? flush() : Completable.complete()).subscribeOn(Schedulers.io()))
                           .andThen(Completable.defer(() ->
                                                             {
                                                                 // fetch the new state of schema from schema tables (not applied to Schema.instance yet)
@@ -1385,7 +1393,8 @@ public final class SchemaKeyspace
                                                                     return Schema.instance.updateVersionAndAnnounce().toCompletable();
                                                                 else
                                                                     return Completable.complete();
-                                                            }));
+                                                            }))
+                          .doOnTerminate(schemaLock::release);
     }
 
     private static void updateKeyspace(String keyspaceName, KeyspaceMetadata keyspaceBefore, KeyspaceMetadata keyspaceAfter)

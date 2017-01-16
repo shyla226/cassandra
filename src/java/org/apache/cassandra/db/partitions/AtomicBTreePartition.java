@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -75,7 +76,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
      * @return an array containing first the difference in size seen after merging the updates, and second the minimum
      * time detla between updates.
      */
-    public long[] addAllWithSizeDelta(final PartitionUpdate update, TPCOpOrder.Group writeOp, UpdateTransaction indexer)
+    public Single<long[]> addAllWithSizeDelta(final PartitionUpdate update, TPCOpOrder.Group writeOp, UpdateTransaction indexer)
     {
         RowUpdater updater = new RowUpdater(this, allocator, writeOp, indexer);
         try
@@ -108,11 +109,10 @@ public class AtomicBTreePartition extends AbstractBTreePartition
             this.ref = new Holder(newColumns, tree, newDeletionInfo, newStatic, newStats);
 
             updater.finish();
-            return new long[]{updater.dataSize, updater.colUpdateTimeDelta};
         }
         finally
         {
-            indexer.commit();
+            return indexer.commit().andThen(Single.just(new long[]{updater.dataSize, updater.colUpdateTimeDelta}));
         }
     }
 

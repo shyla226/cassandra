@@ -273,8 +273,10 @@ public class SASIIndex implements Index, INotificationConsumer
                 return Completable.complete();
             }
 
-            public void finish()
-            {}
+            public Completable finish()
+            {
+                return Completable.complete();
+            }
 
             // we are only interested in the data from Memtable
             // everything else is going to be handled by SSTableWriter observers

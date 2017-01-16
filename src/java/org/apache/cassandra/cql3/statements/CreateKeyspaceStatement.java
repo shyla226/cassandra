@@ -19,6 +19,9 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.regex.Pattern;
 
+import org.apache.commons.math3.analysis.function.Sin;
+
+import io.reactivex.Maybe;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
@@ -99,20 +102,18 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
             throw new ConfigurationException("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
-        try
-        {
-            return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
-                    .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace()));
-        }
-        catch (AlreadyExistsException e)
-        {
-            if (ifNotExists)
-                return null;
-            return Single.error(e);
-        }
+
+        return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace())))
+                               .onErrorResumeNext(e -> {
+                                   if (e instanceof AlreadyExistsException && ifNotExists)
+                                       return Maybe.empty();
+
+                                   return Maybe.error(e);
+                               });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

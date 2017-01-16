@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
@@ -104,7 +105,7 @@ public class DropTypeStatement extends SchemaAlteringStatement
         return name.getKeyspace();
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         if (ksm == null)
@@ -116,6 +117,6 @@ public class DropTypeStatement extends SchemaAlteringStatement
             return null;
 
         return MigrationManager.announceTypeDrop(toDrop, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));
     }
 }

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.permission.CorePermission;
 import io.reactivex.Single;
 import org.apache.cassandra.config.Schema;
@@ -77,7 +78,7 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
         }
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata oldKsm = Schema.instance.getKSMetaData(name);
         // In the (very) unlikely case the keyspace was dropped since validate()
@@ -86,6 +87,6 @@ public class AlterKeyspaceStatement extends SchemaAlteringStatement
 
         KeyspaceMetadata newKsm = oldKsm.withSwapped(attrs.asAlteredKeyspaceParams(oldKsm.params));
         return MigrationManager.announceKeyspaceUpdate(newKsm, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace()));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, keyspace())));
     }
 }
