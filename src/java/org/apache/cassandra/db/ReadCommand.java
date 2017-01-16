@@ -539,9 +539,20 @@ public abstract class ReadCommand implements ReadQuery
         return Transformation.apply(iter, new MetricRecording());
     }
 
+    /**
+     * A transformation for aborting read commands that have exceeded the maximum
+     * duration. A read command is aborted if it has been running for longer
+     * that the client timeout, since in this case the client has already received a
+     * timeout error. Also, for continuous paging, local commands are time limited in
+     * order to prevent keeping resources for too long. In this case, after a command
+     * is aborted, it is scheduled again later on, and it continues from where it left
+     * off via the pagers, {@link org.apache.cassandra.service.pager.AbstractQueryPager},
+     * and the paging state, {@link org.apache.cassandra.service.pager.PagingState}.
+     */
     protected class CheckForAbort extends StoppingTransformation<UnfilteredRowIterator>
     {
         long lastChecked = 0;
+        Row lastRow = null;
 
         protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
         {
@@ -551,6 +562,7 @@ public abstract class ReadCommand implements ReadQuery
                 return null;
             }
 
+            lastRow = null;
             return Transformation.apply(partition, this);
         }
 
@@ -559,7 +571,17 @@ public abstract class ReadCommand implements ReadQuery
             if (TEST_ITERATION_DELAY_MILLIS > 0)
                 maybeDelayForTesting();
 
-            return maybeAbort() ? null : row;
+            if (maybeAbort())
+                return null;
+
+            lastRow = row;
+            return row;
+        }
+
+        protected Row applyToStatic(Row row)
+        {
+            lastRow = row;
+            return row;
         }
 
         private boolean maybeAbort()
@@ -579,6 +601,22 @@ public abstract class ReadCommand implements ReadQuery
 
             if (optionalMonitor.isAborted())
             {
+                /** APOLLO-312: given that for continuous paging we rely on the pagers and the paging state to
+                 * resume commands after they've been interrupted in order to release resources periodically,
+                 * if we are processing the first row after a static row, then aborting right now would cause problems
+                 * to the pagers, since they would assume that there are no more rows in the partition, see
+                 * {@link AbstractQueryPager.Pager#getRemainingInPartition()}.
+                 * Removing this assumption in getRemainingInPartition() (in case of command interrupted) is not enough,
+                 * since currently we don't serialize a static clustering but we send a null row, resulting in the key
+                 * being ignored in the next page. Further, we also send the static row in some conditions if there are
+                 * no other rows, which is clearly incorrect if there are other rows in the partition.
+                 */
+                if (lastRow != null && lastRow.clustering() == Clustering.STATIC_CLUSTERING)
+                {
+                    lastChecked = 0; // reset so that we check again on the next row
+                    return false;
+                }
+
                 if (logger.isTraceEnabled())
                     logger.trace("Stopping {}.{} with monitorable {}", metadata.ksName, metadata.cfName, optionalMonitor);
 
