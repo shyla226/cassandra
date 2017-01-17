@@ -65,7 +65,7 @@ public class RxSubscriptionDebugger
 
             startWatcher();
 
-            System.err.println("SYARTED");
+            System.err.println("STARTED");
         }
     }
 
@@ -78,7 +78,6 @@ public class RxSubscriptionDebugger
             RxJavaPlugins.setOnMaybeAssembly(null);
             RxJavaPlugins.setOnObservableAssembly(null);
             RxJavaPlugins.setOnFlowableAssembly(null);
-
             RxJavaPlugins.setOnCompletableSubscribe(null);
             RxJavaPlugins.setOnSingleSubscribe(null);
             RxJavaPlugins.setOnMaybeSubscribe(null);
@@ -89,16 +88,15 @@ public class RxSubscriptionDebugger
 
     static <T> T onCreate(T observable)
     {
-        if (null != observables.putIfAbsent(System.identityHashCode(observable), Pair.create(System.nanoTime(), Thread.currentThread().getStackTrace())))
-            throw new RuntimeException("Observable was already seen: " + observable);
-
+        observables.putIfAbsent(System.identityHashCode(observable), Pair.create(System.nanoTime(), Thread.currentThread().getStackTrace()));
         return observable;
     }
 
 
     static <T,O> O onSubscribe(T observable, O observer)
     {
-        observables.remove(System.identityHashCode(observable));
+        if (null == observables.remove(System.identityHashCode(observable)))
+            logger.info("Missing observable chain " + observable);
 
         return observer;
     }

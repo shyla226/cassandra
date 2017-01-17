@@ -24,8 +24,10 @@ import java.util.Iterator;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Flowable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleSource;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.AsObservable;
 
 public interface RxIterator<T> extends Iterator<Single<T>>, AsObservable<T>, Closeable

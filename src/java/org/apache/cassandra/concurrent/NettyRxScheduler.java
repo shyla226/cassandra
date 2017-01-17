@@ -338,7 +338,7 @@ public class NettyRxScheduler extends Scheduler
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
-       // RxSubscriptionDebugger.enable();
+        //RxSubscriptionDebugger.enable();
     }
 
 }

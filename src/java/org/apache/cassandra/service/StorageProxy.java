@@ -53,6 +53,7 @@ import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
@@ -1947,30 +1948,28 @@ public class StorageProxy implements StorageProxyMBean
             return result != null;
         }
 
-        void doInitialQueries()
+        Completable doInitialQueries()
         {
-            executor.executeAsync();
+            return executor.executeAsync();
         }
 
-        void maybeTryAdditionalReplicas()
+        Completable maybeTryAdditionalReplicas()
         {
-            executor.maybeTryAdditionalReplicas();
+            return executor.maybeTryAdditionalReplicas();
         }
 
         Single<PartitionIterator> getPartitionIterator()
         {
-            Single<PartitionIterator> obs = executor.handler.get().onErrorResumeNext(e -> {
-                if (e instanceof DigestMismatchException)
-                    return retryOnDigestMismatch();
+            return doInitialQueries()
+                   .andThen(maybeTryAdditionalReplicas())
+                   .andThen(executor.handler.get()
+                            .onErrorResumeNext(e ->
+                                               {
+                                                   if (e instanceof DigestMismatchException)
+                                                       return retryOnDigestMismatch();
 
-                return Single.error(e);
-            });
-
-            doInitialQueries();
-
-            maybeTryAdditionalReplicas();
-
-            return obs;
+                                                   return Single.error(e);
+                                               }));
         }
 
         Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException

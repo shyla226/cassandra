@@ -356,8 +356,6 @@ public abstract class ReadCommand implements ReadQuery
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
     {
-        long startTimeNanos = System.nanoTime();
-
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
         Index index = getIndex(cfs);
 
@@ -397,7 +395,8 @@ public abstract class ReadCommand implements ReadQuery
                                       // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
                                       // processing we do on it).
                                       return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
-                                  }).doOnError((t) -> group.close());
+                                  })
+                             .doOnError((t) -> group.close());
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);

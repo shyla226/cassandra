@@ -273,6 +273,7 @@ public class TPCOpOrder
             if (callingCore == null || callingCore != coreId)
             {
                 //logger.info("Calling core {} not oporder owner will route close() to core {}", callingCore, coreId);
+                //Thread.dumpStack();
                 NettyRxScheduler.getForCore(coreId).scheduleDirect(c);
                 return;
             }
