@@ -1086,6 +1086,8 @@ public class SelectStatement implements CQLStatement
     {
         try
         {
+            if (partition == null)
+                return Completable.complete();
 
             ProtocolVersion protocolVersion = options.getProtocolVersion();
 
@@ -1149,7 +1151,8 @@ public class SelectStatement implements CQLStatement
         }
         finally
         {
-            partition.close();
+            if (partition != null)
+                partition.close();
         }
 
         return Completable.complete();
