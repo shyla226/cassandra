@@ -1,6 +1,7 @@
 DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
+ * Fix assertion for certain legacy range tombstone pattern (CASSANDRA-12203)
  * Set javac encoding to utf-8 (CASSANDRA-11077)
  * Replace empty strings with null values if they cannot be converted (CASSANDRA-12794)
  * Fixed flacky SSTableRewriterTest: check file counts before calling validateCFS (CASSANDRA-12348)
