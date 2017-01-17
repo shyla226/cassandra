@@ -1869,7 +1869,7 @@ public class StorageProxy implements StorageProxyMBean
 
                                             return Single.error(e);
                                         })
-                     .doFinally(() ->
+                            .doOnDispose(()->
                                 {
                                     if (!forContinuousPaging)
                                         recordLatency(group, consistencyLevel, start);

@@ -22,6 +22,8 @@ import java.util.*;
 import io.reactivex.Flowable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
+import io.reactivex.internal.schedulers.ImmediateThinScheduler;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.rows.RowIterator;
@@ -121,12 +123,12 @@ public abstract class PartitionIterators
                 return endOfData();
 
             returned = true;
-            return Single.just(iterator);
+            return Single.using(() -> iterator, (i) -> Single.just(i), (i) -> i.close());
         }
 
         public Flowable<RowIterator> asObservable()
         {
-            return Flowable.just(iterator); //.usin(() -> close());
+            return Flowable.using(() -> iterator, i -> Flowable.just(i), (i) -> i.close());
         }
 
         public void close()

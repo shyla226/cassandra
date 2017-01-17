@@ -22,6 +22,7 @@ import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.db.AsObservable;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.RxIterator;
 
 /**
@@ -98,6 +99,6 @@ public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>, AsOb
 
     public default Flowable<Unfiltered> asObservable()
     {
-        return Flowable.fromIterable(() -> this).doAfterTerminate(() -> close());
+        return Flowable.using(() -> (Iterable<Unfiltered>) this, (u) -> Flowable.fromIterable(u), (u) -> close());
     }
 }

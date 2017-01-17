@@ -27,6 +27,7 @@ import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleSource;
+import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.AsObservable;
 
@@ -34,7 +35,8 @@ public interface RxIterator<T> extends Iterator<Single<T>>, AsObservable<T>, Clo
 {
     public default Flowable<T> asObservable()
     {
-        return Single.concat(Iterables.transform(() -> this, s -> (SingleSource<T>) s))
-                     .doOnTerminate(() -> close());
+        return Flowable.using(() -> Iterables.transform(() -> this, s -> (SingleSource<T>) s),
+                              (r) -> Single.concat(r),
+                              (r) -> close());
     }
 }

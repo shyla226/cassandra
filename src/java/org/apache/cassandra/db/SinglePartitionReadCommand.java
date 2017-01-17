@@ -661,7 +661,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
             UnfilteredRowIterator result = withSSTablesIterated(iterators, cfs.metric);
 
-            return Single.just(result).doOnDispose(() -> result.close());
+            return Single.just(result);
         }
         catch (RuntimeException | Error e)
         {
