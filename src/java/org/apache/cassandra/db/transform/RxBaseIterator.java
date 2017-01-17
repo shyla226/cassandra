@@ -142,6 +142,7 @@ abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V>
     {
         while (next != null & from < length)
             next = applyOne(next, stack[from++]);
+
         return next;
     }
 }

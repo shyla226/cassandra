@@ -334,6 +334,9 @@ public final class SchemaKeyspace
                 {
                     try (RowIterator partition = schema.next().blockingGet())
                     {
+                        if (partition == null)
+                            continue;
+
                         if (!isSystemKeyspaceSchemaPartition(partition.partitionKey()))
                             RowIterators.digest(partition, digest);
                     }
