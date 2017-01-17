@@ -1043,7 +1043,7 @@ public class SelectStatement implements CQLStatement
     {
         ResultSet.Builder result = ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection);
 
-        return Single.concatArray(partitions).flatMap(p -> p.asObservable())
+        return Single.concatArray(partitions).concatMap(p -> p.asObservable())
                      .map(r -> processPartition(r, options, result, nowInSec))
                      .last(Completable.complete())
                      .map(v ->
