@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable;
 import java.io.File;
 import java.io.IOException;
 
+import io.reactivex.Single;
 import org.apache.cassandra.utils.AbstractIterator;
 
 import org.apache.cassandra.config.CFMetaData;
@@ -30,8 +31,9 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.RxIterator;
 
-public class KeyIterator extends AbstractIterator<DecoratedKey> implements CloseableIterator<DecoratedKey>
+public class KeyIterator extends AbstractIterator<Single<DecoratedKey>> implements RxIterator<DecoratedKey>
 {
     private final static class In
     {
@@ -93,7 +95,7 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
         partitioner = metadata.partitioner;
     }
 
-    protected DecoratedKey computeNext()
+    protected Single<DecoratedKey> computeNext()
     {
         try
         {
@@ -103,7 +105,7 @@ public class KeyIterator extends AbstractIterator<DecoratedKey> implements Close
             keyPosition = in.getFilePointer();
             DecoratedKey key = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in.get()));
             RowIndexEntry.Serializer.skip(in.get(), desc.version); // skip remainder of the entry
-            return key;
+            return Single.just(key);
         }
         catch (IOException e)
         {

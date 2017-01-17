@@ -85,7 +85,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                         if (isStopRequested())
                             throw new CompactionInterruptedException(getCompactionInfo());
 
-                        final DecoratedKey key = keys.next();
+                        final DecoratedKey key = keys.next().blockingGet();
                         final long keyPosition = keys.getKeyPosition();
 
                         indexWriter.startPartition(key, keyPosition);

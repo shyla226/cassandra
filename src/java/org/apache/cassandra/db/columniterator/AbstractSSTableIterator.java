@@ -273,18 +273,6 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         isClosed = true;
     }
 
-    public Observable<Unfiltered> asObservable()
-    {
-        Observable<Unfiltered> observable = Observable.create(observableEmitter -> {
-            while (hasNext())
-                observableEmitter.onNext(next());
-
-            observableEmitter.onComplete();
-        });
-
-        return observable.doFinally(() -> close());
-    }
-
     public void close()
     {
         try

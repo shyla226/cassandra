@@ -185,7 +185,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
             {
                 while (scanner.hasNext())
                 {
-                    try (UnfilteredRowIterator rowIter = scanner.next())
+                    try (UnfilteredRowIterator rowIter = scanner.next().blockingGet())
                     {
                         if (rowIter.hasNext())
                         {

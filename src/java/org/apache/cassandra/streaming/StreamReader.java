@@ -334,18 +334,5 @@ public class StreamReader
                                                          "Required disk space: %s.", FBUtilities.prettyPrintMemory(maxSize)));
             return new File(tmpDir, String.format("%s-%s.%s", BUFFER_FILE_PREFIX, sessionId, BUFFER_FILE_SUFFIX));
         }
-
-        public Observable<Unfiltered> asObservable()
-        {
-            Observable<Unfiltered> observable = Observable.create(observableEmitter -> {
-                while (hasNext())
-                    observableEmitter.onNext(next());
-
-                observableEmitter.onComplete();
-            });
-
-            return observable.doFinally(() -> close());
-        }
-
     }
 }

@@ -19,6 +19,7 @@ package org.apache.cassandra.db.rows;
 
 import com.google.common.collect.UnmodifiableIterator;
 
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.DecoratedKey;
@@ -88,7 +89,7 @@ public abstract class WrappingUnfilteredRowIterator extends UnmodifiableIterator
         return wrapped.next();
     }
 
-    public Observable<Unfiltered> asObservable()
+    public Flowable<Unfiltered> asObservable()
     {
         return wrapped.asObservable();
     }

@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Single;
+import io.reactivex.Maybe;
 
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
@@ -53,7 +53,7 @@ public class DropViewStatement extends SchemaAlteringStatement
         // validated in findIndexedCf()
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         // TODO figure out why this is commented out, and what still needs to be done here
 //            ViewDefinition view = Schema.instance.getViewDefinition(keyspace(), columnFamily());
@@ -74,13 +74,14 @@ public class DropViewStatement extends SchemaAlteringStatement
 //                    throw new InvalidRequestException(String.format("View '%s' could not be found in any of the tables of keyspace '%s'", cfName, keyspace()));
 //            }
 
-        return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
-                .onErrorResumeNext(exc -> {
-                    if (exc instanceof ConfigurationException && ifExists)
-                        return Single.just(Event.SchemaChange.NONE);
-                    else
-                        return Single.error(exc);
-                });
+            return MigrationManager.announceViewDrop(keyspace(), columnFamily(), isLocalOnly)
+                    .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                                   .onErrorResumeNext(e ->
+                                                      {
+                                                          if (e instanceof ConfigurationException && ifExists)
+                                                              return Maybe.empty();
+
+                                                          return Maybe.error(e);
+                                                      });
     }
 }

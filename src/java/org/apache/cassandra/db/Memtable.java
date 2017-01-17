@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.utils.Pair;
@@ -316,7 +317,7 @@ public class Memtable implements Comparable<Memtable>
      *
      * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
      */
-    long put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
+    Single<Long> put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
         TreeMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
@@ -336,13 +337,19 @@ public class Memtable implements Comparable<Memtable>
             previous = empty;
         }
 
-        long[] pair = previous.addAllWithSizeDelta(update, opGroup, indexer);
-        minTimestamp = Math.min(minTimestamp, previous.stats().minTimestamp);
-        liveDataSize.addAndGet(initialSize + pair[0]);
-        columnsCollector.update(update.columns());
-        statsCollector.update(update.stats());
-        currentOperations.addAndGet(update.operationCount());
-        return pair[1];
+        final AtomicBTreePartition finalPrevious = previous;
+        final long size = initialSize;
+        return previous.addAllWithSizeDelta(update, opGroup, indexer)
+                                      .map(p ->
+                                           {
+                                               minTimestamp = Math.min(minTimestamp, finalPrevious.stats().minTimestamp);
+                                               liveDataSize.addAndGet(size + p[0]);
+                                               columnsCollector.update(update.columns());
+                                               statsCollector.update(update.stats());
+                                               currentOperations.addAndGet(update.operationCount());
+
+                                               return p[1];
+                                           });
     }
 
     public int partitionCount()
@@ -650,7 +657,7 @@ public class Memtable implements Comparable<Memtable>
             return iter.hasNext();
         }
 
-        public UnfilteredRowIterator next()
+        public Single<UnfilteredRowIterator> next()
         {
             PartitionPosition position = iter.next();
             // Actual stored key should be true DecoratedKey
@@ -658,7 +665,12 @@ public class Memtable implements Comparable<Memtable>
             DecoratedKey key = (DecoratedKey)position;
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position));
+            return Single.just(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)));
+        }
+
+        public void close()
+        {
+
         }
     }
 

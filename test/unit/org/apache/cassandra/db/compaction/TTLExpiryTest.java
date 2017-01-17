@@ -242,7 +242,7 @@ public class TTLExpiryTest
         assertTrue(scanner.hasNext());
         while(scanner.hasNext())
         {
-            UnfilteredRowIterator iter = scanner.next();
+            UnfilteredRowIterator iter = scanner.next().blockingGet();
             assertEquals(Util.dk(noTTLKey), iter.partitionKey());
         }
         scanner.close();

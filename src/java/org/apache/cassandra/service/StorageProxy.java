@@ -54,6 +54,8 @@ import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Completable;
+import io.reactivex.Flowable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
@@ -1569,7 +1571,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command).blockingGet();
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
@@ -1651,10 +1653,10 @@ public class StorageProxy implements StorageProxyMBean
             // We could simply use a close Transformation here. However, we want to make extra sure close() is
             // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
             // framework (which is non trivial code) making that not happen.
-            final PartitionIterator iter = group.executeInternal(controller);
+            final PartitionIterator iter = group.executeInternal(controller).blockingGet();
             return Single.just(new PartitionIterator()
             {
-                public Observable<RowIterator> asObservable()
+                public Flowable<RowIterator> asObservable()
                 {
                     return iter.asObservable();
                 }
@@ -1664,7 +1666,7 @@ public class StorageProxy implements StorageProxyMBean
                     return iter.hasNext();
                 }
 
-                public RowIterator next()
+                public Single<RowIterator> next()
                 {
                     return iter.next();
                 }
@@ -1797,7 +1799,7 @@ public class StorageProxy implements StorageProxyMBean
 
                                             return Single.error(e);
                                         })
-                     .doFinally(() ->
+                            .doOnDispose(()->
                                 {
                                     if (!forContinuousPaging)
                                         recordLatency(group, consistencyLevel, start);
@@ -1876,30 +1878,28 @@ public class StorageProxy implements StorageProxyMBean
             return result != null;
         }
 
-        void doInitialQueries()
+        Completable doInitialQueries()
         {
-            executor.executeAsync();
+            return executor.executeAsync();
         }
 
-        void maybeTryAdditionalReplicas()
+        Completable maybeTryAdditionalReplicas()
         {
-            executor.maybeTryAdditionalReplicas();
+            return executor.maybeTryAdditionalReplicas();
         }
 
         Single<PartitionIterator> getPartitionIterator()
         {
-            Single<PartitionIterator> obs = executor.handler.get().onErrorResumeNext(e -> {
-                if (e instanceof DigestMismatchException)
-                    return retryOnDigestMismatch();
+            return doInitialQueries()
+                   .andThen(maybeTryAdditionalReplicas())
+                   .andThen(executor.handler.get()
+                            .onErrorResumeNext(e ->
+                                               {
+                                                   if (e instanceof DigestMismatchException)
+                                                       return retryOnDigestMismatch();
 
-                return Single.error(e);
-            });
-
-            doInitialQueries();
-
-            maybeTryAdditionalReplicas();
-
-            return obs;
+                                                   return Single.error(e);
+                                               }));
         }
 
         Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
@@ -1960,9 +1960,9 @@ public class StorageProxy implements StorageProxyMBean
                 command.monitor(constructionTime, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout(), false);
 
                 ReadResponse response;
-                try (ReadExecutionController executionController = command.executionController())
+                try (ReadExecutionController executionController = command.executionController();
+                     UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet())
                 {
-                    UnfilteredPartitionIterator iterator = command.executeLocally(executionController);
                     response = command.createResponse(iterator);
                 }
 
@@ -2142,7 +2142,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class SingleRangeResponse extends AbstractIterator<RowIterator> implements PartitionIterator
+    private static class SingleRangeResponse extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
     {
         private final ReadCallback handler;
         private PartitionIterator result;
@@ -2160,7 +2160,7 @@ public class StorageProxy implements StorageProxyMBean
             result = handler.get().blockingGet();
         }
 
-        protected RowIterator computeNext()
+        protected Single<RowIterator> computeNext()
         {
             waitForResponse();
             return result.hasNext() ? result.next() : endOfData();
@@ -2173,7 +2173,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
+    private static class RangeCommandIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
     {
         private final Iterator<RangeForQuery> ranges;
         private final int totalRangeCount;
@@ -2212,7 +2212,7 @@ public class StorageProxy implements StorageProxyMBean
             this.forContinuousPaging = forContinuousPaging;
         }
 
-        public RowIterator computeNext()
+        public Single<RowIterator> computeNext()
         {
             try
             {
@@ -2445,12 +2445,12 @@ public class StorageProxy implements StorageProxyMBean
             command.monitorLocal(ApproximateTime.currentTimeMillis());
 
             // Same reasoning as in readLocalContinuous, see there for details.
-            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(controller));
+            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(controller).blockingGet());
             return Single.just(new PartitionIterator()
             {
-                public Observable<RowIterator> asObservable()
+                public Flowable<RowIterator> asObservable()
                 {
-                    return iter.asObservable().doFinally(() -> close());
+                    return Flowable.using(() -> iter, i -> i.asObservable(), i -> close());
                 }
 
                 public boolean hasNext()
@@ -2458,7 +2458,7 @@ public class StorageProxy implements StorageProxyMBean
                     return iter.hasNext();
                 }
 
-                public RowIterator next()
+                public Single<RowIterator> next()
                 {
                     return iter.next();
                 }

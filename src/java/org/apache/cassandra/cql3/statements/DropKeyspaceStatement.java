@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import io.reactivex.Single;
+import io.reactivex.Maybe;
 
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.Validation;
@@ -57,15 +57,16 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
         return keyspace;
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
         return MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace()))
-                .onErrorResumeNext(exc -> {
-                    if (exc instanceof ConfigurationException && ifExists)
-                        return Single.just(Event.SchemaChange.NONE);
-                    else
-                        return Single.error(exc);
-                });
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof ConfigurationException && ifExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 }

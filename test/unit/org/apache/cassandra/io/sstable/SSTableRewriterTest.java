@@ -95,7 +95,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             writer.switchWriter(getWriter(cfs, sstables.iterator().next().descriptor.directory, txn));
             while(ci.hasNext())
             {
-                writer.append(ci.next());
+                writer.append(ci.next().blockingGet());
             }
             writer.finish();
         }
@@ -127,7 +127,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             writer.switchWriter(getWriter(cfs, sstables.iterator().next().descriptor.directory, txn));
             while (ci.hasNext())
             {
-                writer.append(ci.next());
+                writer.append(ci.next().blockingGet());
             }
             writer.finish();
         }
@@ -160,7 +160,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             writer.switchWriter(getWriter(cfs, sstables.iterator().next().descriptor.directory, txn));
             while (ci.hasNext())
             {
-                UnfilteredRowIterator row = ci.next();
+                UnfilteredRowIterator row = ci.next().blockingGet();
                 writer.append(row);
                 if (!checked && writer.currentWriter().getFilePointer() > 1500000)
                 {
@@ -218,7 +218,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
 
             while(ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (rewriter.currentWriter().getOnDiskFilePointer() > 25000000)
                 {
                     rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
@@ -273,7 +273,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
 
             while(ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (rewriter.currentWriter().getOnDiskFilePointer() > 25000000)
                 {
                     rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
@@ -310,7 +310,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                     int files = 1;
                     while (ci.hasNext())
                     {
-                        rewriter.append(ci.next());
+                        rewriter.append(ci.next().blockingGet());
                         if (rewriter.currentWriter().getFilePointer() > 25000000)
                         {
                         rewriter.switchWriter(getWriter(cfs, sstable.descriptor.directory, txn));
@@ -341,7 +341,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                     int files = 1;
                     while (ci.hasNext())
                     {
-                        rewriter.append(ci.next());
+                        rewriter.append(ci.next().blockingGet());
                         if (rewriter.currentWriter().getFilePointer() > 25000000)
                         {
                         rewriter.switchWriter(getWriter(cfs, sstable.descriptor.directory, txn));
@@ -377,7 +377,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
                     int files = 1;
                     while (ci.hasNext())
                     {
-                        rewriter.append(ci.next());
+                        rewriter.append(ci.next().blockingGet());
                         if (files == 1 && rewriter.currentWriter().getFilePointer() > 10000000)
                         {
                         rewriter.switchWriter(getWriter(cfs, sstable.descriptor.directory, txn));
@@ -455,7 +455,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
             while(ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (rewriter.currentWriter().getFilePointer() > 2500000)
                 {
                     rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
@@ -501,7 +501,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
             while(ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (rewriter.currentWriter().getOnDiskFilePointer() > 25000000)
                 {
                     rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
@@ -541,7 +541,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
             while(ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (rewriter.currentWriter().getOnDiskFilePointer() > 2500000)
                 {
                     assertEquals(files, cfs.getLiveSSTables().size()); // all files are now opened early
@@ -628,7 +628,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
             while (ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (rewriter.currentWriter().getOnDiskFilePointer() > 25000000)
                 {
                     rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
@@ -718,7 +718,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
             while (ci.hasNext())
             {
-                rewriter.append(ci.next());
+                rewriter.append(ci.next().blockingGet());
                 if (keyCount % 10 == 0)
                 {
                     rewriter.switchWriter(getWriter(cfs, s.descriptor.directory, txn));
@@ -756,7 +756,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             writer.switchWriter(getWriter(cfs, sstables.iterator().next().descriptor.directory, txn));
             while (ci.hasNext())
             {
-                writer.append(ci.next());
+                writer.append(ci.next().blockingGet());
                 if (!checked && writer.currentWriter().getFilePointer() > 15000000)
                 {
                     checked = true;
@@ -862,9 +862,9 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
             while (ci.hasNext())
             {
                 if (writer.currentWriter().getFilePointer() < 15000000)
-                    writer.append(ci.next());
+                    writer.append(ci.next().blockingGet());
                 else
-                    writer2.append(ci.next());
+                    writer2.append(ci.next().blockingGet());
             }
             for (int i = 0; i < 5000; i++)
                 assertFalse(Util.getOnlyPartition(Util.cmd(cfs, ByteBufferUtil.bytes(i)).build()).isEmpty());

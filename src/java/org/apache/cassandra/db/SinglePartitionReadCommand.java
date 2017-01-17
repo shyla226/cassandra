@@ -25,7 +25,8 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
-import io.reactivex.Single;
+import io.reactivex.*;
+
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -79,6 +80,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.SearchIterator;
+import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 /**
@@ -380,12 +382,12 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
-    protected UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    protected Single<UnfilteredPartitionIterator> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        UnfilteredRowIterator partition = cfs.isRowCacheEnabled()
+        Single<UnfilteredRowIterator> partition = cfs.isRowCacheEnabled()
                                         ? getThroughCache(cfs, executionController)
                                         : queryMemtableAndDisk(cfs, executionController);
-        return new SingletonUnfilteredPartitionIterator(partition);
+        return partition.map(p -> new SingletonUnfilteredPartitionIterator(p));
     }
 
     /**
@@ -397,7 +399,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * If the partition is is not cached, we figure out what filter is "biggest", read
      * that from disk, then filter the result and either cache that or return it.
      */
-    private UnfilteredRowIterator getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    private Single<UnfilteredRowIterator> getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert !cfs.isIndex(); // CASSANDRA-5732
         assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
@@ -425,7 +427,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 Tracing.trace("Row cache hit");
                 UnfilteredRowIterator unfilteredRowIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
                 cfs.metric.updateSSTableIterated(0);
-                return unfilteredRowIterator;
+                return Single.just(unfilteredRowIterator);
             }
 
             cfs.metric.rowCacheHitOutOfRange.inc();
@@ -453,49 +455,60 @@ public class SinglePartitionReadCommand extends ReadCommand
         {
             RowCacheSentinel sentinel = new RowCacheSentinel();
             boolean sentinelSuccess = CacheService.instance.rowCache.putIfAbsent(key, sentinel);
-            boolean sentinelReplaced = false;
 
-            try
-            {
-                int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
-                @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
-                UnfilteredRowIterator iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).queryMemtableAndDisk(cfs, executionController);
-                try
-                {
-                    // We want to cache only rowsToCache rows
-                    CachedPartition toCache = CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(iter, nowInSec()), nowInSec());
-                    if (sentinelSuccess && !toCache.isEmpty())
-                    {
-                        Tracing.trace("Caching {} rows", toCache.rowCount());
-                        CacheService.instance.rowCache.replace(key, sentinel, toCache);
-                        // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
-                        sentinelReplaced = true;
-                    }
+            //try
+            //{
+            int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
+            @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
+            Single<UnfilteredRowIterator> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).queryMemtableAndDisk(cfs, executionController);
 
-                    // We then re-filter out what this query wants.
-                    // Note that in the case where we don't cache full partitions, it's possible that the current query is interested in more
-                    // than what we've cached, so we can't just use toCache.
-                    UnfilteredRowIterator cacheIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), toCache);
-                    if (cacheFullPartitions)
-                    {
-                        // Everything is guaranteed to be in 'toCache', we're done with 'iter'
-                        assert !iter.hasNext();
-                        iter.close();
-                        return cacheIterator;
-                    }
-                    return UnfilteredRowIterators.concat(cacheIterator, clusteringIndexFilter().filterNotIndexed(columnFilter(), iter));
-                }
-                catch (RuntimeException | Error e)
-                {
-                    iter.close();
-                    throw e;
-                }
-            }
-            finally
-            {
-                if (sentinelSuccess && !sentinelReplaced)
-                    cfs.invalidateCachedPartition(key);
-            }
+            // We want to cache only rowsToCache rows
+            Single<CachedPartition> toCache = iter.map(i -> CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(i, nowInSec()), nowInSec()));
+
+            WrappedBoolean sentinelReplaced = new WrappedBoolean(false);
+
+            return toCache.flatMap(c ->
+                                   {
+
+                                       if (sentinelSuccess && !c.isEmpty())
+                                       {
+                                           Tracing.trace("Caching {} rows", c.rowCount());
+                                           CacheService.instance.rowCache.replace(key, sentinel, c);
+                                           // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
+                                           sentinelReplaced.set(true);
+                                       }
+
+                                       // We then re-filter out what this query wants.
+                                       // Note that in the case where we don't cache full partitions, it's possible that the current query is interested in more
+                                       // than what we've cached, so we can't just use toCache.
+                                       UnfilteredRowIterator cacheIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), c);
+                                       return iter.map(i ->
+                                                       {
+                                                           try
+                                                           {
+                                                               if (cacheFullPartitions)
+                                                               {
+
+                                                                   // Everything is guaranteed to be in 'toCache', we're done with 'iter'
+                                                                   assert !i.hasNext();
+                                                                   i.close();
+                                                                   return cacheIterator;
+                                                               }
+                                                               return UnfilteredRowIterators.concat(cacheIterator, clusteringIndexFilter().filterNotIndexed(columnFilter(), i));
+                                                           }
+                                                           catch (RuntimeException | Error e)
+                                                           {
+                                                               i.close();
+                                                               throw e;
+                                                           }
+                                                       });
+                                   }).onErrorResumeNext(t ->
+                                                        {
+                                                            if (sentinelSuccess && !sentinelReplaced.get())
+                                                                cfs.invalidateCachedPartition(key);
+
+                                                            return Single.error(t);
+                                                        });
         }
 
         Tracing.trace("Fetching data but not populating cache as query does not query from the start of the partition");
@@ -517,7 +530,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * Also note that one must have created a {@code ReadExecutionController} on the queried table and we require it as
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
-    public UnfilteredRowIterator queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public Single<UnfilteredRowIterator> queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);
@@ -531,7 +544,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
-    private UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
+    private Single<UnfilteredRowIterator> queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
     {
         /*
          * We have 2 main strategies:
@@ -643,10 +656,12 @@ public class SinglePartitionReadCommand extends ReadCommand
                                nonIntersectingSSTables, view.sstables.size(), includedDueToTombstones);
 
             if (iterators.isEmpty())
-                return EmptyIterators.unfilteredRow(cfs.metadata, partitionKey(), filter.isReversed());
+                return Single.just(EmptyIterators.unfilteredRow(cfs.metadata, partitionKey(), filter.isReversed()));
 
             StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
-            return withSSTablesIterated(iterators, cfs.metric);
+            UnfilteredRowIterator result = withSSTablesIterated(iterators, cfs.metric);
+
+            return Single.just(result);
         }
         catch (RuntimeException | Error e)
         {
@@ -738,7 +753,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private UnfilteredRowIterator queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ClusteringIndexNamesFilter filter)
+    private Single<UnfilteredRowIterator> queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ClusteringIndexNamesFilter filter)
     {
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
@@ -818,7 +833,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         //cfs.metric.updateSSTableIterated(sstablesIterated);
 
         if (result == null || result.isEmpty())
-            return EmptyIterators.unfilteredRow(metadata(), partitionKey(), false);
+            return Single.just(EmptyIterators.unfilteredRow(metadata(), partitionKey(), false));
 
         DecoratedKey key = result.partitionKey();
         //cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
@@ -843,7 +858,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        return result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed());
+        return Single.just(result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()));
     }
 
     private ImmutableBTreePartition add(UnfilteredRowIterator iter, ImmutableBTreePartition result, ClusteringIndexNamesFilter filter, boolean isRepaired)
@@ -1038,12 +1053,12 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).executionController();
         }
 
-        public PartitionIterator executeInternal(ReadExecutionController controller)
+        public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
         {
-            return limits.filter(UnfilteredPartitionIterators.filter(executeLocally(controller, false), nowInSec), nowInSec);
+            return executeLocally(controller, false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
-        public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
+        public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
         {
             return executeLocally(executionController, true);
         }
@@ -1059,16 +1074,21 @@ public class SinglePartitionReadCommand extends ReadCommand
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController, boolean sort)
+        private Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController, boolean sort)
         {
-            List<Pair<DecoratedKey, UnfilteredPartitionIterator>> partitions = new ArrayList<>(commands.size());
+            List<Pair<DecoratedKey, Single<UnfilteredPartitionIterator>>> partitions = new ArrayList<>(commands.size());
             for (SinglePartitionReadCommand cmd : commands)
-                partitions.add(Pair.of(cmd.partitionKey, cmd.executeLocally(executionController)));
+                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally(executionController)));
+
+            if (commands.size() == 1)
+                return partitions.get(0).getValue();
 
             if (sort)
-                Collections.sort(partitions, (p1, p2) -> p1.getLeft().compareTo(p2.getLeft()));
+                Collections.sort(partitions, Comparator.comparing(Pair::getLeft));
 
-            return UnfilteredPartitionIterators.concat(partitions.stream().map(p -> p.getRight()).collect(Collectors.toList()));
+            return Single.concat(partitions.stream().map(p -> p.getRight()).collect(Collectors.toList()))
+                         .toList()
+                         .map(l -> UnfilteredPartitionIterators.concat(l));
         }
 
         public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

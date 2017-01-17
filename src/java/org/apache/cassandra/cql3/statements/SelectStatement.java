@@ -32,6 +32,8 @@ import java.util.SortedSet;
 
 import com.google.common.base.MoreObjects;
 
+import io.reactivex.Completable;
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.slf4j.Logger;
@@ -494,8 +496,8 @@ public class SelectStatement implements CQLStatement
         {
             if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
             {
-                PartitionIterator data = query.executeInternal(executionController);
-                return processResults(Single.just(data), options, nowInSec, userLimit);
+                Single<PartitionIterator> data = query.executeInternal(executionController);
+                return processResults(data, options, nowInSec, userLimit);
             }
             else
             {
@@ -635,7 +637,7 @@ public class SelectStatement implements CQLStatement
 
             page.map(pi ->
                      {
-                         Observable<RowIterator> it = pi.asObservable();
+                         Flowable<RowIterator> it = pi.asObservable();
 
                          it.takeWhile((p) -> !builder.isCompleted())
                            .map(p -> {
@@ -1041,17 +1043,16 @@ public class SelectStatement implements CQLStatement
     {
         ResultSet.Builder result = ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection);
 
-        return partitions.map(partitionIterator -> {
-            // TODO more efficient way to do this?
-            partitionIterator.forEachRemaining(rowIterator -> processPartition(rowIterator, options, result, nowInSec));
-            partitionIterator.close();
-            return 1;
-        }).map(v -> {
-            ResultSet cqlRows = result.build();
-            orderResults(cqlRows);
-            cqlRows.trim(userLimit);
-            return cqlRows;
-        });
+        return Single.concatArray(partitions).concatMap(p -> p.asObservable())
+                     .map(r -> processPartition(r, options, result, nowInSec))
+                     .last(Completable.complete())
+                     .map(v ->
+                          {
+                              ResultSet cqlRows = result.build();
+                              orderResults(cqlRows);
+                              cqlRows.trim(userLimit);
+                              return cqlRows;
+                          });
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)
@@ -1080,11 +1081,13 @@ public class SelectStatement implements CQLStatement
     }
 
     // Used by ModificationStatement for CAS operations
-    void processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
+    Completable processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
     throws InvalidRequestException
     {
         try
         {
+            if (partition == null)
+                return Completable.complete();
 
             ProtocolVersion protocolVersion = options.getProtocolVersion();
 
@@ -1112,10 +1115,11 @@ public class SelectStatement implements CQLStatement
                         }
                     }
                 }
-                return;
+                return Completable.complete();
             }
+
             if (result.isCompleted())
-                return;
+                return Completable.complete();
 
             while (partition.hasNext())
             {
@@ -1147,8 +1151,11 @@ public class SelectStatement implements CQLStatement
         }
         finally
         {
-            partition.close();
+            if (partition != null)
+                partition.close();
         }
+
+        return Completable.complete();
     }
 
     private static void addValue(ResultBuilder result, ColumnDefinition def, Row row, int nowInSec, ProtocolVersion protocolVersion)

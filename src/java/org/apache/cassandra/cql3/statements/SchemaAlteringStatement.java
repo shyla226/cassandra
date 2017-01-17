@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.cql3.CFName;
@@ -85,53 +86,48 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
      *
      * @throws RequestValidationException
      */
-    public abstract Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException;
+    public abstract Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException;
 
     public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
         // If an IF [NOT] EXISTS clause was used, this may not result in an actual schema change.  To avoid doing
         // extra work in the drivers to handle schema changes, we return an empty message in this case. (CASSANDRA-7600)
-        Single<Event.SchemaChange> ce = announceMigration(false);
-        if (ce == null)
-            return Single.just(new ResultMessage.Void());
+        Maybe<Event.SchemaChange> ce = announceMigration(false);
 
         // when a schema alteration results in a new db object being created, we grant permissions on the new
         // object to the user performing the request if:
         // * the user is not anonymous
         // * the configured IAuthorizer supports granting of permissions (not all do, AllowAllAuthorizer doesn't and
         //   custom external implementations may not)
-        return ce.map(event -> {
-            if (event == Event.SchemaChange.NONE)
-                return new ResultMessage.Void();
-
-            AuthenticatedUser user = state.getClientState().getUser();
-            if (user != null && !user.isAnonymous() && event.change == Event.SchemaChange.Change.CREATED)
-            {
-                try
-                {
-                    grantPermissionsToCreator(state);
-                }
-                catch (UnsupportedOperationException e)
-                {
-                    // not a problem, grant is an optional method on IAuthorizer
-                }
-            }
-            return new ResultMessage.SchemaChange(event);
-        });
+        return ce.map(event ->
+                      {
+                          AuthenticatedUser user = state.getClientState().getUser();
+                          if (user != null && !user.isAnonymous() && event.change == Event.SchemaChange.Change.CREATED)
+                          {
+                              try
+                              {
+                                  grantPermissionsToCreator(state);
+                              }
+                              catch (UnsupportedOperationException e)
+                              {
+                                  // not a problem, grant is an optional method on IAuthorizer
+                              }
+                          }
+                          return new ResultMessage.SchemaChange(event);
+                      }).cast(ResultMessage.class)
+                 .toSingle(new ResultMessage.Void());
     }
 
     public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
-        return announceMigration(true).map(schemaChangeEvent ->
-            schemaChangeEvent == null
-                   ? new ResultMessage.Void()
-                   : new ResultMessage.SchemaChange(schemaChangeEvent)
-        );
+        return announceMigration(true).map(ResultMessage.SchemaChange::new)
+                                      .cast(ResultMessage.class)
+                                      .toSingle(new ResultMessage.Void());
     }
 
-    protected Single<Event.SchemaChange> error(String msg)
+    protected Maybe<Event.SchemaChange> error(String msg)
     {
-        return Single.error(new InvalidRequestException(msg));
+        return Maybe.error(new InvalidRequestException(msg));
     }
 
 }

@@ -4480,7 +4480,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // thus make several short ones "instant" if we wait for them later.try
             try
             {
-                Single.merge(flushes).blockingLast(CommitLogPosition.NONE);
+                Single.concat(flushes).blockingLast(CommitLogPosition.NONE);
             }
             catch (Throwable t)
             {

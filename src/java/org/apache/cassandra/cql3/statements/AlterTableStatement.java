@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
@@ -81,7 +82,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         CFMetaData meta = Validation.validateColumnFamily(keyspace(), columnFamily());
         if (meta.isView())
@@ -337,7 +338,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
         }
 
         return Completable.merge(migrations)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())));
     }
 
     private static void validateAlter(CFMetaData cfm, ColumnDefinition def, AbstractType<?> validatorType)

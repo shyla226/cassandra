@@ -50,6 +50,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -170,7 +171,10 @@ public class NettyRxScheduler extends Scheduler
         if (isStartup)
             return ImmediateThinScheduler.INSTANCE;
 
-        // TODO need to discuss what to do about system tables
+        Integer callerCoreId = null;
+        if (useImmediateForLocal)
+            callerCoreId = getCoreId();
+
         // Convert OP partitions to top level partitioner for secondary indexes; always route
         // system table mutations through core 0
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
@@ -178,6 +182,7 @@ public class NettyRxScheduler extends Scheduler
             if (SchemaConstants.isSystemKeyspace(keyspaceName)
                         || SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName))
                 return getForCore(0);
+
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
         }
 
@@ -189,11 +194,11 @@ public class NettyRxScheduler extends Scheduler
             PartitionPosition next = keyspaceRanges.get(i);
             if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
             {
+                //logger.info("Read moving to {} from {}", i-1, getCoreId());
+
                 if (useImmediateForLocal)
-                {
-                    Integer callerCoreId = getCoreId();
                     return callerCoreId != null && callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
-                }
+
 
                 return getForCore(i - 1);
             }
@@ -342,6 +347,7 @@ public class NettyRxScheduler extends Scheduler
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
+        //RxSubscriptionDebugger.enable();
     }
 
 }

@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
@@ -60,7 +61,7 @@ public class DropTableStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
         if (ksm == null)
@@ -92,12 +93,13 @@ public class DropTableStatement extends SchemaAlteringStatement
         }
 
         return MigrationManager.announceColumnFamilyDrop(keyspace(), columnFamily(), isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
-                .onErrorResumeNext(exc -> {
-                    if (exc instanceof ConfigurationException && ifExists)
-                        return Single.just(Event.SchemaChange.NONE);
-                    else
-                        return Single.error(exc);
-                });
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof ConfigurationException && ifExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 }

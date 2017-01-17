@@ -29,7 +29,10 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -48,6 +51,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.Wrapped;
+import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 /**
@@ -151,8 +156,8 @@ public class StreamReceiveTask extends StreamTask
 
         public void run()
         {
-            boolean hasViews = false;
-            boolean hasCDC = false;
+            WrappedBoolean hasViews = new WrappedBoolean(false);
+            WrappedBoolean hasCDC = new WrappedBoolean(false);
             ColumnFamilyStore cfs = null;
             try
             {
@@ -166,8 +171,9 @@ public class StreamReceiveTask extends StreamTask
                     return;
                 }
                 cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
-                hasViews = !Iterables.isEmpty(View.findAll(kscf.left, kscf.right));
-                hasCDC = cfs.metadata.params.cdc;
+                hasViews.set(!Iterables.isEmpty(View.findAll(kscf.left, kscf.right)));
+                hasCDC.set(cfs.metadata.params.cdc);
+                CFMetaData metadata = cfs.metadata;
 
                 Collection<SSTableReader> readers = task.sstables;
 
@@ -182,8 +188,9 @@ public class StreamReceiveTask extends StreamTask
                      * For CDC-enabled tables, we want to ensure that the mutations are run through the CommitLog so they
                      * can be archived by the CDC process on discard.
                      */
-                    if (hasViews || hasCDC)
+                    if (hasViews.get() || hasCDC.get())
                     {
+                        List<Completable> writes = new ArrayList<>();
                         for (SSTableReader reader : readers)
                         {
                             Keyspace ks = Keyspace.open(reader.getKeyspaceName());
@@ -191,20 +198,24 @@ public class StreamReceiveTask extends StreamTask
                             {
                                 while (scanner.hasNext())
                                 {
-                                    try (UnfilteredRowIterator rowIterator = scanner.next())
+                                    Completable mutation = scanner.next().flatMapCompletable(i ->
                                     {
-                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata)));
+                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(i, ColumnFilter.all(metadata)));
 
                                         // MV *can* be applied unsafe if there's no CDC on the CFS as we flush below
                                         // before transaction is done.
                                         //
                                         // If the CFS has CDC, however, these updates need to be written to the CommitLog
                                         // so they get archived into the cdc_raw folder
-                                        ks.apply(m, hasCDC, true, false);
-                                    }
+                                        return ks.apply(m, hasCDC.get(), true, false);
+                                    });
+
+                                    writes.add(mutation);
                                 }
                             }
                         }
+
+                        Completable.merge(writes).blockingGet();
                     }
                     else
                     {
@@ -252,7 +263,7 @@ public class StreamReceiveTask extends StreamTask
             {
                 // We don't keep the streamed sstables since we've applied them manually so we abort the txn and delete
                 // the streamed sstables.
-                if (hasViews || hasCDC)
+                if (hasViews.get() || hasCDC.get())
                 {
                     if (cfs != null)
                         cfs.forceBlockingFlush();

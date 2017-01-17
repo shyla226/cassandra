@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.reactivex.Single;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 
@@ -249,11 +250,11 @@ public class BigTableScanner implements ISSTableScanner
         return iterator.hasNext();
     }
 
-    public UnfilteredRowIterator next()
+    public Single<UnfilteredRowIterator> next()
     {
         if (iterator == null)
             iterator = createIterator();
-        return iterator.next();
+        return Single.just(iterator.next());
     }
 
     public void remove()
@@ -430,12 +431,17 @@ public class BigTableScanner implements ISSTableScanner
             return sstable.metadata;
         }
 
+        public void close()
+        {
+
+        }
+
         public boolean hasNext()
         {
             return false;
         }
 
-        public UnfilteredRowIterator next()
+        public Single<UnfilteredRowIterator> next()
         {
             return null;
         }

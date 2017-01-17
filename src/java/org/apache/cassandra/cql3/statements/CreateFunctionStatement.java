@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -141,14 +142,14 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
             throw new InvalidRequestException(String.format("Cannot add function '%s' to non existing keyspace '%s'.", functionName.name, functionName.keyspace));
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Function old = Schema.instance.findFunction(functionName, argTypes).orElse(null);
         boolean replaced = old != null;
         if (replaced)
         {
             if (ifNotExists)
-                return Single.just(Event.SchemaChange.NONE);
+                return Maybe.empty();
             if (!orReplace)
                 return error(String.format("Function %s already exists", old));
             if (!(old instanceof ScalarFunction))
@@ -165,10 +166,10 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
         UDFunction udFunction = UDFunction.create(functionName, argNames, argTypes, returnType, calledOnNullInput, language, body);
 
         return MigrationManager.announceNewFunction(udFunction, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(
+                .andThen(Maybe.just(new Event.SchemaChange(
                         replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
                         Event.SchemaChange.Target.FUNCTION,
-                        udFunction.name().keyspace, udFunction.name().name, AbstractType.asCQLTypeStringList(udFunction.argTypes())));
+                        udFunction.name().keyspace, udFunction.name().name, AbstractType.asCQLTypeStringList(udFunction.argTypes()))));
     }
 
     private AbstractType<?> prepareType(String typeName, CQL3Type.Raw rawType)

@@ -23,6 +23,10 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
+
+import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
+import io.reactivex.Observable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -79,101 +83,111 @@ public abstract class AbstractReadExecutor
         command.setDigestVersion(digestVersion);
     }
 
-    protected void makeDataRequests(Iterable<InetAddress> endpoints)
+    protected Completable makeDataRequests(Iterable<InetAddress> endpoints)
     {
-        makeRequests(command, endpoints);
-
+        return makeRequests(command, endpoints);
     }
 
-    protected void makeDigestRequests(Iterable<InetAddress> endpoints)
+    protected Completable makeDigestRequests(Iterable<InetAddress> endpoints)
     {
-        makeRequests(command.copy().setIsDigestQuery(true), endpoints);
+        return makeRequests(command.copy().setIsDigestQuery(true), endpoints);
     }
 
-    private void makeRequests(ReadCommand readCommand, Iterable<InetAddress> endpoints)
+    private Completable makeRequests(ReadCommand readCommand, Iterable<InetAddress> endpoints)
     {
-        boolean hasLocalEndpoint = false;
 
-        for (InetAddress endpoint : endpoints)
-        {
-            if (StorageProxy.canDoLocalRequest(endpoint))
+            boolean hasLocalEndpoint = false;
+
+            for (InetAddress endpoint : endpoints)
             {
-                hasLocalEndpoint = true;
-                continue;
+                if (StorageProxy.canDoLocalRequest(endpoint))
+                {
+                    hasLocalEndpoint = true;
+                    continue;
+                }
+
+                if (traceState != null)
+                    traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
+                logger.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
+                MessageOut<ReadCommand> message = readCommand.createMessage();
+                MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
             }
 
-            if (traceState != null)
-                traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            logger.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            MessageOut<ReadCommand> message = readCommand.createMessage();
-            MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
-        }
-
-        // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
-        if (hasLocalEndpoint)
-        {
-            logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
-
-            if (command instanceof SinglePartitionReadCommand)
+            // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
+            if (hasLocalEndpoint)
             {
-                SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
+                //logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
 
-                Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().ksName, singleCommand.partitionKey(), false);
-                scheduler.scheduleDirect(this::executeLocalRead);
+                if (command instanceof SinglePartitionReadCommand)
+                {
+                    SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
+                    Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().ksName, singleCommand.partitionKey(), false);
+
+                    return executeLocalRead().subscribeOn(scheduler);
+                }
+                else
+                {
+                    return executeLocalRead().subscribeOn(NettyRxScheduler.instance());
+                }
             }
-            else
-            {
-                NettyRxScheduler.instance().scheduleDirect(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
-            }
-        }
+
+            return Completable.complete();
     }
 
-    private void executeLocalRead()
+    private Completable executeLocalRead()
     {
-        final long start = System.nanoTime();
-        final long constructionTime = System.currentTimeMillis();
-        MessagingService.Verb verb = MessagingService.Verb.READ;
-        try
+        return Completable.defer(
+        () ->
         {
-            ReadResponse response;
-            try (ReadExecutionController executionController = command.executionController())
-            {
-                UnfilteredPartitionIterator iterator = command.executeLocally(executionController);
-                response = command.createResponse(iterator);
-            }
+            final long start = System.nanoTime();
+            final long constructionTime = System.currentTimeMillis();
+            MessagingService.Verb verb = MessagingService.Verb.READ;
 
-            if (command.complete())
-            {
-                handler.response(response);
-            }
-            else
-            {
-                MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-            }
+            ReadExecutionController executionController = command.executionController();
+            return command.executeLocally(executionController)
+                          .map(iterator -> command.createResponse(iterator))
+                          .flatMapCompletable(response ->
+                                              {
+                                                  executionController.close();
 
-            MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
-        }
-        catch (Throwable t)
-        {
-            if (t instanceof TombstoneOverwhelmingException)
-            {
-                handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
-                logger.error(t.getMessage());
-            }
-            else
-            {
-                handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                throw t;
-            }
-        }
+                                                  if (command.complete())
+                                                  {
+                                                      handler.response(response);
+                                                  }
+                                                  else
+                                                  {
+                                                      MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
+                                                      handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                                                  }
+
+                                                  MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+
+                                                  return Completable.complete();
+                                              })
+                          .onErrorResumeNext(t ->
+                                             {
+                                                 executionController.close();
+
+                                                 if (t instanceof TombstoneOverwhelmingException)
+                                                 {
+                                                     handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
+                                                     logger.error(t.getMessage());
+                                                     return Completable.complete();
+                                                 }
+                                                 else
+                                                 {
+                                                     handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                                                     return Completable.error(t);
+                                                 }
+                                             });
+        });
     }
 
     /**
      * Perform additional requests if it looks like the original will time out.  May block while it waits
      * to see if the original requests are answered first.
      */
-    public abstract void maybeTryAdditionalReplicas();
+    public abstract Completable maybeTryAdditionalReplicas();
 
     /**
      * Get the replicas involved in the [finished] request.
@@ -185,7 +199,7 @@ public abstract class AbstractReadExecutor
     /**
      * send the initial set of requests
      */
-    public abstract void executeAsync();
+    public abstract Completable executeAsync();
 
     /**
      * wait for an answer.  Blocks until success or timeout, so it is caller's
@@ -266,16 +280,19 @@ public abstract class AbstractReadExecutor
             super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
-        public void executeAsync()
+        public Completable executeAsync()
         {
-            makeDataRequests(targetReplicas.subList(0, 1));
+            Completable result = makeDataRequests(targetReplicas.subList(0, 1));
             if (targetReplicas.size() > 1)
-                makeDigestRequests(targetReplicas.subList(1, targetReplicas.size()));
+                result = result.concatWith(makeDigestRequests(targetReplicas.subList(1, targetReplicas.size())));
+
+            return result;
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Completable maybeTryAdditionalReplicas()
         {
             // no-op
+            return Completable.complete();
         }
 
         public Collection<InetAddress> getContactedReplicas()
@@ -300,57 +317,65 @@ public abstract class AbstractReadExecutor
             this.cfs = cfs;
         }
 
-        public void executeAsync()
+        public Completable executeAsync()
         {
             // if CL + RR result in covering all replicas, getReadExecutor forces AlwaysSpeculating.  So we know
             // that the last replica in our list is "extra."
             List<InetAddress> initialReplicas = targetReplicas.subList(0, targetReplicas.size() - 1);
 
+            Completable result;
             if (handler.blockfor < initialReplicas.size())
             {
                 // We're hitting additional targets for read repair.  Since our "extra" replica is the least-
                 // preferred by the snitch, we do an extra data read to start with against a replica more
                 // likely to reply; better to let RR fail than the entire query.
-                makeDataRequests(initialReplicas.subList(0, 2));
+                result = makeDataRequests(initialReplicas.subList(0, 2));
                 if (initialReplicas.size() > 2)
-                    makeDigestRequests(initialReplicas.subList(2, initialReplicas.size()));
+                    result = result.concatWith(makeDigestRequests(initialReplicas.subList(2, initialReplicas.size())));
             }
             else
             {
                 // not doing read repair; all replies are important, so it doesn't matter which nodes we
                 // perform data reads against vs digest.
-                makeDataRequests(initialReplicas.subList(0, 1));
+                result = makeDataRequests(initialReplicas.subList(0, 1));
                 if (initialReplicas.size() > 1)
-                    makeDigestRequests(initialReplicas.subList(1, initialReplicas.size()));
+                    result = result.concatWith(makeDigestRequests(initialReplicas.subList(1, initialReplicas.size())));
             }
+
+            return result;
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Completable maybeTryAdditionalReplicas()
         {
-            // no latency information, or we're overloaded
-            if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
-                return;
+            return Completable.defer(
+            () ->
+            {
+                // no latency information, or we're overloaded
+                if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
+                    return CompletableObserver::onComplete;
 
-            NettyRxScheduler.instance().scheduleDirect(() -> {
+                NettyRxScheduler.instance().scheduleDirect(() ->
+                                                           {
+                                                               if (handler.hasValue())
+                                                                   return;
 
-                if (handler.hasValue())
-                    return;
+                                                               // Could be waiting on the data, or on enough digests.
+                                                               ReadCommand retryCommand = command;
+                                                               if (handler.resolver.isDataPresent())
+                                                                   retryCommand = command.copy().setIsDigestQuery(true);
 
-                // Could be waiting on the data, or on enough digests.
-                ReadCommand retryCommand = command;
-                if (handler.resolver.isDataPresent())
-                    retryCommand = command.copy().setIsDigestQuery(true);
+                                                               InetAddress extraReplica = Iterables.getLast(targetReplicas);
+                                                               if (traceState != null)
+                                                                   traceState.trace("speculating read retry on {}", extraReplica);
+                                                               logger.trace("speculating read retry on {}", extraReplica);
+                                                               MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), extraReplica, handler);
+                                                               speculated = true;
 
-                InetAddress extraReplica = Iterables.getLast(targetReplicas);
-                if (traceState != null)
-                    traceState.trace("speculating read retry on {}", extraReplica);
-                logger.trace("speculating read retry on {}", extraReplica);
-                MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), extraReplica, handler);
-                speculated = true;
+                                                               cfs.metric.speculativeRetries.inc();
+                                                           }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 
-                cfs.metric.speculativeRetries.inc();
-
-            }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                return CompletableObserver::onComplete;
+            });
         }
 
         public Collection<InetAddress> getContactedReplicas()
@@ -376,9 +401,10 @@ public abstract class AbstractReadExecutor
             this.cfs = cfs;
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Completable maybeTryAdditionalReplicas()
         {
             // no-op
+            return Completable.complete();
         }
 
         public Collection<InetAddress> getContactedReplicas()
@@ -387,12 +413,13 @@ public abstract class AbstractReadExecutor
         }
 
         @Override
-        public void executeAsync()
+        public Completable executeAsync()
         {
-            makeDataRequests(targetReplicas.subList(0, targetReplicas.size() > 1 ? 2 : 1));
+            Completable result = makeDataRequests(targetReplicas.subList(0, targetReplicas.size() > 1 ? 2 : 1));
             if (targetReplicas.size() > 2)
-                makeDigestRequests(targetReplicas.subList(2, targetReplicas.size()));
-            cfs.metric.speculativeRetries.inc();
+                result = result.concatWith(makeDigestRequests(targetReplicas.subList(2, targetReplicas.size())));
+
+            return result.concatWith(Completable.fromAction(() -> cfs.metric.speculativeRetries.inc()));
         }
     }
 }

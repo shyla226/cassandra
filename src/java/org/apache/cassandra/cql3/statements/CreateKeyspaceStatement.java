@@ -19,9 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.regex.Pattern;
 
-import io.reactivex.Completable;
-import io.reactivex.Observable;
-import io.reactivex.Single;
+import io.reactivex.Maybe;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.Validation;
@@ -100,17 +99,17 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
             throw new ConfigurationException("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
         return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace()))
-                .onErrorResumeNext(exc -> {
-                    if (exc instanceof AlreadyExistsException && ifNotExists)
-                        return Single.just(Event.SchemaChange.NONE);
-                    else
-                        return Single.error(exc);
-                });
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace())))
+                               .onErrorResumeNext(e -> {
+                                   if (e instanceof AlreadyExistsException && ifNotExists)
+                                       return Maybe.empty();
+
+                                   return Maybe.error(e);
+                               });
     }
 
     protected void grantPermissionsToCreator(QueryState state)

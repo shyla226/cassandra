@@ -117,7 +117,7 @@ public abstract class ReadResponse
         {
             try (DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version);
+                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version).blockingGet();
                 return buffer.buffer();
             }
             catch (IOException e)

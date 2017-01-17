@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.List;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -210,14 +211,14 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             throw new InvalidRequestException(String.format("Cannot add aggregate '%s' to non existing keyspace '%s'.", functionName.name, functionName.keyspace));
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Function old = Schema.instance.findFunction(functionName, argTypes).orElse(null);
         boolean replaced = old != null;
         if (replaced)
         {
             if (ifNotExists)
-                return Single.just(Event.SchemaChange.NONE);
+                return Maybe.empty();
             if (!orReplace)
                 return error(String.format("Function %s already exists", old));
             if (!(old instanceof AggregateFunction))
@@ -238,10 +239,10 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
         UDAggregate udAggregate = new UDAggregate(functionName, argTypes, returnType, stateFunction, finalFunction, initcond);
 
         return MigrationManager.announceNewAggregate(udAggregate, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(
+                .andThen(Maybe.just( new Event.SchemaChange(
                         replaced ? Event.SchemaChange.Change.UPDATED : Event.SchemaChange.Change.CREATED,
                         Event.SchemaChange.Target.AGGREGATE,
-                        udAggregate.name().keyspace, udAggregate.name().name, AbstractType.asCQLTypeStringList(udAggregate.argTypes())));
+                        udAggregate.name().keyspace, udAggregate.name().name, AbstractType.asCQLTypeStringList(udAggregate.argTypes()))));
     }
 
     private static String stateFuncSig(FunctionName stateFuncName, CQL3Type.Raw stateTypeRaw, List<CQL3Type.Raw> argRawTypes)

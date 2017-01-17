@@ -115,7 +115,7 @@ public final class CounterCacheKey extends CacheKey
         ClusteringIndexFilter filter = new ClusteringIndexNamesFilter(FBUtilities.singleton(clustering, metadata.comparator), false);
         SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(metadata, nowInSec, key, builder.build(), filter);
         try (ReadExecutionController controller = cmd.executionController();
-             RowIterator iter = UnfilteredRowIterators.filter(cmd.queryMemtableAndDisk(cfs, controller), nowInSec))
+             RowIterator iter = UnfilteredRowIterators.filter(cmd.queryMemtableAndDisk(cfs, controller).blockingGet(), nowInSec))
         {
             ByteBuffer value = null;
             if (column.isStatic())

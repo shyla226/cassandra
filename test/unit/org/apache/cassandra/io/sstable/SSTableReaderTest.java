@@ -599,7 +599,7 @@ public class SSTableReaderTest
         assertNotNull(searcher);
         try (ReadExecutionController executionController = rc.executionController())
         {
-            assertEquals(1, Util.size(UnfilteredPartitionIterators.filter(searcher.search(executionController), rc.nowInSec())));
+            assertEquals(1, Util.size(UnfilteredPartitionIterators.filter(searcher.search(executionController).blockingGet(), rc.nowInSec())));
         }
     }
 

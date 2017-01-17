@@ -27,6 +27,7 @@ import com.google.common.collect.*;
 
 import org.junit.Test;
 
+import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CFMetaData;
@@ -265,7 +266,7 @@ public class CompactionIteratorTest
         {
             List<Unfiltered> result = new ArrayList<>();
             assertTrue(iter.hasNext());
-            try (UnfilteredRowIterator partition = iter.next())
+            try (UnfilteredRowIterator partition = iter.next().blockingGet())
             {
                 Iterators.addAll(result, partition);
             }
@@ -351,9 +352,9 @@ public class CompactionIteratorTest
         }
 
         @Override
-        public UnfilteredRowIterator next()
+        public Single<UnfilteredRowIterator> next()
         {
-            return iter.next();
+            return Single.just(iter.next());
         }
 
         @Override
@@ -384,6 +385,11 @@ public class CompactionIteratorTest
         public String getBackingFiles()
         {
             return null;
+        }
+
+        public void close()
+        {
+
         }
     }
 }

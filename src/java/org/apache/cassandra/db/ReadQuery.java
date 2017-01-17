@@ -55,14 +55,14 @@ public interface ReadQuery
             return Single.just(EmptyIterators.partition());
         }
 
-        public PartitionIterator executeInternal(ReadExecutionController controller)
+        public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
         {
-            return EmptyIterators.partition();
+            return Single.just(EmptyIterators.partition());
         }
 
-        public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
+        public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
         {
-            return EmptyIterators.unfilteredPartition(executionController.metaData());
+            return Single.just(EmptyIterators.unfilteredPartition(executionController.metaData()));
         }
 
         public DataLimits limits()
@@ -149,7 +149,7 @@ public interface ReadQuery
      * @param controller the {@code ReadExecutionController} protecting the read.
      * @return the result of the query.
      */
-    public PartitionIterator executeInternal(ReadExecutionController controller);
+    public Single<PartitionIterator> executeInternal(ReadExecutionController controller);
 
     /**
      * Execute the query locally. This is where the reading actually happens, typically this method
@@ -162,7 +162,7 @@ public interface ReadQuery
      * @param controller the {@code ReadExecutionController} protecting the read.
      * @return the result of the read query.
      */
-    public UnfilteredPartitionIterator executeLocally(ReadExecutionController controller);
+    public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController controller);
 
     /**
      * Returns a pager for the query.

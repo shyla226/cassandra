@@ -19,6 +19,7 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.NoSuchElementException;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 
@@ -42,13 +43,13 @@ public class SingletonUnfilteredPartitionIterator implements UnfilteredPartition
         return !returned;
     }
 
-    public UnfilteredRowIterator next()
+    public Single<UnfilteredRowIterator> next()
     {
         if (returned)
             throw new NoSuchElementException();
 
         returned = true;
-        return iter;
+        return Single.just(iter);
     }
 
     public void remove()

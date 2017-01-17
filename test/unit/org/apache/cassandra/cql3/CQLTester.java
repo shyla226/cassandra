@@ -27,6 +27,8 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -313,7 +315,7 @@ public abstract class CQLTester
         aggregates = null;
 
         // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
-        ScheduledExecutors.optionalTasks.execute(new Runnable()
+        Executors.newSingleThreadExecutor().execute(new Runnable()
         {
             public void run()
             {
@@ -347,7 +349,8 @@ public abstract class CQLTester
                             latch.countDown();
                         }
                     });
-                    latch.await(2, TimeUnit.SECONDS);
+                    if (!latch.await(2, TimeUnit.SECONDS))
+                        logger.warn("TImes out waiting for shutdown");
 
                     removeAllSSTables(KEYSPACE, tablesToDrop);
                 }
@@ -735,6 +738,8 @@ public abstract class CQLTester
     {
         try
         {
+            logger.error("SCHEMA CHANGE: " + query);
+
             ClientState state = ClientState.forInternalCalls();
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);
             QueryState queryState = new QueryState(state);

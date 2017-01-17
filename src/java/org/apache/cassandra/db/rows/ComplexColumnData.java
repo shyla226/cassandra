@@ -21,9 +21,11 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.Iterator;
 import java.util.Objects;
+import java.util.stream.StreamSupport;
 
 import com.google.common.base.Function;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.DeletionPurger;
@@ -99,6 +101,12 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell>
     public Iterator<Cell> iterator()
     {
         return BTree.iterator(cells);
+    }
+
+    public Iterator<Single<Cell>> rxiterator()
+    {
+        return StreamSupport.stream(BTree.<Cell>iterable(cells).spliterator(), false)
+                            .map(c -> Single.just(c)).iterator();
     }
 
     public Iterator<Cell> reverseIterator()

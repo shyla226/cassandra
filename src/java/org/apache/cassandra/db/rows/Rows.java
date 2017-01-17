@@ -22,6 +22,7 @@ import java.util.*;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
@@ -149,21 +150,21 @@ public abstract class Rows
                 diffListener.onDeletion(i, clustering, mergedDeletion, inputDeletion);
         }
 
-        List<Iterator<ColumnData>> inputIterators = new ArrayList<>(1 + inputs.length);
-        inputIterators.add(merged.iterator());
+        List<Iterator<Single<ColumnData>>> inputIterators = new ArrayList<>(1 + inputs.length);
+        inputIterators.add(merged.rxiterator());
         for (Row row : inputs)
-            inputIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
+            inputIterators.add(row == null ? Collections.emptyIterator() : row.rxiterator());
 
         Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new MergeIterator.Reducer<ColumnData, Object>()
         {
             ColumnData mergedData;
             ColumnData[] inputDatas = new ColumnData[inputs.length];
-            public void reduce(int idx, ColumnData current)
+            public void reduce(int idx, Single<ColumnData> current)
             {
                 if (idx == 0)
-                    mergedData = current;
+                    mergedData = current.blockingGet();
                 else
-                    inputDatas[idx - 1] = current;
+                    inputDatas[idx - 1] = current.blockingGet();
             }
 
             protected Object getReduced()

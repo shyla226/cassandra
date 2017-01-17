@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -120,14 +121,14 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         return new UserType(name.getKeyspace(), name.getUserTypeName(), columnNames, types, true);
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         assert ksm != null; // should haven't validate otherwise
 
         // Can happen with ifNotExists
         if (ksm.types.get(name.getUserTypeName()).isPresent())
-            return Single.just(Event.SchemaChange.NONE);
+            return Maybe.empty();
 
         UserType type = createType();
         String duplicate = haveDuplicateName(type);
@@ -135,6 +136,6 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             return error(String.format("Duplicate field name %s in type %s", duplicate, type.name));
 
         return MigrationManager.announceNewType(type, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName()));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));
     }
 }

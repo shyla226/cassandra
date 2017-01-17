@@ -28,6 +28,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
@@ -300,113 +301,135 @@ public class CustomCassandraIndex implements Index
             {
             }
 
-            public void partitionDelete(DeletionTime deletionTime)
+            public Completable partitionDelete(DeletionTime deletionTime)
             {
+                return Completable.complete();
             }
 
-            public void rangeTombstone(RangeTombstone tombstone)
+            public Completable rangeTombstone(RangeTombstone tombstone)
             {
+                return Completable.complete();
             }
 
-            public void insertRow(Row row)
+            public Completable insertRow(Row row)
             {
                 if (isPrimaryKeyIndex())
                 {
-                    indexPrimaryKey(row.clustering(),
+                    return indexPrimaryKey(row.clustering(),
                                     getPrimaryKeyIndexLiveness(row),
                                     row.deletion());
                 }
                 else
                 {
                     if (indexedColumn.isComplex())
-                        indexCells(row.clustering(), row.getComplexColumnData(indexedColumn));
+                        return indexCells(row.clustering(), row.getComplexColumnData(indexedColumn));
                     else
-                        indexCell(row.clustering(), row.getCell(indexedColumn));
+                        return indexCell(row.clustering(), row.getCell(indexedColumn));
                 }
+
             }
 
-            public void removeRow(Row row)
+            public Completable removeRow(Row row)
             {
+                Completable result = Completable.complete();
+
                 if (isPrimaryKeyIndex())
-                    indexPrimaryKey(row.clustering(), row.primaryKeyLivenessInfo(), row.deletion());
+                    result = result.concatWith(indexPrimaryKey(row.clustering(), row.primaryKeyLivenessInfo(), row.deletion()));
 
                 if (indexedColumn.isComplex())
-                    removeCells(row.clustering(), row.getComplexColumnData(indexedColumn));
+                    result = result.concatWith(removeCells(row.clustering(), row.getComplexColumnData(indexedColumn)));
                 else
-                    removeCell(row.clustering(), row.getCell(indexedColumn));
+                    result = result.concatWith(removeCell(row.clustering(), row.getCell(indexedColumn)));
+
+                return result;
             }
 
 
-            public void updateRow(Row oldRow, Row newRow)
+            public Completable updateRow(Row oldRow, Row newRow)
             {
+                Completable result = Completable.complete();
+
                 if (isPrimaryKeyIndex())
-                    indexPrimaryKey(newRow.clustering(),
+                    result = result.concatWith(indexPrimaryKey(newRow.clustering(),
                                     newRow.primaryKeyLivenessInfo(),
-                                    newRow.deletion());
+                                    newRow.deletion()));
 
                 if (indexedColumn.isComplex())
                 {
-                    indexCells(newRow.clustering(), newRow.getComplexColumnData(indexedColumn));
-                    removeCells(oldRow.clustering(), oldRow.getComplexColumnData(indexedColumn));
+                    result = result.concatWith(indexCells(newRow.clustering(), newRow.getComplexColumnData(indexedColumn)));
+                    result = result.concatWith(removeCells(oldRow.clustering(), oldRow.getComplexColumnData(indexedColumn)));
                 }
                 else
                 {
-                    indexCell(newRow.clustering(), newRow.getCell(indexedColumn));
-                    removeCell(oldRow.clustering(), oldRow.getCell(indexedColumn));
+                    result = result.concatWith(indexCell(newRow.clustering(), newRow.getCell(indexedColumn)));
+                    result = result.concatWith(removeCell(oldRow.clustering(), oldRow.getCell(indexedColumn)));
                 }
+
+                return result;
             }
 
-            public void finish()
+            public Completable finish()
             {
+                return Completable.complete();
             }
 
-            private void indexCells(Clustering clustering, Iterable<Cell> cells)
-            {
-                if (cells == null)
-                    return;
-
-                for (Cell cell : cells)
-                    indexCell(clustering, cell);
-            }
-
-            private void indexCell(Clustering clustering, Cell cell)
-            {
-                if (cell == null || !cell.isLive(nowInSec))
-                    return;
-
-                insert(key.getKey(),
-                       clustering,
-                       cell,
-                       LivenessInfo.withExpirationTime(cell.timestamp(), cell.ttl(), cell.localDeletionTime()),
-                       opGroup);
-            }
-
-            private void removeCells(Clustering clustering, Iterable<Cell> cells)
+            private Completable indexCells(Clustering clustering, Iterable<Cell> cells)
             {
                 if (cells == null)
-                    return;
+                    return Completable.complete();
 
+                Completable result = Completable.complete();
                 for (Cell cell : cells)
-                    removeCell(clustering, cell);
+                    result = result.concatWith(indexCell(clustering, cell));
+
+                return result;
             }
 
-            private void removeCell(Clustering clustering, Cell cell)
+            private Completable indexCell(Clustering clustering, Cell cell)
             {
                 if (cell == null || !cell.isLive(nowInSec))
-                    return;
+                    return Completable.complete();
 
-                delete(key.getKey(), clustering, cell, opGroup, nowInSec);
+                return insert(key.getKey(),
+                              clustering,
+                              cell,
+                              LivenessInfo.withExpirationTime(cell.timestamp(), cell.ttl(), cell.localDeletionTime()),
+                              opGroup);
             }
 
-            private void indexPrimaryKey(final Clustering clustering,
+            private Completable removeCells(Clustering clustering, Iterable<Cell> cells)
+            {
+                if (cells == null)
+                    return Completable.complete();
+
+                Completable result = Completable.complete();
+                for (Cell cell : cells)
+                    result = result.concatWith(removeCell(clustering, cell));
+
+                return result;
+            }
+
+            private Completable removeCell(Clustering clustering, Cell cell)
+            {
+                if (cell == null || !cell.isLive(nowInSec))
+                    return Completable.complete();
+
+                return delete(key.getKey(), clustering, cell, opGroup, nowInSec);
+            }
+
+            private Completable indexPrimaryKey(final Clustering clustering,
                                          final LivenessInfo liveness,
                                          final Row.Deletion deletion)
             {
+                Completable result = Completable.complete();
+
                 if (liveness.timestamp() != LivenessInfo.NO_TIMESTAMP)
-                    insert(key.getKey(), clustering, null, liveness, opGroup);
+                    result = result.concatWith(insert(key.getKey(), clustering, null, liveness, opGroup));
 
                 if (!deletion.isLive())
-                    delete(key.getKey(), clustering, deletion.time(), opGroup);
+                    result = result.concatWith(delete(key.getKey(), clustering, deletion.time(), opGroup));
+
+                return result;
             }
 
             private LivenessInfo getPrimaryKeyIndexLiveness(Row row)
@@ -438,19 +461,20 @@ public class CustomCassandraIndex implements Index
      * @param deletion deletion timestamp etc
      * @param opGroup the operation under which to perform the deletion
      */
-    public void deleteStaleEntry(DecoratedKey indexKey,
+    public Completable deleteStaleEntry(DecoratedKey indexKey,
                                  Clustering indexClustering,
                                  DeletionTime deletion,
                                  TPCOpOrder.Group opGroup)
     {
-        doDelete(indexKey, indexClustering, deletion, opGroup);
         logger.debug("Removed index entry for stale value {}", indexKey);
+
+        return doDelete(indexKey, indexClustering, deletion, opGroup);
     }
 
     /**
      * Called when adding a new entry to the index
      */
-    private void insert(ByteBuffer rowKey,
+    private Completable insert(ByteBuffer rowKey,
                         Clustering clustering,
                         Cell cell,
                         LivenessInfo info,
@@ -461,14 +485,15 @@ public class CustomCassandraIndex implements Index
                                                                cell));
         Row row = BTreeRow.noCellLiveRow(buildIndexClustering(rowKey, clustering, cell), info);
         PartitionUpdate upd = partitionUpdate(valueKey, row);
-        indexCfs.apply(upd, UpdateTransaction.NO_OP, opGroup, null);
         logger.debug("Inserted entry into index for value {}", valueKey);
+
+        return indexCfs.apply(upd, UpdateTransaction.NO_OP, opGroup, null);
     }
 
     /**
      * Called when deleting entries on non-primary key columns
      */
-    private void delete(ByteBuffer rowKey,
+    private Completable delete(ByteBuffer rowKey,
                         Clustering clustering,
                         Cell cell,
                         TPCOpOrder.Group opGroup,
@@ -477,16 +502,16 @@ public class CustomCassandraIndex implements Index
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
                                                                cell));
-        doDelete(valueKey,
-                 buildIndexClustering(rowKey, clustering, cell),
-                 new DeletionTime(cell.timestamp(), nowInSec),
-                 opGroup);
+        return doDelete(valueKey,
+                        buildIndexClustering(rowKey, clustering, cell),
+                        new DeletionTime(cell.timestamp(), nowInSec),
+                        opGroup);
     }
 
     /**
      * Called when deleting entries from indexes on primary key columns
      */
-    private void delete(ByteBuffer rowKey,
+    private Completable delete(ByteBuffer rowKey,
                         Clustering clustering,
                         DeletionTime deletion,
                         TPCOpOrder.Group opGroup)
@@ -494,21 +519,22 @@ public class CustomCassandraIndex implements Index
         DecoratedKey valueKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
                                                                null));
-        doDelete(valueKey,
-                 buildIndexClustering(rowKey, clustering, null),
-                 deletion,
-                 opGroup);
+        return doDelete(valueKey,
+                        buildIndexClustering(rowKey, clustering, null),
+                        deletion,
+                        opGroup);
     }
 
-    private void doDelete(DecoratedKey indexKey,
+    private Completable doDelete(DecoratedKey indexKey,
                           Clustering indexClustering,
                           DeletionTime deletion,
                           TPCOpOrder.Group opGroup)
     {
         Row row = BTreeRow.emptyDeletedRow(indexClustering, Row.Deletion.regular(deletion));
         PartitionUpdate upd = partitionUpdate(indexKey, row);
-        indexCfs.apply(upd, UpdateTransaction.NO_OP, opGroup, null);
         logger.debug("Removed index entry for value {}", indexKey);
+
+        return indexCfs.apply(upd, UpdateTransaction.NO_OP, opGroup, null);
     }
 
     private void validatePartitionKey(DecoratedKey partitionKey) throws InvalidRequestException

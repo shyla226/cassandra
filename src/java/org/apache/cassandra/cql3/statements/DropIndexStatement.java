@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
@@ -70,15 +71,16 @@ public class DropIndexStatement extends SchemaAlteringStatement
     @Override
     public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws RequestValidationException
     {
-        Single<Event.SchemaChange> ce = announceMigration(false);
-        return ce == null ? Single.just(new ResultMessage.Void()) : ce.map(ResultMessage.SchemaChange::new);
+        return announceMigration(false).map(schemaChangeEvent -> new ResultMessage.SchemaChange(schemaChangeEvent))
+                                       .cast(ResultMessage.class)
+                                       .toSingle(new ResultMessage.Void());
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
         CFMetaData cfm = lookupIndexedTable();
         if (cfm == null)
-            return Single.just(Event.SchemaChange.NONE);
+            return Maybe.empty();
 
         CFMetaData updatedCfm = cfm.copy();
         updatedCfm.indexes(updatedCfm.getIndexes().without(indexName));
@@ -86,7 +88,7 @@ public class DropIndexStatement extends SchemaAlteringStatement
         // Note that we shouldn't call columnFamily() at this point because the index has been dropped and the call to lookupIndexedTable()
         // in that method would now throw.
         Event.SchemaChange event = new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, cfm.ksName, cfm.cfName);
-        return MigrationManager.announceColumnFamilyUpdate(updatedCfm, isLocalOnly).toSingle(() -> event);
+        return MigrationManager.announceColumnFamilyUpdate(updatedCfm, isLocalOnly).andThen(Maybe.just(event));
     }
 
     /**

@@ -19,10 +19,13 @@ package org.apache.cassandra.db.rows;
 
 import java.util.*;
 import java.security.MessageDigest;
+import java.util.Observable;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.*;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -369,7 +372,7 @@ public abstract class UnfilteredRowIterators
                   mergeStaticRows(iterators, columns.statics, nowInSec, listener, partitionDeletion),
                   reversed,
                   mergeStats(iterators));
-            this.mergeIterator = MergeIterator.get(iterators,
+            this.mergeIterator = MergeIterator.get(iterators.stream().map(i -> i.asRxIterator()).collect(Collectors.toList()),
                                                    reversed ? metadata.comparator.reversed() : metadata.comparator,
                                                    new MergeReducer(iterators.size(), reversed, nowInSec, listener));
             this.listener = listener;
@@ -551,15 +554,15 @@ public abstract class UnfilteredRowIterators
                 return listener == null;
             }
 
-            public void reduce(int idx, Unfiltered current)
+            public void reduce(int idx, Single<Unfiltered> current)
             {
-                nextKind = current.kind();
+                nextKind = current.blockingGet().kind();
                 if (nextKind == Unfiltered.Kind.ROW)
-                    rowMerger.add(idx, (Row) current);
+                    rowMerger.add(idx, (Row) current.blockingGet());
                 else
                 {
                     maybeInitMarkerMerger();
-                    markerMerger.add(idx, (RangeTombstoneMarker) current);
+                    markerMerger.add(idx, (RangeTombstoneMarker) current.blockingGet());
                 }
             }
 

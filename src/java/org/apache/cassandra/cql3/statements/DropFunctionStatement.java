@@ -23,7 +23,7 @@ import java.util.List;
 
 import com.google.common.base.Joiner;
 
-import io.reactivex.Single;
+import io.reactivex.Maybe;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.Schema;
@@ -128,15 +128,15 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
                                                             functionName, functionName, functionName));
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         Function old = findFunction();
         if (old == null)
         {
             if (ifExists)
-                return Single.just(Event.SchemaChange.NONE);
+                return Maybe.empty();
             else
-                return error(getMissingFunctionError());
+                return Maybe.error(new InvalidRequestException(getMissingFunctionError()));
         }
 
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(old.name().keyspace);
@@ -145,8 +145,8 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
             return error(String.format("Function '%s' still referenced by %s", old, referrers));
 
         return MigrationManager.announceFunctionDrop((UDFunction) old, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
-                                      old.name().keyspace, old.name().name, AbstractType.asCQLTypeStringList(old.argTypes())));
+                .andThen(Maybe.just( new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
+                                      old.name().keyspace, old.name().name, AbstractType.asCQLTypeStringList(old.argTypes()))));
     }
 
     private String getMissingFunctionError()

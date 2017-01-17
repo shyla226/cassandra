@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +74,7 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         }
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException, InvalidRequestException
     {
         CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), columnFamily()).copy();
         Triggers triggers = cfm.getTriggers();
@@ -81,7 +82,7 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         if (triggers.get(triggerName).isPresent())
         {
             if (ifNotExists)
-                return Single.just(Event.SchemaChange.NONE);
+                return Maybe.empty();
             else
                 error(String.format("Trigger %s already exists", triggerName));
         }
@@ -89,6 +90,6 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         cfm.triggers(triggers.with(TriggerMetadata.create(triggerName, triggerClass)));
         logger.info("Adding trigger with name {} and class {}", triggerName, triggerClass);
         return MigrationManager.announceColumnFamilyUpdate(cfm, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()));
+                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())));
     }
 }

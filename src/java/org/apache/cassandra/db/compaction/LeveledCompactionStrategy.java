@@ -28,6 +28,7 @@ import com.google.common.primitives.Doubles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -341,7 +342,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
 
     // Lazily creates SSTableBoundedScanner for sstable that are assumed to be from the
     // same level (e.g. non overlapping) - see #4142
-    private static class LeveledScanner extends AbstractIterator<UnfilteredRowIterator> implements ISSTableScanner
+    private static class LeveledScanner extends AbstractIterator<Single<UnfilteredRowIterator>> implements ISSTableScanner
     {
         private final Collection<Range<Token>> ranges;
         private final List<SSTableReader> sstables;
@@ -407,7 +408,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             return sstables.get(0).metadata; // The ctor checks we have at least one sstable
         }
 
-        protected UnfilteredRowIterator computeNext()
+        protected Single<UnfilteredRowIterator> computeNext()
         {
             if (currentScanner == null)
                 return endOfData();

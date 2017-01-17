@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -284,7 +285,7 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract ReadCommand copy();
 
-    protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    protected abstract Single<UnfilteredPartitionIterator> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
 
@@ -353,66 +354,61 @@ public abstract class ReadCommand implements ReadQuery
      */
     @SuppressWarnings("resource") // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
-    public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
+    public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
     {
-        long startTimeNanos = System.nanoTime();
-
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
-        Index index = getIndex(cfs);
-
-        Index.Searcher searcher = null;
-        if (index != null)
+        return Single.defer(
+        () ->
         {
-            if (!cfs.indexManager.isIndexQueryable(index))
-                throw new IndexNotAvailableException(index);
 
-            searcher = index.searcherFor(this);
-            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
-        }
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
+            Index index = getIndex(cfs);
 
-        TPCOpOrder.Group group = null;
-        UnfilteredPartitionIterator resultIterator = null;
-        try
-        {
+            Index.Searcher pickSearcher = null;
+            if (index != null)
+            {
+                if (!cfs.indexManager.isIndexQueryable(index))
+                    throw new IndexNotAvailableException(index);
+
+                pickSearcher = index.searcherFor(this);
+                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
+            }
+
+            Index.Searcher searcher = pickSearcher;
+
             //Local requests track their own oporder
-            group = cfs.readOrdering.start();
+            TPCOpOrder.Group group = cfs.readOrdering.start();
 
-            resultIterator = searcher == null
-                             ? queryStorage(cfs, executionController)
-                             : searcher.search(executionController);
+            Single<UnfilteredPartitionIterator> resultIterator = searcher == null
+                                                                 ? queryStorage(cfs, executionController)
+                                                                 : searcher.search(executionController);
 
-            resultIterator = withStateTracking(resultIterator);
-            resultIterator = withOpOrderTracking(resultIterator, group);
-            //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+            return resultIterator.map(
+            r ->
+            {
+                r = withStateTracking(r);
+                r = withOpOrderTracking(r, group);
+                //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
-            // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
-            // no point in checking it again.
-            RowFilter updatedFilter = searcher == null
-                                    ? rowFilter()
-                                    : index.getPostIndexQueryFilter(rowFilter());
+                // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+                // no point in checking it again.
+                RowFilter updatedFilter = searcher == null
+                                          ? rowFilter()
+                                          : index.getPostIndexQueryFilter(rowFilter());
 
-            // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
-            // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
-            // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
-            // processing we do on it).
-            return limits().filter(updatedFilter.filter(resultIterator, nowInSec()), nowInSec());
-        }
-        catch (RuntimeException | Error e)
-        {
-            if (group != null)
-                group.close();
-
-            if (resultIterator != null)
-                resultIterator.close();
-            throw e;
-        }
+                // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+                // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+                // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+                // processing we do on it).
+                return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
+            }).doOnError((t) -> group.close());
+        });
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
-    public PartitionIterator executeInternal(ReadExecutionController controller)
+    public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
     {
-        return UnfilteredPartitionIterators.filter(executeLocally(controller), nowInSec());
+        return executeLocally(controller).map(p -> UnfilteredPartitionIterators.filter(p, nowInSec()));
     }
 
     public ReadExecutionController executionController()

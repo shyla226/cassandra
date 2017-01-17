@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.QueryValidationException;
+import io.reactivex.Completable;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
@@ -568,10 +569,10 @@ public class CustomIndexTest extends CQLTester
 
         ReadCommand cmd = Util.cmd(cfs, 0).build();
         try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController))
+             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
         {
             assertTrue(iterator.hasNext());
-            cfs.indexManager.deletePartition(iterator.next(), FBUtilities.nowInSeconds());
+            cfs.indexManager.deletePartition(iterator.next().blockingGet(), FBUtilities.nowInSeconds());
         }
 
         assertEquals(1, index.partitionDeletions.size());
@@ -968,27 +969,42 @@ public class CustomIndexTest extends CQLTester
                     barriers.add(writeBarrier);
                 }
 
-                public void insertRow(Row row)
+                public Completable insertRow(Row row)
                 {
                     indexedRowCount.incrementAndGet();
+                    return Completable.complete();
                 }
 
-                public void finish()
+                public Completable finish()
                 {
                     // we've indexed all rows in the target partition,
                     // grab the read OpOrder.Group for the base CFS so
                     // we can compare it with the starting group
                     if (indexedRowCount.get() < ROWS_IN_PARTITION)
                         readOrderingAtFinish = baseCfs.readOrdering.getCurrent(opGroup.coreId);
+
+                    return Completable.complete();
                 }
 
-                public void partitionDelete(DeletionTime deletionTime) { }
+                public Completable partitionDelete(DeletionTime deletionTime)
+                {
+                    return Completable.complete();
+                }
 
-                public void rangeTombstone(RangeTombstone tombstone) { }
+                public Completable rangeTombstone(RangeTombstone tombstone)
+                {
+                    return Completable.complete();
+                }
 
-                public void updateRow(Row oldRowData, Row newRowData) { }
+                public Completable updateRow(Row oldRowData, Row newRowData)
+                {
+                    return Completable.complete();
+                }
 
-                public void removeRow(Row row) { }
+                public Completable removeRow(Row row)
+                {
+                    return Completable.complete();
+                }
 
             };
         }

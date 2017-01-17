@@ -91,9 +91,9 @@ public class SSTableUtils
         {
             while (slhs.hasNext())
             {
-                UnfilteredRowIterator ilhs = slhs.next();
+                UnfilteredRowIterator ilhs = slhs.next().blockingGet();
                 assert srhs.hasNext() : "LHS contained more rows than RHS";
-                UnfilteredRowIterator irhs = srhs.next();
+                UnfilteredRowIterator irhs = srhs.next().blockingGet();
                 assertContentEquals(ilhs, irhs);
             }
             assert !srhs.hasNext() : "RHS contained more rows than LHS";

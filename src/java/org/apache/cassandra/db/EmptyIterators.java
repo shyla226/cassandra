@@ -20,7 +20,9 @@ package org.apache.cassandra.db;
 
 import java.util.NoSuchElementException;
 
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -51,7 +53,7 @@ public class EmptyIterators
             return false;
         }
 
-        public R next()
+        public Single<R> next()
         {
             throw new NoSuchElementException();
         }
@@ -80,9 +82,9 @@ public class EmptyIterators
             super();
         }
 
-        public Observable<RowIterator> asObservable()
+        public Flowable<RowIterator> asObservable()
         {
-            return Observable.empty();
+            return Flowable.empty();
         }
     }
 
@@ -184,9 +186,9 @@ public class EmptyIterators
             this.partitionLevelDeletion = partitionLevelDeletion;
         }
 
-        public Observable<Unfiltered> asObservable()
+        public Flowable<Unfiltered> asObservable()
         {
-            return Observable.empty();
+            return Flowable.empty();
         }
     }
 

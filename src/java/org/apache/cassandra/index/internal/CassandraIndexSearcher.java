@@ -26,6 +26,8 @@ import java.util.NavigableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Observable;
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
@@ -56,23 +58,16 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
     @SuppressWarnings("resource") // Both the OpOrder and 'indexIter' are closed on exception, or through the closing of the result
     // of this method.
-    public UnfilteredPartitionIterator search(ReadExecutionController executionController)
+    public Single<UnfilteredPartitionIterator> search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table
         DecoratedKey indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
-        UnfilteredRowIterator indexIter = queryIndex(indexKey, command, executionController);
-        try
-        {
-            return queryDataFromIndex(indexKey, UnfilteredRowIterators.filter(indexIter, command.nowInSec()), command, executionController);
-        }
-        catch (RuntimeException | Error e)
-        {
-            indexIter.close();
-            throw e;
-        }
+        Single<UnfilteredRowIterator> indexIter = queryIndex(indexKey, command, executionController);
+
+        return indexIter.flatMap(i -> queryDataFromIndex(indexKey, UnfilteredRowIterators.filter(i, command.nowInSec()), command, executionController));
     }
 
-    private UnfilteredRowIterator queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
+    private Single<UnfilteredRowIterator> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
     {
         ClusteringIndexFilter filter = makeIndexFilter(command);
         ColumnFamilyStore indexCfs = index.getBackingTable().get();
@@ -185,8 +180,8 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return index.buildIndexClusteringPrefix(rowKey, clustering, null).build();
     }
 
-    protected abstract UnfilteredPartitionIterator queryDataFromIndex(DecoratedKey indexKey,
-                                                                      RowIterator indexHits,
-                                                                      ReadCommand command,
-                                                                      ReadExecutionController executionController);
+    protected abstract Single<UnfilteredPartitionIterator> queryDataFromIndex(DecoratedKey indexKey,
+                                                                                  RowIterator indexHits,
+                                                                                  ReadCommand command,
+                                                                                  ReadExecutionController executionController);
 }

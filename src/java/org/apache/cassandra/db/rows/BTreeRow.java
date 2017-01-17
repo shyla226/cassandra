@@ -27,6 +27,7 @@ import com.google.common.collect.Collections2;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 
+import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
@@ -242,6 +243,11 @@ public class BTreeRow extends AbstractRow
     public Iterator<ColumnData> iterator()
     {
         return searchIterator();
+    }
+
+    public Iterator<Single<ColumnData>> rxiterator()
+    {
+        return Iterators.transform(searchIterator(), c -> Single.just(c));
     }
 
     public Iterable<Cell> cells()

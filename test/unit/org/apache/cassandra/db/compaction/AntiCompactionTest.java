@@ -111,7 +111,7 @@ public class AntiCompactionTest
             {
                 while (scanner.hasNext())
                 {
-                    UnfilteredRowIterator row = scanner.next();
+                    UnfilteredRowIterator row = scanner.next().blockingGet();
                     if (sstable.isRepaired())
                     {
                         assertTrue(range.contains(row.partitionKey().getToken()));
@@ -248,7 +248,7 @@ public class AntiCompactionTest
             {
                 while (scanner.hasNext())
                 {
-                    try (UnfilteredRowIterator row = scanner.next())
+                    try (UnfilteredRowIterator row = scanner.next().blockingGet())
                     {
                         if (sstable.isRepaired())
                         {

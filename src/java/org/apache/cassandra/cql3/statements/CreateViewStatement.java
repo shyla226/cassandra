@@ -113,7 +113,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         }
     }
 
-    public Single<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         // We need to make sure that:
         //  - primary key includes all columns in base table's primary key
@@ -168,7 +168,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
             if (s instanceof Term.Raw)
                 return error("Cannot use terms in selection when defining a materialized view");
 
-            ColumnDefinition cdef = (ColumnDefinition)s;
+            ColumnDefinition cdef = (ColumnDefinition) s;
             included.add(cdef.name);
         }
 
@@ -176,7 +176,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         for (ColumnDefinition.Raw identifier : Iterables.concat(partitionKeys, clusteringKeys))
         {
             if (!targetPrimaryKeys.add(identifier))
-                return error("Duplicate entry found in PRIMARY KEY: "+identifier);
+                return error("Duplicate entry found in PRIMARY KEY: " + identifier);
 
             ColumnDefinition cdef = identifier.prepare(cfm);
 
@@ -297,13 +297,14 @@ public class CreateViewStatement extends SchemaAlteringStatement
                                                        viewCfm);
 
         return MigrationManager.announceNewView(definition, isLocalOnly)
-                .toSingle(() -> new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily()))
-                .onErrorResumeNext(exc -> {
-                    if (exc instanceof AlreadyExistsException && ifNotExists)
-                        return Single.just(Event.SchemaChange.NONE);
-                    else
-                        return Single.error(exc);
-                });
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                               .onErrorResumeNext(e ->
+                                                  {
+                                                      if (e instanceof AlreadyExistsException && ifNotExists)
+                                                          return Maybe.empty();
+
+                                                      return Maybe.error(e);
+                                                  });
     }
 
     private static boolean getColumnIdentifier(CFMetaData cfm,
