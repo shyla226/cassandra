@@ -59,6 +59,8 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
 import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
@@ -111,11 +113,6 @@ import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.triggers.TriggerExecutor;
-import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.UUIDGen;
-import org.apache.cassandra.utils.UUIDSerializer;
 
 
 public class StorageProxy implements StorageProxyMBean
@@ -608,7 +605,6 @@ public class StorageProxy implements StorageProxyMBean
      * @return an Observable that emits a single (null) item when all mutations have completed
      */
     public static Single<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
-    throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
@@ -616,25 +612,35 @@ public class StorageProxy implements StorageProxyMBean
         long startTime = System.nanoTime();
 
         Single<ResultMessage.Void> observable = null;
-
         List<Single<ResultMessage.Void>> singles = mutations.size() == 1 ? null : new ArrayList<>(mutations.size());
-        for (IMutation mutation : mutations)
+        try
         {
-            Single<ResultMessage.Void> singleMutationObservable;
-            if (mutation instanceof CounterMutation)
+            for (IMutation mutation : mutations)
             {
-                singleMutationObservable = mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime).get();
-            }
-            else
-            {
-                WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-                singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, wt, queryStartNanoTime).get();
-            }
+                Single<ResultMessage.Void> singleMutationObservable;
+                if (mutation instanceof CounterMutation)
+                {
+                    // TODO this can throw UnavailableException, hence the try/catch.  Should integrate this better with Rx
+                    singleMutationObservable = mutateCounter((CounterMutation) mutation, localDataCenter, queryStartNanoTime).get();
+                }
+                else
+                {
+                    WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
+                    singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, wt, queryStartNanoTime).get();
+                }
 
-            if (singles == null)
-                observable = singleMutationObservable;
-            else
-                singles.add(singleMutationObservable);
+                if (singles == null)
+                    observable = singleMutationObservable;
+                else
+                    singles.add(singleMutationObservable);
+            }
+        }
+        catch (UnavailableException exc)
+        {
+            writeMetrics.unavailables.mark();
+            writeMetricsMap.get(consistency_level).unavailables.mark();
+            Tracing.trace("Unavailable");
+            return Single.error(exc);
         }
 
         if (observable == null)
@@ -759,9 +765,9 @@ public class StorageProxy implements StorageProxyMBean
 
         if (StorageService.instance.isStarting() || StorageService.instance.isJoining() || StorageService.instance.isMoving())
         {
-            // TODO needs to be async/Rx?
-            BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
-                                                    mutations), writeCommitLog);
+            Completable completable = BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
+                                                            mutations), writeCommitLog);
+            completables.add(completable);
         }
         else
         {
@@ -823,20 +829,22 @@ public class StorageProxy implements StorageProxyMBean
 
             if (!wrappers.isEmpty())
             {
-                // TODO make these async/Rx
-
                 // Apply to local batchlog memtable in this thread
-                BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), Lists.transform(wrappers, w -> w.mutation)),
-                                      writeCommitLog);
+                Completable completable = BatchlogManager.store(
+                        Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), Lists.transform(wrappers, w -> w.mutation)),
+                        writeCommitLog);
 
                 // now actually perform the writes and wait for them to complete
-                asyncWriteBatchedMutations(wrappers, localDataCenter, Stage.VIEW_MUTATION);
+                completables.add(completable.doOnComplete(() ->
+                    asyncWriteBatchedMutations(wrappers, localDataCenter)));
             }
+
 
             if (!nonPairedMutations.isEmpty())
             {
-                BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonPairedMutations),
-                                      writeCommitLog);
+                completables.add(BatchlogManager.store(
+                        Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonPairedMutations),
+                        writeCommitLog));
             }
         }
         return Completable.merge(completables)
@@ -845,10 +853,9 @@ public class StorageProxy implements StorageProxyMBean
 
     @SuppressWarnings("unchecked")
     public static Single<ResultMessage.Void> mutateWithTriggers(Collection<? extends IMutation> mutations,
-                                                      ConsistencyLevel consistencyLevel,
-                                                      boolean mutateAtomically,
-                                                      long queryStartNanoTime)
-    throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
+                                                                ConsistencyLevel consistencyLevel,
+                                                                boolean mutateAtomically,
+                                                                long queryStartNanoTime)
     {
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
 
@@ -862,17 +869,15 @@ public class StorageProxy implements StorageProxyMBean
 
         if (augmented != null)
         {
-            // TODO Rx-ify
-            mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime);
-            return Single.just(new ResultMessage.Void());
+            return mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime)
+                    .toSingleDefault(new ResultMessage.Void());
         }
         else
         {
             if (mutateAtomically || updatesView)
             {
-                // TODO Rx-ify
-                mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime);
-                return Single.just(new ResultMessage.Void());
+                return mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime)
+                        .toSingleDefault(new ResultMessage.Void());
             }
             else
             {
@@ -892,88 +897,97 @@ public class StorageProxy implements StorageProxyMBean
      * @param requireQuorumForRemove at least a quorum of nodes will see update before deleting batchlog
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
-    // TODO Rx-ify
-    public static void mutateAtomically(Collection<Mutation> mutations,
-                                        ConsistencyLevel consistency_level,
-                                        boolean requireQuorumForRemove,
-                                        long queryStartNanoTime)
-    throws UnavailableException, OverloadedException, WriteTimeoutException
+    public static Completable mutateAtomically(Collection<Mutation> mutations,
+                                               ConsistencyLevel consistency_level,
+                                               boolean requireQuorumForRemove,
+                                               long queryStartNanoTime)
     {
         Tracing.trace("Determining replicas for atomic batch");
         long startTime = System.nanoTime();
 
-        List<WriteResponseHandlerWrapper> wrappers = new ArrayList<WriteResponseHandlerWrapper>(mutations.size());
+        List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
-        try
+        // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
+        // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
+        ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove
+                                                 ? ConsistencyLevel.QUORUM
+                                                 : consistency_level;
+
+        switch (consistency_level)
         {
+            case ALL:
+            case EACH_QUORUM:
+                batchConsistencyLevel = consistency_level;
+        }
 
-            // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
-            // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
-            ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove
-                                                     ? ConsistencyLevel.QUORUM
-                                                     : consistency_level;
+        final Collection<InetAddress> batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
+        final UUID batchUUID = UUIDGen.getTimeUUID();
+        BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(),
+                                                                                                      () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
 
-            switch (consistency_level)
+        // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
+        for (Mutation mutation : mutations)
+        {
+            WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
+                                                                           consistency_level,
+                                                                           batchConsistencyLevel,
+                                                                           WriteType.BATCH,
+                                                                           cleanup,
+                                                                           queryStartNanoTime);
+            // exit early if we can't fulfill the CL at this time.
+            try
             {
-                case ALL:
-                case EACH_QUORUM:
-                    batchConsistencyLevel = consistency_level;
-            }
-
-            final Collection<InetAddress> batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
-            final UUID batchUUID = UUIDGen.getTimeUUID();
-            BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(),
-                                                                                                          () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
-
-            // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-            for (Mutation mutation : mutations)
-            {
-                WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
-                                                                               consistency_level,
-                                                                               batchConsistencyLevel,
-                                                                               WriteType.BATCH,
-                                                                               cleanup,
-                                                                               queryStartNanoTime);
-                // exit early if we can't fulfill the CL at this time.
                 wrapper.handler.assureSufficientLiveNodes();
-                wrappers.add(wrapper);
             }
+            catch (UnavailableException exc)
+            {
+                return Completable.error(exc);
+            }
+            wrappers.add(wrapper);
+        }
 
-            // write to the batchlog
-            syncWriteToBatchlog(mutations, batchlogEndpoints, batchUUID, queryStartNanoTime);
+        // write to the batchlog
+        Completable batchlogCompletable = asyncWriteToBatchlog(mutations, batchlogEndpoints, batchUUID, queryStartNanoTime);
 
-            // now actually perform the writes and wait for them to complete
-            syncWriteBatchedMutations(wrappers, localDataCenter, Stage.MUTATION);
-        }
-        catch (UnavailableException e)
-        {
-            writeMetrics.unavailables.mark();
-            writeMetricsMap.get(consistency_level).unavailables.mark();
-            Tracing.trace("Unavailable");
-            throw e;
-        }
-        catch (WriteTimeoutException e)
-        {
-            writeMetrics.timeouts.mark();
-            writeMetricsMap.get(consistency_level).timeouts.mark();
-            Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
-            throw e;
-        }
-        catch (WriteFailureException e)
-        {
-            writeMetrics.failures.mark();
-            writeMetricsMap.get(consistency_level).failures.mark();
-            Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
-            throw e;
-        }
-        finally
-        {
+        // now actually perform the writes and wait for them to complete
+        Completable completable = batchlogCompletable.andThen(
+                Completable.defer(() -> {
+                    return syncWriteBatchedMutations(wrappers, localDataCenter);
+                }));
+        return completable.onErrorResumeNext(throwable -> {
+            if (throwable instanceof  UnavailableException)
+            {
+                writeMetrics.unavailables.mark();
+                writeMetricsMap.get(consistency_level).unavailables.mark();
+                Tracing.trace("Unavailable");
+                return Completable.error(throwable);
+            }
+            else if (throwable instanceof WriteTimeoutException)
+            {
+                WriteTimeoutException e = (WriteTimeoutException) throwable;
+                writeMetrics.timeouts.mark();
+                writeMetricsMap.get(consistency_level).timeouts.mark();
+                Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
+                return Completable.error(throwable);
+            }
+            else if (throwable instanceof WriteFailureException)
+            {
+                WriteFailureException e = (WriteFailureException) throwable;
+                writeMetrics.failures.mark();
+                writeMetricsMap.get(consistency_level).failures.mark();
+                Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
+                return Completable.error(throwable);
+            }
+            else
+            {
+                return Completable.error(throwable);
+            }
+        }).doFinally(() -> {
             long latency = System.nanoTime() - startTime;
             writeMetrics.addNano(latency);
             writeMetricsMap.get(consistency_level).addNano(latency);
-
-        }
+        });
     }
 
     /**
@@ -1023,7 +1037,7 @@ public class StorageProxy implements StorageProxyMBean
         return replica.equals(FBUtilities.getBroadcastAddress());
     }
 
-    private static void syncWriteToBatchlog(Collection<Mutation> mutations, Collection<InetAddress> endpoints, UUID uuid, long queryStartNanoTime)
+    private static Completable asyncWriteToBatchlog(Collection<Mutation> mutations, Collection<InetAddress> endpoints, UUID uuid, long queryStartNanoTime)
     throws WriteTimeoutException, WriteFailureException
     {
         WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
@@ -1040,11 +1054,26 @@ public class StorageProxy implements StorageProxyMBean
             logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, target, batch.size());
 
             if (canDoLocalRequest(target))
-                performLocally(Stage.MUTATION, Optional.empty(), () -> BatchlogManager.store(batch), handler);
+            {
+                BatchlogManager.store(batch).subscribe(
+                        // onComplete
+                        () -> handler.response(null),
+
+                        // onError
+                        exc -> {
+                            JVMStabilityInspector.inspectThrowable(exc);
+                            if (!(exc instanceof WriteTimeoutException))
+                                logger.error("Failed to store batchlog entry locally:", exc);
+                            handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
+                        }
+                );
+            }
             else
+            {
                 MessagingService.instance().sendRR(message, target, handler);
+            }
         }
-        handler.get();
+        return handler.get().toCompletable();
     }
 
     private static void asyncRemoveFromBatchlog(Collection<InetAddress> endpoints, UUID uuid)
@@ -1056,13 +1085,26 @@ public class StorageProxy implements StorageProxyMBean
                 logger.trace("Sending batchlog remove request {} to {}", uuid, target);
 
             if (canDoLocalRequest(target))
-                performLocally(Stage.MUTATION, () -> BatchlogManager.remove(uuid));
+            {
+                BatchlogManager.remove(uuid).subscribe(
+                        // onComplete
+                        () -> {
+                        },
+
+                        // onError
+                        exc -> {
+                            JVMStabilityInspector.inspectThrowable(exc);
+                            logger.error("Failed to remove batchlog entry locally:", exc);
+                        });
+            }
             else
+            {
                 MessagingService.instance().sendOneWay(message, target);
+            }
         }
     }
 
-    private static void asyncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, String localDataCenter, Stage stage)
+    private static void asyncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, String localDataCenter)
     {
         for (WriteResponseHandlerWrapper wrapper : wrappers)
         {
@@ -1070,7 +1112,7 @@ public class StorageProxy implements StorageProxyMBean
 
             try
             {
-                sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter, stage);
+                sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter);
             }
             catch (OverloadedException | WriteTimeoutException e)
             {
@@ -1079,18 +1121,19 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, String localDataCenter, Stage stage)
+    private static Completable syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, String localDataCenter)
     throws WriteTimeoutException, OverloadedException
     {
         for (WriteResponseHandlerWrapper wrapper : wrappers)
         {
             Iterable<InetAddress> endpoints = Iterables.concat(wrapper.handler.naturalEndpoints, wrapper.handler.pendingEndpoints);
-            sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter, stage);
+            sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter);
         }
 
-
+        List<Completable> completables = new ArrayList<>(wrappers.size());
         for (WriteResponseHandlerWrapper wrapper : wrappers)
-            wrapper.handler.get();
+            completables.add(wrapper.handler.get().toCompletable());
+        return Completable.concat(completables);
     }
 
     /**
@@ -1124,7 +1167,7 @@ public class StorageProxy implements StorageProxyMBean
         if (writeType == WriteType.COUNTER)
             executeCounterWrite(mutation, targets, responseHandler, localDataCenter);
         else
-            sendToHintedEndpoints((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION);
+            sendToHintedEndpoints((Mutation) mutation, targets, responseHandler, localDataCenter);
 
         return responseHandler;
     }
@@ -1234,8 +1277,7 @@ public class StorageProxy implements StorageProxyMBean
     public static void sendToHintedEndpoints(final Mutation mutation,
                                              Iterable<InetAddress> targets,
                                              AbstractWriteResponseHandler<IMutation> responseHandler,
-                                             String localDataCenter,
-                                             Stage stage)
+                                             String localDataCenter)
     throws OverloadedException
     {
         int targetsSize = Iterables.size(targets);
@@ -1398,57 +1440,6 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void performLocally(Stage stage, final Runnable runnable)
-    {
-        StageManager.getStage(stage).maybeExecuteImmediately(new LocalMutationRunnable()
-        {
-            public void runMayThrow()
-            {
-                try
-                {
-                    runnable.run();
-                }
-                catch (Exception ex)
-                {
-                    logger.error("Failed to apply mutation locally : {}", ex);
-                }
-            }
-
-            @Override
-            protected Verb verb()
-            {
-                return MessagingService.Verb.MUTATION;
-            }
-        });
-    }
-
-    private static void performLocally(Stage stage, Optional<IMutation> mutation, final Runnable runnable, final IAsyncCallbackWithFailure<?> handler)
-    {
-        StageManager.getStage(stage).maybeExecuteImmediately(new LocalMutationRunnable(mutation)
-        {
-            public void runMayThrow()
-            {
-                try
-                {
-                    runnable.run();
-                    handler.response(null);
-                }
-                catch (Exception ex)
-                {
-                    if (!(ex instanceof WriteTimeoutException))
-                        logger.error("Failed to apply mutation locally : {}", ex);
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                }
-            }
-
-            @Override
-            protected Verb verb()
-            {
-                return MessagingService.Verb.MUTATION;
-            }
-        });
-    }
-
     /**
      * Handle counter mutation on the coordinator host.
      *
@@ -1549,7 +1540,7 @@ public class StorageProxy implements StorageProxyMBean
                     Set<InetAddress> remotes = Sets.difference(ImmutableSet.copyOf(targets),
                             ImmutableSet.of(FBUtilities.getBroadcastAddress()));
                     if (!remotes.isEmpty())
-                        sendToHintedEndpoints(result, remotes, responseHandler, localDataCenter, Stage.COUNTER_MUTATION);
+                        sendToHintedEndpoints(result, remotes, responseHandler, localDataCenter);
                 },
 
                 // onError

@@ -49,9 +49,9 @@ public interface QueryHandler
                                                     Map<String, ByteBuffer> customPayload,
                                                     long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 
-    Single<ResultMessage> processBatch(BatchStatement statement,
-                                       QueryState state,
-                                       BatchQueryOptions options,
-                                       Map<String, ByteBuffer> customPayload,
-                                       long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
+    Single<? extends ResultMessage> processBatch(BatchStatement statement,
+                                                 QueryState state,
+                                                 BatchQueryOptions options,
+                                                 Map<String, ByteBuffer> customPayload,
+                                                 long queryStartNanoTime) throws RequestExecutionException, RequestValidationException;
 }

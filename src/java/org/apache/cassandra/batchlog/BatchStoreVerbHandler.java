@@ -26,7 +26,8 @@ public final class BatchStoreVerbHandler implements IVerbHandler<Batch>
 {
     public void doVerb(MessageIn<Batch> message, int id)
     {
-        BatchlogManager.store(message.payload);
+        // TODO need to make async in the final TPC version?
+        BatchlogManager.store(message.payload).blockingAwait();
         MessagingService.instance().sendReply(WriteResponse.createMessage(), id, message.from);
     }
 }

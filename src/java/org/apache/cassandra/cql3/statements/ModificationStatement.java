@@ -433,7 +433,6 @@ public abstract class ModificationStatement implements CQLStatement
     }
 
     public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException
     {
         if (options.getConsistency() == null)
             return Single.error(new InvalidRequestException("Invalid empty consistency level"));
@@ -455,7 +454,6 @@ public abstract class ModificationStatement implements CQLStatement
     }
 
     private Single<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException
     {
         ConsistencyLevel cl = options.getConsistency();
         try

@@ -26,6 +26,7 @@ public final class BatchRemoveVerbHandler implements IVerbHandler<UUID>
 {
     public void doVerb(MessageIn<UUID> message, int id)
     {
-        BatchlogManager.remove(message.payload);
+        // TODO need to make async in the final TPC version?
+        BatchlogManager.remove(message.payload).blockingAwait();
     }
 }
