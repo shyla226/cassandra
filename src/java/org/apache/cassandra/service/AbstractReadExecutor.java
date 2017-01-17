@@ -132,7 +132,6 @@ public abstract class AbstractReadExecutor
             }
 
             return Completable.complete();
-
     }
 
     private Completable executeLocalRead()
@@ -147,6 +146,8 @@ public abstract class AbstractReadExecutor
                       .map(iterator -> command.createResponse(iterator))
                       .flatMapCompletable(response ->
                                           {
+                                              executionController.close();
+
                                               if (command.complete())
                                               {
                                                   handler.response(response);
@@ -161,12 +162,10 @@ public abstract class AbstractReadExecutor
 
                                               return Completable.complete();
                                           })
-                      .doOnTerminate(() ->
-                                     {
-                                         executionController.close();
-                                     })
                       .onErrorResumeNext(t ->
                                          {
+                                             executionController.close();
+
                                              if (t instanceof TombstoneOverwhelmingException)
                                              {
                                                  handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);

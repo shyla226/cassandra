@@ -600,7 +600,7 @@ public abstract class Message
                 ClientWarn.instance.captureWarnings();
 
             QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
-            //logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
+            //logger.info("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
             request.execute(qstate, queryStartNanoTime)
 
@@ -622,7 +622,7 @@ public abstract class Message
                         response.attach(connection);
                         connection.applyStateTransition(request.type, response.type);
 
-                        logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
+                        //logger.info("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
                         ClientWarn.instance.resetWarnings();
                     },

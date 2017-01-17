@@ -137,6 +137,7 @@ public class TPCOpOrder
         if (callingCore == null || callingCore != coreId)
         {
             //logger.info("Calling core {} not oporder owner will route start() to core {}", callingCore, coreId);
+            //Thread.dumpStack();
             Single<Group> g = Single.fromCallable(c);
             g = g.observeOn(NettyRxScheduler.getForCore(coreId));
             return g.blockingGet();

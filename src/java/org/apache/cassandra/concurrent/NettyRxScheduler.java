@@ -170,6 +170,10 @@ public class NettyRxScheduler extends Scheduler
         if (isStartup)
             return ImmediateThinScheduler.INSTANCE;
 
+        Integer callerCoreId = null;
+        if (useImmediateForLocal)
+            callerCoreId = getCoreId();
+
         // Convert OP partitions to top level partitioner
         // Needed for 2i and System tables
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
@@ -185,11 +189,11 @@ public class NettyRxScheduler extends Scheduler
             PartitionPosition next = keyspaceRanges.get(i);
             if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
             {
+                //logger.info("Read moving to {} from {}", i-1, getCoreId());
+
                 if (useImmediateForLocal)
-                {
-                    Integer callerCoreId = getCoreId();
                     return callerCoreId != null && callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
-                }
+
 
                 return getForCore(i - 1);
             }

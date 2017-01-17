@@ -356,47 +356,52 @@ public abstract class ReadCommand implements ReadQuery
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
     {
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
-        Index index = getIndex(cfs);
-
-        Index.Searcher pickSearcher = null;
-        if (index != null)
+        return Single.defer(
+        () ->
         {
-            if (!cfs.indexManager.isIndexQueryable(index))
-                throw new IndexNotAvailableException(index);
 
-            pickSearcher = index.searcherFor(this);
-            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
-        }
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
+            Index index = getIndex(cfs);
 
-        Index.Searcher searcher = pickSearcher;
+            Index.Searcher pickSearcher = null;
+            if (index != null)
+            {
+                if (!cfs.indexManager.isIndexQueryable(index))
+                    throw new IndexNotAvailableException(index);
 
-        //Local requests track their own oporder
-        TPCOpOrder.Group group = cfs.readOrdering.start();
+                pickSearcher = index.searcherFor(this);
+                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
+            }
 
-        Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                         ? queryStorage(cfs, executionController)
-                         : searcher.search(executionController);
+            Index.Searcher searcher = pickSearcher;
 
-        return resultIterator.map(r ->
-                                  {
-                                      r = withStateTracking(r);
-                                      r = withOpOrderTracking(r, group);
-                                      //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+            //Local requests track their own oporder
+            TPCOpOrder.Group group = cfs.readOrdering.start();
 
-                                      // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
-                                      // no point in checking it again.
-                                      RowFilter updatedFilter = searcher == null
-                                                                ? rowFilter()
-                                                                : index.getPostIndexQueryFilter(rowFilter());
+            Single<UnfilteredPartitionIterator> resultIterator = searcher == null
+                                                                 ? queryStorage(cfs, executionController)
+                                                                 : searcher.search(executionController);
 
-                                      // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
-                                      // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
-                                      // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
-                                      // processing we do on it).
-                                      return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
-                                  })
-                             .doOnError((t) -> group.close());
+            return resultIterator.map(
+            r ->
+            {
+                r = withStateTracking(r);
+                r = withOpOrderTracking(r, group);
+                //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+
+                // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+                // no point in checking it again.
+                RowFilter updatedFilter = searcher == null
+                                          ? rowFilter()
+                                          : index.getPostIndexQueryFilter(rowFilter());
+
+                // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+                // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+                // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+                // processing we do on it).
+                return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
+            }).doOnError((t) -> group.close());
+        });
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
