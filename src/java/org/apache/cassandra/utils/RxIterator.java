@@ -32,7 +32,7 @@ public interface RxIterator<T> extends Iterator<Single<T>>, AsObservable<T>, Clo
 {
     public default Flowable<T> asObservable()
     {
-        return Single.merge(Iterables.transform(() -> this, s -> (SingleSource<T>) s))
+        return Single.concat(Iterables.transform(() -> this, s -> (SingleSource<T>) s))
                      .doOnTerminate(() -> close());
     }
 }
