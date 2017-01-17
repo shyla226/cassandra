@@ -268,6 +268,9 @@ public abstract class DataLimits
         @Override
         protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
         {
+            if (partition == null)
+                return null;
+
             return partition instanceof UnfilteredRowIterator ? Transformation.apply((UnfilteredRowIterator) partition, this)
                                                               : Transformation.apply((RowIterator) partition, this);
         }

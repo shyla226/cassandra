@@ -105,7 +105,7 @@ implements BaseRowIterator<R>
         super.add(transformation);
 
         // transform any existing data
-        if (staticRow != null)
+        if (staticRow != null || staticRow == Rows.EMPTY_STATIC_ROW)
             staticRow = transformation.applyToStatic(staticRow);
         next = applyOne(next, transformation);
         partitionKey = transformation.applyToPartitionKey(partitionKey);

@@ -20,11 +20,9 @@
  */
 package org.apache.cassandra.db.transform;
 
-import java.util.Collections;
-
+import io.reactivex.Single;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
-import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.merge;
 
@@ -47,9 +45,9 @@ implements BasePartitionIterator<R>
     // *********************************
 
 
-    protected BaseRowIterator<?> applyOne(BaseRowIterator<?> value, Transformation transformation)
+    protected Single<BaseRowIterator<?>> applyOne(Single<? extends BaseRowIterator<?>> value, Transformation transformation)
     {
-        return value == null ? null : transformation.applyToPartition(value);
+        return value == null ? null : value.map(v -> transformation.applyToPartition(v));
     }
 
     void add(Transformation transformation)
@@ -79,40 +77,34 @@ implements BasePartitionIterator<R>
 
     public final boolean hasNext()
     {
-        BaseRowIterator<?> next = null;
-        try
+        Single<BaseRowIterator<?>> next;
+
+        BaseIterator.Stop stop = this.stop;
+        while (this.next == null)
         {
-            BaseIterator.Stop stop = this.stop;
-            while (this.next == null)
+            Transformation[] fs = stack;
+            int len = length;
+
+            while (!stop.isSignalled && input.hasNext())
             {
-                Transformation[] fs = stack;
-                int len = length;
-
-                while (!stop.isSignalled && input.hasNext())
+                next = (Single<BaseRowIterator<?>>)input.next();
+                for (int i = 0; next != null & i < len; i++)
                 {
-                    next = input.next().blockingGet();
-                    for (int i = 0 ; next != null & i < len ; i++)
-                        next = fs[i].applyToPartition(next);
-
-                    if (next != null)
-                    {
-                        this.next = next;
-                        return true;
-                    }
+                    final int fi = i;
+                    next = next.map(n -> fs[fi].applyToPartition(n));
                 }
 
-                if (stop.isSignalled || !hasMoreContents())
-                    return false;
+                if (next != null)
+                {
+                    this.next = next;
+                    return true;
+                }
             }
-            return true;
 
+            if (stop.isSignalled || !hasMoreContents())
+                return false;
         }
-        catch (Throwable t)
-        {
-            if (next != null)
-                Throwables.close(t, Collections.singleton(next));
-            throw t;
-        }
+        return true;
     }
 
 }

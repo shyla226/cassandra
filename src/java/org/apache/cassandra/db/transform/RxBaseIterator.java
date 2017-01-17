@@ -19,6 +19,8 @@ package org.apache.cassandra.db.transform;
 
 import java.util.NoSuchElementException;
 
+import org.apache.commons.math3.analysis.function.Sin;
+
 import io.reactivex.Single;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -30,7 +32,7 @@ import static org.apache.cassandra.utils.Throwables.merge;
 abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V> extends Stack implements AutoCloseable, RxIterator<O>
 {
     I input;
-    V next;
+    Single<? extends V> next;
     BaseIterator.Stop stop; // applies at the end of the current next()
 
     // responsibility for initialising next lies with the subclass
@@ -60,7 +62,7 @@ abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V>
      *
      * used in hasMoreContents to apply the functions that follow the MoreContents
      */
-    protected abstract V applyOne(V value, Transformation transformation);
+    protected abstract Single<? extends V> applyOne(Single<? extends V> value, Transformation transformation);
 
     public final void close()
     {
@@ -84,9 +86,9 @@ abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V>
         if (next == null && !hasNext())
             throw new NoSuchElementException();
 
-        O next = (O) this.next;
+        Single<O> next = (Single<O>)this.next;
         this.next = null;
-        return Single.just(next);
+        return next;
     }
 
     // may set next != null if the next contents are a transforming iterator that already has data to return,
@@ -119,7 +121,7 @@ abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V>
                 RxBaseIterator abstr = (RxBaseIterator) newContents;
                 prefix = abstr;
                 input = (I) abstr.input;
-                next = apply((V)abstr.next, holder.length); // must apply all remaining functions to the next, if any
+                next = apply((Single<? extends V>)abstr.next, holder.length); // must apply all remaining functions to the next, if any
             }
 
             // since we're truncating our transformation stack to only those occurring after the extend transformation
@@ -136,7 +138,7 @@ abstract class RxBaseIterator<V, I extends RxIterator<? extends V>, O extends V>
     }
 
     // apply the functions [from..length)
-    private V apply(V next, int from)
+    private Single<? extends V> apply(Single<? extends V> next, int from)
     {
         while (next != null & from < length)
             next = applyOne(next, stack[from++]);
