@@ -1961,8 +1961,9 @@ public class StorageProxy implements StorageProxyMBean
         Single<PartitionIterator> getPartitionIterator()
         {
             return Completable.concatArray(doInitialQueries(), maybeTryAdditionalReplicas())
-                   .andThen(executor.handler.get()
-                            .onErrorResumeNext(e ->
+                              .andThen(executor.handler.get()
+                                               .onErrorResumeNext(
+                                               e ->
                                                {
                                                    if (e instanceof DigestMismatchException)
                                                        return retryOnDigestMismatch();
