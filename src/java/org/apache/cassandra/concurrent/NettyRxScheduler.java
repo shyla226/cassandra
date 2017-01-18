@@ -139,6 +139,11 @@ public class NettyRxScheduler extends Scheduler
         return eventLoopThreads.get(Thread.currentThread());
     }
 
+    public static boolean isStartup()
+    {
+        return isStartup;
+    }
+
     public static int getNumNettyThreads()
     {
         return isStartup ? 1 : NUM_NETTY_THREADS;

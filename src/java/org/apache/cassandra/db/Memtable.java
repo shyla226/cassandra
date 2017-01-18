@@ -607,7 +607,7 @@ public class Memtable implements Comparable<Memtable>
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead
-        try (final TPCOpOrder.Group group = new OpOrder().start())
+        try (final TPCOpOrder.Group group = new OpOrder(null).start())
         {
             int rowOverhead;
             MemtableAllocator allocator = MEMORY_POOL.newAllocator();

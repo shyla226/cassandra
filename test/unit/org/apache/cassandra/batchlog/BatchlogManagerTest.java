@@ -34,6 +34,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -59,7 +60,7 @@ import org.apache.cassandra.utils.UUIDGen;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.junit.Assert.*;
 
-public class BatchlogManagerTest
+public class BatchlogManagerTest extends CQLTester
 {
     private static final String KEYSPACE1 = "BatchlogManagerTest1";
     private static final String CF_STANDARD1 = "Standard1";
@@ -153,7 +154,7 @@ public class BatchlogManagerTest
                            ? (System.currentTimeMillis() - BatchlogManager.getBatchlogTimeout())
                            : (System.currentTimeMillis() + BatchlogManager.getBatchlogTimeout());
 
-            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingAwait();
+            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingGet();
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
@@ -164,7 +165,6 @@ public class BatchlogManagerTest
 
         // Force batchlog replay and wait for it to complete.
         BatchlogManager.instance.startBatchlogReplay().get();
-
         // Ensure that the first half, and only the first half, got replayed.
         assertEquals(50, BatchlogManager.instance.countAllBatches() - initialAllBatches);
         assertEquals(50, BatchlogManager.instance.getTotalBatchesReplayed() - initialReplayedBatches);

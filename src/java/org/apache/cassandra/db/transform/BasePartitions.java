@@ -91,7 +91,7 @@ implements BasePartitionIterator<R>
                 for (int i = 0; next != null & i < len; i++)
                 {
                     final int fi = i;
-                    next = next.map(n -> fs[fi].applyToPartition(n));
+                    next = next.map(n -> n == null ? n : fs[fi].applyToPartition(n));
                 }
 
                 if (next != null)

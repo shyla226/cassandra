@@ -1531,7 +1531,9 @@ public class SelectTest extends CQLTester
         execute("DELETE FROM %s WHERE a = 2 AND b = 2");
 
         beforeAndAfterFlush(() -> {
-            
+
+            assertRows(execute("SELECT COUNT(*) FROM %s"), row(5L));
+
             // Checks filtering
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
                                  "SELECT * FROM %s WHERE c = 4 AND d = 8");

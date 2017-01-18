@@ -25,6 +25,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Scheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 
@@ -90,12 +91,14 @@ public class OpOrder
     private static final Logger logger = LoggerFactory.getLogger(OpOrder.class);
 
     final TPCOpOrder localOpOrders[] = new TPCOpOrder[NettyRxScheduler.NUM_NETTY_THREADS];
+    final Object creator;
 
-
-    public OpOrder()
+    public OpOrder(Object creator)
     {
         for (int i = 0; i < NettyRxScheduler.NUM_NETTY_THREADS; i++)
-            localOpOrders[i] = new TPCOpOrder(i);
+            localOpOrders[i] = new TPCOpOrder(i, this);
+
+        this.creator = creator;
     }
 
     /**
@@ -151,7 +154,14 @@ public class OpOrder
      */
     public final class Barrier
     {
-        private TPCOpOrder.Barrier tpcBarriers[] = new TPCOpOrder.Barrier[NettyRxScheduler.NUM_NETTY_THREADS];
+        /*
+         * During startup we have 1 thread. so if a barrier is issued during startup
+         * but awaited after TPC engine, we can hang. This ensures we properly handle barriers
+         * during startup
+         */
+        private final boolean isStartup = NettyRxScheduler.isStartup();
+        private final int numCores = isStartup ? 1 : NettyRxScheduler.getNumNettyThreads();
+        private final TPCOpOrder.Barrier tpcBarriers[] = new TPCOpOrder.Barrier[numCores];
 
         /**
          * @return true if @param group was started prior to the issuing of the barrier.
@@ -161,7 +171,7 @@ public class OpOrder
          */
         public boolean isAfter(TPCOpOrder.Group group)
         {
-            TPCOpOrder.Barrier barrier = tpcBarriers[group.coreId];
+            TPCOpOrder.Barrier barrier = group.coreId >= numCores ? null : tpcBarriers[group.coreId];
             if (barrier == null)
                 return true;
 
@@ -174,12 +184,9 @@ public class OpOrder
          */
         public void issue()
         {
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            CountDownLatch latch = new CountDownLatch(threads);
+            CountDownLatch latch = new CountDownLatch(numCores);
 
-            Integer coreId = NettyRxScheduler.getCoreId();
-
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -198,10 +205,12 @@ public class OpOrder
                     }
                 };
 
-                if (coreId == null || i != coreId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be issued from a TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
             Uninterruptibles.awaitUninterruptibly(latch);
@@ -213,11 +222,9 @@ public class OpOrder
         public void markBlocking()
         {
 
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            Integer coreId = NettyRxScheduler.getCoreId();
-            CountDownLatch latch = new CountDownLatch(threads);
+            CountDownLatch latch = new CountDownLatch(numCores);
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -226,10 +233,11 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (coreId == null || i != coreId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be markedBlocked from a TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
             Uninterruptibles.awaitUninterruptibly(latch);
@@ -238,13 +246,11 @@ public class OpOrder
 
         public boolean allPriorOpsAreFinished()
         {
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            CountDownLatch latch = new CountDownLatch(threads);
-            Integer coreId = NettyRxScheduler.getCoreId();
+            CountDownLatch latch = new CountDownLatch(numCores);
 
-            boolean allPriorFinished[] = new boolean[threads];
+            boolean allPriorFinished[] = new boolean[numCores];
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -254,14 +260,15 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (coreId == null || i != coreId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be accessed TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
             Uninterruptibles.awaitUninterruptibly(latch);
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
                 if (!allPriorFinished[i])
                     return false;
 
@@ -273,14 +280,12 @@ public class OpOrder
          */
         public void await()
         {
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            CountDownLatch latch = new CountDownLatch(threads);
-            Integer coreId = NettyRxScheduler.getCoreId();
 
-            WaitQueue.Signal signals[] = new WaitQueue.Signal[threads];
+            CountDownLatch latch = new CountDownLatch(numCores);
+            WaitQueue.Signal signals[] = new WaitQueue.Signal[numCores];
             final Thread caller = Thread.currentThread();
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -293,14 +298,15 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (coreId == null || i != coreId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be awaited from a TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
             Uninterruptibles.awaitUninterruptibly(latch);
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
                 if (signals[i] != null)
                     signals[i].awaitUninterruptibly();
         }

@@ -83,7 +83,7 @@ public abstract class CommitLogSegment
     static final int SYNC_MARKER_SIZE = 4 + 4;
 
     // The OpOrder used to order appends wrt sync
-    private final OpOrder appendOrder = new OpOrder();
+    private final OpOrder appendOrder = new OpOrder(this);
 
     private final AtomicInteger allocatePosition = new AtomicInteger();
 

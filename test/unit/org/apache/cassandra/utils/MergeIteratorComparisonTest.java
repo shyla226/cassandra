@@ -517,10 +517,10 @@ public class MergeIteratorComparisonTest
     }
 
     static class Counted<T> {
-        T item;
+        Single<T> item;
         int count;
         
-        Counted(T item) {
+        Counted(Single<T> item) {
             this.item = item;
             count = 0;
         }
@@ -530,7 +530,7 @@ public class MergeIteratorComparisonTest
             if (obj == null || !(obj instanceof Counted))
                 return false;
             Counted<?> c = (Counted<?>) obj;
-            return Objects.equal(item, c.item) && count == c.count;
+            return Objects.equal(item.blockingGet(), c.item.blockingGet()) && count == c.count;
         }
 
         @Override
@@ -548,8 +548,8 @@ public class MergeIteratorComparisonTest
         public void reduce(int idx, Single<T> next)
         {
             if (current == null)
-                current = new Counted<T>(next.blockingGet());
-            assert current.item.equals(next);
+                current = new Counted<>(next);
+            assert current.item.blockingGet().equals(next.blockingGet());
             ++current.count;
         }
 

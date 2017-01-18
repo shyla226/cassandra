@@ -56,7 +56,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 20, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 100, time = 2, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 10, time = 2, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1
 , jvmArgsAppend = {"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor",
                    "-Dcassandra.storagedir=/tmp/foobar",
@@ -139,7 +139,7 @@ public class ReadWriteTest extends CQLTester
                        .jvmArgs("-server")
                        .forks(1)
                        .mode(Mode.AverageTime)
-                       //.addProfiler(LinuxPerfAsmProfiler.class)
+                       .addProfiler(LinuxPerfAsmProfiler.class)
                        .build();
 
         Collection<RunResult> records = new Runner(opts).run();

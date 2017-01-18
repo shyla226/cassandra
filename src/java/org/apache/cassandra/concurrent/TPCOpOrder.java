@@ -32,6 +32,7 @@ import io.reactivex.Single;
 import io.reactivex.functions.Action;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 /**
@@ -107,12 +108,13 @@ public class TPCOpOrder
      * will unlink this one
      */
     private volatile Group current;
-
     private final int coreId;
+    private final OpOrder parent;
 
-    public TPCOpOrder(int coreId)
+    public TPCOpOrder(int coreId, OpOrder parent)
     {
         this.coreId = coreId;
+        this.parent = parent;
         this.current = new Group(coreId);
     }
 
@@ -125,11 +127,20 @@ public class TPCOpOrder
     public Group start()
     {
         Callable<Group> c = () -> {
+
+            int i = 0;
+
             while (true)
             {
+                i++;
                 Group current = this.current;
                 if (current.register())
                     return current;
+
+                if (i > 1024)
+                {
+                    throw new AssertionError("OpOrder register loop is deadlocked");
+                }
             }
         };
 
@@ -200,7 +211,7 @@ public class TPCOpOrder
         private volatile Group prev, next;
         public final int coreId;
         private final long id; // monotonically increasing id for compareTo()
-        private int running = 0; // number of operations currently running.  < 0 means we're expired, and the count of tasks still running is -(running + 1)
+        private volatile int running = 0; // number of operations currently running.  < 0 means we're expired, and the count of tasks still running is -(running + 1)
         private volatile boolean isBlocking; // indicates running operations are blocking future barriers
         private final WaitQueue isBlockingSignal = new WaitQueue(); // signal to wait on to indicate isBlocking is true
         private final WaitQueue waiting = new WaitQueue(); // signal to wait on for completion
@@ -300,14 +311,14 @@ public class TPCOpOrder
                 if (prev == null)
                     break;
                 // if we haven't finished this Ordered yet abort and let it clean up when it's done
-                if (prev.running != FINISHED)
+                if (prev.running > FINISHED)
                     return;
                 start = prev;
             }
 
             // now walk forwards in time, in case we finished up late
             Group end = this.next;
-            while (end.running == FINISHED)
+            while (end.running <= FINISHED)
                 end = end.next;
 
             // now walk from first to last, unlinking the prev pointer and waking up any blocking threads
@@ -443,6 +454,7 @@ public class TPCOpOrder
                 throw new IllegalStateException("This barrier needs to have issue() called on it before prior operations can complete");
             if (current.next.prev == null)
                 return true;
+
             return false;
         }
 
