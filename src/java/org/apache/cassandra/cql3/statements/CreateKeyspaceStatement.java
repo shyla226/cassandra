@@ -19,11 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.regex.Pattern;
 
-import org.apache.commons.math3.analysis.function.Sin;
-
 import io.reactivex.Maybe;
-import io.reactivex.Observable;
-import io.reactivex.Single;
+
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.Validation;
@@ -105,7 +102,6 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
     public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
-
         return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)
                                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace())))
                                .onErrorResumeNext(e -> {

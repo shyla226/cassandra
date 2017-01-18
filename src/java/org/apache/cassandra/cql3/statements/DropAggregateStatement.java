@@ -102,7 +102,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
             if (old == null || !(old instanceof AggregateFunction))
             {
                 if (ifExists)
-                    return null;
+                    return Maybe.empty();
                 // just build a nicer error message
                 StringBuilder sb = new StringBuilder();
                 for (CQL3Type.Raw rawType : argRawTypes)
@@ -119,7 +119,7 @@ public final class DropAggregateStatement extends SchemaAlteringStatement
             if (olds == null || olds.isEmpty() || !(olds.iterator().next() instanceof AggregateFunction))
             {
                 if (ifExists)
-                    return null;
+                    return Maybe.empty();
                 return error(String.format("Cannot drop non existing aggregate '%s'", functionName));
             }
             old = olds.iterator().next();

@@ -82,7 +82,7 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         if (triggers.get(triggerName).isPresent())
         {
             if (ifNotExists)
-                return null;
+                return Maybe.empty();
             else
                 error(String.format("Trigger %s already exists", triggerName));
         }

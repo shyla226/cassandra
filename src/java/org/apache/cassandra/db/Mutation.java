@@ -57,8 +57,9 @@ public class Mutation implements IMutation
 
     // Time at which this mutation was instantiated
     public final long createdAt = System.currentTimeMillis();
+
     // keep track of when mutation has started waiting for a MV partition lock
-    public final AtomicLong viewLockAcquireStart = new AtomicLong(0);
+    public long viewLockAcquireStart = 0;
 
     private boolean cdcEnabled = false;
 
@@ -215,7 +216,7 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    private Completable applyAsync(boolean durableWrites, boolean isDroppable)
+    public Completable applyAsync(boolean durableWrites, boolean isDroppable)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
         return ks.apply(this, durableWrites, true, isDroppable);

@@ -109,12 +109,12 @@ public class DropTypeStatement extends SchemaAlteringStatement
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
         if (ksm == null)
-            return null; // do not assert (otherwise IF EXISTS case fails)
+            return Maybe.empty(); // do not assert (otherwise IF EXISTS case fails)
 
         UserType toDrop = ksm.types.getNullable(name.getUserTypeName());
         // Can be null with ifExists
         if (toDrop == null)
-            return null;
+            return Maybe.empty();
 
         return MigrationManager.announceTypeDrop(toDrop, isLocalOnly)
                 .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TYPE, keyspace(), name.getStringTypeName())));

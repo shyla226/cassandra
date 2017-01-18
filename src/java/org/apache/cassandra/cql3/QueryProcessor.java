@@ -489,24 +489,22 @@ public class QueryProcessor implements QueryHandler
         return processStatement(statement, queryState, options, queryStartNanoTime);
     }
 
-    public Single<ResultMessage> processBatch(BatchStatement statement,
-                                              QueryState state,
-                                              BatchQueryOptions options,
-                                              Map<String, ByteBuffer> customPayload,
-                                              long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> processBatch(BatchStatement statement,
+                                                        QueryState state,
+                                                        BatchQueryOptions options,
+                                                        Map<String, ByteBuffer> customPayload,
+                                                        long queryStartNanoTime)
     {
         return processBatch(statement, state, options, queryStartNanoTime);
     }
 
-    public Single<ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
         ClientState clientState = queryState.getClientState();
         batch.checkAccess(clientState);
         batch.validate();
         batch.validate(clientState);
-        return Single.just(batch.execute(queryState, options, queryStartNanoTime));
+        return batch.execute(queryState, options, queryStartNanoTime);
     }
 
     public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)

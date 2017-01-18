@@ -24,8 +24,6 @@ import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 
 import io.reactivex.Maybe;
-import io.reactivex.Observable;
-import io.reactivex.Single;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.*;

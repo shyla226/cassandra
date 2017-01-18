@@ -296,7 +296,6 @@ public class CreateViewStatement extends SchemaAlteringStatement
                                                        whereClauseText,
                                                        viewCfm);
 
-
         return MigrationManager.announceNewView(definition, isLocalOnly)
                                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
                                .onErrorResumeNext(e ->

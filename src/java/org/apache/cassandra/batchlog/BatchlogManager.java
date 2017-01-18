@@ -29,6 +29,7 @@ import javax.management.ObjectName;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.RateLimiter;
+import io.reactivex.Completable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,21 +107,22 @@ public class BatchlogManager implements BatchlogManagerMBean
         batchlogTasks.awaitTermination(60, TimeUnit.SECONDS);
     }
 
-    public static void remove(UUID id)
+    public static Completable remove(UUID id)
     {
-        new Mutation(PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
-                                                         UUIDType.instance.decompose(id),
-                                                         FBUtilities.timestampMicros(),
-                                                         FBUtilities.nowInSeconds()))
-            .apply();
+        return new Mutation(PartitionUpdate.fullPartitionDelete(
+                SystemKeyspace.Batches,
+                UUIDType.instance.decompose(id),
+                FBUtilities.timestampMicros(),
+                FBUtilities.nowInSeconds()))
+            .applyAsync();
     }
 
-    public static void store(Batch batch)
+    public static Completable store(Batch batch)
     {
-        store(batch, true);
+        return store(batch, true);
     }
 
-    public static void store(Batch batch, boolean durableWrites)
+    public static Completable store(Batch batch, boolean durableWrites)
     {
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
@@ -145,14 +147,14 @@ public class BatchlogManager implements BatchlogManagerMBean
                .add("version", MessagingService.current_version)
                .appendAll("mutations", mutations);
 
-        builder.buildAsMutation().apply(durableWrites);
+        return builder.buildAsMutation().applyAsync(durableWrites, true);
     }
 
     @VisibleForTesting
     public int countAllBatches()
     {
         String query = String.format("SELECT count(*) FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES);
-        // TODO make async
+        // TODO make async?
         UntypedResultSet results = executeInternal(query).blockingGet();
         if (results == null || results.isEmpty())
             return 0;
@@ -222,6 +224,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         return (int) Math.max(1, Math.min(DEFAULT_PAGE_SIZE, 4 * 1024 * 1024 / averageRowSize));
     }
 
+    // TODO make this process everything async?
     private void processBatchlogEntries(UntypedResultSet batches, int pageSize, RateLimiter rateLimiter)
     {
         int positionInPage = 0;
@@ -244,14 +247,14 @@ public class BatchlogManager implements BatchlogManagerMBean
                 }
                 else
                 {
-                    remove(id); // no write mutations were sent (either expired or all CFs involved truncated).
+                    remove(id).blockingAwait(); // no write mutations were sent (either expired or all CFs involved truncated).
                     ++totalBatchesReplayed;
                 }
             }
             catch (IOException e)
             {
                 logger.warn("Skipped batch replay of {} due to {}", id, e);
-                remove(id);
+                remove(id).blockingAwait();
             }
 
             if (++positionInPage == pageSize)
@@ -269,7 +272,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         HintsService.instance.flushAndFsyncBlockingly(transform(hintedNodes, StorageService.instance::getHostIdForEndpoint));
 
         // once all generated hints are fsynced, actually delete the batches
-        replayedBatches.forEach(BatchlogManager::remove);
+        replayedBatches.forEach(uuid -> BatchlogManager.remove(uuid).blockingAwait());
     }
 
     private void finishAndClearBatches(ArrayList<ReplayingBatch> batches, Set<InetAddress> hintedNodes, Set<UUID> replayedBatches)

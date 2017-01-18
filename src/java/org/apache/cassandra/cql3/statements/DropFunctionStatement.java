@@ -24,7 +24,6 @@ import java.util.List;
 import com.google.common.base.Joiner;
 
 import io.reactivex.Maybe;
-import io.reactivex.Single;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.Schema;

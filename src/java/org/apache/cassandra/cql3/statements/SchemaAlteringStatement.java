@@ -120,7 +120,7 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
 
     public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
-        return announceMigration(true).map(schemaChangeEvent -> new ResultMessage.SchemaChange(schemaChangeEvent))
+        return announceMigration(true).map(ResultMessage.SchemaChange::new)
                                       .cast(ResultMessage.class)
                                       .toSingle(new ResultMessage.Void());
     }

@@ -63,7 +63,6 @@ public class DropTableStatement extends SchemaAlteringStatement
 
     public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
     {
-
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
         if (ksm == null)
             return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));

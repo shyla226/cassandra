@@ -19,7 +19,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
-import io.reactivex.Single;
 
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.CFMetaData;
@@ -56,7 +55,7 @@ public class DropViewStatement extends SchemaAlteringStatement
 
     public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
-
+        // TODO figure out why this is commented out, and what still needs to be done here
 //            ViewDefinition view = Schema.instance.getViewDefinition(keyspace(), columnFamily());
 //            if (view == null)
 //            {
@@ -84,6 +83,5 @@ public class DropViewStatement extends SchemaAlteringStatement
 
                                                           return Maybe.error(e);
                                                       });
-
     }
 }

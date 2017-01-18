@@ -153,7 +153,7 @@ public class BatchlogManagerTest
                            ? (System.currentTimeMillis() - BatchlogManager.getBatchlogTimeout())
                            : (System.currentTimeMillis() + BatchlogManager.getBatchlogTimeout());
 
-            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations));
+            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingAwait();
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
@@ -237,7 +237,7 @@ public class BatchlogManagerTest
             else
                 timestamp--;
 
-            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), FBUtilities.timestampMicros(), mutations));
+            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), FBUtilities.timestampMicros(), mutations)).blockingAwait();
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
@@ -292,8 +292,7 @@ public class BatchlogManagerTest
                           .build());
         }
 
-
-        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations)).blockingAwait();
         Assert.assertEquals(initialAllBatches + 1, BatchlogManager.instance.countAllBatches());
 
         String query = String.format("SELECT count(*) FROM %s.%s where id = %s",
@@ -325,11 +324,11 @@ public class BatchlogManagerTest
         }
 
         // Store the batch
-        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations)).blockingAwait();
         Assert.assertEquals(initialAllBatches + 1, BatchlogManager.instance.countAllBatches());
 
         // Remove the batch
-        BatchlogManager.remove(uuid);
+        BatchlogManager.remove(uuid).blockingAwait();
 
         assertEquals(initialAllBatches, BatchlogManager.instance.countAllBatches());
 
@@ -365,7 +364,7 @@ public class BatchlogManagerTest
                           .add("val", "val" + j)
                           .build());
         }
-        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations));
+        BatchlogManager.store(Batch.createLocal(uuid, timestamp, mutations)).blockingAwait();
         assertEquals(1, BatchlogManager.instance.countAllBatches() - initialAllBatches);
 
         // Flush the batchlog to disk (see CASSANDRA-6822).

@@ -227,7 +227,7 @@ public class BatchMessage extends Message.Request
             final UUID finalTracingId = tracingId;
 
             return handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime)
-                          .map( response -> {
+                          .map(response -> {
                               if (finalTracingId != null)
                                   response.setTracingId(finalTracingId);
 

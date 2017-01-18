@@ -31,6 +31,7 @@ import com.google.common.util.concurrent.Striped;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.*;
@@ -51,6 +52,7 @@ public class CounterMutation implements IMutation
 {
     public static final CounterMutationSerializer serializer = new CounterMutationSerializer();
 
+    // TODO with TPC, we could use a separate (smaller) set of locks per core/thread to minimize contention
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentCounterWriters() * 1024);
 
     private final Mutation mutation;
@@ -111,58 +113,82 @@ public class CounterMutation implements IMutation
      *
      * @return the applied resulting Mutation
      */
-    public Mutation applyCounterMutation() throws WriteTimeoutException
+    public Single<Mutation> applyCounterMutation()
     {
-        Mutation result = new Mutation(getKeyspaceName(), key());
-        Keyspace keyspace = Keyspace.open(getKeyspaceName());
+        return applyCounterMutation(System.nanoTime());
+    }
 
-        List<Lock> locks = new ArrayList<>();
-        Tracing.trace("Acquiring counter locks");
-        try
+    private Single<Mutation> applyCounterMutation(long startTime)
+    {
+        return Single.defer(() ->
         {
-            grabCounterLocks(keyspace, locks);
-            for (PartitionUpdate upd : getPartitionUpdates())
-                result.add(processModifications(upd));
-            result.apply();
-            return result;
-        }
-        finally
-        {
-            for (Lock lock : locks)
-                lock.unlock();
-        }
+            Keyspace keyspace = Keyspace.open(getKeyspaceName());
+            if ((System.nanoTime() - startTime) > TimeUnit.MILLISECONDS.toNanos(getTimeout()))
+                return Single.error(new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace)));
+
+            Mutation result = new Mutation(getKeyspaceName(), key());
+            List<Lock> locks = new ArrayList<>();
+            Tracing.trace("Acquiring counter locks");
+            try
+            {
+                boolean success = tryGrabCounterLocks(locks);
+                if (!success)
+                {
+                    Tracing.trace("Failed to acquire counter locks, scheduling retry");
+                    return Single.defer(() -> this.applyCounterMutation(startTime))
+                            .subscribeOn(NettyRxScheduler.instance());
+                }
+
+                // TODO this will need to become async to handle disk reads
+                for (PartitionUpdate upd : getPartitionUpdates())
+                    result.add(processModifications(upd));
+
+                Completable completable = result.applyAsync();
+                completable = completable.doFinally(() -> {
+                    for (Lock lock : locks)
+                        lock.unlock();
+                });
+                return completable.toSingleDefault(result);
+            }
+            // failsafe lock release
+            catch (Throwable t)
+            {
+                for (Lock lock : locks)
+                    lock.unlock();
+                throw t;
+            }
+        }).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));
     }
 
     public void apply()
     {
-        applyCounterMutation();
+        applyCounterMutation().blockingGet();
     }
 
     public Completable applyAsync()
     {
-        // TODO rx-ify
-        applyCounterMutation();
-        return Completable.complete();
+        return applyCounterMutation().toCompletable();
     }
 
-    private void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException
+    /**
+     * @param locks a list that will be populated with acquired locks, if all acquisitions are successful
+     * @return true if lock acquisition was successful, false otherwise
+     */
+    private boolean tryGrabCounterLocks(List<Lock> locks)
     {
-        long startTime = System.nanoTime();
-
         for (Lock lock : LOCKS.bulkGet(getCounterLockKeys()))
         {
-            long timeout = TimeUnit.MILLISECONDS.toNanos(getTimeout()) - (System.nanoTime() - startTime);
-            try
+            if (!lock.tryLock())
             {
-                if (!lock.tryLock(timeout, TimeUnit.NANOSECONDS))
-                    throw new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace));
-                locks.add(lock);
+                // we failed to acquire a lock, so unlock everything we've acquired and give up
+                for (Lock toUnlock: locks)
+                    toUnlock.unlock();
+                locks.clear();
+                return false;
             }
-            catch (InterruptedException e)
-            {
-                throw new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace));
-            }
+            locks.add(lock);
         }
+        return true;
     }
 
     /**
@@ -208,6 +234,7 @@ public class CounterMutation implements IMutation
         }
 
         Tracing.trace("Reading {} counter values from the CF", marks.size());
+        // TODO this will need to become async to handle disk reads
         updateWithCurrentValuesFromCFS(marks, cfs);
 
         // What's remain is new counters
@@ -263,6 +290,7 @@ public class CounterMutation implements IMutation
         ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(names.build(), false);
         SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(cfs.metadata, nowInSec, key(), builder.build(), filter);
         PeekingIterator<PartitionUpdate.CounterMark> markIter = Iterators.peekingIterator(marks.iterator());
+        // TODO queryMemtableAndDisk will become async, need to update how counters writes work based on that
         try (ReadExecutionController controller = cmd.executionController();
              RowIterator partition = UnfilteredRowIterators.filter(cmd.queryMemtableAndDisk(cfs, controller).blockingGet(), nowInSec))
         {

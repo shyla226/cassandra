@@ -36,6 +36,7 @@ import com.google.common.collect.Maps;
 import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
@@ -345,43 +346,58 @@ public class BatchStatement implements CQLStatement
     }
 
 
-    public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
-        return Single.just(execute(queryState, BatchQueryOptions.withoutPerStatementVariables(options), queryStartNanoTime));
+        return execute(queryState, BatchQueryOptions.withoutPerStatementVariables(options), queryStartNanoTime);
     }
 
-    public ResultMessage execute(QueryState queryState, BatchQueryOptions options, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    public Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
         return execute(queryState, options, false, options.getTimestamp(queryState), queryStartNanoTime);
     }
 
-    private ResultMessage execute(QueryState queryState, BatchQueryOptions options, boolean local, long now, long queryStartNanoTime)
-    throws RequestExecutionException, RequestValidationException
+    private Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, boolean local, long now, long queryStartNanoTime)
     {
         if (options.getConsistency() == null)
-            throw new InvalidRequestException("Invalid empty consistency level");
+            return Single.error(new InvalidRequestException("Invalid empty consistency level"));
         if (options.getSerialConsistency() == null)
-            throw new InvalidRequestException("Invalid empty serial consistency level");
+            return Single.error(new InvalidRequestException("Invalid empty serial consistency level"));
 
-        if (hasConditions)
-            return executeWithConditions(options, queryState, queryStartNanoTime);
+        if (!hasConditions)
+            return executeWithoutConditions(getMutations(options, local, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
 
-        executeWithoutConditions(getMutations(options, local, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
-        return new ResultMessage.Void();
+        // Paxos is already slow, so for now, just execute it in a blocking way on a different thread
+        return Single.defer(() -> {
+            try
+            {
+                return Single.just(executeWithConditions(options, queryState, queryStartNanoTime));
+            }
+            catch (Throwable t)
+            {
+                return Single.error(t);
+            }
+        }).subscribeOn(Schedulers.io());
     }
 
-    private void executeWithoutConditions(Collection<? extends IMutation> mutations, ConsistencyLevel cl, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
+    private Single<? extends ResultMessage> executeWithoutConditions(Collection<? extends IMutation> mutations, ConsistencyLevel cl, long queryStartNanoTime)
     {
         if (mutations.isEmpty())
-            return;
+            return Single.just(new ResultMessage.Void());
 
-        verifyBatchSize(mutations);
-        verifyBatchType(mutations);
+        try
+        {
+            verifyBatchSize(mutations);
+            verifyBatchType(mutations);
+        }
+        catch (InvalidRequestException exc)
+        {
+            return Single.error(exc);
+        }
 
         updatePartitionsPerBatchMetrics(mutations.size());
 
         boolean mutateAtomic = (isLogged() && mutations.size() > 1);
-        StorageProxy.mutateWithTriggers(mutations, cl, mutateAtomic, queryStartNanoTime);
+        return StorageProxy.mutateWithTriggers(mutations, cl, mutateAtomic, queryStartNanoTime);
     }
 
     private void updatePartitionsPerBatchMetrics(int updatedPartitions)

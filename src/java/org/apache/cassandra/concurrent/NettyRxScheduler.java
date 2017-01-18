@@ -44,6 +44,7 @@ import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -174,10 +175,14 @@ public class NettyRxScheduler extends Scheduler
         if (useImmediateForLocal)
             callerCoreId = getCoreId();
 
-        // Convert OP partitions to top level partitioner
-        // Needed for 2i and System tables
+        // Convert OP partitions to top level partitioner for secondary indexes; always route
+        // system table mutations through core 0
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
         {
+            if (SchemaConstants.isSystemKeyspace(keyspaceName)
+                        || SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName))
+                return getForCore(0);
+
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
         }
 
