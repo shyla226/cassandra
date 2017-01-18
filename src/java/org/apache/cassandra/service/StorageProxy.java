@@ -1960,8 +1960,7 @@ public class StorageProxy implements StorageProxyMBean
 
         Single<PartitionIterator> getPartitionIterator()
         {
-            return doInitialQueries()
-                   .andThen(maybeTryAdditionalReplicas())
+            return Completable.concatArray(doInitialQueries(), maybeTryAdditionalReplicas())
                    .andThen(executor.handler.get()
                             .onErrorResumeNext(e ->
                                                {

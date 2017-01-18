@@ -419,7 +419,8 @@ public abstract class AbstractReadExecutor
             if (targetReplicas.size() > 2)
                 result = result.concatWith(makeDigestRequests(targetReplicas.subList(2, targetReplicas.size())));
 
-            return result.concatWith(Completable.fromAction(() -> cfs.metric.speculativeRetries.inc()));
+            cfs.metric.speculativeRetries.inc();
+            return result;
         }
     }
 }
