@@ -129,7 +129,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                 emitter = e;
             }
         })
-               .timeout(command.getTimeout(), TimeUnit.MILLISECONDS)
+               .timeout(command.getTimeout(), TimeUnit.MILLISECONDS, NettyRxScheduler.instance())
                .onErrorResumeNext(exc -> {
                    if (Tracing.isTracing())
                    {
