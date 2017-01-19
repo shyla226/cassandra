@@ -631,14 +631,14 @@ public final class SystemKeyspace
         return s;
     }
 
-    private static List<String> tokensAsList(Collection<PartitionPosition> tokens)
+    private static List<String> tokensAsList(Collection<Long> tokens)
     {
         if (tokens.isEmpty())
             return Collections.emptyList();
         Token.TokenFactory factory = StorageService.instance.getTokenFactory();
         List<String> s = new ArrayList<>(tokens.size());
-        for (PartitionPosition tk : tokens)
-            s.add(factory.toString(tk.getToken()));
+        for (Long tk : tokens)
+            s.add(tk.toString());
         return s;
     }
 
@@ -676,7 +676,7 @@ public final class SystemKeyspace
     {
         // TODO technically this needs to be per-keyspace; just use a distributed KS for now
         ColumnFamilyStore cfs = Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(SystemDistributedKeyspace.REPAIR_HISTORY);
-        List<PartitionPosition> ranges = NettyRxScheduler.getRangeList(cfs.keyspace.getName(), false);
+        List<Long> ranges = NettyRxScheduler.getRangeList(cfs.keyspace.getName(), false);
         String req = "INSERT INTO system.%s (key, token_boundaries) VALUES ('%s', ?)";
         logger.info("LIST = " + tokensAsList(ranges));
         executeInternal(String.format(req, LOCAL, LOCAL), tokensAsList(ranges)).blockingGet();

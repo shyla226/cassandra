@@ -130,7 +130,7 @@ public class Memtable implements Comparable<Memtable>
     private final List<TreeMap<PartitionPosition, AtomicBTreePartition>> partitions;
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
-    private final List<PartitionPosition> rangeList;
+    private final List<Long> rangeList;
     private final boolean hasSplits;
 
     // The smallest timestamp for all partitions stored in this memtable
@@ -171,7 +171,7 @@ public class Memtable implements Comparable<Memtable>
         this.partitions = generatePartitionMaps();
     }
 
-    private List<PartitionPosition> generateRangeList(ColumnFamilyStore cfs)
+    private List<Long> generateRangeList(ColumnFamilyStore cfs)
     {
         if (!hasSplits)
             return null;
@@ -200,11 +200,13 @@ public class Memtable implements Comparable<Memtable>
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
 
-        PartitionPosition rangeStart = rangeList.get(0);
+        Long keyToken = (Long) key.getToken().getTokenValue();
+
+        Long rangeStart = rangeList.get(0);
         for (int i = 1; i < rangeList.size(); i++)
         {
-            PartitionPosition next = rangeList.get(i);
-            if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
+            Long next = rangeList.get(i);
+            if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
                 return partitions.get(i - 1);
 
             rangeStart = next;

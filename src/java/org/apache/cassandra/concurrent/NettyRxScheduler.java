@@ -28,6 +28,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
@@ -38,16 +39,22 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.CompositeDisposable;
+import io.reactivex.disposables.Disposables;
+import io.reactivex.internal.disposables.DisposableContainer;
 import io.reactivex.internal.disposables.EmptyDisposable;
+import io.reactivex.internal.disposables.ListCompositeDisposable;
+import io.reactivex.internal.schedulers.ComputationScheduler;
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.rx.RxSubscriptionDebugger;
@@ -83,9 +90,9 @@ public class NettyRxScheduler extends Scheduler
         }
     };
 
-    final static Map<String, List<PartitionPosition>> keyspaceToRangeMapping = new HashMap<>();
+    public final static FastThreadLocal<Integer> threadToCoreIdMapping = new FastThreadLocal<>();
 
-    final static IdentityHashMap<Thread, Integer> eventLoopThreads = new IdentityHashMap<>();
+    final static Map<String, List<Long>> keyspaceToRangeMapping = new HashMap<>();
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
@@ -118,7 +125,7 @@ public class NettyRxScheduler extends Scheduler
             scheduler = new NettyRxScheduler(loop, cpuId);
             localNettyEventLoop.set(scheduler);
             perCoreSchedulers[cpuId] = scheduler;
-            eventLoopThreads.put(Thread.currentThread(), cpuId);
+            threadToCoreIdMapping.set(cpuId);
             logger.info("Putting {} on core {}", Thread.currentThread().getName(), cpuId);
             isStartup = false;
         }
@@ -128,7 +135,7 @@ public class NettyRxScheduler extends Scheduler
 
     public static boolean inEventLoop()
     {
-        return isStartup || eventLoopThreads.containsKey(Thread.currentThread());
+        return isStartup || threadToCoreIdMapping.get() != null;
     }
 
     public static Integer getCoreId()
@@ -136,7 +143,7 @@ public class NettyRxScheduler extends Scheduler
         if (isStartup)
             return 0;
 
-        return eventLoopThreads.get(Thread.currentThread());
+        return threadToCoreIdMapping.get();
     }
 
     public static boolean isStartup()
@@ -161,15 +168,16 @@ public class NettyRxScheduler extends Scheduler
 
     public static Scheduler getForCore(int core)
     {
-        NettyRxScheduler scheduler = perCoreSchedulers[core];
-        assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
-
         if (isStartup)
             return ImmediateThinScheduler.INSTANCE;
+
+        NettyRxScheduler scheduler = perCoreSchedulers[core];
+        assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
 
         return scheduler;
     }
 
+    @Inline
     public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
     {
         // force all system table operations to go through a single core
@@ -180,30 +188,27 @@ public class NettyRxScheduler extends Scheduler
         if (useImmediateForLocal)
             callerCoreId = getCoreId();
 
+        if (SchemaConstants.isSystemKeyspace(keyspaceName) || SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName))
+            return getForCore(0);
+
         // Convert OP partitions to top level partitioner for secondary indexes; always route
         // system table mutations through core 0
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
-        {
-            if (SchemaConstants.isSystemKeyspace(keyspaceName)
-                        || SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName))
-                return getForCore(0);
-
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
-        }
 
-        List<PartitionPosition> keyspaceRanges = getRangeList(keyspaceName);
+        List<Long> keyspaceRanges = getRangeList(keyspaceName);
+        Long keyToken = (Long)key.getToken().getTokenValue();
 
-        PartitionPosition rangeStart = keyspaceRanges.get(0);
+        Long rangeStart = keyspaceRanges.get(0);
         for (int i = 1; i < keyspaceRanges.size(); i++)
         {
-            PartitionPosition next = keyspaceRanges.get(i);
-            if (key.compareTo(rangeStart) >= 0 && key.compareTo(next) < 0)
+            Long next = keyspaceRanges.get(i);
+            if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
             {
                 //logger.info("Read moving to {} from {}", i-1, getCoreId());
 
                 if (useImmediateForLocal)
                     return callerCoreId != null && callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
-
 
                 return getForCore(i - 1);
             }
@@ -214,20 +219,23 @@ public class NettyRxScheduler extends Scheduler
         throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
     }
 
-    public static List<PartitionPosition> getRangeList(String keyspaceName)
+    public static List<Long> getRangeList(String keyspaceName)
     {
         return getRangeList(keyspaceName, true);
     }
 
-    public static List<PartitionPosition> getRangeList(String keyspaceName, boolean persist)
+    public static List<Long> getRangeList(String keyspaceName, boolean persist)
     {
-        List<PartitionPosition> ranges = keyspaceToRangeMapping.get(keyspaceName);
+        List<Long> ranges = keyspaceToRangeMapping.get(keyspaceName);
 
         if (ranges != null)
             return ranges;
 
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspaceName);
-        List<PartitionPosition> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS);
+        List<Long> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS)
+                                          .stream()
+                                          .map(s -> (Long) s.getToken().getTokenValue())
+                                          .collect(Collectors.toList());
 
         if (persist)
         {
@@ -253,7 +261,13 @@ public class NettyRxScheduler extends Scheduler
 
 
     @Override
-    public Scheduler.Worker createWorker()
+    public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)
+    {
+        return createWorker().scheduleDirect(run, delay, unit);
+    }
+
+    @Override
+    public Worker createWorker()
     {
         return new Worker(eventLoop);
     }
@@ -262,14 +276,14 @@ public class NettyRxScheduler extends Scheduler
     {
         private final EventExecutorGroup nettyEventLoop;
 
-        private final CompositeDisposable tasks;
+        private final ListCompositeDisposable tasks;
 
         volatile boolean disposed;
 
         Worker(EventExecutorGroup nettyEventLoop)
         {
             this.nettyEventLoop = nettyEventLoop;
-            this.tasks = new CompositeDisposable();
+            this.tasks = new ListCompositeDisposable();
         }
 
         @Override
@@ -310,7 +324,30 @@ public class NettyRxScheduler extends Scheduler
             return scheduleActual(action, delayTime, unit, tasks);
         }
 
-        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, CompositeDisposable parent)
+        public Disposable scheduleDirect(final Runnable run, long delayTime, TimeUnit unit)
+        {
+            Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+            try
+            {
+                Future<?> f;
+                if (delayTime <= 0)
+                {
+                    f = nettyEventLoop.submit(decoratedRun);
+                }
+                else
+                {
+                    f = nettyEventLoop.schedule(decoratedRun, delayTime, unit);
+                }
+                return Disposables.fromFuture(f);
+            }
+            catch (RejectedExecutionException ex)
+            {
+                RxJavaPlugins.onError(ex);
+                return EmptyDisposable.INSTANCE;
+            }
+        }
+
+        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, DisposableContainer parent)
         {
             Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
 
