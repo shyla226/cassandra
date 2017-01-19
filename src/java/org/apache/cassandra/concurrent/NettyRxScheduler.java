@@ -99,8 +99,7 @@ public class NettyRxScheduler extends Scheduler
 
     final EventExecutorGroup eventLoop;
     public final int cpuId;
-    public final long cpuThreadId;
-    public final String cpuThreadName;
+    public final Thread cpuThread;
 
     public static NettyRxScheduler instance()
     {
@@ -137,6 +136,14 @@ public class NettyRxScheduler extends Scheduler
         return eventLoopThreads.get(Thread.currentThread());
     }
 
+    public static Integer getCoreId(Scheduler scheduler)
+    {
+        if (scheduler instanceof NettyRxScheduler)
+            return ((NettyRxScheduler)scheduler).cpuId;
+
+        return null;
+    }
+
     public static int getNumNettyThreads()
     {
         return isStartup ? 1 : NUM_NETTY_THREADS;
@@ -148,8 +155,12 @@ public class NettyRxScheduler extends Scheduler
         assert cpuId >= 0;
         this.eventLoop = eventLoop;
         this.cpuId = cpuId;
-        this.cpuThreadId = Thread.currentThread().getId();
-        this.cpuThreadName = Thread.currentThread().getName();
+        this.cpuThread = Thread.currentThread();
+    }
+
+    public static int getNumCores()
+    {
+        return perCoreSchedulers.length;
     }
 
     public static Scheduler getForCore(int core)
@@ -161,6 +172,16 @@ public class NettyRxScheduler extends Scheduler
             return ImmediateThinScheduler.INSTANCE;
 
         return scheduler;
+    }
+
+    public static NettyRxScheduler maybeGetForCore(int core)
+    {
+        return perCoreSchedulers[core];
+    }
+
+    public static boolean isValidCoreId(Integer coreId)
+    {
+        return coreId != null && coreId >= 0 && coreId <= getNumCores();
     }
 
     public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)

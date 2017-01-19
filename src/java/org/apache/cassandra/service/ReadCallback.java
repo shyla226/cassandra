@@ -18,6 +18,7 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.stream.Collectors;
 
 import io.reactivex.Single;
 import org.apache.cassandra.db.*;
@@ -32,8 +34,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
-import io.reactivex.Scheduler;
 import io.reactivex.subjects.BehaviorSubject;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
@@ -44,16 +44,13 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 
 public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
@@ -78,6 +75,9 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
     final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
     final Single<PartitionIterator> observable;
+
+    // the core on which a local request is scheduled, if any
+    private Integer localCoreId = null;
 
     /**
      * Constructor when response count has to be calculated and blocked for.
@@ -130,10 +130,36 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                    }
 
                    if (exc instanceof TimeoutException)
+                   {
+                       if (NettyRxScheduler.isValidCoreId(localCoreId))
+                       {
+                           logger.info("Local request was running on core {}, thread stack:\n{}",
+                                       localCoreId,
+                                       Arrays.stream(NettyRxScheduler.maybeGetForCore(localCoreId).cpuThread.getStackTrace())
+                                             .map(e -> String.format("\tat %s\n", e))
+                                             .collect(Collectors.toList()));
+                       }
+                       else
+                       {
+                           logger.debug("Local request was running on unassigned or invalid core ({})", localCoreId);
+                       }
+
                        return Single.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
+                   }
 
                    return Single.error(exc);
                });
+    }
+
+    /**
+     * Store the information of which core a local request is running on, if any. This is helpful
+     * for debugging local query timeouts.
+     *
+     * @param localCoreId - the core id of the local read request, null if running on a scheduler with unassinged core
+     */
+    public void setLocalCoreId(Integer localCoreId)
+    {
+        this.localCoreId = localCoreId;
     }
 
     public Single<PartitionIterator> get()

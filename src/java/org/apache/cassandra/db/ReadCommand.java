@@ -383,7 +383,7 @@ public abstract class ReadCommand implements ReadQuery
 
             resultIterator = withStateTracking(resultIterator);
             resultIterator = withOpOrderTracking(resultIterator, group);
-            //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+            resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
             // no point in checking it again.
