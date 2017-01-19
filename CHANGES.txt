@@ -1,6 +1,8 @@
 DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
+ * Read repair is not blocking repair to finish in foreground repair (CASSANDRA-13115)
+ * Stress daemon help is incorrect (CASSANDRA-12563)
  * Remove ALTER TYPE support (CASSANDRA-12443)
  * Fix assertion for certain legacy range tombstone pattern (CASSANDRA-12203)
  * Set javac encoding to utf-8 (CASSANDRA-11077)
