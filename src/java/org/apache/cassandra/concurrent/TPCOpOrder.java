@@ -18,20 +18,16 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Completable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import io.reactivex.functions.Action;
-import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 /**
@@ -93,6 +89,34 @@ s.doProduceWork();
  */
 public class TPCOpOrder
 {
+    private static final boolean DEBUG_OP_ORDER_CALLERS = false;
+
+    private static final class DebugThreadInfo
+    {
+        private final String name;
+        private final int callingCoreId;
+        private final StackTraceElement[] stackTraceElements;
+
+        DebugThreadInfo(Thread t, int callingCoreId)
+        {
+            this.name = t.getName();
+            this.callingCoreId = callingCoreId;
+            this.stackTraceElements = t.getStackTrace();
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder ret = new StringBuilder();
+            ret.append(name).append(" - calling core id: ").append(callingCoreId).append('\n');
+            for (StackTraceElement t : stackTraceElements)
+                ret.append("\t at ").append(t.toString()).append('\n');
+            ret.append('\n');
+
+            return ret.toString();
+        }
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(TPCOpOrder.class);
 
     /**
@@ -122,23 +146,27 @@ public class TPCOpOrder
      *
      * @return the Ordered instance that manages this OpOrder
      */
-    public Group start()
+    public Group start(int callingCore)
     {
-        Callable<Group> c = () -> {
+        final DebugThreadInfo debugThreadInfo = DEBUG_OP_ORDER_CALLERS ? new DebugThreadInfo(Thread.currentThread(), callingCore) : null;
+        Callable<Group> c = () ->
+        {
+            // which thread is updating this.current?
+            // Also, this method will hang the thread if an op order
+            // is closed one extra time so we need to put some safety checks in place
             while (true)
             {
                 Group current = this.current;
-                if (current.register())
+                if (current.register(debugThreadInfo))
                     return current;
             }
         };
 
-        Integer callingCore = NettyRxScheduler.getCoreId();
-        if (callingCore == null || callingCore != coreId)
+        if (callingCore != coreId)
         {
             //logger.info("Calling core {} not oporder owner will route start() to core {}", callingCore, coreId);
             Single<Group> g = Single.fromCallable(c);
-            g = g.observeOn(NettyRxScheduler.getForCore(coreId));
+            g = g.subscribeOn(NettyRxScheduler.getForCore(coreId));
             return g.blockingGet();
         }
 
@@ -204,6 +232,9 @@ public class TPCOpOrder
         private final WaitQueue isBlockingSignal = new WaitQueue(); // signal to wait on to indicate isBlocking is true
         private final WaitQueue waiting = new WaitQueue(); // signal to wait on for completion
 
+        private final List<DebugThreadInfo> openingThreads = DEBUG_OP_ORDER_CALLERS ? new ArrayList<>(16) : null;
+        private final List<DebugThreadInfo> closingThreads = DEBUG_OP_ORDER_CALLERS ? new ArrayList<>(16) : null;
+
         // constructs first instance only
         private Group(int coreId)
         {
@@ -236,10 +267,13 @@ public class TPCOpOrder
         }
 
         // attempts to start an operation against this Ordered instance, and returns true if successful.
-        private boolean register()
+        private boolean register(DebugThreadInfo debugThreadInfo)
         {
             if (running < 0)
                 return false;
+
+            if (DEBUG_OP_ORDER_CALLERS)
+                openingThreads.add(debugThreadInfo);
 
             ++running;
             return true;
@@ -251,8 +285,15 @@ public class TPCOpOrder
          */
         public void close()
         {
+            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
+            final DebugThreadInfo debugThreadInfo = DEBUG_OP_ORDER_CALLERS ? new DebugThreadInfo(Thread.currentThread(), scheduler.cpuId) : null;
+
+
             Runnable c = () ->
             {
+                if (DEBUG_OP_ORDER_CALLERS)
+                    closingThreads.add(debugThreadInfo);
+
                 if (running < 0)
                 {
                     ++running;
@@ -267,12 +308,14 @@ public class TPCOpOrder
                 {
                     --running;
                     if (running < 0)
-                        throw new IllegalStateException("A local Op Order was closed more than once.");
+                    {
+                        logThreadInfo("A local op oprder was closed more than once");
+                        throw new IllegalStateException("A local op order was closed more than once.");
+                    }
                 }
             };
 
-            Integer callingCore = NettyRxScheduler.getCoreId();
-            if (callingCore == null || callingCore != coreId)
+            if (scheduler.cpuId != coreId)
             {
                 //logger.info("Calling core {} not oporder owner will route close() to core {}", callingCore, coreId);
                 NettyRxScheduler.getForCore(coreId).scheduleDirect(c);
@@ -282,6 +325,15 @@ public class TPCOpOrder
             c.run();
         }
 
+        private void logThreadInfo(String message)
+        {
+            if (DEBUG_OP_ORDER_CALLERS)
+            {
+                logger.debug("{}:", message);
+                logger.debug("Opening threads: \n{}", openingThreads.stream().map(DebugThreadInfo::toString).collect(Collectors.joining("\n")));
+                logger.debug("Closing threads: \n{}", closingThreads.stream().map(DebugThreadInfo::toString).collect(Collectors.joining("\n")));
+            }
+        }
         /**
          * called once we know all operations started against this Ordered have completed,
          * however we do not know if operations against its ancestors have completed, or
@@ -401,6 +453,8 @@ public class TPCOpOrder
 
             final Group oldCurrent;
 
+            //is this still required? It seems to be called only from the core thread but then again
+            //I think the awaitUninterruptibly in OpOrder.issue() is not safe.
             synchronized (TPCOpOrder.this)
             {
                 oldCurrent = current;

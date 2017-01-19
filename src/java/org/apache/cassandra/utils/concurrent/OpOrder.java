@@ -106,12 +106,9 @@ public class OpOrder
      */
     public TPCOpOrder.Group start()
     {
-        Integer coreId = NettyRxScheduler.getCoreId();
-
-        if (coreId == null)
-            coreId = 0;
-
-        return localOpOrders[coreId].start();
+        NettyRxScheduler scheduler = NettyRxScheduler.instance();
+        int coreId = NettyRxScheduler.isValidCoreId(scheduler.cpuId) ? scheduler.cpuId : 0;
+        return localOpOrders[coreId].start(scheduler.cpuId);
     }
 
     public TPCOpOrder.Group getCurrent(int coreId)
@@ -174,10 +171,9 @@ public class OpOrder
          */
         public void issue()
         {
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            CountDownLatch latch = new CountDownLatch(threads);
-
-            Integer coreId = NettyRxScheduler.getCoreId();
+            final int threads = NettyRxScheduler.getNumNettyThreads();
+            final CountDownLatch latch = new CountDownLatch(threads);
+            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
 
             for (int i = 0; i < threads; i++)
             {
@@ -197,12 +193,13 @@ public class OpOrder
                     }
                 };
 
-                if (coreId == null || i != coreId)
+                if (i != scheduler.cpuId)
                     NettyRxScheduler.getForCore(i).scheduleDirect(r);
                 else
                     r.run();
             }
 
+            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
         }
 
@@ -211,10 +208,9 @@ public class OpOrder
          */
         public void markBlocking()
         {
-
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            Integer coreId = NettyRxScheduler.getCoreId();
-            CountDownLatch latch = new CountDownLatch(threads);
+            final int threads = NettyRxScheduler.getNumNettyThreads();
+            final CountDownLatch latch = new CountDownLatch(threads);
+            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
 
             for (int i = 0; i < threads; i++)
             {
@@ -225,21 +221,22 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (coreId == null || i != coreId)
+                if (i != scheduler.cpuId)
                     NettyRxScheduler.getForCore(i).scheduleDirect(r);
                 else
                     r.run();
             }
 
+            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
         }
 
 
         public boolean allPriorOpsAreFinished()
         {
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            CountDownLatch latch = new CountDownLatch(threads);
-            Integer coreId = NettyRxScheduler.getCoreId();
+            final int threads = NettyRxScheduler.getNumNettyThreads();
+            final CountDownLatch latch = new CountDownLatch(threads);
+            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
 
             boolean allPriorFinished[] = new boolean[threads];
 
@@ -253,12 +250,13 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (coreId == null || i != coreId)
+                if (i != scheduler.cpuId)
                     NettyRxScheduler.getForCore(i).scheduleDirect(r);
                 else
                     r.run();
             }
 
+            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
             for (int i = 0; i < threads; i++)
                 if (!allPriorFinished[i])
@@ -272,9 +270,9 @@ public class OpOrder
          */
         public void await()
         {
-            int threads = NettyRxScheduler.getNumNettyThreads();
-            CountDownLatch latch = new CountDownLatch(threads);
-            Integer coreId = NettyRxScheduler.getCoreId();
+            final int threads = NettyRxScheduler.getNumNettyThreads();
+            final CountDownLatch latch = new CountDownLatch(threads);
+            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
 
             WaitQueue.Signal signals[] = new WaitQueue.Signal[threads];
             final Thread caller = Thread.currentThread();
@@ -292,12 +290,13 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (coreId == null || i != coreId)
+                if (i != scheduler.cpuId)
                     NettyRxScheduler.getForCore(i).scheduleDirect(r);
                 else
                     r.run();
             }
 
+            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
             for (int i = 0; i < threads; i++)
                 if (signals[i] != null)

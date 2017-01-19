@@ -379,9 +379,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     protected void recordLatency(TableMetrics metric, long latencyNanos)
     {
-        return;
-
-    //       metric.readLatency.addNano(latencyNanos);
+        metric.readLatency.addNano(latencyNanos);
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
