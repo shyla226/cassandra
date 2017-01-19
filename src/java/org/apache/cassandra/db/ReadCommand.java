@@ -40,7 +40,6 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
-import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -59,7 +58,6 @@ import org.apache.cassandra.schema.UnknownIndexException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * General interface for storage-engine read commands (common to both range and
@@ -288,6 +286,14 @@ public abstract class ReadCommand implements ReadQuery
 
     protected abstract int oldestUnrepairedTombstone();
 
+
+    /**
+     * Whether the underlying {@code ClusteringIndexFilter} is reversed or not.
+     *
+     * @return whether the underlying {@code ClusteringIndexFilter} is reversed or not.
+     */
+    public abstract boolean isReversed();
+
     public ReadResponse createResponse(UnfilteredPartitionIterator iterator)
     {
         return isDigestQuery()
@@ -355,7 +361,7 @@ public abstract class ReadCommand implements ReadQuery
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
     {
-        long startTimeNanos = System.nanoTime();
+        //long startTimeNanos = System.nanoTime();
 
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
         Index index = getIndex(cfs);
@@ -370,20 +376,15 @@ public abstract class ReadCommand implements ReadQuery
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
         }
 
-        TPCOpOrder.Group group = null;
         UnfilteredPartitionIterator resultIterator = null;
         try
         {
-            //Local requests track their own oporder
-            group = cfs.readOrdering.start();
-
             resultIterator = searcher == null
                              ? queryStorage(cfs, executionController)
                              : searcher.search(executionController);
 
             resultIterator = withStateTracking(resultIterator);
-            resultIterator = withOpOrderTracking(resultIterator, group);
-            resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+            //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
             // no point in checking it again.
@@ -399,9 +400,6 @@ public abstract class ReadCommand implements ReadQuery
         }
         catch (RuntimeException | Error e)
         {
-            if (group != null)
-                group.close();
-
             if (resultIterator != null)
                 resultIterator.close();
             throw e;
@@ -555,36 +553,6 @@ public abstract class ReadCommand implements ReadQuery
 
             return false;
         }
-    }
-
-    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
-    {
-        final TPCOpOrder.Group group;
-        boolean closed = false;
-
-        TrackOpOrder(TPCOpOrder.Group group)
-        {
-            this.group = group;
-        }
-
-        protected void onClose()
-        {
-            if (closed)
-                return;
-
-            group.close();
-            closed = true;
-        }
-    }
-
-    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
-    {
-        return Transformation.apply(iter, new TrackOpOrder(group));
-    }
-
-    protected UnfilteredRowIterator withStateTracking(UnfilteredRowIterator iter)
-    {
-        return Transformation.apply(iter, new CheckForAbort());
     }
 
     private void maybeDelayForTesting()

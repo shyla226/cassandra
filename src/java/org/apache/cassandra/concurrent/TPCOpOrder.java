@@ -224,7 +224,7 @@ public class TPCOpOrder
         private void expire()
         {
             if (running < 0)
-                throw new IllegalStateException();
+                throw new IllegalStateException("A local op order was expired more then once.");
 
             int current = running;
 
@@ -266,6 +266,8 @@ public class TPCOpOrder
                 else
                 {
                     --running;
+                    if (running < 0)
+                        throw new IllegalStateException("A local Op Order was closed more than once.");
                 }
             };
 
