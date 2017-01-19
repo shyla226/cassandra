@@ -116,7 +116,8 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
     private Single<PartitionIterator> makeObservable()
     {
-        return Single.create((SingleOnSubscribe<PartitionIterator>) e -> {
+        return Single.create((SingleOnSubscribe<PartitionIterator>) e ->
+        {
             if (value != null)
             {
                 if (value instanceof Throwable)
@@ -129,24 +130,25 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                 emitter = e;
             }
         })
-               .timeout(command.getTimeout(), TimeUnit.MILLISECONDS, NettyRxScheduler.instance())
-               .onErrorResumeNext(exc -> {
-                   if (Tracing.isTracing())
-                   {
-                       String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                       Tracing.trace("{}; received {} of {} responses{}", new Object[]{ ( exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
-                   }
-                   else if (logger.isDebugEnabled())
-                   {
-                       String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                       logger.debug("{}; received {} of {} responses{}", new Object[]{ ( exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
-                   }
+                     //.timeout(command.getTimeout(), TimeUnit.MILLISECONDS, NettyRxScheduler.instance())
+                     .onErrorResumeNext(exc ->
+                                        {
+                                            if (Tracing.isTracing())
+                                            {
+                                                String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                                                Tracing.trace("{}; received {} of {} responses{}", new Object[]{ (exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
+                                            }
+                                            else if (logger.isDebugEnabled())
+                                            {
+                                                String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                                                logger.debug("{}; received {} of {} responses{}", new Object[]{ (exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
+                                            }
 
-                   if (exc instanceof TimeoutException)
-                       return Single.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
+                                            if (exc instanceof TimeoutException)
+                                                return Single.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
 
-                   return Single.error(exc);
-               });
+                                            return Single.error(exc);
+                                        });
     }
 
     public Single<PartitionIterator> get()
