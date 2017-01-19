@@ -840,13 +840,22 @@ class ContinuousPagingTestUtils
                 if (checkNumberOfRowsInPage && pageUnit == ContinuousPagingOptions.PageUnit.ROWS && numRows > 0)
                 {
                     int totRows = maxRows > 0 ? maxRows : rows.length;
-                    assertEquals(String.format("PS %d, tot %d, received %d", pageSize, totRows, numPagesReceived),
+                    assertEquals(String.format("Unexpected number of rows in current page: page size %d, total expected rows %d, received pages so far %d",
+                                               pageSize, totRows, numPagesReceived),
                                  Math.min(pageSize, totRows - numRowsReceived), numRows);
                 }
 
                 if (checkRows)
-                    rowsReceived.addAll(Arrays.asList(tester.getRowsNet(cluster, meta, pageRows)));
-
+                {
+                    Object[][] rows = tester.getRowsNet(cluster, meta, pageRows);
+                    for (int i = 0; i < rows.length; i++)
+                    {
+                        for (int j = 0; j < rows[i].length; j++)
+                            assertNotNull(String.format("Row %d has a null field: %s", i, Arrays.toString(rows[i])),
+                                          rows[i][j]);
+                    }
+                    rowsReceived.addAll(Arrays.asList(rows));
+                }
                 numRowsReceived += numRows;
                 numPagesReceived += 1;
                 pageRows.clear();
