@@ -351,7 +351,8 @@ public abstract class AbstractReadExecutor
             () ->
             {
                 // no latency information, or we're overloaded
-                if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
+                if (cfs.keyspace.getReplicationStrategy().getReplicationFactor() == 1 ||
+                    cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
                     return CompletableObserver::onComplete;
 
                 NettyRxScheduler.instance().scheduleDirect(() ->
