@@ -188,13 +188,15 @@ public class NettyRxScheduler extends Scheduler
         if (useImmediateForLocal)
             callerCoreId = getCoreId();
 
-        if (SchemaConstants.isSystemKeyspace(keyspaceName) || SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspaceName))
-            return getForCore(0);
-
         // Convert OP partitions to top level partitioner for secondary indexes; always route
         // system table mutations through core 0
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
+        {
+            if (SchemaConstants.isSystemKeyspace(keyspaceName))
+                return getForCore(0);
+
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
+        }
 
         List<Long> keyspaceRanges = getRangeList(keyspaceName);
         Long keyToken = (Long)key.getToken().getTokenValue();

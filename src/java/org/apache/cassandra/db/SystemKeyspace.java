@@ -675,8 +675,7 @@ public final class SystemKeyspace
     public static synchronized void updateTokenBoundaries()
     {
         // TODO technically this needs to be per-keyspace; just use a distributed KS for now
-        ColumnFamilyStore cfs = Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME).getColumnFamilyStore(SystemDistributedKeyspace.REPAIR_HISTORY);
-        List<Long> ranges = NettyRxScheduler.getRangeList(cfs.keyspace.getName(), false);
+        List<Long> ranges = NettyRxScheduler.getRangeList(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, false);
         String req = "INSERT INTO system.%s (key, token_boundaries) VALUES ('%s', ?)";
         logger.info("LIST = " + tokensAsList(ranges));
         executeInternal(String.format(req, LOCAL, LOCAL), tokensAsList(ranges)).blockingGet();

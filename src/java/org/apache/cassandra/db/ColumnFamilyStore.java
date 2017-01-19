@@ -410,8 +410,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         metric = new TableMetrics(this);
         fileIndexGenerator.set(generation);
         sampleLatencyNanos = DatabaseDescriptor.getReadRpcTimeout() / 2;
-        hasSpecialHandlingForTPC = SchemaConstants.isSystemKeyspace(keyspace.getName())
-                || SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(keyspace.getName());
+        hasSpecialHandlingForTPC = SchemaConstants.isSystemKeyspace(keyspace.getName());
 
         logger.info("Initializing {}.{}", keyspace.getName(), name);
 
