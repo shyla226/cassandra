@@ -36,7 +36,7 @@ public class NativeAllocatorTest
     {
         {
             final ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
-            final OpOrder order = new OpOrder();
+            final OpOrder order = new OpOrder(this);
             final TPCOpOrder.Group group = order.start();
             final CountDownLatch canClean = new CountDownLatch(1);
             final CountDownLatch isClean = new CountDownLatch(1);

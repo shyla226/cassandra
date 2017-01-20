@@ -150,6 +150,7 @@ public abstract class AbstractCommitLogSegmentManager
 
         shutdown = false;
         managerThread = NamedThreadFactory.createThread(runnable, "COMMIT-LOG-ALLOCATOR");
+        managerThread.setDaemon(true);
         managerThread.start();
 
         // for simplicity, ensure the first segment is allocated before continuing

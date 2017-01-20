@@ -153,6 +153,7 @@ public abstract class AbstractCommitLogService
 
         shutdown = false;
         thread = NamedThreadFactory.createThread(runnable, name);
+        thread.setDaemon(true);
         thread.start();
     }
 

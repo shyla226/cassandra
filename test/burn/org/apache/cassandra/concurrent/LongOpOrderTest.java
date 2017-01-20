@@ -68,7 +68,7 @@ public class LongOpOrderTest
         }
     };
 
-    final OpOrder order = new OpOrder();
+    final OpOrder order = new OpOrder(this);
     final AtomicInteger errors = new AtomicInteger();
 
     class TestOrdering implements Runnable

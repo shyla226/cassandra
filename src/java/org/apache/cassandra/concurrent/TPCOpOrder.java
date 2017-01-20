@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 /**
@@ -131,12 +132,13 @@ public class TPCOpOrder
      * will unlink this one
      */
     private volatile Group current;
-
     private final int coreId;
+    private final OpOrder parent;
 
-    public TPCOpOrder(int coreId)
+    public TPCOpOrder(int coreId, OpOrder parent)
     {
         this.coreId = coreId;
+        this.parent = parent;
         this.current = new Group(coreId);
     }
 

@@ -84,7 +84,7 @@ public class Keyspace
 
     //OpOrder is defined globally since we need to order writes across
     //Keyspaces in the case of Views (batchlog of view mutations)
-    public static final OpOrder writeOrder = new OpOrder();
+    public static final OpOrder writeOrder = new OpOrder(Keyspace.class);
 
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<UUID, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();

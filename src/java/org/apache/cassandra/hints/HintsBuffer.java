@@ -67,7 +67,7 @@ final class HintsBuffer
 
         position = new AtomicInteger();
         offsets = new ConcurrentHashMap<>();
-        appendOrder = new OpOrder();
+        appendOrder = new OpOrder(this);
     }
 
     static HintsBuffer create(int slabSize)

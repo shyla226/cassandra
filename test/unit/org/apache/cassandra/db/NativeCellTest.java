@@ -46,7 +46,7 @@ public class NativeCellTest
 
     private static final Logger logger = LoggerFactory.getLogger(NativeCellTest.class);
     private static final NativeAllocator nativeAllocator = new NativePool(Integer.MAX_VALUE, Integer.MAX_VALUE, 1f, null).newAllocator();
-    private static final TPCOpOrder.Group group = new OpOrder().start();
+    private static final TPCOpOrder.Group group = new OpOrder(null).start();
     private static Random rand;
 
     @BeforeClass

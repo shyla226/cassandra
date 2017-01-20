@@ -25,6 +25,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Scheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 
@@ -90,12 +91,14 @@ public class OpOrder
     private static final Logger logger = LoggerFactory.getLogger(OpOrder.class);
 
     final TPCOpOrder localOpOrders[] = new TPCOpOrder[NettyRxScheduler.NUM_NETTY_THREADS];
+    final Object creator;
 
-
-    public OpOrder()
+    public OpOrder(Object creator)
     {
         for (int i = 0; i < NettyRxScheduler.NUM_NETTY_THREADS; i++)
-            localOpOrders[i] = new TPCOpOrder(i);
+            localOpOrders[i] = new TPCOpOrder(i, this);
+
+        this.creator = creator;
     }
 
     /**
@@ -148,7 +151,14 @@ public class OpOrder
      */
     public final class Barrier
     {
-        private TPCOpOrder.Barrier tpcBarriers[] = new TPCOpOrder.Barrier[NettyRxScheduler.NUM_NETTY_THREADS];
+        /*
+         * During startup we have 1 thread. so if a barrier is issued during startup
+         * but awaited after TPC engine, we can hang. This ensures we properly handle barriers
+         * during startup
+         */
+        private final boolean isStartup = NettyRxScheduler.isStartup();
+        private final int numCores = isStartup ? 1 : NettyRxScheduler.getNumNettyThreads();
+        private final TPCOpOrder.Barrier tpcBarriers[] = new TPCOpOrder.Barrier[numCores];
 
         /**
          * @return true if @param group was started prior to the issuing of the barrier.
@@ -158,7 +168,7 @@ public class OpOrder
          */
         public boolean isAfter(TPCOpOrder.Group group)
         {
-            TPCOpOrder.Barrier barrier = tpcBarriers[group.coreId];
+            TPCOpOrder.Barrier barrier = group.coreId >= numCores ? null : tpcBarriers[group.coreId];
             if (barrier == null)
                 return true;
 
@@ -171,11 +181,9 @@ public class OpOrder
          */
         public void issue()
         {
-            final int threads = NettyRxScheduler.getNumNettyThreads();
-            final CountDownLatch latch = new CountDownLatch(threads);
-            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
+            CountDownLatch latch = new CountDownLatch(numCores);
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -189,17 +197,19 @@ public class OpOrder
                     }
                     catch (Throwable e)
                     {
-                        e.printStackTrace();
+                        logger.error("Deadlocking OpOrder issue : ", e);
+                        throw new RuntimeException(e);
                     }
                 };
 
-                if (i != scheduler.cpuId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be issued from a TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
-            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
         }
 
@@ -208,11 +218,10 @@ public class OpOrder
          */
         public void markBlocking()
         {
-            final int threads = NettyRxScheduler.getNumNettyThreads();
-            final CountDownLatch latch = new CountDownLatch(threads);
-            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
 
-            for (int i = 0; i < threads; i++)
+            CountDownLatch latch = new CountDownLatch(numCores);
+
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -221,26 +230,24 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (i != scheduler.cpuId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be markedBlocked from a TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
-            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
         }
 
 
         public boolean allPriorOpsAreFinished()
         {
-            final int threads = NettyRxScheduler.getNumNettyThreads();
-            final CountDownLatch latch = new CountDownLatch(threads);
-            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
+            CountDownLatch latch = new CountDownLatch(numCores);
 
-            boolean allPriorFinished[] = new boolean[threads];
+            boolean allPriorFinished[] = new boolean[numCores];
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -250,15 +257,15 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (i != scheduler.cpuId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be accessed TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
-            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
                 if (!allPriorFinished[i])
                     return false;
 
@@ -270,14 +277,12 @@ public class OpOrder
          */
         public void await()
         {
-            final int threads = NettyRxScheduler.getNumNettyThreads();
-            final CountDownLatch latch = new CountDownLatch(threads);
-            final NettyRxScheduler scheduler = NettyRxScheduler.instance();
 
-            WaitQueue.Signal signals[] = new WaitQueue.Signal[threads];
+            CountDownLatch latch = new CountDownLatch(numCores);
+            WaitQueue.Signal signals[] = new WaitQueue.Signal[numCores];
             final Thread caller = Thread.currentThread();
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
             {
                 final int fi = i;
 
@@ -290,15 +295,15 @@ public class OpOrder
                     latch.countDown();
                 };
 
-                if (i != scheduler.cpuId)
-                    NettyRxScheduler.getForCore(i).scheduleDirect(r);
-                else
-                    r.run();
+                Scheduler scheduler = NettyRxScheduler.getForCore(i);
+                Integer callerCore = NettyRxScheduler.getCoreId();
+                assert isStartup ||  callerCore == null || callerCore != i : "A barrier should never be awaited from a TPC thread";
+
+                scheduler.scheduleDirect(r);
             }
 
-            //isn't this going to deadlock if two core threads call this method at the same time?
             Uninterruptibles.awaitUninterruptibly(latch);
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < numCores; i++)
                 if (signals[i] != null)
                     signals[i].awaitUninterruptibly();
         }
