@@ -300,6 +300,11 @@ public class SinglePartitionReadCommand extends ReadCommand
         return DatabaseDescriptor.getReadRpcTimeout();
     }
 
+    public boolean isReversed()
+    {
+        return clusteringIndexFilter.isReversed();
+    }
+
     public boolean selectsKey(DecoratedKey key)
     {
         if (!this.partitionKey().equals(key))
@@ -376,9 +381,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     protected void recordLatency(TableMetrics metric, long latencyNanos)
     {
-        return;
-
-    //       metric.readLatency.addNano(latencyNanos);
+        metric.readLatency.addNano(latencyNanos);
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)

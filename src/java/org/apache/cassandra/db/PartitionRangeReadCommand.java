@@ -198,6 +198,11 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DatabaseDescriptor.getRangeRpcTimeout();
     }
 
+    public boolean isReversed()
+    {
+        return dataRange.isReversed();
+    }
+
     public boolean selectsKey(DecoratedKey key)
     {
         if (!dataRange().contains(key))

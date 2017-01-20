@@ -20,9 +20,14 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import io.reactivex.Single;
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
@@ -52,7 +57,7 @@ public abstract class ReadResponse
     @VisibleForTesting
     public static ReadResponse createRemoteDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
     {
-        return new RemoteDataResponse(LocalDataResponse.build(data, command.columnFilter()));
+        return new RemoteDataResponse(RemoteDataResponse.build(data, command.columnFilter()));
     }
 
     public static ReadResponse createDigestResponse(UnfilteredPartitionIterator data, ReadCommand command)
@@ -106,35 +111,98 @@ public abstract class ReadResponse
     // built on the owning node responding to a query
     private static class LocalDataResponse extends ReadResponse
     {
-        final UnfilteredPartitionIterator iter;
+        private final List<Single<ImmutableBTreePartition>> partitions;
+
 
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
-            this.iter = iter;
-        }
-
-        private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
-        {
-            try (DataOutputBuffer buffer = new DataOutputBuffer())
-            {
-                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version).blockingGet();
-                return buffer.buffer();
-            }
-            catch (IOException e)
-            {
-                // We're serializing in memory so this shouldn't happen
-                throw new RuntimeException(e);
-            }
+            this.partitions = build(iter, command);
         }
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
         {
-            return iter;
+            return new AbstractUnfilteredPartitionIterator()
+            {
+                private int idx;
+
+                public CFMetaData metadata()
+                {
+                    return command.metadata();
+                }
+
+                public boolean hasNext()
+                {
+                    return idx < partitions.size();
+                }
+
+                public Single<UnfilteredRowIterator> next()
+                {
+                    // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
+                    return partitions.get(idx++).map(p -> p.unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed()));
+                }
+
+                public void close()
+                {
+
+                }
+            };
+        }
+
+        private static List<Single<ImmutableBTreePartition>> build(UnfilteredPartitionIterator iterator, ReadCommand command)
+        {
+            try
+            {
+                if (!iterator.hasNext())
+                    return Collections.emptyList();
+
+                if (command instanceof SinglePartitionReadCommand)
+                {
+                    Single<UnfilteredRowIterator> partition = iterator.next();
+                    List<Single<ImmutableBTreePartition>> partitions =
+                    Collections.singletonList(partition.map(p ->
+                                                            {
+                                                                try
+                                                                {
+                                                                    ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
+
+                                                                    return b;
+                                                                } finally
+                                                                {
+                                                                    p.close();
+                                                                }
+                                                            }));
+
+                    return partitions;
+                }
+
+                List<Single<ImmutableBTreePartition>> partitions = new ArrayList<>();
+                while (iterator.hasNext())
+                {
+                    Single<UnfilteredRowIterator> partition = iterator.next();
+                    Single<ImmutableBTreePartition> r = partition.map(p -> {
+                        try
+                        {
+                            ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
+                            return b;
+                        } finally
+                        {
+                            p.close();
+                        }
+
+                    });
+                    partitions.add(r);
+                }
+                return partitions;
+            }catch (Throwable t)
+            {
+                t.printStackTrace();
+            }
+            return null;
         }
 
         public ByteBuffer digest(ReadCommand command)
         {
-            return makeDigest(iter, command);
+            return makeDigest(makeIterator(command), command);
         }
 
         public boolean isDigestResponse()
@@ -149,6 +217,20 @@ public abstract class ReadResponse
         protected RemoteDataResponse(ByteBuffer data)
         {
             super(data, SerializationHelper.Flag.FROM_REMOTE);
+        }
+
+        private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
+        {
+            try (DataOutputBuffer buffer = new DataOutputBuffer())
+            {
+                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version);
+                return buffer.buffer();
+            }
+            catch (IOException e)
+            {
+                // We're serializing in memory so this shouldn't happen
+                throw new RuntimeException(e);
+            }
         }
     }
 

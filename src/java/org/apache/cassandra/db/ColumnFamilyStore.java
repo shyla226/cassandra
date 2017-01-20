@@ -1083,16 +1083,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             // records owned by this memtable
             setCommitLogUpperBound(commitLogUpperBound);
 
-            // we then issue the barrier; this lets us wait for all operations started prior to the barrier to complete;
-            // since this happens after wiring up the commitLogUpperBound, we also know all operations with earlier
-            // commit log segment position have also completed, i.e. the memtables are done and ready to flush
-            writeBarrier.issue();
             postFlush = new PostFlush(memtables);
             postFlushTask = ListenableFutureTask.create(postFlush);
         }
 
         public void run()
         {
+            // we issue the barrier; this lets us wait for all operations started prior to the barrier to complete;
+            // since this happens after wiring up the commitLogUpperBound, we also know all operations with earlier
+            // commit log segment position have also completed, i.e. the memtables are done and ready to flush
+            writeBarrier.issue();
+
             // mark writes older than the barrier as blocking progress, permitting them to exceed our memory limit
             // if they are stuck waiting on it, then wait for them all to complete
             writeBarrier.markBlocking();

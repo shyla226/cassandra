@@ -41,7 +41,6 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
-import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -60,7 +59,6 @@ import org.apache.cassandra.schema.UnknownIndexException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * General interface for storage-engine read commands (common to both range and
@@ -289,6 +287,14 @@ public abstract class ReadCommand implements ReadQuery
 
     protected abstract int oldestUnrepairedTombstone();
 
+
+    /**
+     * Whether the underlying {@code ClusteringIndexFilter} is reversed or not.
+     *
+     * @return whether the underlying {@code ClusteringIndexFilter} is reversed or not.
+     */
+    public abstract boolean isReversed();
+
     public ReadResponse createResponse(UnfilteredPartitionIterator iterator)
     {
         return isDigestQuery()
@@ -374,19 +380,12 @@ public abstract class ReadCommand implements ReadQuery
             }
 
             Index.Searcher searcher = pickSearcher;
-
-            //Local requests track their own oporder
-            TPCOpOrder.Group group = cfs.readOrdering.start();
-
             Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                                                                 ? queryStorage(cfs, executionController)
-                                                                 : searcher.search(executionController);
-
+                                                                 ? queryStorage(cfs, executionController) : searcher.search(executionController);
             return resultIterator.map(
             r ->
             {
                 r = withStateTracking(r);
-                r = withOpOrderTracking(r, group);
                 //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
                 // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
@@ -400,7 +399,7 @@ public abstract class ReadCommand implements ReadQuery
                 // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
                 // processing we do on it).
                 return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
-            }).doOnError((t) -> group.close());
+            });
         });
     }
 
@@ -551,36 +550,6 @@ public abstract class ReadCommand implements ReadQuery
 
             return false;
         }
-    }
-
-    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
-    {
-        final TPCOpOrder.Group group;
-        boolean closed = false;
-
-        TrackOpOrder(TPCOpOrder.Group group)
-        {
-            this.group = group;
-        }
-
-        protected void onClose()
-        {
-            if (closed)
-                return;
-
-            group.close();
-            closed = true;
-        }
-    }
-
-    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
-    {
-        return Transformation.apply(iter, new TrackOpOrder(group));
-    }
-
-    protected UnfilteredRowIterator withStateTracking(UnfilteredRowIterator iter)
-    {
-        return Transformation.apply(iter, new CheckForAbort());
     }
 
     private void maybeDelayForTesting()

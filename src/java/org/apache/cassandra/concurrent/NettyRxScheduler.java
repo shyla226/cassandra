@@ -19,7 +19,6 @@
 package org.apache.cassandra.concurrent;
 
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -51,7 +50,6 @@ import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -90,8 +88,6 @@ public class NettyRxScheduler extends Scheduler
         }
     };
 
-    public final static FastThreadLocal<Integer> threadToCoreIdMapping = new FastThreadLocal<>();
-
     final static Map<String, List<Long>> keyspaceToRangeMapping = new HashMap<>();
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
@@ -100,17 +96,30 @@ public class NettyRxScheduler extends Scheduler
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
     static
     {
-        perCoreSchedulers[0] = new NettyRxScheduler(GlobalEventExecutor.INSTANCE.next(), 0);
+        perCoreSchedulers[0] = new NettyRxScheduler(GlobalEventExecutor.INSTANCE, 0);
     }
 
+    /**
+     * This flag is set to false once core zero is assigned to its final scheduler, whilst
+     * this is true core zero is assigned to the netty global event executor and all other
+     * cores are unassigned yet. When this flag becomes false, it doesn't mean all cores
+     * are assigned, but only that the first one is assigned and final.
+     */
     private static volatile boolean isStartup = true;
 
+    /** The event loop for executing tasks on the thread assigned to a core. Note that all threads have a thread
+     * local NettyRxScheduler, but only threads assigned to a core have a dedicated event loop, the other ones
+     * share the Netty global executor and should really not rely on the event loop, so this must stay private.
+     */
+    private final EventExecutorGroup eventLoop;
 
-    final EventExecutorGroup eventLoop;
+    /** The cpu id assigned to this scheduler, or Integer.MAX_VALUE for non-assigned threads */
     public final int cpuId;
-    public final long cpuThreadId;
-    public final String cpuThreadName;
 
+    /** The thread of which we are the scheduler */
+    public final Thread cpuThread;
+
+    /** Return a thread local instance of this class */
     public static NettyRxScheduler instance()
     {
         return localNettyEventLoop.get();
@@ -119,13 +128,16 @@ public class NettyRxScheduler extends Scheduler
     public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
     {
         NettyRxScheduler scheduler = localNettyEventLoop.get();
-        if (scheduler == null || scheduler.eventLoop != loop)
+        if (scheduler.eventLoop != loop)
         {
             assert loop.inEventLoop();
+
+            if (cpuId == 0)
+                awaitInactivity(scheduler);
+
             scheduler = new NettyRxScheduler(loop, cpuId);
             localNettyEventLoop.set(scheduler);
             perCoreSchedulers[cpuId] = scheduler;
-            threadToCoreIdMapping.set(cpuId);
             logger.info("Putting {} on core {}", Thread.currentThread().getName(), cpuId);
             isStartup = false;
         }
@@ -133,27 +145,49 @@ public class NettyRxScheduler extends Scheduler
         return scheduler;
     }
 
-    public static boolean inEventLoop()
+    /**
+     * Wait up to a second for inactivity on the global event loop. This ensures that we can
+     * switch from the startup thread that is assigned to core zero, the Netty global executor, to
+     * the new executor without causing races, for example in
+     * {{{@link org.apache.cassandra.utils.concurrent.OpOrder}}} or other structures that have been
+     * partitioned by core.
+     *
+     * @param scheduler - a scheduler whose eventLoop instance must be GlobalEventExecutor.INSTANCE
+     */
+    private static void awaitInactivity(NettyRxScheduler scheduler)
     {
-        return isStartup || threadToCoreIdMapping.get() != null;
+        assert scheduler.eventLoop == GlobalEventExecutor.INSTANCE;
+        try
+        {
+            if (!GlobalEventExecutor.INSTANCE.awaitInactivity(1, TimeUnit.SECONDS))
+                logger.warn("Failed to wait for inactivity when switching away from global event executor");
+        }
+        catch (InterruptedException ex)
+        {
+            logger.warn("Got interrupted exception when switching away from global event executor", ex);
+        }
     }
 
-    public static Integer getCoreId()
+    private static Integer getCoreId()
     {
         if (isStartup)
             return 0;
 
-        return threadToCoreIdMapping.get();
+        NettyRxScheduler instance = instance();
+        return isValidCoreId(instance.cpuId) ? instance.cpuId : null;
     }
 
-    public static boolean isStartup()
+    public static boolean isTPCThread()
     {
-        return isStartup;
+        return isValidCoreId(instance().cpuId);
     }
 
-    public static int getNumNettyThreads()
+    public static Integer getCoreId(Scheduler scheduler)
     {
-        return isStartup ? 1 : NUM_NETTY_THREADS;
+        if (scheduler instanceof NettyRxScheduler)
+            return ((NettyRxScheduler)scheduler).cpuId;
+
+        return null;
     }
 
     private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
@@ -162,19 +196,44 @@ public class NettyRxScheduler extends Scheduler
         assert cpuId >= 0;
         this.eventLoop = eventLoop;
         this.cpuId = cpuId;
-        this.cpuThreadId = Thread.currentThread().getId();
-        this.cpuThreadName = Thread.currentThread().getName();
+        this.cpuThread = Thread.currentThread();
     }
 
+    public static int getNumCores()
+    {
+        return perCoreSchedulers.length;
+    }
+
+    /**
+     * Return a scheduler for a specific core. If the scheduler for that core is null,
+     * then that means that the core is unassigned yet, in this case, execute on core zero,
+     * which uses the global netty executor. Note that isStartup may already be false, since
+     * that only means that core zero was assigned.
+     *
+     * @param core - the core number for which we want a scheduler of
+     *
+     * @return - the scheduler of the core specified, or the scheduler of core zero if not yet assigned
+     */
     public static Scheduler getForCore(int core)
     {
-        if (isStartup)
-            return ImmediateThinScheduler.INSTANCE;
-
         NettyRxScheduler scheduler = perCoreSchedulers[core];
-        assert scheduler != null && scheduler.cpuId == core : scheduler == null ? "NPE" : "" + scheduler.cpuId + " != " + core;
+        return scheduler == null ? perCoreSchedulers[0] : scheduler;
+    }
 
-        return scheduler;
+    /**
+     * Return a scheduler for a specific core, if assigned, otherwise null.
+     *
+     * @param core - the core number for which we want a scheduler of
+     * @return - the scheduler of the core specified, or null if not yet assigned
+     */
+    public static NettyRxScheduler maybeGetForCore(int core)
+    {
+        return perCoreSchedulers[core];
+    }
+
+    public static boolean isValidCoreId(Integer coreId)
+    {
+        return coreId != null && coreId >= 0 && coreId <= getNumCores();
     }
 
     @Inline
