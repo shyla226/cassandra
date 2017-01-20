@@ -1,6 +1,7 @@
 DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
+ * Indexer is not correctly invoked when building indexes over sstables (CASSANDRA-13075)
  * Read repair is not blocking repair to finish in foreground repair (CASSANDRA-13115)
  * Stress daemon help is incorrect (CASSANDRA-12563)
  * Remove ALTER TYPE support (CASSANDRA-12443)
