@@ -254,6 +254,7 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                   | <schemaChangeStatement>
                   | <authenticationStatement>
                   | <authorizationStatement>
+                  | <thirdPartyStatement>
                   ;
 
 <dataChangeStatement> ::= <insertStatement>
@@ -1482,15 +1483,19 @@ syntax_rules += r'''
                                     ( "ON" <resource> )? ( "OF" <rolename> )? "NORECURSIVE"?
                              ;
 
-<permission> ::= "AUTHORIZE"
-               | "CREATE"
-               | "ALTER"
-               | "DROP"
-               | "SELECT"
-               | "MODIFY"
-               | "DESCRIBE"
-               | "EXECUTE"
+<permission> ::= <corePermission>
+               | <thirdPartyPermission>
                ;
+
+<corePermission> ::= "AUTHORIZE"
+                   | "CREATE"
+                   | "ALTER"
+                   | "DROP"
+                   | "SELECT"
+                   | "MODIFY"
+                   | "DESCRIBE"
+                   | "EXECUTE"
+                   ;
 
 <permissionExpr> ::= ( <permission> "PERMISSION"? )
                    | ( "ALL" "PERMISSIONS"? )
@@ -1502,6 +1507,7 @@ syntax_rules += r'''
              | <roleResource>
              | <functionResource>
              | <jmxResource>
+             | <thirdPartyResource>
              ;
 
 <dataResource> ::= ( "ALL" "KEYSPACES" )
