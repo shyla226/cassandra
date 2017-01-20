@@ -35,6 +35,7 @@ DSE 5.1.0
  * Add method to IAuthenticator to login by user as well as by role (APOLLO-70)
  * Add private protocol version (APOLLO-2)
 Merged from DSE 5.0.x
+ * Indexer is not correctly invoked when building indexes over sstables (CASSANDRA-13075)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
  * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
  * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)

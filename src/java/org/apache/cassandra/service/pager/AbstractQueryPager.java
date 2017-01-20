@@ -20,6 +20,7 @@ package org.apache.cassandra.service.pager;
 import org.apache.cassandra.config.CFMetaData;
 import java.util.function.Function;
 
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
