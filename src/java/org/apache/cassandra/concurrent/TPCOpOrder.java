@@ -133,13 +133,11 @@ public class TPCOpOrder
      */
     private volatile Group current;
     private final int coreId;
-    private final OpOrder parent;
 
     public TPCOpOrder(int coreId, OpOrder parent)
     {
         this.coreId = coreId;
-        this.parent = parent;
-        this.current = new Group(coreId);
+        this.current = new Group(coreId, parent);
     }
 
     /**
@@ -153,20 +151,17 @@ public class TPCOpOrder
         final DebugThreadInfo debugThreadInfo = DEBUG_OP_ORDER_CALLERS ? new DebugThreadInfo(Thread.currentThread(), callingCore) : null;
         Callable<Group> c = () ->
         {
-            // which thread is updating this.current?
-            // Also, this method will hang the thread if an op order
-            // is closed one extra time so we need to put some safety checks in place
-            while (true)
+            boolean ret = current.register(debugThreadInfo);
+            if (!ret)
             {
-                Group current = this.current;
-                if (current.register(debugThreadInfo))
-                    return current;
+                current.logThreadInfo("Failed to register new operation to local op order group");
+                throw new IllegalStateException("Failed to register new operation to local op order group");
             }
+            return current;
         };
 
         if (callingCore != coreId)
         {
-            //logger.info("Calling core {} not oporder owner will route start() to core {}", callingCore, coreId);
             Single<Group> g = Single.fromCallable(c);
             g = g.subscribeOn(NettyRxScheduler.getForCore(coreId));
             return g.blockingGet();
@@ -233,15 +228,17 @@ public class TPCOpOrder
         private volatile boolean isBlocking; // indicates running operations are blocking future barriers
         private final WaitQueue isBlockingSignal = new WaitQueue(); // signal to wait on to indicate isBlocking is true
         private final WaitQueue waiting = new WaitQueue(); // signal to wait on for completion
+        private final OpOrder parent;
 
         private final List<DebugThreadInfo> openingThreads = DEBUG_OP_ORDER_CALLERS ? new ArrayList<>(16) : null;
         private final List<DebugThreadInfo> closingThreads = DEBUG_OP_ORDER_CALLERS ? new ArrayList<>(16) : null;
 
         // constructs first instance only
-        private Group(int coreId)
+        private Group(int coreId, OpOrder parent)
         {
             this.coreId = coreId;
             this.id = 0;
+            this.parent = parent;
         }
 
         private Group(Group prev)
@@ -249,6 +246,7 @@ public class TPCOpOrder
             this.coreId = prev.coreId;
             this.id = prev.id + 1;
             this.prev = prev;
+            this.parent = prev.parent;
         }
 
         // prevents any further operations starting against this Ordered instance
@@ -290,7 +288,6 @@ public class TPCOpOrder
             final NettyRxScheduler scheduler = NettyRxScheduler.instance();
             final DebugThreadInfo debugThreadInfo = DEBUG_OP_ORDER_CALLERS ? new DebugThreadInfo(Thread.currentThread(), scheduler.cpuId) : null;
 
-
             Runnable c = () ->
             {
                 if (DEBUG_OP_ORDER_CALLERS)
@@ -331,7 +328,7 @@ public class TPCOpOrder
         {
             if (DEBUG_OP_ORDER_CALLERS)
             {
-                logger.debug("{}:", message);
+                logger.debug("{} - parent: {}", message, parent.toString());
                 logger.debug("Opening threads: \n{}", openingThreads.stream().map(DebugThreadInfo::toString).collect(Collectors.joining("\n")));
                 logger.debug("Closing threads: \n{}", closingThreads.stream().map(DebugThreadInfo::toString).collect(Collectors.joining("\n")));
             }
@@ -453,18 +450,10 @@ public class TPCOpOrder
             if (orderOnOrBefore != null)
                 throw new IllegalStateException("Can only call issue() once on each Barrier");
 
-            final Group oldCurrent;
-
-            //is this still required? It seems to be called only from the core thread but then again
-            //I think the awaitUninterruptibly in OpOrder.issue() is not safe.
-            synchronized (TPCOpOrder.this)
-            {
-                oldCurrent = current;
-                orderOnOrBefore = oldCurrent;
-                current = oldCurrent.next = new Group(current);
-                oldCurrent.expire();
-            }
-
+            final Group oldCurrent = current;
+            orderOnOrBefore = oldCurrent;
+            current = oldCurrent.next = new Group(current);
+            oldCurrent.expire();
         }
 
         /**
