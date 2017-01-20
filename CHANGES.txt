@@ -2,6 +2,7 @@ DSE 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from 4.0:
+ * Improved compactions metrics (CASSANDRA-13015)
  * Speed-up start-up sequence by avoiding un-needed flushes (CASSANDRA-13031)
  * Use Caffeine (W-TinyLFU) for on-heap caches (CASSANDRA-10855)
  * Thrift removal (CASSANDRA-11115)
@@ -173,8 +174,13 @@ Merged from DSE 5.0.x
  * Restore resumable hints delivery (CASSANDRA-11960)
  * Properly record CAS contention (CASSANDRA-12626)
 Merged from 3.0:
+<<<<<<< HEAD
  * Remove ALTER TYPE support (CASSANDRA-12443)
  * Fix assertion for certain legacy range tombstone pattern (CASSANDRA-12203)
+=======
+ * Stress daemon help is incorrect (CASSANDRA-12563)
+ * Read repair is not blocking repair to finish in foreground repair (CASSANDRA-13115)
+>>>>>>> oss-cassandra/trunk
  * Replace empty strings with null values if they cannot be converted (CASSANDRA-12794)
  * Fix deserialization of 2.x DeletedCells (CASSANDRA-12620)
  * Add parent repair session id to anticompaction log message (CASSANDRA-12186)
