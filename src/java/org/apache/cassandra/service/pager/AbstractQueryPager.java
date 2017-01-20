@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.pager;
 
+import org.apache.cassandra.config.CFMetaData;
 import java.util.function.Function;
 
 import org.apache.cassandra.db.*;
@@ -83,6 +84,20 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal(executionController));
     }
 
+    @SuppressWarnings("resource")
+    public UnfilteredPartitionIterator fetchPageUnfiltered(int pageSize, ReadExecutionController executionController, CFMetaData cfm)
+    {
+        assert internalPager == null : "only one iteration at a time is supported";
+
+        if (isExhausted())
+            return EmptyIterators.unfilteredPartition(cfm);
+
+        final int toFetch = Math.min(pageSize, remaining);
+        final ReadCommand pageCommand = nextPageReadCommand(toFetch);
+        internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
+        return Transformation.apply(pageCommand.executeLocally(executionController), internalPager);
+    }
+
     private PartitionIterator innerFetch(int pageSize, Function<ReadCommand, PartitionIterator> itSupplier)
     {
         assert internalPager == null : "only one iteration at a time is supported";
@@ -92,19 +107,45 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
-        internalPager = new Pager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        PartitionIterator iter = itSupplier.apply(pageCommand);
-        return Transformation.apply(iter, internalPager);
+        internalPager = new RowPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
+        return Transformation.apply(itSupplier.apply(pageCommand), internalPager);
+    }
+
+    private class UnfilteredPager extends Pager<Unfiltered>
+    {
+        private UnfilteredPager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        {
+            super(pageLimits, pageCommand, nowInSec);
+        }
+
+        protected BaseRowIterator<Unfiltered> apply(BaseRowIterator<Unfiltered> partition)
+        {
+            return Transformation.apply(counter.applyTo((UnfilteredRowIterator) partition), this);
+        }
+    }
+
+    private class RowPager extends Pager<Row>
+    {
+
+        private RowPager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        {
+            super(pageLimits, pageCommand, nowInSec);
+        }
+
+        protected BaseRowIterator<Row> apply(BaseRowIterator<Row> partition)
+        {
+            return Transformation.apply(counter.applyTo((RowIterator) partition), this);
+        }
     }
 
     /**
      * A transformation to keep track of the lastRow that was iterated and to determine
      * when a page is available. If fetching only a single page, it also stops the iteration after 1 page.
      */
-    private class Pager extends Transformation<RowIterator>
+    private abstract class Pager<T extends Unfiltered> extends Transformation<BaseRowIterator<T>>
     {
         private final DataLimits pageLimits;
-        private final DataLimits.Counter counter;
+        protected final DataLimits.Counter counter;
         private final ReadCommand pageCommand;
         private DecoratedKey currentKey;
         private Row lastRow;
@@ -118,7 +159,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         }
 
         @Override
-        public RowIterator applyToPartition(RowIterator partition)
+        public BaseRowIterator<T> applyToPartition(BaseRowIterator<T> partition)
         {
             currentKey = partition.partitionKey();
 
@@ -137,8 +178,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 }
             }
 
-            return Transformation.apply(counter.applyTo(partition), this);
+            return apply(partition);
         }
+
+        protected abstract BaseRowIterator<T> apply(BaseRowIterator<T> partition);
 
         @Override
         public void onClose()
