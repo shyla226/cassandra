@@ -202,7 +202,7 @@ public abstract class CQLTester
         isServerPrepared = true;
 
         //Required for TPC
-        requireNetwork();
+        requireNetwork(false);
     }
 
     public static void cleanupAndLeaveDirs() throws IOException

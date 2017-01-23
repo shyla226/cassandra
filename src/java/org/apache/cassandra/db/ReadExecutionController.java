@@ -25,19 +25,16 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 public class ReadExecutionController implements AutoCloseable
 {
     // For every reads
-    private final TPCOpOrder.Group baseOp;
     private final CFMetaData baseMetadata; // kept to sanity check that we have take the op order on the right table
 
     // For index reads
     private final ReadExecutionController indexController;
     private final TPCOpOrder.Group writeOp;
 
-    private ReadExecutionController(TPCOpOrder.Group baseOp, CFMetaData baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
+    private ReadExecutionController(CFMetaData baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
-        assert (baseOp == null) == (baseMetadata == null);
-        this.baseOp = baseOp;
         this.baseMetadata = baseMetadata;
         this.indexController = indexController;
         this.writeOp = writeOp;
@@ -55,12 +52,12 @@ public class ReadExecutionController implements AutoCloseable
 
     public boolean validForReadOn(ColumnFamilyStore cfs)
     {
-        return baseOp != null && cfs.metadata.cfId.equals(baseMetadata.cfId);
+        return cfs.metadata.cfId.equals(baseMetadata.cfId);
     }
 
     public static ReadExecutionController empty()
     {
-        return new ReadExecutionController(null, null, null, null);
+        return new ReadExecutionController(null, null, null);
     }
 
     /**
@@ -80,36 +77,29 @@ public class ReadExecutionController implements AutoCloseable
 
         if (indexCfs == null)
         {
-            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata, null, null);
+            return new ReadExecutionController(baseCfs.metadata, null, null);
         }
         else
         {
-            TPCOpOrder.Group baseOp = null, writeOp = null;
+            TPCOpOrder.Group writeOp = null;
             ReadExecutionController indexController = null;
             // OpOrder.start() shouldn't fail, but better safe than sorry.
             try
             {
-                baseOp = baseCfs.readOrdering.start();
-                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata, null, null);
+                indexController = new ReadExecutionController(indexCfs.metadata, null, null);
                 // TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try* to delete stale entries, without blocking if there's no room
                 // as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
                 writeOp = Keyspace.writeOrder.start();
-                return new ReadExecutionController(baseOp, baseCfs.metadata, indexController, writeOp);
+                return new ReadExecutionController(baseCfs.metadata, indexController, writeOp);
             }
             catch (RuntimeException e)
             {
                 // Note that must have writeOp == null since ReadOrderGroup ctor can't fail
                 assert writeOp == null;
-                try
-                {
-                    if (baseOp != null)
-                        baseOp.close();
-                }
-                finally
-                {
-                    if (indexController != null)
-                        indexController.close();
-                }
+
+                if (indexController != null)
+                    indexController.close();
+
                 throw e;
             }
         }
@@ -128,23 +118,15 @@ public class ReadExecutionController implements AutoCloseable
 
     public void close()
     {
-        try
+        if (indexController != null)
         {
-            if (baseOp != null)
-                baseOp.close();
-        }
-        finally
-        {
-            if (indexController != null)
+            try
             {
-                try
-                {
-                    indexController.close();
-                }
-                finally
-                {
-                    writeOp.close();
-                }
+                indexController.close();
+            }
+            finally
+            {
+                writeOp.close();
             }
         }
     }
