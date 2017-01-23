@@ -1134,6 +1134,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 }
                 catch (Throwable t)
                 {
+                    logger.error("Flushing {} failed with error", memtable.toString(), t);
                     t = memtable.abortRunnables(flushRunnables, t);
                     t = txn.abort(t);
                     throw Throwables.propagate(t);
