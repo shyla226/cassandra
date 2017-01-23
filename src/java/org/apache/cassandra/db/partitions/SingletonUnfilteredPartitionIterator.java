@@ -40,12 +40,12 @@ public class SingletonUnfilteredPartitionIterator implements UnfilteredPartition
 
     public boolean hasNext()
     {
-        return !returned && iter.hasNext();
+        return !returned;
     }
 
     public Single<UnfilteredRowIterator> next()
     {
-        if (returned || !hasNext())
+        if (returned)
             throw new NoSuchElementException();
 
         returned = true;

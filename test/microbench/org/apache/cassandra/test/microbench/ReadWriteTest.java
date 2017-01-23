@@ -98,7 +98,7 @@ public class ReadWriteTest extends CQLTester
         table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
         executeNet(ProtocolVersion.CURRENT, "use " + keyspace + ";");
         writeStatement = prepareNet(ProtocolVersion.CURRENT, "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)");
-        readStatement = prepareNet(ProtocolVersion.CURRENT, "SELECT * from "+table+" where userid = ? limit 1");
+        readStatement = prepareNet(ProtocolVersion.CURRENT, "SELECT * from "+table+" where userid = ? limit 5000");
 
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
@@ -130,6 +130,8 @@ public class ReadWriteTest extends CQLTester
         List<Row> rows = futures.stream().map(f -> f.getUninterruptibly().one()).collect(Collectors.toList());
         futures.clear();
 
+        if (rows.size() == 0)
+            System.err.println("EMPTY");
         return rows;
     }
 

@@ -26,6 +26,9 @@ import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -44,6 +47,7 @@ public abstract class ReadResponse
 {
     // Serializer for single partition read response
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
+    private static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 
     protected ReadResponse()
     {
@@ -111,17 +115,18 @@ public abstract class ReadResponse
     // built on the owning node responding to a query
     private static class LocalDataResponse extends ReadResponse
     {
-        private final List<Single<ImmutableBTreePartition>> partitions;
-
-
+//        private final List<Single<ImmutableBTreePartition>> partitions;
+        final UnfilteredPartitionIterator iter;
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
-            this.partitions = build(iter, command);
+            this.iter = iter; // build(iter, command);
         }
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
         {
-            return new AbstractUnfilteredPartitionIterator()
+            return iter;
+
+/*            return new AbstractUnfilteredPartitionIterator()
             {
                 private int idx;
 
@@ -145,34 +150,25 @@ public abstract class ReadResponse
                 {
 
                 }
-            };
+            };*/
         }
 
         private static List<Single<ImmutableBTreePartition>> build(UnfilteredPartitionIterator iterator, ReadCommand command)
         {
+            if (!iterator.hasNext())
+                return Collections.emptyList();
+
             try
             {
-                if (!iterator.hasNext())
-                    return Collections.emptyList();
-
                 if (command instanceof SinglePartitionReadCommand)
                 {
                     Single<UnfilteredRowIterator> partition = iterator.next();
-                    List<Single<ImmutableBTreePartition>> partitions =
-                    Collections.singletonList(partition.map(p ->
-                                                            {
-                                                                try
-                                                                {
-                                                                    ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
-
-                                                                    return b;
-                                                                } finally
-                                                                {
-                                                                    p.close();
-                                                                }
-                                                            }));
-
-                    return partitions;
+                    return Collections.singletonList(partition.map(p ->
+                                                                   {
+                                                                       ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
+                                                                       p.close();
+                                                                       return b;
+                                                                   }));
                 }
 
                 List<Single<ImmutableBTreePartition>> partitions = new ArrayList<>();
@@ -180,24 +176,20 @@ public abstract class ReadResponse
                 {
                     Single<UnfilteredRowIterator> partition = iterator.next();
                     Single<ImmutableBTreePartition> r = partition.map(p -> {
-                        try
-                        {
-                            ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
-                            return b;
-                        } finally
-                        {
-                            p.close();
-                        }
 
+                        ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
+                        p.close();
+                        return b;
                     });
                     partitions.add(r);
                 }
+
                 return partitions;
-            }catch (Throwable t)
-            {
-                t.printStackTrace();
             }
-            return null;
+            finally
+            {
+                iterator.close();
+            }
         }
 
         public ByteBuffer digest(ReadCommand command)

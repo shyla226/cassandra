@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -362,7 +363,7 @@ public abstract class ReadCommand implements ReadQuery
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
     {
-        return Single.defer(
+        Single s =  Single.defer(
         () ->
         {
 
@@ -379,13 +380,19 @@ public abstract class ReadCommand implements ReadQuery
                 Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
             }
 
+            //Local requests track their own oporder
+            TPCOpOrder.Group group = cfs.readOrdering.start();
+
             Index.Searcher searcher = pickSearcher;
             Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                                                                 ? queryStorage(cfs, executionController) : searcher.search(executionController);
+                                                                 ? queryStorage(cfs, executionController)
+                                                                 : searcher.search(executionController);
+
             return resultIterator.map(
             r ->
             {
                 r = withStateTracking(r);
+                r = withOpOrderTracking(r, group);
                 //resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
 
                 // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
@@ -401,6 +408,11 @@ public abstract class ReadCommand implements ReadQuery
                 return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
             });
         });
+
+        if (this instanceof SinglePartitionReadCommand)
+            s = s.subscribeOn(NettyRxScheduler.getForKey(executionController.metaData().ksName, ((SinglePartitionReadCommand)this).partitionKey(), false ));
+
+        return s;
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
@@ -562,6 +574,33 @@ public abstract class ReadCommand implements ReadQuery
     {
         return Transformation.apply(iter, new CheckForAbort());
     }
+
+
+    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
+    {
+        final TPCOpOrder.Group group;
+        boolean closed = false;
+
+        TrackOpOrder(TPCOpOrder.Group group)
+        {
+            this.group = group;
+        }
+
+        protected void onClose()
+        {
+            if (closed)
+                throw new AssertionError("OpOrder already closed");
+
+            group.close();
+            closed = true;
+        }
+    }
+
+    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
+    {
+        return Transformation.apply(iter, new TrackOpOrder(group));
+    }
+
 
     /**
      * Creates a message for this command.

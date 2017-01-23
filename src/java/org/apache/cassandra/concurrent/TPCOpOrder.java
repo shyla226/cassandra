@@ -163,6 +163,7 @@ public class TPCOpOrder
         if (callingCore != coreId)
         {
             Single<Group> g = Single.fromCallable(c);
+            //logger.debug("Calling core {} not oporder owner will route open() to core {}", callingCore, coreId);
             g = g.subscribeOn(NettyRxScheduler.getForCore(coreId));
             return g.blockingGet();
         }
@@ -316,7 +317,7 @@ public class TPCOpOrder
 
             if (scheduler.cpuId != coreId)
             {
-                //logger.info("Calling core {} not oporder owner will route close() to core {}", callingCore, coreId);
+                //logger.debug("Calling core {} not oporder owner will route close() to core {}", scheduler.cpuId, coreId);
                 NettyRxScheduler.getForCore(coreId).scheduleDirect(c);
                 return;
             }

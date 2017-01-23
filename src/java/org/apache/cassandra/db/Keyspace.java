@@ -509,7 +509,7 @@ public class Keyspace
 
                             // This view update can't happen right now, so schedule another attempt later.
                             return Completable.defer(() -> applyInternal(mutation, writeCommitLog, true, isDroppable))
-                                    .subscribeOn(NettyRxScheduler.instance());
+                                    .observeOn(NettyRxScheduler.instance());
                         }
                     }
                     else
@@ -602,9 +602,9 @@ public class Keyspace
                 for (Lock lock : locks)
                     lock.unlock();
             }
-        })
-        //Route the work to the correct core
-        .subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));
+
+            //Route the work to the correct core
+        }).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()
