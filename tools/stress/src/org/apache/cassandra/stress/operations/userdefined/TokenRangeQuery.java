@@ -21,6 +21,7 @@ package org.apache.cassandra.stress.operations.userdefined;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -31,9 +32,7 @@ import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.ColumnMetadata;
 import com.datastax.driver.core.ContinuousPagingOptions;
 import com.datastax.driver.core.Row;
-import com.datastax.driver.core.RowIterator;
 import com.datastax.driver.core.SimpleStatement;
-import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.TableMetadata;
 import com.datastax.driver.core.Token;
 import com.datastax.driver.core.TokenRange;
@@ -109,7 +108,7 @@ public class TokenRangeQuery extends Operation
     {
         public final TokenRange tokenRange;
         public final String query;
-        public RowIterator it;
+        public Iterator<Row> it;
         public Set<Token> partitions = new HashSet<>();
 
         public State(TokenRange tokenRange, String query)
@@ -167,10 +166,10 @@ public class TokenRangeQuery extends Operation
 
             if (state.it == null)
             {
-                Statement statement = new SimpleStatement(state.query);
-                statement.setRoutingTokenRange(state.tokenRange);
+                SimpleStatement statement = new SimpleStatement(state.query);
+                statement.setRoutingToken(state.tokenRange.getEnd());
                 statement.setConsistencyLevel(JavaDriverClient.from(ThriftConversion.fromThrift(settings.command.consistencyLevel)));
-                state.it = client.execute(statement, ContinuousPagingOptions.create(pageSize, ContinuousPagingOptions.PageUnit.ROWS));
+                state.it = client.execute(statement, ContinuousPagingOptions.builder().withPageSize(pageSize, ContinuousPagingOptions.PageUnit.ROWS).build()).iterator();
             }
 
             int rowsToProcess = pageSize;
@@ -201,7 +200,6 @@ public class TokenRangeQuery extends Operation
 
             if (!state.it.hasNext() || isWarmup)
             { // no more pages to fetch or just warming up, ready to move on to another token range
-                state.it.close();
                 currentState.set(null);
             }
 
@@ -317,15 +315,8 @@ public class TokenRangeQuery extends Operation
             return 0;
 
         int numLeft = workManager.takePermits(1);
-        int ret = numLeft > 0 ? 1 : 0;
 
-        if (ret == 0)
-        {
-            State state = currentState.get();
-            if (state != null && state.it != null)
-                state.it.close(); // be nice to the driver
-        }
-        return ret;
+        return numLeft > 0 ? 1 : 0;
     }
 
     public String key()

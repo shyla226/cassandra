@@ -23,6 +23,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import com.datastax.driver.core.ContinuousPagingOptions;
+import com.datastax.driver.core.exceptions.DriverException;
+import com.datastax.driver.core.exceptions.OperationTimedOutException;
 import org.apache.cassandra.cql3.CQLTester;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
@@ -58,6 +60,7 @@ public class ContinuousPagingErrorsTest extends CQLTester
                                                                                                          .numClusterings(100)
                                                                                                          .partitionSize(2048)
                                                                                                          .failAfter(0)
+                                                                                                         .exception(DriverException.class)
                                                                                                          .build())
         {
             helper.testContinuousPaging(1, 500, ContinuousPagingOptions.PageUnit.ROWS);
@@ -84,6 +87,7 @@ public class ContinuousPagingErrorsTest extends CQLTester
                                                                                                          .numClusterings(100)
                                                                                                          .partitionSize(2048)
                                                                                                          .failAfter(1)
+                                                                                                         .exception(DriverException.class)
                                                                                                          .build())
         {
             helper.testContinuousPaging(1, 500, ContinuousPagingOptions.PageUnit.ROWS);
@@ -110,6 +114,7 @@ public class ContinuousPagingErrorsTest extends CQLTester
                                                                                                          .numClusterings(100)
                                                                                                          .partitionSize(2048)
                                                                                                          .failAfter(2)
+                                                                                                         .exception(OperationTimedOutException.class)
                                                                                                          .build())
         {
             helper.testContinuousPaging(1, 500, ContinuousPagingOptions.PageUnit.ROWS);
