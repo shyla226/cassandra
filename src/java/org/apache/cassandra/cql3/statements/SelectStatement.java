@@ -34,6 +34,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -72,7 +73,6 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 
 /**
@@ -142,6 +142,26 @@ public class SelectStatement implements CQLStatement
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
         this.queriedColumns = gatherQueriedColumns();
+    }
+
+    /**
+     * Adds the specified restrictions to the index restrictions.
+     *
+     * @param indexRestriction the index restrictions to add
+     * @return a new {@code SelectStatement} instance with the added index restrictions
+     */
+    public SelectStatement addIndexRestrictions(Restrictions indexRestrictions)
+    {
+        return new SelectStatement(cfm,
+                                   boundTerms,
+                                   parameters,
+                                   selection,
+                                   restrictions.addIndexRestrictions(indexRestrictions),
+                                   isReversed,
+                                   aggregationSpec,
+                                   orderingComparator,
+                                   limit,
+                                   perPartitionLimit);
     }
 
     public Iterable<Function> getFunctions()
