@@ -18,32 +18,51 @@
 
 package org.apache.cassandra.cql3.restrictions;
 
-import java.util.ArrayList;
-import java.util.List;
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.IndexName;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
-public class IndexRestrictions
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+
+public final class IndexRestrictions
 {
+    /**
+     * The empty {@code IndexRestrictions}.
+     */
+    private static final IndexRestrictions EMPTY_RESTRICTIONS = new IndexRestrictions(ImmutableList.of(), ImmutableList.of());
+
     public static final String INDEX_NOT_FOUND = "Invalid index expression, index %s not found for %s.%s";
     public static final String INVALID_INDEX = "Target index %s cannot be used to query %s.%s";
     public static final String CUSTOM_EXPRESSION_NOT_SUPPORTED = "Index %s does not support custom expressions";
     public static final String NON_CUSTOM_INDEX_IN_EXPRESSION = "Only CUSTOM indexes may be used in custom index expressions, %s is not valid";
     public static final String MULTIPLE_EXPRESSIONS = "Multiple custom index expressions in a single query are not supported";
 
-    private final List<Restrictions> regularRestrictions = new ArrayList<>();
-    private final List<CustomIndexExpression> customExpressions = new ArrayList<>();
+    private final ImmutableList<Restrictions> regularRestrictions;
+    private final ImmutableList<CustomIndexExpression> customExpressions;
 
-    public void add(Restrictions restrictions)
-    {
-        regularRestrictions.add(restrictions);
+    private IndexRestrictions(ImmutableList<Restrictions> regularRestrictions, ImmutableList<CustomIndexExpression> customExpressions){
+        this.regularRestrictions = regularRestrictions;
+        this.customExpressions = customExpressions;
     }
 
-    public void add(CustomIndexExpression expression)
+    /**
+     * Returns an empty {@code IndexRestrictions}.
+     * @return an empty {@code IndexRestrictions}
+     */
+    public static IndexRestrictions of()
     {
-        customExpressions.add(expression);
+        return EMPTY_RESTRICTIONS;
+    }
+
+    /**
+     * Creates a new {@code IndexRestrictions.Builder} instance.
+     * @return a new {@code IndexRestrictions.Builder} instance.
+     */
+    public static Builder builder()
+    {
+        return new IndexRestrictions.Builder();
     }
 
     public boolean isEmpty()
@@ -51,33 +70,105 @@ public class IndexRestrictions
         return regularRestrictions.isEmpty() && customExpressions.isEmpty();
     }
 
-    public List<Restrictions> getRestrictions()
+    /**
+     * Returns the regular restrictions.
+     * @return the regular restrictions
+     */
+    public ImmutableList<Restrictions> getRestrictions()
     {
         return regularRestrictions;
     }
 
-    public List<CustomIndexExpression> getCustomIndexExpressions()
+    /**
+     * Returns the custom expressions.
+     * @return the custom expressions
+     */
+    public ImmutableList<CustomIndexExpression> getCustomIndexExpressions()
     {
         return customExpressions;
     }
 
     static InvalidRequestException invalidIndex(IndexName indexName, CFMetaData cfm)
     {
-        return new InvalidRequestException(String.format(INVALID_INDEX, indexName.getIdx(), cfm.ksName, cfm.cfName));
+        return invalidRequest(INVALID_INDEX, indexName.getIdx(), cfm.ksName, cfm.cfName);
     }
 
     static InvalidRequestException indexNotFound(IndexName indexName, CFMetaData cfm)
     {
-        return new InvalidRequestException(String.format(INDEX_NOT_FOUND,indexName.getIdx(), cfm.ksName, cfm.cfName));
+        return invalidRequest(INDEX_NOT_FOUND,indexName.getIdx(), cfm.ksName, cfm.cfName);
     }
 
     static InvalidRequestException nonCustomIndexInExpression(IndexName indexName)
     {
-        return new InvalidRequestException(String.format(NON_CUSTOM_INDEX_IN_EXPRESSION, indexName.getIdx()));
+        return invalidRequest(NON_CUSTOM_INDEX_IN_EXPRESSION, indexName.getIdx());
     }
 
     static InvalidRequestException customExpressionNotSupported(IndexName indexName)
     {
-        return new InvalidRequestException(String.format(CUSTOM_EXPRESSION_NOT_SUPPORTED, indexName.getIdx()));
+        return invalidRequest(CUSTOM_EXPRESSION_NOT_SUPPORTED, indexName.getIdx());
+    }
+
+    /**
+     * Builder for IndexRestrictions.
+     */
+    public static final class Builder
+    {
+        /**
+         * Builder for the regular restrictions.
+         */
+        private ImmutableList.Builder<Restrictions> regularRestrictions = ImmutableList.builder();
+
+        /**
+         * Builder for the custom expressions.
+         */
+        private ImmutableList.Builder<CustomIndexExpression> customExpressions = ImmutableList.builder();
+
+        private Builder() {}
+
+        /**
+         * Adds the specified restrictions.
+         *
+         * @param restrictions the restrictions to add
+         * @return this {@code Builder}
+         */
+        public Builder add(Restrictions restrictions)
+        {
+            regularRestrictions.add(restrictions);
+            return this;
+        }
+
+        /**
+         * Adds the restrictions and custom expressions from the specified {@code IndexRestrictions}.
+         *
+         * @param restrictions the restrictions and custom expressions to add
+         * @return this {@code Builder}
+         */
+        public Builder add(IndexRestrictions restrictions)
+        {
+            regularRestrictions.addAll(restrictions.regularRestrictions);
+            customExpressions.addAll(restrictions.customExpressions);
+            return this;
+        }
+
+        /**
+         * Adds the specified index expression.
+         *
+         * @param expression the index expression to add
+         * @return this {@code Builder}
+         */
+        public Builder add(CustomIndexExpression expression)
+        {
+            customExpressions.add(expression);
+            return this;
+        }
+
+        /**
+         * Builds a new {@code IndexRestrictions} instance
+         * @return a new {@code IndexRestrictions} instance
+         */
+        public IndexRestrictions build()
+        {
+            return new IndexRestrictions(regularRestrictions.build(), customExpressions.build());
+        }
     }
 }
