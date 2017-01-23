@@ -27,8 +27,8 @@ import wcwidth
 
 from collections import defaultdict
 from displaying import colorme, get_str, FormattedValue, DEFAULT_VALUE_COLORS, NO_COLOR_MAP
-from cassandra.cqltypes import EMPTY
-from cassandra.util import datetime_from_timestamp
+from dse.cqltypes import EMPTY
+from dse.util import datetime_from_timestamp
 from util import UTC
 
 is_win = platform.system() == 'Windows'
