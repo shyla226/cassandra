@@ -150,7 +150,10 @@ public class OutOfSpaceTest extends CQLTester
         catch (ExecutionException e)
         {
             // Correct path.
-            Assert.assertTrue(errorClass.isInstance(e.getCause()));
+            Throwable t = e.getCause();
+            while (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class)
+                t = t.getCause();
+            Assert.assertTrue(errorClass.isInstance(t));
         }
 
         // Make sure commit log wasn't discarded.
