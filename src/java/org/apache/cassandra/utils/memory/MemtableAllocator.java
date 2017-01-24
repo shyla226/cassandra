@@ -140,28 +140,11 @@ public abstract class MemtableAllocator
         public void allocate(long size, TPCOpOrder.Group opGroup)
         {
             assert size >= 0;
-
-            while (true)
-            {
-                if (parent.tryAllocate(size))
-                {
-                    acquired(size);
-                    return;
-                }
-                WaitQueue.Signal signal = opGroup.isBlockingSignal(parent.hasRoom().register(Thread.currentThread(), parent.blockedTimerContext()));
-                boolean allocated = parent.tryAllocate(size);
-                if (allocated || opGroup.isBlocking())
-                {
-                    signal.cancel();
-                    if (allocated) // if we allocated, take ownership
-                        acquired(size);
-                    else // otherwise we're blocking so we're permitted to overshoot our constraints, to just allocate without blocking
-                        allocated(size);
-                    return;
-                }
-                else
-                    signal.awaitUninterruptibly();
-            }
+            
+            if (parent.tryAllocate(size))
+                acquired(size);
+            else
+                allocated(size);
         }
 
         // retroactively mark an amount allocated and acquired in the tracker, and owned by us
