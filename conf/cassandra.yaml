@@ -526,7 +526,7 @@ memtable_allocation_type: heap_buffers
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-#memtable_flush_writers: 2
+memtable_flush_writers: 12
 
 # Total space to use for change-data-capture logs on disk.
 #
@@ -1045,7 +1045,7 @@ tombstone_failure_threshold: 100000
 
 # Log WARN on any multiple-partition batch size exceeding this value. 5kb per batch by default.
 # Caution should be taken on increasing the size of this threshold as it can lead to node instability.
-batch_size_warn_threshold_in_kb: 5
+batch_size_warn_threshold_in_kb: 45
 
 # Fail any multiple-partition batch exceeding this value. 50kb (10x warn threshold) by default.
 batch_size_fail_threshold_in_kb: 50
