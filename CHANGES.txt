@@ -1,4 +1,5 @@
 DSE 5.0.6
+ * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
  * Always die on AssertionError and log flush failure errors. (APOLLO-227)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
