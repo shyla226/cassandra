@@ -326,10 +326,9 @@ public final class SchemaKeyspace
                 continue;
 
             ReadCommand cmd = getReadCommandForTableSchema(table);
-            try (ReadExecutionController executionController = cmd.executionController())
+            try (ReadExecutionController executionController = cmd.executionController();
+                 PartitionIterator schema = cmd.executeInternal(executionController).blockingGet())
             {
-
-                PartitionIterator schema = cmd.executeInternal(executionController).blockingGet();
                 while (schema.hasNext())
                 {
                     try (RowIterator partition = schema.next().blockingGet())
