@@ -220,21 +220,45 @@ public class Keyspace
      * @param columnFamilyName the column family to snapshot or all on null
      * @throws IOException if the column family doesn't exist
      */
-    public void snapshot(String snapshotName, String columnFamilyName) throws IOException
+    public Set<SSTableReader> snapshot(String snapshotName, String columnFamilyName) throws IOException
+    {
+        return snapshot(snapshotName, columnFamilyName, new HashSet<>());
+    }
+
+    /**
+     * Take a snapshot of the specific column family, or the entire set of column families
+     * if columnFamily is null with a given timestamp
+     *
+     * @param snapshotName     the tag associated with the name of the snapshot.  This value may not be null
+     * @param columnFamilyName the column family to snapshot or all on null
+     * @param alreadySnapshotted the set of sstables that have already been snapshotted (to avoid duplicate hardlinks in
+     *                           some edge cases)
+     * @throws IOException if the column family doesn't exist
+     */
+    public Set<SSTableReader> snapshot(String snapshotName, String columnFamilyName, Set<SSTableReader> alreadySnapshotted) throws IOException
     {
         assert snapshotName != null;
+        assert alreadySnapshotted != null;
+
         boolean tookSnapShot = false;
+        Set<SSTableReader> snapshotSSTables = new HashSet<>();
+        // copy so we can update after each CF snapshot without modifying the original
+        alreadySnapshotted = new HashSet<>(alreadySnapshotted);
         for (ColumnFamilyStore cfStore : columnFamilyStores.values())
         {
             if (columnFamilyName == null || cfStore.name.equals(columnFamilyName))
             {
                 tookSnapShot = true;
-                cfStore.snapshot(snapshotName);
+                Set<SSTableReader> newSnapshots = cfStore.snapshot(snapshotName, null, false, alreadySnapshotted);
+                snapshotSSTables.addAll(newSnapshots);
+                alreadySnapshotted.addAll(newSnapshots);
             }
         }
 
         if ((columnFamilyName != null) && !tookSnapShot)
             throw new IOException("Failed taking snapshot. Table " + columnFamilyName + " does not exist.");
+
+        return snapshotSSTables;
     }
 
     /**

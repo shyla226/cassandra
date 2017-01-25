@@ -105,7 +105,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                                        !sstable.metadata.isIndex() && // exclude SSTables from 2i
                                        new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(desc.ranges);
                             }
-                        }, true); //ephemeral snapshot, if repair fails, it will be cleaned next startup
+                        }, true, new HashSet<>()); //ephemeral snapshot, if repair fails, it will be cleaned next startup
                     }
                     logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from);
                     MessagingService.instance().sendReply(new MessageOut(MessagingService.Verb.INTERNAL_RESPONSE), id, message.from);

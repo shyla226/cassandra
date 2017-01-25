@@ -321,8 +321,8 @@ public class ColumnFamilyStoreTest
         }
         ScrubTest.fillIndexCF(cfs, false, colValues);
 
-        cfs.snapshot("nonEphemeralSnapshot", null, false);
-        cfs.snapshot("ephemeralSnapshot", null, true);
+        cfs.snapshot("nonEphemeralSnapshot", null, false, new HashSet<>());
+        cfs.snapshot("ephemeralSnapshot", null, true, new HashSet<>());
 
         Map<String, Pair<Long, Long>> snapshotDetails = cfs.getSnapshotDetails();
         assertEquals(2, snapshotDetails.size());

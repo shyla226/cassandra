@@ -1606,14 +1606,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public void snapshotWithoutFlush(String snapshotName)
     {
-        snapshotWithoutFlush(snapshotName, null, false);
+        snapshotWithoutFlush(snapshotName, null, false, new HashSet<>());
     }
 
     /**
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned during next startup
      */
-    public Set<SSTableReader> snapshotWithoutFlush(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral)
+    public Set<SSTableReader> snapshotWithoutFlush(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, Set<SSTableReader> alreadySnapshotted)
     {
+        assert alreadySnapshotted != null;
         Set<SSTableReader> snapshottedSSTables = new HashSet<>();
         for (ColumnFamilyStore cfs : concatWithIndexes())
         {
@@ -1622,6 +1623,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             {
                 for (SSTableReader ssTable : currentView.sstables)
                 {
+                    // As reported in APOLLO-290, custom indexes that use a regular Cassandra table as the backing data
+                    // store (such as PartitionedVertexTable in DSE) can cause duplicate hardlink errors when a snapshot
+                    // is performed.  This is because the backing table is also registered as an Index CFS (see Index.getBackingTable()),
+                    // so it gets snapshotted once as an index table, and once as a normal table.  We check for duplicates
+                    // and skip them here to avoid that.
+                    if (alreadySnapshotted.contains(ssTable))
+                        continue;
+
                     File snapshotDirectory = Directories.getSnapshotDirectory(ssTable.descriptor, snapshotName);
                     ssTable.createLinks(snapshotDirectory.getPath()); // hard links
                     filesJSONArr.add(ssTable.descriptor.relativeFilenameFor(Component.DATA));
@@ -1754,24 +1763,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return refs;
     }
 
-    /**
-     * Take a snap shot of this columnfamily store.
-     *
-     * @param snapshotName the name of the associated with the snapshot
-     */
     public Set<SSTableReader> snapshot(String snapshotName)
     {
-        return snapshot(snapshotName, null, false);
+        return snapshot(snapshotName, null, false, new HashSet<>());
     }
-
 
     /**
      * @param ephemeral If this flag is set to true, the snapshot will be cleaned up during next startup
      */
-    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral)
+    public Set<SSTableReader> snapshot(String snapshotName, Predicate<SSTableReader> predicate, boolean ephemeral, Set<SSTableReader> alreadySnapshotted)
     {
         forceBlockingFlush();
-        return snapshotWithoutFlush(snapshotName, predicate, ephemeral);
+        return snapshotWithoutFlush(snapshotName, predicate, ephemeral, alreadySnapshotted);
     }
 
     public boolean snapshotExists(String snapshotName)

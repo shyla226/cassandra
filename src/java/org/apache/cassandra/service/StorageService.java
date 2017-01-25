@@ -36,6 +36,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2817,8 +2818,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 throw new IOException("Snapshot " + tag + " already exists.");
 
 
+        Set<SSTableReader> snapshotted = new HashSet<>();
         for (Keyspace keyspace : keyspaces)
-            keyspace.snapshot(tag, null);
+            snapshotted.addAll(keyspace.snapshot(tag, null, snapshotted));
     }
 
     /**
@@ -2907,10 +2909,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
 
+        Set<SSTableReader> snapshotted = new HashSet<>();
         for (Entry<Keyspace, List<String>> entry : keyspaceColumnfamily.entrySet())
         {
             for (String table : entry.getValue())
-                entry.getKey().snapshot(tag, table);
+                snapshotted.addAll(entry.getKey().snapshot(tag, table, snapshotted));
         }
 
     }

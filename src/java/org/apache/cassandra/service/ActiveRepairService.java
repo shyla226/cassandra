@@ -631,7 +631,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                !(sstable.metadata.isIndex()) && // exclude SSTables from 2i
                                new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(ranges);
                     }
-                }, true);
+                }, true, new HashSet<>());
 
                 if (isAlreadyRepairing(cfId, parentSessionId, snapshottedSSTables))
                 {
