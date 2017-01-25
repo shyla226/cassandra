@@ -2,6 +2,7 @@ DSE 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from 4.0:
+ * Parallelize streaming of different keyspaces (4663)
  * Improved compactions metrics (CASSANDRA-13015)
  * Speed-up start-up sequence by avoiding un-needed flushes (CASSANDRA-13031)
  * Use Caffeine (W-TinyLFU) for on-heap caches (CASSANDRA-10855)
@@ -67,6 +68,7 @@ Merged from DSE 5.0.x
  * Tables in system_distributed should not use gcgs of 0 (CASSANDRA-12954)
 
 3.10
+ * Fix flaky GcCompactionTest (CASSANDRA-12664)
  * Fix TestHintedHandoff.hintedhandoff_decom_test (CASSANDRA-13058)
  * Fixed query monitoring for range queries (CASSANDRA-13050)
  * Remove outboundBindAny configuration property (CASSANDRA-12673)
@@ -179,9 +181,9 @@ Merged from DSE 5.0.x
  * Restore resumable hints delivery (CASSANDRA-11960)
  * Properly record CAS contention (CASSANDRA-12626)
 Merged from 3.0:
+ * Better error when modifying function permissions without explicit keyspace (CASSANDRA-12925)
  * Indexer is not correctly invoked when building indexes over sstables (CASSANDRA-13075)
- * Read repair is not blocking repair to finish in foreground repair (CASSANDRA-13115)
- * Stress daemon help is incorrect(CASSANDRA-12563)
+ * Stress daemon help is incorrect (CASSANDRA-12563)
  * Read repair is not blocking repair to finish in foreground repair (CASSANDRA-13115)
  * Stress daemon help is incorrect (CASSANDRA-12563)
  * Remove ALTER TYPE support (CASSANDRA-12443)

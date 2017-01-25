@@ -2029,7 +2029,7 @@ public class DatabaseDescriptor
     }
 
     /**
-     * @deprecated use {@link this#getStreamingKeepAlivePeriod()} instead
+     * @deprecated use {@link #getStreamingKeepAlivePeriod()} instead
      * @return streaming_socket_timeout_in_ms property
      */
     @Deprecated
@@ -2041,6 +2041,11 @@ public class DatabaseDescriptor
     public static int getStreamingKeepAlivePeriod()
     {
         return conf.streaming_keep_alive_period_in_secs;
+    }
+
+    public static int getStreamingConnectionsPerHost()
+    {
+        return conf.streaming_connections_per_host;
     }
 
     public static String getLocalDataCenter()
