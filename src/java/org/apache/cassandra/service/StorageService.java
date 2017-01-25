@@ -76,6 +76,7 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.hints.HintVerbHandler;
 import org.apache.cassandra.hints.HintsService;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
@@ -3071,8 +3072,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 throw new IOException("Snapshot " + tag + " already exists.");
 
 
+        Set<SSTableReader> snapshotted = new HashSet<>();
         for (Keyspace keyspace : keyspaces)
-            keyspace.snapshot(tag, null, skipFlush);
+            snapshotted.addAll(keyspace.snapshot(tag, null, skipFlush, snapshotted));
     }
 
     /**
@@ -3132,10 +3134,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
 
+        Set<SSTableReader> snapshotted = new HashSet<>();
         for (Entry<Keyspace, List<String>> entry : keyspaceColumnfamily.entrySet())
         {
             for (String table : entry.getValue())
-                entry.getKey().snapshot(tag, table, skipFlush);
+                snapshotted.addAll(entry.getKey().snapshot(tag, table, skipFlush, snapshotted));
         }
 
     }

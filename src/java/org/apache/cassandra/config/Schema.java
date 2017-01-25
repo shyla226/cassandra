@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -574,6 +575,7 @@ public class Schema
 
         // remove all cfs from the keyspace instance.
         List<UUID> droppedCfs = new ArrayList<>();
+        HashSet<SSTableReader> alreadySnapshotted = new HashSet<>();
         for (CFMetaData cfm : ksm.tablesAndViews())
         {
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfm.cfName);
@@ -581,7 +583,7 @@ public class Schema
             unload(cfm);
 
             if (DatabaseDescriptor.isAutoSnapshot())
-                cfs.snapshot(snapshotName);
+                alreadySnapshotted.addAll(cfs.snapshot(snapshotName, null, false, false, alreadySnapshotted));
             Keyspace.open(ksm.name).dropCf(cfm.cfId);
 
             droppedCfs.add(cfm.cfId);

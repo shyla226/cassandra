@@ -217,23 +217,34 @@ public class Keyspace
      * @param snapshotName     the tag associated with the name of the snapshot.  This value may not be null
      * @param columnFamilyName the column family to snapshot or all on null
      * @param skipFlush Skip blocking flush of memtable
+     * @param alreadySnapshotted the set of sstables that have already been snapshotted (to avoid duplicate hardlinks in
+     *                           some edge cases)
      * @throws IOException if the column family doesn't exist
      */
-    public void snapshot(String snapshotName, String columnFamilyName, boolean skipFlush) throws IOException
+    public Set<SSTableReader> snapshot(String snapshotName, String columnFamilyName, boolean skipFlush, Set<SSTableReader> alreadySnapshotted) throws IOException
     {
         assert snapshotName != null;
+        assert alreadySnapshotted != null;
+
         boolean tookSnapShot = false;
+        Set<SSTableReader> snapshotSSTables = new HashSet<>();
+        // copy so we can update after each CF snapshot without modifying the original
+        alreadySnapshotted = new HashSet<>(alreadySnapshotted);
         for (ColumnFamilyStore cfStore : columnFamilyStores.values())
         {
             if (columnFamilyName == null || cfStore.name.equals(columnFamilyName))
             {
                 tookSnapShot = true;
-                cfStore.snapshot(snapshotName, skipFlush);
+                Set<SSTableReader> newSnapshots = cfStore.snapshot(snapshotName, null, false, skipFlush, alreadySnapshotted);
+                snapshotSSTables.addAll(newSnapshots);
+                alreadySnapshotted.addAll(newSnapshots);
             }
         }
 
         if ((columnFamilyName != null) && !tookSnapShot)
             throw new IOException("Failed taking snapshot. Table " + columnFamilyName + " does not exist.");
+
+        return snapshotSSTables;
     }
 
     /**
@@ -246,7 +257,7 @@ public class Keyspace
      */
     public void snapshot(String snapshotName, String columnFamilyName) throws IOException
     {
-        snapshot(snapshotName, columnFamilyName, false);
+        snapshot(snapshotName, columnFamilyName, false, new HashSet<>());
     }
 
     /**
