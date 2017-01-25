@@ -50,17 +50,6 @@ public class FilteredPartition extends ImmutableBTreePartition
         final Iterator<Row> iter = iterator();
         return new RowIterator()
         {
-            public Observable<Row> asObservable()
-            {
-                return Observable.create(subscriber -> {
-
-                    while (hasNext())
-                        subscriber.onNext(next());
-
-                    subscriber.onComplete();
-                });
-            }
-
             public CFMetaData metadata()
             {
                 return metadata;

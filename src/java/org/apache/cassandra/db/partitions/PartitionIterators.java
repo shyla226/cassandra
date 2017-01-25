@@ -40,13 +40,7 @@ public abstract class PartitionIterators
     @SuppressWarnings("resource") // The created resources are returned right away
     public static Single<RowIterator> getOnlyElement(final PartitionIterator iter, SinglePartitionReadCommand command)
     {
-        // If the query has no results, we'll get an empty iterator, but we still
-        // want a RowIterator out of this method, so we return an empty one.
-        Single<RowIterator> toReturn = iter.hasNext()
-                                       ? iter.next()
-                                       : Single.just(EmptyIterators.row(command.metadata(),
-                                                                        command.partitionKey(),
-                                                                        command.clusteringIndexFilter().isReversed()));
+        Single<RowIterator> toReturn = iter.next();
 
         // Note that in general, we should wrap the result so that it's close method actually
         // close the whole PartitionIterator.
@@ -61,7 +55,21 @@ public abstract class PartitionIterators
                 assert !hadNext;
             }
         }
-        return toReturn.map(t -> Transformation.apply(t, new Close()));
+        return toReturn.map(t ->
+                            {
+                                // If the query has no results, we'll get an empty iterator, but we still
+                                // want a RowIterator out of this method, so we return an empty one.
+                                if (t == null)
+                                {
+                                    return EmptyIterators.row(command.metadata(),
+                                                              command.partitionKey(),
+                                                              command.clusteringIndexFilter().isReversed());
+                                }
+                                else
+                                {
+                                    return Transformation.apply(t, new Close());
+                                }
+                            });
     }
 
     @SuppressWarnings("resource") // The created resources are returned right away
