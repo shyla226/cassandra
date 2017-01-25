@@ -21,6 +21,8 @@ DSE 5.1.0
  * Add method to IAuthenticator to login by user as well as by role (APOLLO-70)
  * Add private protocol version (APOLLO-2)
 Merged from DSE 5.0.x
+ * Filter out duplicate sstables when performing snapshots to avoid
+   duplicate hardlink errors (APOLLO-290)
  * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
  * Always die on AssertionError and log flush failure errors. (APOLLO-227)
  * Indexer is not correctly invoked when building indexes over sstables (CASSANDRA-13075)
