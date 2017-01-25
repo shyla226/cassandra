@@ -140,7 +140,7 @@ public abstract class MemtableAllocator
         public void allocate(long size, TPCOpOrder.Group opGroup)
         {
             assert size >= 0;
-            
+
             if (parent.tryAllocate(size))
                 acquired(size);
             else
