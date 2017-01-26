@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.rows.Cell;
@@ -33,6 +34,9 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -40,6 +44,23 @@ import static org.junit.Assert.*;
 
 public class KeyspaceTest extends CQLTester
 {
+    private static int defaultMetricsHistogramUpdateInterval;
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        DatabaseDescriptor.daemonInitialization();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
+    }
+
     @Test
     public void testGetRowNoColumns() throws Throwable
     {
@@ -409,7 +430,7 @@ public class KeyspaceTest extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        cfs.metric.sstablesPerReadHistogram.cf.clear();
+        cfs.metric.sstablesPerReadHistogram.clear();
 
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", slices(cfs, null, 1499, false), 1000);
         int[] expectedValues = new int[500];
@@ -417,16 +438,16 @@ public class KeyspaceTest extends CQLTester
             expectedValues[i] = i + 1000;
         assertRowsInResult(cfs, command, expectedValues);
 
-        assertEquals(5, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
-        cfs.metric.sstablesPerReadHistogram.cf.clear();
+        assertEquals(5, cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(), 0.1);
+        cfs.metric.sstablesPerReadHistogram.clear();
 
         command = singlePartitionSlice(cfs, "0", slices(cfs, 1500, 2000, false), 1000);
         for (int i = 0; i < 500; i++)
             expectedValues[i] = i + 1500;
         assertRowsInResult(cfs, command, expectedValues);
 
-        assertEquals(5, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
-        cfs.metric.sstablesPerReadHistogram.cf.clear();
+        assertEquals(5, cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(), 0.1);
+        cfs.metric.sstablesPerReadHistogram.clear();
 
         // reverse
         command = singlePartitionSlice(cfs, "0", slices(cfs, 1500, 2000, true), 1000);
@@ -462,11 +483,11 @@ public class KeyspaceTest extends CQLTester
             cfs.forceBlockingFlush();
         }
 
-        cfs.metric.sstablesPerReadHistogram.cf.clear();
+        cfs.metric.sstablesPerReadHistogram.clear();
         assertRows(execute("SELECT * FROM %s WHERE a = ? AND (b, c) >= (?, ?) AND (b) <= (?) LIMIT 1000", "0", "a5", 85, "a5"),
                 row("0", "a5", 85, 0),
                 row("0", "a5", 95, 0));
-        assertEquals(2, cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(), 0.1);
+        assertEquals(2, cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(), 0.1);
     }
 
     private void validateSliceLarge(ColumnFamilyStore cfs)

@@ -18,46 +18,30 @@
 
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
 
 /**
- * An incrementing and decrementing counter metric.
+ * A metric that can be composed by other metrics.
+ *
+ * Composable metrics are normally of two types:
+ * - single, which means they act as a normal metric
+ * - composite, which means they are composed exclusively by child metrics of
+ *   type M, and cannot be updated directly.
  */
-public abstract class Counter implements Metric, Counting, Composable<Counter>
+public interface Composable<M extends Metric>
 {
-    /**
-     * Increment the counter by one.
-     */
-    public void inc()
+    public enum Type
     {
-        inc(1);
+        SINGLE,
+        COMPOSITE
     }
 
-    /**
-     * Increment the counter by {@code n}.
-     *
-     * @param n the amount by which the counter will be increased
-     */
-    public abstract void inc(long n);
+    public Type getType();
 
-    /**
-     * Decrement the counter by one.
-     */
-    public void dec()
+    public default void compose(M metric)
     {
-        dec(1);
+        assert getType() == Type.SINGLE : "Composite metrics should implement compose()";
+        throw new UnsupportedOperationException("Single metric cannot be composed with other metrics");
     }
 
-    /**
-     * Decrement the counter by {@code n}.
-     *
-     * @param n the amount by which the counter will be decreased
-     */
-    public abstract void dec(long n);
-
-    public static Counter make(boolean isComposite)
-    {
-        return isComposite ? new CompositeCounter() : new SingleCounter();
-    }
 }

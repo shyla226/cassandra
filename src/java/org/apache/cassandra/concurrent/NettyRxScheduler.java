@@ -95,6 +95,9 @@ public class NettyRxScheduler extends Scheduler
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
+    // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
+    private final static AtomicInteger roundRobinIndex = new AtomicInteger(0);
+
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
     static
@@ -232,6 +235,16 @@ public class NettyRxScheduler extends Scheduler
     public static int getNumCores()
     {
         return perCoreSchedulers.length;
+    }
+
+    /**
+     * Return the next core for scheduling one or more tasks.
+     *
+     * @return a valid core id, distributed in a round-robin way
+     */
+    public static int getNextCore()
+    {
+        return roundRobinIndex.getAndIncrement() % getNumCores();
     }
 
     /**
@@ -482,25 +495,4 @@ public class NettyRxScheduler extends Scheduler
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
         //RxSubscriptionDebugger.enable();
     }
-
-    private static final sun.misc.Unsafe UNSAFE;
-    private static final long PROBE;
-
-    static
-    {
-        try
-        {
-            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            UNSAFE = (sun.misc.Unsafe) field.get(null);
-
-            Class<?> tk = Thread.class;
-            PROBE = UNSAFE.objectFieldOffset(tk.getDeclaredField("threadLocalRandomProbe"));
-        }
-        catch (Exception e)
-        {
-            throw new AssertionError(e);
-        }
-    }
-
 }

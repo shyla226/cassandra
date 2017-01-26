@@ -25,17 +25,19 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
-import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
+import org.apache.cassandra.metrics.Histogram;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -51,6 +53,11 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     // legacy value corresponding to a window size of 100 when using com.codahale.metrics.ExponentiallyDecayingReservoi
     static final long MAX_LATENCY = 107964792;
 
+    // we set the histogram update interval to zero, which means the histogram will update itself each time
+    // a read is performed, rather than periodically, this means we can only consult histogram values in
+    // a thread safe way, which is ok, since we currently only consult values in a periodic task
+    private static final int HISTOGRAM_UPDATE_INTERVAL_MILLIS = 0;
+
     private volatile int dynamicUpdateInterval = DatabaseDescriptor.getDynamicUpdateInterval();
     private volatile int dynamicResetInterval = DatabaseDescriptor.getDynamicResetInterval();
     private volatile double dynamicBadnessThreshold = DatabaseDescriptor.getDynamicBadnessThreshold();
@@ -63,7 +70,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     private boolean registered = false;
 
     private volatile Map<InetAddress, Double> scores = Collections.emptyMap();
-    private final ConcurrentHashMap<InetAddress, DecayingEstimatedHistogramReservoir> samples = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<InetAddress, Histogram> samples = new ConcurrentHashMap<>();
 
     public final IEndpointSnitch subsnitch;
 
@@ -256,10 +263,10 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         if (MAX_LATENCY < latency)
             latency = MAX_LATENCY;
 
-        DecayingEstimatedHistogramReservoir sample = samples.get(host);
+        Histogram sample = samples.get(host);
         if (sample == null)
             // using samples.get() before the computeIfAbsent gives a slight perf improvement
-            sample = samples.computeIfAbsent(host, (h) -> new DecayingEstimatedHistogramReservoir(true, MAX_LATENCY));
+            sample = samples.computeIfAbsent(host, (h) -> Histogram.make(true, MAX_LATENCY, HISTOGRAM_UPDATE_INTERVAL_MILLIS, false));
 
         sample.update(latency);
     }
@@ -268,6 +275,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     {
         if (!StorageService.instance.isGossipActive())
             return;
+
         if (!registered)
         {
             if (MessagingService.instance() != null)
@@ -278,19 +286,28 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
 
         }
         double maxLatency = 1;
+
+        // First get the entries snapshots, the histogram will update itself so we do this only once,
+        // also note that this is not thread safe, which is OK since this method is only called by
+        // the scheduled tasks scheduler
+        Map<InetAddress, Snapshot> snapshots = samples.entrySet()
+                                                      .stream()
+                                                      .collect(Collectors.toMap(Map.Entry::getKey,
+                                                                                entry -> entry.getValue().getSnapshot()));
+
         // We're going to weight the latency for each host against the worst one we see, to
         // arrive at sort of a 'badness percentage' for them. First, find the worst for each:
         HashMap<InetAddress, Double> newScores = new HashMap<>();
-        for (Map.Entry<InetAddress, DecayingEstimatedHistogramReservoir> entry : samples.entrySet())
+        for (Map.Entry<InetAddress, Snapshot> entry : snapshots.entrySet())
         {
-            double mean = entry.getValue().getSnapshot().getValue(percentile);
+            double mean = entry.getValue().getValue(percentile);
             if (mean > maxLatency)
                 maxLatency = mean;
         }
         // now make another pass to do the weighting based on the maximums we found before
-        for (Map.Entry<InetAddress, DecayingEstimatedHistogramReservoir> entry: samples.entrySet())
+        for (Map.Entry<InetAddress, Snapshot> entry: snapshots.entrySet())
         {
-            double score = entry.getValue().getSnapshot().getValue(percentile) / maxLatency;
+            double score = entry.getValue().getValue(percentile) / maxLatency;
             // finally, add the severity without any weighting, since hosts scale this relative to their own load and the size of the task causing the severity.
             // "Severity" is basically a measure of compaction activity (CASSANDRA-3722).
             if (USE_SEVERITY)
@@ -339,11 +356,11 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
     public List<Double> dumpTimings(InetAddress host) throws UnknownHostException
     {
         ArrayList<Double> timings = new ArrayList<>();
-        DecayingEstimatedHistogramReservoir sample = samples.get(host);
+        Histogram sample = samples.get(host);
         if (sample != null)
         {
             long[] values = sample.getSnapshot().getValues();
-            long[] bucketOffsets = sample.getBucketOffsets();
+            long[] bucketOffsets = sample.getOffsets();
             for (int i = 0; i < values.length; i++)
             {
                 for (long l = 0; l < values[i]; l++)

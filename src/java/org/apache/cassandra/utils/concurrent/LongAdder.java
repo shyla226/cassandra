@@ -26,17 +26,19 @@ import sun.misc.Contended;
 
 /**
  * A class equivalent to {@link java.util.concurrent.atomic.LongAdder} except that
- * it uses an offheap buffer to store an array of longs, one per thread assigned to a core
- * plus one. At position zero, we store a long that is updated with CAS, this is used for
- * all threads not assigned to a core. At positions > 0 we store values reserved to threads
- * assigned to a core, so at position 1 we have a long value that will be updated by the thread
- * assigned to core zero, and so forth. In this case a simple read and volatile write is sufficient.
+ * it creates a Cell per core-thread as soon as needed, and a further Cell to be
+ * shared by every other thread. The dedicated cells are updated with an ordered put,
+ * aka as lazy set, rather than a full volatile write, whilst the shared Cell is
+ * updated with CAS.
  *
- * The sum can be recovered from any thread, via a volatile read of all values.
- */
+ * The ordered put guarantees atomicity, just like a volatile write, but not
+ * total ordering. So we may miss the latest value when reading, I added a load
+ * fence to help, but I am unsure if it does help.
+ *
+ * Even if we miss the latest value however, we can tolerate this.
+ * */
 public class LongAdder
 {
-    // Unsafe mechanics
     private static final sun.misc.Unsafe UNSAFE;
     private static final long valueOffset;
 
@@ -64,11 +66,11 @@ public class LongAdder
         Cell(long x) { value = x; }
 
         /** Lazyness does not guarantee the value that is written
-         * will be immediately visible but it does ensure that the
-         * update will be atomic (i.e. either visible or not at all)
-         * and typically a reading thread will have access in a few
-         * nanoseconds. It is suitable when only a single thread updates
-         * a value, even for incrementing, since we know the current
+         * will be immediately visible to another thread but it does
+         * ensure that the update will be atomic (i.e. either visible
+         * or not at all) and typically a reading thread will have access
+         * in a few nanoseconds. It is suitable when only a single thread
+         * updates a value, even for incrementing, since we know the current
          * value in this case.
          */
         void add(long x, boolean lazy)
@@ -89,9 +91,7 @@ public class LongAdder
 
         long get()
         {
-            // TODO - is the loadFence the correct way to emulate a volatile read? If not, we can just accept that
-            // we may miss the last update on read
-            UNSAFE.loadFence();
+            UNSAFE.loadFence(); // TODO - is this helping at all?
             return UNSAFE.getLong(this, valueOffset);
         }
     }
@@ -115,7 +115,7 @@ public class LongAdder
         // annotation performace drops by 10x if allocating all together
         // when the array is created
         if (values[index] == null)
-            values[index] = new Cell(0L);
+            values[index] = new Cell(0L); //TODO - two threads may race for the last item
 
         // only the last index requires a cas, for the rest a lazy put
         // is sufficient since only one thread will update this values

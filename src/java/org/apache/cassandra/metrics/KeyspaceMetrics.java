@@ -218,22 +218,22 @@ public class KeyspaceMetrics
             }
         });
         // latency metrics for TableMetrics to update
-        readLatency = new LatencyMetrics(factory, "Read");
-        writeLatency = new LatencyMetrics(factory, "Write");
-        rangeLatency = new LatencyMetrics(factory, "Range");
+        readLatency = new LatencyMetrics(factory, "Read", true);
+        writeLatency = new LatencyMetrics(factory, "Write", true);
+        rangeLatency = new LatencyMetrics(factory, "Range", true);
         // create histograms for TableMetrics to replicate updates to
-        sstablesPerReadHistogram = Metrics.histogram(factory.createMetricName("SSTablesPerReadHistogram"), true);
-        tombstoneScannedHistogram = Metrics.histogram(factory.createMetricName("TombstoneScannedHistogram"), false);
-        liveScannedHistogram = Metrics.histogram(factory.createMetricName("LiveScannedHistogram"), false);
-        colUpdateTimeDeltaHistogram = Metrics.histogram(factory.createMetricName("ColUpdateTimeDeltaHistogram"), false);
-        viewLockAcquireTime =  Metrics.timer(factory.createMetricName("ViewLockAcquireTime"));
-        viewReadTime = Metrics.timer(factory.createMetricName("ViewReadTime"));
+        sstablesPerReadHistogram = Metrics.histogram(factory.createMetricName("SSTablesPerReadHistogram"), true, true);
+        tombstoneScannedHistogram = Metrics.histogram(factory.createMetricName("TombstoneScannedHistogram"), false, true);
+        liveScannedHistogram = Metrics.histogram(factory.createMetricName("LiveScannedHistogram"), false, true);
+        colUpdateTimeDeltaHistogram = Metrics.histogram(factory.createMetricName("ColUpdateTimeDeltaHistogram"), false, true);
+        viewLockAcquireTime =  Metrics.timer(factory.createMetricName("ViewLockAcquireTime"), true);
+        viewReadTime = Metrics.timer(factory.createMetricName("ViewReadTime"), true);
         // add manually since histograms do not use createKeyspaceGauge method
         allMetrics.addAll(Lists.newArrayList("SSTablesPerReadHistogram", "TombstoneScannedHistogram", "LiveScannedHistogram"));
 
-        casPrepare = new LatencyMetrics(factory, "CasPrepare");
-        casPropose = new LatencyMetrics(factory, "CasPropose");
-        casCommit = new LatencyMetrics(factory, "CasCommit");
+        casPrepare = new LatencyMetrics(factory, "CasPrepare", true);
+        casPropose = new LatencyMetrics(factory, "CasPropose", true);
+        casCommit = new LatencyMetrics(factory, "CasCommit", true);
     }
 
     /**

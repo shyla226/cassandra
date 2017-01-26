@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.Assume;
 import org.junit.BeforeClass;
@@ -62,10 +63,16 @@ public class ColumnFamilyStoreTest
     public static final String CF_SUPER6 = "Super6";
     public static final String CF_INDEX1 = "Indexed1";
 
+    private static int defaultMetricsHistogramUpdateInterval;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
@@ -77,6 +84,12 @@ public class ColumnFamilyStoreTest
         SchemaLoader.createKeyspace(KEYSPACE2,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD1));
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
     }
 
     @Before
@@ -110,9 +123,9 @@ public class ColumnFamilyStoreTest
                 .applyUnsafe();
         cfs.forceBlockingFlush();
 
-        cfs.metric.sstablesPerReadHistogram.cf.clear(); // resets counts
+        cfs.metric.sstablesPerReadHistogram.clear(); // resets counts
         Util.getAll(Util.cmd(cfs, "key1").includeRow("c1").build());
-        assertEquals(1, cfs.metric.sstablesPerReadHistogram.cf.getCount());
+        assertEquals(1, cfs.metric.sstablesPerReadHistogram.getCount());
     }
 
     @Test

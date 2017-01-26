@@ -20,7 +20,6 @@ package org.apache.cassandra.test.microbench;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.metrics.Histogram;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -57,7 +56,7 @@ public class HistogramUpdateBench
     @Setup
     public void setup()
     {
-       histogram = new Histogram(new DecayingEstimatedHistogramReservoir());
+       histogram = Histogram.make(false);
     }
 
     @State(Scope.Thread)
@@ -65,18 +64,6 @@ public class HistogramUpdateBench
     {
         @Contended
         long i;
-    }
-
-    @State(Scope.Thread)
-    public static class ReservoirUpdateThreadState extends ThreadState
-    {
-        DecayingEstimatedHistogramReservoir reservoir = new DecayingEstimatedHistogramReservoir();
-    }
-
-    @Benchmark
-    public void reservoirUpdate(ReservoirUpdateThreadState state)
-    {
-        state.reservoir.update(testValueLevel + (state.i++ & 0x800));
     }
 
     @Benchmark

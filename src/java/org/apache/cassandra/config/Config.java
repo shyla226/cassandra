@@ -332,10 +332,12 @@ public class Config
 
     public volatile boolean back_pressure_enabled = false;
     public volatile ParameterizedClass back_pressure_strategy;
-	
-	/** The configuration for continuous paging */
+
+    /** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 
+    /** How often histograms used by JMX metrics are updated, in milliseconds */
+    public int metrics_histogram_update_interval_millis = 2000;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

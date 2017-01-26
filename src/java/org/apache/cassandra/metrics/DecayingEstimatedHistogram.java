@@ -21,12 +21,14 @@ package org.apache.cassandra.metrics;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -40,7 +42,7 @@ import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.utils.EstimatedHistogram;
 
 /**
- * A decaying histogram reservoir where values collected during each minute will be twice as significant as the values
+ * A decaying histogram where values collected during each minute will be twice as significant as the values
  * collected in the previous minute. Measured values are collected in variable sized buckets, using small buckets in the
  * lower range and larger buckets in the upper range. Use this histogram when you want to know if the distribution of
  * the underlying data stream has changed recently and you want high resolution on values in the lower range.
@@ -54,19 +56,19 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  * add up to 1.000.000 * 60 * pow(2, 30) which can be represented with 56 bits giving us some head room in a signed
  * 64 bit long.
  *
- * Internally two reservoirs are maintained, one with decay and one without decay. All public getters in a snapshot
+ * Internally two histograms are maintained, one with decay and one without decay. All public getters in a snapshot
  * will expose the decay functionality with the exception of the {@link com.codahale.metrics.Snapshot#getValues()}
- * which will return values from the reservoir without decay. This makes it possible for the caller to maintain precise
+ * which will return values from the histogram without decay. This makes it possible for the caller to maintain precise
  * deltas in an interval of its choise.
  *
  * Each bucket represents values from [previous bucket offset, current offset). See {@link BucketProperties} for details
  * on how the bucket offsets are calcualted.
  *
- * Internally the reservoir will store updates in temporary buffers, one per core thread plus another one for every other thread.
+ * Internally the histogram will store updates in temporary buffers, one per core thread plus another one for every other thread.
  * Periodically this temporary buffers are aggregated into the final buckets and decaying buckets by scheduling a task
  * always on the same core. The core is chosen in a round robin fashion. Optionally aggregation is performed also before
  * a read, if the thread reading is the same as the aggregation thread or if the thread reading is not a core thread. This is
- * mostly to avoid breaking unit tests (timers internally use a histogram reservoir).
+ * mostly to avoid breaking unit tests (timers internally use a histogram).
  *
  * The temporary buffers that are dedicated to a core thread will be updated by performing a volatile read and an ordered write,
  * not a volatile write since this would be too expensive. The temporary buffer shared by all threads is instead updated with
@@ -81,124 +83,33 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  * [2]: https://en.wikipedia.org/wiki/Half-life
  * [3]: https://github.com/dropwizard/metrics/blob/v3.1.2/metrics-core/src/main/java/com/codahale/metrics/ExponentiallyDecayingReservoir.java
  */
-public final class DecayingEstimatedHistogramReservoir
+final class DecayingEstimatedHistogram implements Histogram
 {
-    /**
-     * Whether zeros are considered by default.
-     */
-    static final boolean DEFAULT_ZERO_CONSIDERATION = false;
-
-    /** The maximum trackable value, 18 TB. This comes from the legacy implementation based on
-     * {@link EstimatedHistogram#newOffsets(int, boolean)} with size set to 164 and  considerZeros
-     * set to true.*/
-    static final long DEFAULT_MAX_TRACKABLE_VALUE = 18 * (1L << 43);
-
-    static final long HALF_TIME_IN_S = 60L;
-    private static final double MEAN_LIFETIME_IN_S = HALF_TIME_IN_S / Math.log(2.0);
-    private static final long LANDMARK_RESET_INTERVAL_IN_MS = 30L * 60L * 1000L;
-
-    /** How often buffers are aggregated, with the second part of the interval randomized */
-    @VisibleForTesting
-    public static int AGGREGATION_INTERVAL_MS = 10 * 1000;
+    /** The recorders takes care of performing real-time updates, there is typically one recorder
+     * for simple histogram (at the table level) and multiple recorders for aggregated histograms
+     * (at the keyspace or global level). */
+    private final Recorder recorder;
 
     /**
-     * An index that is incremented atomically when creating a reservoid to ensure that we distribute
-     * aggregations to the differenct cores.
+     * The reservoir contains the buckets with and without decay, and they are periodically
+     * aggregated by looking at the values in the recorder.
      */
-    private final static AtomicInteger currentCoreIndex = new AtomicInteger(0);
+    private final ForwardDecayingReservoir reservoir;
 
-    /**
-     * This class contais properties of the buckets, such as the offsets and how to index a bucket, given
-     * a value.
-     */
-    private final BucketProperties bucketProperties;
-
-    /**
-     * Provides the current time. Encapsulated into a class for testing purposes.
-     */
-    private final Clock clock;
-
-    /** True if the first bucket starts with an offset of zero. This only affects the snapshots and is kept
-     * for backward compatibility, internally offsets will always start at zero.
-     */
-    private final boolean considerZeroes;
-
-    /** This is the last time forward decay was rescaled */
-    private long decayLandmark;
-
-    /** The number of cores, we allocate numCores +1 buffers so it's handy to have this property stored here */
-    private final int numCores;
-
-    /** An array of thread local buffers, one per core. */
-    private final Buffer[] buffers;
-
-    /** The core on which the aggregating thread is running */
-    private final int coreId;
-
-    /** The aggregated buckets without forward decaying */
-    private final long[] buckets;
-
-    /** The aggregated buckets with forward decaying */
-    private final long[] decayingBuckets;
-
-    /**
-     * The snapshot is published by the aggregating thread each time some local
-     * buffers have been processed, so that the reading threads do not need to block.
-     */
-    private volatile Snapshot snapshot;
-
-    /**
-     * This is set to true by the aggregating thread when at least one of the local buckets
-     * is overflowed, that is it could not track a value becasue it was too high even for
-     * the largest bucket.
-     */
-    private volatile boolean isOverflowed;
-
-    /**
-     * Construct a decaying histogram with default number of buckets and without considering zeroes.
-     */
-    public DecayingEstimatedHistogramReservoir()
+    DecayingEstimatedHistogram(boolean considerZeroes, long maxTrackableValue, int updateTimeMillis, Clock clock)
     {
-        this(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, ApproximateClock.defaultClock());
+        this.recorder = new Recorder(new BucketProperties(maxTrackableValue));
+        this.reservoir = new ForwardDecayingReservoir(recorder.bucketProperties, clock, considerZeroes, updateTimeMillis);
+
+        this.reservoir.add(recorder);
     }
 
-    public DecayingEstimatedHistogramReservoir(Clock clock)
+    static Reservoir makeReservoir(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis)
     {
-        this(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, clock);
-    }
-
-    /**
-     * Construct a decaying histogram with default number of buckets.
-     *
-     * @param considerZeroes when true, 0-value measurements in a separate bucket, otherwise they will be collected in
-     *                       same bucket as 1-value measurements
-     */
-    public DecayingEstimatedHistogramReservoir(boolean considerZeroes)
-    {
-        this(considerZeroes, DEFAULT_MAX_TRACKABLE_VALUE, ApproximateClock.defaultClock());
-    }
-
-    public DecayingEstimatedHistogramReservoir(boolean considerZeroes, long maxTrackableValue)
-    {
-        this(considerZeroes, maxTrackableValue, ApproximateClock.defaultClock());
-    }
-
-    @VisibleForTesting
-    DecayingEstimatedHistogramReservoir(boolean considerZeroes, long maxTrackableValue, Clock clock)
-    {
-        this.considerZeroes = considerZeroes;
-        this.bucketProperties = new BucketProperties(maxTrackableValue);
-        this.clock = clock;
-        this.isOverflowed = false;
-        this.buckets = new long[bucketProperties.numBuckets];
-        this.decayingBuckets = new long[bucketProperties.numBuckets];
-        this.numCores = NettyRxScheduler.getNumCores();
-        this.buffers = new Buffer[numCores + 1];
-        this.decayLandmark = clock.getTime();
-        this.snapshot = new Snapshot(this);
-        this.coreId = currentCoreIndex.getAndIncrement() % NettyRxScheduler.getNumCores();
-
-        scheduleAggregation();
+        return new ForwardDecayingReservoir(new BucketProperties(maxTrackableValue),
+                                            ApproximateClock.defaultClock(),
+                                            considerZeroes,
+                                            updateIntervalMillis);
     }
 
     /**
@@ -208,105 +119,27 @@ public final class DecayingEstimatedHistogramReservoir
      */
     public final void update(final long value)
     {
-        int coreId = NettyRxScheduler.getCoreId();
-        if (buffers[coreId] == null)
-            buffers[coreId] = new Buffer(bucketProperties);
-        buffers[coreId].update(value, coreId < numCores);
-    }
-
-    private void scheduleAggregation()
-    {
-        // randomize the second half of the interval so that we don't have all metrics created at the same time performing
-        // aggregation together
-        int interval = AGGREGATION_INTERVAL_MS / 2 + ThreadLocalRandom.current().nextInt(0, AGGREGATION_INTERVAL_MS / 2 + 1);
-        NettyRxScheduler.getForCore(coreId).scheduleDirect(this::aggregate, interval, TimeUnit.MILLISECONDS);
-    }
-
-    /**
-     * Perform an aggregation before a read only in the following cases:
-     *
-     * - we happen to be on the aggregating thread anyway
-     * - the calling thread is not a Netty thread (in which case we do a blocking get)
-     */
-    private void onReadAggregate()
-    {
-        int coreId = NettyRxScheduler.getCoreId();
-        if (coreId == this.coreId)
-            aggregate();
-        else if (coreId == NettyRxScheduler.getNumCores())
-            Completable.fromRunnable(this::aggregate).subscribeOn(NettyRxScheduler.getForCore(this.coreId)).blockingGet();
-    }
-
-    /**
-     * Read values from the thread local buffers and aggregate them into the buckets. Perform any forward decay or
-     * rescaling. This method is suppossed to be called always from only one thread at a time by scheduling a task
-     * on the same core.
-     */
-    @VisibleForTesting
-    public void aggregate()
-    {
-        try
-        {
-            final long now = clock.getTime();
-            rescaleIfNeeded(now);
-
-            final long weight = Math.round(forwardDecayWeight(now, decayLandmark));
-            for (Buffer buffer : buffers)
-            {
-                if (buffer == null)
-                    continue;
-
-                if (buffer.isOverflowed && !this.isOverflowed)
-                    this.isOverflowed = true;
-
-                for (int i = 0; i < buckets.length; i++)
-                {
-                    // here we may loose an update at most I think, since a lazy set
-                    // aka putOrderedLong takes a few nanoseconds to be visible but for
-                    // metrics it should be acceptable as long as it is atomic
-                    long value = buffer.getAndSet(i, 0);
-
-                    buckets[i] += value;
-                    decayingBuckets[i] += value * weight;
-                }
-            }
-
-            this.snapshot = new Snapshot(this);
-        }
-        finally
-        {
-            scheduleAggregation();
-        }
-    }
-
-    public long[] getBucketOffsets()
-    {
-        return bucketProperties.makeOffsets(considerZeroes);
+        recorder.update(value);
     }
 
     /**
      * Return the number of buckets where recorded values are stored.
      *
-     * This method does not return the number of recorded values as suggested by the {@link Reservoir} interface.
-     *
      * @return the number of buckets
      */
     public int size()
     {
-        return bucketProperties.size();
+        return reservoir.bucketProperties.size();
     }
 
     /**
-     * Returns a snapshot of the decaying values in this reservoir.
-     *
-     * Non-decaying reservoir will not be included in the snapshot.
+     * Returns a snapshot of the decaying values in this histogram.
      *
      * @return the snapshot
      */
     public com.codahale.metrics.Snapshot getSnapshot()
     {
-        onReadAggregate();
-        return snapshot;
+        return reservoir.getSnapshot();
     }
 
     /**
@@ -315,86 +148,45 @@ public final class DecayingEstimatedHistogramReservoir
     @VisibleForTesting
     boolean isOverflowed()
     {
-        onReadAggregate();
-        return isOverflowed;
+        return reservoir.isOverflowed();
     }
 
     @VisibleForTesting
     public void clear()
     {
-        for (Buffer buffer : buffers)
-        {
-            if (buffer != null)
-                buffer.clear();
-        }
+        recorder.clear();
+        reservoir.clear();
+    }
 
-        isOverflowed = false;
-        for (int i = 0; i < bucketProperties.size(); i++)
-        {
-            buckets[i] = 0;
-            decayingBuckets[i] = 0;
-        }
+    public void aggregate()
+    {
+        reservoir.onReadAggregate();
+    }
 
-        snapshot = new Snapshot(this);
+    public boolean considerZeroes()
+    {
+        return reservoir.considerZeroes();
+    }
+
+    public long maxTrackableValue()
+    {
+        return reservoir.maxTrackableValue();
+    }
+
+    public long[] getOffsets()
+    {
+        return reservoir.getOffsets();
     }
 
     public long getCount()
     {
-        onReadAggregate();
-        return snapshot.count;
+        return reservoir.getCount();
     }
 
-    /**
-     * Copy the buckets by taking into account the considerZeroes boolean (for backward compatibility).
-     */
-    private long[] materializeBuckets(boolean withForwardDecay)
+    @Override
+    public Type getType()
     {
-        final long[] buckets = withForwardDecay ? decayingBuckets : this.buckets;
-        final int length = considerZeroes ? bucketProperties.size() : bucketProperties.size() - 1;
-
-        long[] ret = new long[length];
-        int index = 0;
-        if (considerZeroes)
-        {
-            ret[index++] = buckets[0];
-            ret[index++] = buckets[1];
-        }
-        else
-        {
-            ret[index++] = buckets[0] + buckets[1];
-        }
-
-        for (int i = 2; i < size(); i++)
-            ret[index++] = buckets[i];
-
-        return ret;
-    }
-
-    private void rescaleIfNeeded(long now)
-    {
-        if (needRescale(now))
-        {
-            rescale(now);
-        }
-    }
-
-    private void rescale(long now)
-    {
-        final double rescaleFactor = forwardDecayWeight(now, decayLandmark);
-        decayLandmark = now;
-
-        for (int i = 0; i < size(); i++)
-            decayingBuckets[i] = Math.round((decayingBuckets[i] / rescaleFactor));
-    }
-
-    private boolean needRescale(long now)
-    {
-        return (now - decayLandmark) > LANDMARK_RESET_INTERVAL_IN_MS;
-    }
-
-    private static double forwardDecayWeight(long now, long decayLandmark)
-    {
-        return Math.exp(((now - decayLandmark) / 1000.0) / MEAN_LIFETIME_IN_S);
+        return Type.SINGLE;
     }
 
     /**
@@ -413,7 +205,7 @@ public final class DecayingEstimatedHistogramReservoir
      * with our fixed properties).
      *
      */
-    private static final class BucketProperties
+    static final class BucketProperties
     {
         /** The maximum value that can be tracked by the histogram */
         final long maxTrackableValue;
@@ -444,7 +236,7 @@ public final class DecayingEstimatedHistogramReservoir
          * @param considerZeroes when true add zero as the first value to the offsets
          * @return the number of buckets required (the array size)
          */
-        private long[] makeOffsets(boolean considerZeroes)
+        long[] makeOffsets(boolean considerZeroes)
         {
             ArrayList<Long> ret = new ArrayList<>();
             if (considerZeroes)
@@ -518,15 +310,370 @@ public final class DecayingEstimatedHistogramReservoir
         }
     }
 
+    /**
+     * This is the reservoir for DecayingEstimatedHistogram. It will periodically aggregate
+     * the value of the recorders and perform forward decay.
+     */
+    final static class ForwardDecayingReservoir implements Reservoir
+    {
+        static final long HALF_TIME_IN_S = 60L;
+        static final double MEAN_LIFETIME_IN_S = HALF_TIME_IN_S / Math.log(2.0);
+        static final long LANDMARK_RESET_INTERVAL_IN_MS = 30L * 60L * 1000L;
+
+        /** Stores the properties of the buckets, such as offsets and how to index into the buckets. */
+        private final BucketProperties bucketProperties;
+
+        /**
+         * Provides the current time. Encapsulated into a class for testing purposes.
+         */
+        private final Clock clock;
+
+        /** True if the first bucket starts with an offset of zero. This only affects the snapshots and is kept
+         * for backward compatibility, internally offsets will always start at zero.
+         */
+        private final boolean considerZeroes;
+
+        /** How ofter the buckets are updated by reading from the recorders and performing forward decay. */
+        private final int updateIntervalMillis;
+
+        /** This is the last time forward decay was rescaled */
+        private long decayLandmark;
+
+        /** The recorders take care of performing real-time updates, there is typically one recorder
+         * for a simple histogram (at the table level) and multiple recorders for aggregated histograms
+         * (at the keyspace or global level). Recorders are shared by reservoirs and must in no way be
+         * altered.
+         * */
+        private final CopyOnWriteArrayList<Recorder> recorders;
+
+        /** The core on which the aggregating thread is running */
+        private final int coreId;
+
+        /** The aggregated buckets without forward decaying */
+        private final long[] buckets;
+
+        /** The aggregated buckets with forward decaying */
+        private final long[] decayingBuckets;
+
+        /** This is published after a periodic aggregation */
+        private volatile Snapshot snapshot;
+
+        /**
+         * This is set to true by the aggregating thread when at least one of the local buckets
+         * is overflowed, that is it could not track a value becasue it was too high even for
+         * the largest bucket.
+         */
+        private volatile boolean isOverflowed;
+
+        ForwardDecayingReservoir(BucketProperties bucketProperties, Clock clock, boolean considerZeroes, int updateIntervalMillis)
+        {
+            this.bucketProperties = bucketProperties;
+            this.clock = clock;
+            this.considerZeroes = considerZeroes;
+            this.updateIntervalMillis = updateIntervalMillis;
+            this.isOverflowed = false;
+            this.buckets = new long[bucketProperties.numBuckets];
+            this.decayingBuckets = new long[bucketProperties.numBuckets];
+            this.recorders = new CopyOnWriteArrayList<>();
+            this.decayLandmark = clock.getTime();
+            this.snapshot = new Snapshot(this);
+            this.coreId = NettyRxScheduler.getNextCore();
+        }
+
+        void add(Recorder recorder)
+        {
+            recorders.add(recorder);
+
+            if (recorders.size() == 1)
+                schedule();
+        }
+
+        void schedule()
+        {
+            if (updateIntervalMillis > 0)
+                NettyRxScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
+        }
+
+        @Override
+        public boolean considerZeroes()
+        {
+            return considerZeroes;
+        }
+
+        @Override
+        public long maxTrackableValue()
+        {
+            return bucketProperties.maxTrackableValue;
+        }
+
+        /**
+         * Perform an aggregation before a read.
+         *
+         * This is only done if the update interval is <= 0, which means that no updates are scheduled.
+         * Aggregation is not thread safe and therefore the callers must take care of serializing calls
+         * to read methods that in turn call this method. This is currently performed only by unit tests,
+         * which are single threaded, or by {@link org.apache.cassandra.locator.DynamicEndpointSnitch},
+         * which only consults the histogram in a periodic task, hence from the same thread.
+         */
+        void onReadAggregate()
+        {
+            if (updateIntervalMillis <= 0)
+                aggregate();
+        }
+
+        boolean isOverflowed()
+        {
+            onReadAggregate();
+            return isOverflowed;
+        }
+
+        public long getCount()
+        {
+            onReadAggregate();
+            return snapshot.getCount();
+        }
+
+        public Snapshot getSnapshot()
+        {
+            onReadAggregate();
+            return snapshot;
+        }
+
+        /**
+         * Read values from the thread local buffers and aggregate them into the buckets. Perform any forward decay or
+         * rescaling. This method is suppossed to be called always from only one thread at a time by scheduling a task
+         * on the same core.
+         */
+        @VisibleForTesting
+        void aggregate()
+        {
+            try
+            {
+                final long now = clock.getTime();
+                rescaleIfNeeded(now);
+
+                final long weight = Math.round(forwardDecayWeight(now, decayLandmark));
+                this.isOverflowed = recorders.stream().map(Recorder::isOverFlowed).reduce(Boolean.FALSE, Boolean::logicalOr);
+
+                for (int i = 0; i < buckets.length; i++)
+                {
+                    final int index = i;
+                    long value = recorders.stream().map(recorder -> recorder.getValue(index)).reduce(0L, Long::sum);
+                    long delta = value - buckets[i];
+                    if (delta > 0)
+                    {
+                        buckets[i] += delta;
+                        decayingBuckets[i] += delta * weight;
+                    }
+
+                }
+
+                this.snapshot = new Snapshot(this);
+            }
+            finally
+            {
+                schedule();
+            }
+        }
+
+        private boolean isCompatible(Reservoir other)
+        {
+            if (!(other instanceof ForwardDecayingReservoir))
+                return false;
+
+            ForwardDecayingReservoir otherFDReservoir = (ForwardDecayingReservoir)other;
+            return otherFDReservoir.considerZeroes == this.considerZeroes &&
+                   otherFDReservoir.buckets.length == this.buckets.length &&
+                   otherFDReservoir.decayingBuckets.length == this.decayingBuckets.length;
+        }
+
+        public void add(Histogram histogram)
+        {
+            if (!(histogram instanceof DecayingEstimatedHistogram))
+                throw new IllegalArgumentException("Histogram is not compatible");
+
+            DecayingEstimatedHistogram decayingEstimatedHistogram = (DecayingEstimatedHistogram)histogram;
+
+            if (!isCompatible(decayingEstimatedHistogram.reservoir))
+                throw new IllegalArgumentException("Histogram reservoir is not compatible");
+
+            this.recorders.add(decayingEstimatedHistogram.recorder);
+
+        }
+
+        public long[] getOffsets()
+        {
+            return bucketProperties.makeOffsets(considerZeroes);
+        }
+
+        void clear()
+        {
+            isOverflowed = false;
+            for (int i = 0; i < bucketProperties.size(); i++)
+            {
+                buckets[i] = 0;
+                decayingBuckets[i] = 0;
+            }
+
+            snapshot = new Snapshot(this);
+        }
+
+        private void rescaleIfNeeded(long now)
+        {
+            if (needRescale(now))
+            {
+                rescale(now);
+            }
+        }
+
+        private void rescale(long now)
+        {
+            final double rescaleFactor = forwardDecayWeight(now, decayLandmark);
+            decayLandmark = now;
+
+            for (int i = 0; i < decayingBuckets.length; i++)
+                decayingBuckets[i] = Math.round((decayingBuckets[i] / rescaleFactor));
+        }
+
+        private boolean needRescale(long now)
+        {
+            return (now - decayLandmark) > LANDMARK_RESET_INTERVAL_IN_MS;
+        }
+
+        private static double forwardDecayWeight(long now, long decayLandmark)
+        {
+            return Math.exp(((now - decayLandmark) / 1000.0) / MEAN_LIFETIME_IN_S);
+        }
+    }
+
 
     /**
-     * A buffer for storing buckets during an interval of time.
-     * This class is not thread safe, it should be stored in a thread
-     * local object and used by the same thread. It should only be updated
-     * by that thread, with the exception of the closed field, which should
-     * only be updated by the thread that aggregates buffer. Such aggregation
-     * thread should also only read values after closed has been set to true,
-     * sice the values are not stored with a put volatile but with a simple put.
+     * A recorder takes care of updating values. It owns up to N+1 buffers,
+     * where N is the number of cores. Depending on the thread that performs
+     * the update, the corresponding buffer is updated. The thread-per-core
+     * threads use a private buffer, updated with an Unsafe.putOrderedWrong
+     * (which is an atomic write, withouth the memory ordering of volatile writes)
+     * whilst all other threads share a final buffer which is updated with a CAS.
+     *
+     * The values in the buffers are then aggreagated on read.
+     *
+     * We allocate memory for buffers only as needed for two reasons: to reduce
+     * memory footprint and, most importantly, to reduce the likehood that
+     * two buffer pointers will share the same cache line. On allocation we
+     * use the UNSAFE to atomically set the buffer pointer into the array.
+     *
+     * An histogram then aggregates the values from one or more recorders.
+     * A simple histogram owns a single Recorder whilst an aggregate histogram
+     * references multiple recorders from its child histograms.
+     */
+    private static final class Recorder
+    {
+        private final BucketProperties bucketProperties;
+        private final int numCores;
+        private final Buffer[] buffers;
+
+        private static final sun.misc.Unsafe UNSAFE;
+        private static final int base;
+        private static final int shift;
+
+        static
+        {
+            try
+            {
+                Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+                field.setAccessible(true);
+                UNSAFE = (sun.misc.Unsafe) field.get(null);
+
+                base = UNSAFE.arrayBaseOffset(Buffer[].class);
+                int scale = UNSAFE.arrayIndexScale(Buffer[].class);
+                if ((scale & (scale - 1)) != 0)
+                    throw new Error("data type scale not a power of two");
+                shift = 31 - Integer.numberOfLeadingZeros(scale);
+            }
+            catch (Exception e)
+            {
+                throw new AssertionError(e);
+            }
+        }
+
+        /**
+         * Return the memory offset in bytes of an item in the buffrs array.
+         * @param i the index of the item
+         * @return the offset of the item in bytes
+         */
+        private static long arrayOffset(int i)
+        {
+            return ((long) i << shift) + base;
+        }
+
+        Recorder(BucketProperties bucketProperties)
+        {
+            this.bucketProperties = bucketProperties;
+            this.numCores = NettyRxScheduler.getNumCores();
+            this.buffers = new Buffer[numCores + 1];
+        }
+
+        // thread-safe: called by many threads (the updating threads)
+        void update(final long value)
+        {
+            int coreId = NettyRxScheduler.getCoreId();
+
+            Buffer buffer = buffers[coreId];
+            if (buffer == null)
+                buffer = allocateBuffer(coreId);
+
+            buffer.update(value, coreId < numCores);
+        }
+
+        private Buffer allocateBuffer(int coreId)
+        {
+            boolean lazySetOk = coreId < numCores;
+            Buffer buffer = new Buffer(bucketProperties);
+
+            if (lazySetOk)
+            { // we know only one thread can update this memory location
+                UNSAFE.putOrderedObject(buffers, arrayOffset(coreId), buffer);
+            }
+            else
+            { // it could be that there are 2 or more threads racing to update the same memory location
+                if (!UNSAFE.compareAndSwapObject(buffers, arrayOffset(coreId), null, buffer))
+                    buffer = (Buffer)UNSAFE.getObjectVolatile(buffers, arrayOffset(coreId));
+            }
+
+            return buffer;
+        }
+
+        // not thread-safe: must only be called by the aggregating thread
+        boolean isOverFlowed()
+        {
+            return Arrays.stream(buffers)
+                         .filter(Objects::nonNull).map(b -> b.isOverflowed)
+                         .reduce(Boolean.FALSE, Boolean::logicalOr);
+        }
+
+        // not thread-safe: must only be called by the aggregating thread
+        long getValue(final int index)
+        {
+            return Arrays.stream(buffers)
+                         .filter(Objects::nonNull)
+                         // here we may loose an update at most I think, since a lazy set
+                         // aka putOrderedLong takes a few nanoseconds to be visible but for
+                         // metrics it should be acceptable as long as it is atomic
+                         .map(b -> b.getLongVolatile(index))
+                         .reduce(0L, Long::sum);
+        }
+
+        // not thread-safe: testing only
+        void clear()
+        {
+            Arrays.stream(buffers).filter(Objects::nonNull).forEach(Buffer::clear);
+        }
+    }
+
+    /**
+     * A buffer that stores buckets off-heap and that can update
+     * items atomically with lazy set or CAS.
+     *
      */
     private static final class Buffer
     {
@@ -557,18 +704,19 @@ public final class DecayingEstimatedHistogramReservoir
 
             int index = bucketProperties.getIndex(value) << 3;
             if (lazy)
-            {
                 buffer.putLongOrdered(index, buffer.getLongVolatile(index) + 1);
-            }
             else
-            {
                 buffer.getAndAddLong(index, 1);
-            }
         }
 
         long getAndSet(int index, long value)
         {
             return buffer.getAndSetLong(index << 3, value);
+        }
+
+        long getLongVolatile(int index)
+        {
+            return buffer.getLongVolatile(index << 3);
         }
 
         void clear()
@@ -579,7 +727,7 @@ public final class DecayingEstimatedHistogramReservoir
     }
 
     /**
-     * Represents a snapshot of the decaying histogram.
+     * A snapshot of the decaying histogram.
      *
      * The decaying buckets are copied into a snapshot array to give a consistent view for all getters. However, the
      * copy is made without a write-lock and so other threads may change the buckets while the array is copied,
@@ -598,14 +746,49 @@ public final class DecayingEstimatedHistogramReservoir
         private final long count;
         private final long countWithDecay;
 
-        public Snapshot(final DecayingEstimatedHistogramReservoir reservoir)
+        public Snapshot(final ForwardDecayingReservoir reservoir)
         {
-            this.bucketOffsets = reservoir.bucketProperties.makeOffsets(reservoir.considerZeroes);
+            this.bucketOffsets = reservoir.getOffsets();
             this.isOverflowed = reservoir.isOverflowed;
-            this.buckets = reservoir.materializeBuckets(false);
-            this.decayingBuckets = reservoir.materializeBuckets(true);
-            this.count = count(buckets);
-            this.countWithDecay = count(decayingBuckets);
+            this.buckets = copyBuckets(reservoir.buckets, reservoir.considerZeroes);
+            this.decayingBuckets = copyBuckets(reservoir.decayingBuckets, reservoir.considerZeroes);
+            this.count = countBuckets(buckets);
+            this.countWithDecay = countBuckets(decayingBuckets);
+        }
+
+        private long[] copyBuckets(long[] buckets, boolean considerZeroes)
+        {
+            long[] ret = new long[bucketOffsets.length];
+
+            int index = 0;
+            if (considerZeroes)
+            {
+                ret[index++] = buckets[0];
+                ret[index++] = buckets[1];
+            }
+            else
+            {
+                ret[index++] = buckets[0] + buckets[1];
+            }
+
+            for (int i = 2; i < buckets.length; i++)
+            {
+                ret[index++] = buckets[i];
+            }
+            return ret;
+        }
+
+        private long countBuckets(long[] buckets)
+        {
+            long sum = 0L;
+            for (int i = 0; i < buckets.length; i++)
+                sum += buckets[i];
+            return sum;
+        }
+
+        long getCount()
+        {
+            return count;
         }
 
         /**
@@ -667,21 +850,13 @@ public final class DecayingEstimatedHistogramReservoir
             return decayingBuckets.length;
         }
 
-        private long count(long[] buckets)
-        {
-            long sum = 0L;
-            for (int i = 0; i < buckets.length; i++)
-                sum += buckets[i];
-            return sum;
-        }
-
         /**
-         * Get the estimated max-value that could have been added to this reservoir.
+         * Get the estimated max-value that could have been added to this histogram.
          *
-         * As values are collected in variable sized buckets, the actual max value recored in the reservoir may be less
+         * As values are collected in variable sized buckets, the actual max value recored in the histogram may be less
          * than the value returned.
          *
-         * @return the largest value that could have been added to this reservoir, or Long.MAX_VALUE if the reservoir
+         * @return the largest value that could have been added to this histogram, or Long.MAX_VALUE if the histogram
          * overflowed
          */
         public long getMax()
@@ -722,12 +897,12 @@ public final class DecayingEstimatedHistogramReservoir
         }
 
         /**
-         * Get the estimated min-value that could have been added to this reservoir.
+         * Get the estimated min-value that could have been added to this histogram.
          *
-         * As values are collected in variable sized buckets, the actual min value recored in the reservoir may be
+         * As values are collected in variable sized buckets, the actual min value recored in the histogram may be
          * higher than the value returned.
          *
-         * @return the smallest value that could have been added to this reservoir
+         * @return the smallest value that could have been added to this histogram
          */
         public long getMin()
         {
@@ -740,7 +915,7 @@ public final class DecayingEstimatedHistogramReservoir
         }
 
         /**
-         * Get the estimated standard deviation of the values added to this reservoir.
+         * Get the estimated standard deviation of the values added to this histogram.
          *
          * As values are collected in variable sized buckets, the actual deviation may be more or less than the value
          * returned.

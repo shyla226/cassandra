@@ -18,46 +18,44 @@
 
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Counting;
-import com.codahale.metrics.Metric;
+import org.apache.cassandra.utils.concurrent.LongAdder;
 
 /**
  * An incrementing and decrementing counter metric.
+ *
+ * This class is identical to {@link com.codahale.metrics.Counter}, except
+ * that uses {@link LongAdder} instead of {@link com.codahale.metrics.LongAdder}.
  */
-public abstract class Counter implements Metric, Counting, Composable<Counter>
+class SingleCounter extends Counter
 {
-    /**
-     * Increment the counter by one.
-     */
-    public void inc()
+    private final LongAdder count;
+
+    SingleCounter()
     {
-        inc(1);
+        this.count = new LongAdder();
     }
 
-    /**
-     * Increment the counter by {@code n}.
-     *
-     * @param n the amount by which the counter will be increased
-     */
-    public abstract void inc(long n);
-
-    /**
-     * Decrement the counter by one.
-     */
-    public void dec()
+    @Override
+    public void inc(long n)
     {
-        dec(1);
+        count.add(n);
     }
 
-    /**
-     * Decrement the counter by {@code n}.
-     *
-     * @param n the amount by which the counter will be decreased
-     */
-    public abstract void dec(long n);
-
-    public static Counter make(boolean isComposite)
+    @Override
+    public void dec(long n)
     {
-        return isComposite ? new CompositeCounter() : new SingleCounter();
+        count.add(-n);
+    }
+
+    @Override
+    public long getCount()
+    {
+        return count.sum();
+    }
+
+    @Override
+    public Type getType()
+    {
+        return Type.SINGLE;
     }
 }

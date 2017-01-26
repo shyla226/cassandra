@@ -2269,4 +2269,15 @@ public class DatabaseDescriptor
     {
         return conf.continuous_paging;
     }
+
+    public static int getMetricsHistogramUpdateTimeMillis()
+    {
+        return conf.metrics_histogram_update_interval_millis;
+    }
+
+    @VisibleForTesting
+    public static void setMetricsHistogramUpdateTimeMillis(int interval)
+    {
+        conf.metrics_histogram_update_interval_millis = interval;
+    }
 }

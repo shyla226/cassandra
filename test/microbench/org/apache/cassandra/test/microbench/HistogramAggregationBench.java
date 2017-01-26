@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.metrics.Histogram;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -59,16 +58,10 @@ public class HistogramAggregationBench
     static final long testValueLevel = 12340;
     Histogram histogram;
 
-    @Setup
-    public void testSetUp()
-    {
-        DecayingEstimatedHistogramReservoir.AGGREGATION_INTERVAL_MS = 100;
-    }
-
     @Setup(Level.Iteration)
     public void setup() throws InterruptedException
     {
-        histogram = new Histogram(new DecayingEstimatedHistogramReservoir());
+        histogram = Histogram.make(false);
 
         int numCores = NettyRxScheduler.getNumCores();
         Thread[] threads = new Thread[numCores];
@@ -84,8 +77,6 @@ public class HistogramAggregationBench
             threads[c].setDaemon(true);
             threads[c].start();
         }
-        logger.trace("Sleeping....");
-        Thread.sleep(DecayingEstimatedHistogramReservoir.AGGREGATION_INTERVAL_MS + 1);
 
         logger.trace("Waiting for updating threads to finish....");
         for (Thread t : threads)

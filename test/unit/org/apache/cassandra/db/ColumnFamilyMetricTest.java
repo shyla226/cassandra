@@ -19,8 +19,11 @@ package org.apache.cassandra.db;
 
 import java.util.Collection;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
+
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
@@ -32,13 +35,25 @@ import static org.junit.Assert.assertEquals;
 
 public class ColumnFamilyMetricTest
 {
+    private static int defaultMetricsHistogramUpdateInterval;
+
     @BeforeClass
     public static void defineSchema() throws Exception
     {
         SchemaLoader.prepareServer();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+
         SchemaLoader.createKeyspace("Keyspace1",
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD("Keyspace1", "Standard2"));
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
     }
 
     @Test
@@ -89,7 +104,7 @@ public class ColumnFamilyMetricTest
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
 
         // This confirms another test/set up did not overflow the histogram
-        store.metric.colUpdateTimeDeltaHistogram.cf.getSnapshot().get999thPercentile();
+        store.metric.colUpdateTimeDeltaHistogram.getSnapshot().get999thPercentile();
 
         new RowUpdateBuilder(store.metadata, 0, "4242")
             .clustering("0")
@@ -98,7 +113,7 @@ public class ColumnFamilyMetricTest
             .applyUnsafe();
 
         // The histogram should not have overflowed on the first write
-        store.metric.colUpdateTimeDeltaHistogram.cf.getSnapshot().get999thPercentile();
+        store.metric.colUpdateTimeDeltaHistogram.getSnapshot().get999thPercentile();
 
         // smallest time delta that would overflow the histogram if unfiltered
         new RowUpdateBuilder(store.metadata, 18165375903307L, "4242")
@@ -108,6 +123,6 @@ public class ColumnFamilyMetricTest
             .applyUnsafe();
 
         // CASSANDRA-11117 - update with large timestamp delta should not overflow the histogram
-        store.metric.colUpdateTimeDeltaHistogram.cf.getSnapshot().get999thPercentile();
+        store.metric.colUpdateTimeDeltaHistogram.getSnapshot().get999thPercentile();
     }
 }
