@@ -5,6 +5,7 @@ DSE 5.0.6
  * Always die on AssertionError and log flush failure errors. (APOLLO-227)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
+ * Better error when modifying function permissions without explicit keyspace (CASSANDRA-12925)
  * Indexer is not correctly invoked when building indexes over sstables (CASSANDRA-13075)
  * Read repair is not blocking repair to finish in foreground repair (CASSANDRA-13115)
  * Stress daemon help is incorrect (CASSANDRA-12563)
@@ -35,7 +36,6 @@ Merged from 3.0.X
  * Nodetool compactionstats fails with NullPointerException (CASSANDRA-13021)
  * Thread local pools never cleaned up (CASSANDRA-13033)
  * Set RPC_READY to false when draining or if a node is marked as shutdown (CASSANDRA-12781)
- * CQL often queries static columns unnecessarily (CASSANDRA-12768)
  * Make sure sstables only get committed when it's safe to discard commit log records (CASSANDRA-12956)
  * Reject default_time_to_live option when creating or altering MVs (CASSANDRA-12868)
  * Nodetool should use a more sane max heap size (CASSANDRA-12739)
