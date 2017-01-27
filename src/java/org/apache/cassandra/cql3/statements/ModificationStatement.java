@@ -30,6 +30,9 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.ColumnDefinition.Raw;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.conditions.ColumnCondition;
+import org.apache.cassandra.cql3.conditions.ColumnConditions;
+import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.Selection;
@@ -253,7 +256,7 @@ public abstract class ModificationStatement implements CQLStatement
         // columns is if we set some static columns, and in that case no clustering
         // columns should be given. So in practice, it's enough to check if we have
         // either the table has no clustering or if it has at least one of them set.
-        return cfm.clusteringColumns().isEmpty() || restrictions.hasClusteringColumnsRestriction();
+        return cfm.clusteringColumns().isEmpty() || restrictions.hasClusteringColumnsRestrictions();
     }
 
     public boolean updatesStaticRow()
@@ -304,7 +307,7 @@ public abstract class ModificationStatement implements CQLStatement
     public NavigableSet<Clustering> createClustering(QueryOptions options)
     throws InvalidRequestException
     {
-        if (appliesOnlyToStaticColumns() && !restrictions.hasClusteringColumnsRestriction())
+        if (appliesOnlyToStaticColumns() && !restrictions.hasClusteringColumnsRestrictions())
             return FBUtilities.singleton(CBuilder.STATIC_BUILDER.build(), cfm.comparator);
 
         return restrictions.getClusteringColumns(options);
@@ -629,7 +632,7 @@ public abstract class ModificationStatement implements CQLStatement
         List<ByteBuffer> keys = buildPartitionKeyNames(options);
 
         if (type.allowClusteringColumnSlices()
-                && restrictions.hasClusteringColumnsRestriction()
+                && restrictions.hasClusteringColumnsRestrictions()
                 && restrictions.isColumnRange())
         {
             Slices slices = createSlice(options);
@@ -669,7 +672,7 @@ public abstract class ModificationStatement implements CQLStatement
 
                 PartitionUpdate upd = collector.getPartitionUpdate(cfm, dk, options.getConsistency());
 
-                if (!restrictions.hasClusteringColumnsRestriction())
+                if (!restrictions.hasClusteringColumnsRestrictions())
                 {
                     addUpdateForKey(upd, Clustering.EMPTY, params);
                 }

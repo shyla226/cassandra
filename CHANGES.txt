@@ -3,6 +3,9 @@ DSE 5.2.0
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from 4.0:
  * Parallelize streaming of different keyspaces (4663)
+4.0
+ * Refactor ColumnCondition (CASSANDRA-12981)
+ * Parallelize streaming of different keyspaces (CASSANDRA-4663)
  * Improved compactions metrics (CASSANDRA-13015)
  * Speed-up start-up sequence by avoiding un-needed flushes (CASSANDRA-13031)
  * Use Caffeine (W-TinyLFU) for on-heap caches (CASSANDRA-10855)
@@ -71,6 +74,8 @@ Merged from DSE 5.0.x
  * Tables in system_distributed should not use gcgs of 0 (CASSANDRA-12954)
 
 3.10
+ * Fix secondary index queries regression (CASSANDRA-13013)
+ * Add duration type to the protocol V5 (CASSANDRA-12850)
  * Fix duration type validation (CASSANDRA-13143)
  * Fix flaky GcCompactionTest (CASSANDRA-12664)
  * Fix TestHintedHandoff.hintedhandoff_decom_test (CASSANDRA-13058)
@@ -185,9 +190,6 @@ Merged from DSE 5.0.x
  * Restore resumable hints delivery (CASSANDRA-11960)
  * Properly record CAS contention (CASSANDRA-12626)
 Merged from 3.0:
-=======
-Merged from 3.0.X
->>>>>>> dse5.0
  * Better error when modifying function permissions without explicit keyspace (CASSANDRA-12925)
  * Indexer is not correctly invoked when building indexes over sstables (CASSANDRA-13075)
  * Stress daemon help is incorrect (CASSANDRA-12563)
@@ -261,6 +263,7 @@ Merged from 3.0.X
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
+ * Fix handling of nulls and unsets in IN conditions (CASSANDRA-12981) 
  * Fix race causing infinite loop if Thrift server is stopped before it starts listening (CASSANDRA-12856)
  * CompactionTasks now correctly drops sstables out of compaction when not enough disk space is available (CASSANDRA-12979)
  * Remove support for non-JavaScript UDFs (CASSANDRA-12883)

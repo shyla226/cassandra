@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.config.ColumnDefinition.Kind;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -36,7 +37,6 @@ import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -94,6 +94,12 @@ public final class StatementRestrictions
      * Specify if the query will return a range of partition keys.
      */
     private boolean isKeyRange;
+
+    /**
+     * <code>true</code> if nonPrimaryKeyRestrictions contains restriction on a regular column,
+     * <code>false</code> otherwise.
+     */
+    private boolean hasRegularColumnsRestrictions;
 
     /**
      * Creates a new empty <code>StatementRestrictions</code>.
@@ -237,6 +243,7 @@ public final class StatementRestrictions
         this.clusteringColumnsRestrictions = clusteringColumnsRestrictionSet;
         this.nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictionSet;
         this.notNullColumns = notNullColumnsBuilder.build();
+        this.hasRegularColumnsRestrictions = nonPrimaryKeyRestrictions.hasRestrictionFor(Kind.REGULAR);
 
         boolean hasQueriableClusteringColumnIndex = false;
         boolean hasQueriableIndex = false;
@@ -268,7 +275,7 @@ public final class StatementRestrictions
         if (usesSecondaryIndexing || partitionKeyRestrictions.needFiltering(cfm))
             filterRestrictionsBuilder.add(partitionKeyRestrictions);
 
-        if (selectsOnlyStaticColumns && hasClusteringColumnsRestriction())
+        if (selectsOnlyStaticColumns && hasClusteringColumnsRestrictions())
         {
             // If the only updated/deleted columns are static, then we don't need clustering columns.
             // And in fact, unless it is an INSERT, we reject if clustering colums are provided as that
@@ -558,7 +565,7 @@ public final class StatementRestrictions
                    "Slice restrictions are not supported on the clustering columns in %s statements", type);
 
         if (!type.allowClusteringColumnSlices()
-               && (!cfm.isCompactTable() || (cfm.isCompactTable() && !hasClusteringColumnsRestriction())))
+               && (!cfm.isCompactTable() || (cfm.isCompactTable() && !hasClusteringColumnsRestrictions())))
         {
             if (!selectsOnlyStaticColumns && hasUnrestrictedClusteringColumns())
                 throw invalidRequest("Some clustering keys are missing: %s",
@@ -570,7 +577,7 @@ public final class StatementRestrictions
 
                        "Clustering columns can only be restricted with CONTAINS with a secondary index or filtering");
 
-            if (hasClusteringColumnsRestriction() && clusteringColumnsRestrictions.needFiltering())
+            if (hasClusteringColumnsRestrictions() && clusteringColumnsRestrictions.needFiltering())
             {
                 if (hasQueriableIndex || forView)
                 {
@@ -785,7 +792,7 @@ public final class StatementRestrictions
      * @return <code>true</code> if the query has some restrictions on the clustering columns,
      * <code>false</code> otherwise.
      */
-    public boolean hasClusteringColumnsRestriction()
+    public boolean hasClusteringColumnsRestrictions()
     {
         return !clusteringColumnsRestrictions.isEmpty();
     }
@@ -877,4 +884,12 @@ public final class StatementRestrictions
                 && (clusteringColumnsRestrictions.hasOnlyEqualityRestrictions());
     }
 
+    /**
+     * Checks if one of the restrictions applies to a regular column.
+     * @return {@code true} if one of the restrictions applies to a regular column, {@code false} otherwise.
+     */
+    public boolean hasRegularColumnsRestrictions()
+    {
+        return hasRegularColumnsRestrictions;
+    }
 }
