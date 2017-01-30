@@ -74,7 +74,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MessagingServiceMBean;
-import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.CacheServiceMBean;
 import org.apache.cassandra.service.GCInspector;
@@ -1027,7 +1026,7 @@ public class NodeProbe implements AutoCloseable
             case "truncate":
                 return ssProxy.getTruncateRpcTimeout();
             case "streamingsocket":
-                return (long) ssProxy.getStreamingSocketTimeout();
+                return ssProxy.getStreamingSocketTimeout();
             default:
                 throw new RuntimeException("Timeout type requires one of (" + GetTimeout.TIMEOUT_TYPES + ")");
         }
@@ -1535,8 +1534,8 @@ class ColumnFamilyStoreMBeanIterator implements Iterator<Map.Entry<String, Colum
                     return keyspaceNameCmp;
 
                 // get CF name and split it for index name
-                String e1CF[] = e1.getValue().getColumnFamilyName().split("\\.");
-                String e2CF[] = e2.getValue().getColumnFamilyName().split("\\.");
+                String e1CF[] = e1.getValue().getTableName().split("\\.");
+                String e2CF[] = e2.getValue().getTableName().split("\\.");
                 assert e1CF.length <= 2 && e2CF.length <= 2 : "unexpected split count for table name";
 
                 //if neither are indexes, just compare CF names

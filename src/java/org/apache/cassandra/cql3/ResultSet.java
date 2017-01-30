@@ -32,9 +32,9 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.*;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class ResultSet
 {
