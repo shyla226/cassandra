@@ -29,13 +29,12 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.PartitionColumns;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
@@ -54,6 +53,8 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * A special sstable multi writer for time window compaction
@@ -160,7 +161,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
                                                              cfs.metadata,
                                                              meta.copy(),
                                                              new SerializationHeader(header.isForSSTable(),
-                                                                                     cfs.metadata,
+                                                                                     cfs.metadata(),
                                                                                      header.columns(),
                                                                                      new EncodingStats(minTimestamp, header.stats().minLocalDeletionTime, header.stats().minTTL)),
                                                              indexes,
@@ -235,9 +236,9 @@ public class TWCSMultiWriter implements SSTableMultiWriter
         return filepointerSum;
     }
 
-    public UUID getCfId()
+    public TableId getTableId()
     {
-        return cfs.metadata.cfId;
+        return cfs.metadata.id;
     }
 
     public Throwable commit(Throwable accumulate)
@@ -457,7 +458,14 @@ public class TWCSMultiWriter implements SSTableMultiWriter
     {
         private final Iterator<Unfiltered> unfiltereds;
 
-        UnfilteredRowIteratorBucket(List<Unfiltered> uris, CFMetaData metadata, DecoratedKey partitionKey, DeletionTime partitionLevelDeletion, PartitionColumns columns, Row staticRow, boolean isReverseOrder, EncodingStats stats)
+        UnfilteredRowIteratorBucket(List<Unfiltered> uris,
+                                    TableMetadata metadata,
+                                    DecoratedKey partitionKey,
+                                    DeletionTime partitionLevelDeletion,
+                                    RegularAndStaticColumns columns,
+                                    Row staticRow,
+                                    boolean isReverseOrder,
+                                    EncodingStats stats)
         {
             super(metadata, partitionKey, partitionLevelDeletion, columns, staticRow, isReverseOrder, stats);
             this.unfiltereds = uris.iterator();

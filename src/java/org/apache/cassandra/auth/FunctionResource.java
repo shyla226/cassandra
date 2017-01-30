@@ -26,13 +26,13 @@ import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.permission.Permissions;
-import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.Schema;
 
 /**
  * IResource implementation representing functions.

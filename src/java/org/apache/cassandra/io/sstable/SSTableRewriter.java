@@ -150,7 +150,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                     continue;
 
                 if (tmpKey == null)
-                    tmpKey = new MutableKeyCacheKey(reader.metadata.ksAndCFName, reader.descriptor, key.getKey());
+                    tmpKey = new MutableKeyCacheKey(reader.metadata(), reader.descriptor, key.getKey());
                 else
                     tmpKey.mutate(reader.descriptor, key.getKey());
 

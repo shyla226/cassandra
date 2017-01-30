@@ -533,7 +533,7 @@ public class ContinuousPagingService
             this.pageWriter = new ContinuousPageWriter(state.getConnection(),
                                                        pagingOptions.maxPagesPerSecond(),
                                                        config);
-            this.avgRowSize = ResultSet.estimatedRowSize(statement.cfm, selection.getColumns());
+            this.avgRowSize = ResultSet.estimatedRowSize(statement.table, selection.getColumns());
 
             allocatePage(1);
         }

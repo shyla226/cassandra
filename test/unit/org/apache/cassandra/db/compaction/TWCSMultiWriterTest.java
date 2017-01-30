@@ -19,10 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -30,7 +27,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.junit.Test;
 
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -44,11 +40,8 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.BTreeRow;
-import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -59,7 +52,6 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -80,13 +72,13 @@ public class TWCSMultiWriterTest extends CQLTester
         int nowInSeconds = FBUtilities.nowInSeconds();
         Range<Token> r = new Range<>(cfs.getPartitioner().getMinimumToken(), cfs.getPartitioner().getMaximumToken());
         DataRange dr = new DataRange(Range.makeRowRange(r), new ClusteringIndexSliceFilter(Slices.ALL, false));
-        PartitionRangeReadCommand rc = new PartitionRangeReadCommand(cfs.metadata,
-                                                                             nowInSeconds,
-                                                                             ColumnFilter.all(cfs.metadata),
-                                                                             RowFilter.NONE,
-                                                                             DataLimits.NONE,
-                                                                             dr,
-                                                                             Optional.empty());
+        PartitionRangeReadCommand rc = new PartitionRangeReadCommand(cfs.metadata(),
+                                                                     nowInSeconds,
+                                                                     ColumnFilter.all(cfs.metadata()),
+                                                                     RowFilter.NONE,
+                                                                     DataLimits.NONE,
+                                                                     dr,
+                                                                     Optional.empty());
         TWCSMultiWriter.BucketIndexer indexes = TWCSMultiWriter.createBucketIndexes(TimeUnit.MINUTES, 1);
         try (ReadExecutionController executionController = rc.executionController();
              UnfilteredPartitionIterator pi = rc.executeLocally(executionController))

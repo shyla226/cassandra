@@ -24,12 +24,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -37,9 +35,9 @@ import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.PartitionColumns;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.compaction.TWCSMultiWriter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
@@ -55,6 +53,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -127,9 +126,9 @@ public class TWCSSplitPartitionBench extends CQLTester
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         Range<Token> r = new Range<>(cfs.getPartitioner().getMinimumToken(), cfs.getPartitioner().getMaximumToken());
         DataRange dr = new DataRange(Range.makeRowRange(r), new ClusteringIndexSliceFilter(Slices.ALL, false));
-        PartitionRangeReadCommand rc = new PartitionRangeReadCommand(cfs.metadata,
+        PartitionRangeReadCommand rc = new PartitionRangeReadCommand(cfs.metadata(),
                                                                      FBUtilities.nowInSeconds(),
-                                                                     ColumnFilter.all(cfs.metadata),
+                                                                     ColumnFilter.all(cfs.metadata()),
                                                                      RowFilter.NONE,
                                                                      DataLimits.NONE,
                                                                      dr,
@@ -177,7 +176,7 @@ public class TWCSSplitPartitionBench extends CQLTester
 
     static class MBROnHeapUnfilteredPartitions
     {
-        private final CFMetaData metadata;
+        private final TableMetadata metadata;
         private final List<MBRUnfilteredRowHolder> rows = new ArrayList<>();
         private final UnfilteredPartitionIterator iter;
 
@@ -205,16 +204,16 @@ public class TWCSSplitPartitionBench extends CQLTester
 
         private static class MBROnHeapUnfilteredPartitionIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
         {
-            private final CFMetaData metadata;
+            private final TableMetadata metadata;
             private final Iterator<MBRUnfilteredRowHolder> it;
 
-            private MBROnHeapUnfilteredPartitionIterator(CFMetaData metadata, UnfilteredPartitionIterator iter, List<MBRUnfilteredRowHolder> rows)
+            private MBROnHeapUnfilteredPartitionIterator(TableMetadata metadata, UnfilteredPartitionIterator iter, List<MBRUnfilteredRowHolder> rows)
             {
                 this.metadata = metadata;
                 it = rows.iterator();
             }
 
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return metadata;
             }
@@ -233,16 +232,16 @@ public class TWCSSplitPartitionBench extends CQLTester
 
         private static class MBRUnfilteredRowHolder
         {
-            private final CFMetaData metadata;
+            private final TableMetadata metadata;
             private final DecoratedKey key;
             private final DeletionTime partitionLevelDeletion;
-            private final PartitionColumns partitionColumns;
+            private final RegularAndStaticColumns partitionColumns;
             private final Row staticRow;
             private final boolean reversed;
             private final EncodingStats stats;
             private final List<Unfiltered> content;
 
-            public MBRUnfilteredRowHolder(CFMetaData metadata, DecoratedKey key, DeletionTime partitionLevelDeletion, PartitionColumns partitionColumns, Row staticRow, boolean reversed, EncodingStats stats, List<Unfiltered> content)
+            public MBRUnfilteredRowHolder(TableMetadata metadata, DecoratedKey key, DeletionTime partitionLevelDeletion, RegularAndStaticColumns partitionColumns, Row staticRow, boolean reversed, EncodingStats stats, List<Unfiltered> content)
             {
                 this.metadata = metadata;
                 this.key = key;

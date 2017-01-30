@@ -22,22 +22,19 @@ import java.util.*;
 
 import io.netty.buffer.ByteBuf;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.transport.*;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.ReversedType;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.transport.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class ResultSet
 {
@@ -746,16 +743,16 @@ public class ResultSet
      * primary columns, as well as complex columns and ignores disk format overheads.
      * @return - an estimated size of a CQL row.
      */
-    public static int estimatedRowSize(CFMetaData cfm, List<ColumnDefinition> columns)
+    public static int estimatedRowSize(TableMetadata cfm, List<ColumnMetadata> columns)
     {
-        ColumnFamilyStore cfs = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
+        ColumnFamilyStore cfs = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
 
         int avgColumnSize = (int)(cfs.getMeanCells() > 0
                                   ? cfs.getMeanPartitionSize() / cfs.getMeanCells()
                                   : cfs.getMeanPartitionSize());
 
         int ret = 0;
-        for (ColumnDefinition def : columns)
+        for (ColumnMetadata def : columns)
         {
             int fixedLength = def.type.valueLengthIfFixed();
             ret += CBUtil.sizeOfValue(fixedLength > 0 ? fixedLength : avgColumnSize);

@@ -20,7 +20,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import com.google.common.collect.ImmutableList;
 
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.IndexName;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
@@ -33,8 +33,8 @@ public final class IndexRestrictions
      */
     private static final IndexRestrictions EMPTY_RESTRICTIONS = new IndexRestrictions(ImmutableList.of(), ImmutableList.of());
 
-    public static final String INDEX_NOT_FOUND = "Invalid index expression, index %s not found for %s.%s";
-    public static final String INVALID_INDEX = "Target index %s cannot be used to query %s.%s";
+    public static final String INDEX_NOT_FOUND = "Invalid index expression, index %s not found for %s";
+    public static final String INVALID_INDEX = "Target index %s cannot be used to query %s";
     public static final String CUSTOM_EXPRESSION_NOT_SUPPORTED = "Index %s does not support custom expressions";
     public static final String NON_CUSTOM_INDEX_IN_EXPRESSION = "Only CUSTOM indexes may be used in custom index expressions, %s is not valid";
     public static final String MULTIPLE_EXPRESSIONS = "Multiple custom index expressions in a single query are not supported";
@@ -88,14 +88,14 @@ public final class IndexRestrictions
         return customExpressions;
     }
 
-    static InvalidRequestException invalidIndex(IndexName indexName, CFMetaData cfm)
+    static InvalidRequestException invalidIndex(IndexName indexName, TableMetadata table)
     {
-        return invalidRequest(INVALID_INDEX, indexName.getIdx(), cfm.ksName, cfm.cfName);
+        return new InvalidRequestException(String.format(INVALID_INDEX, indexName.getIdx(), table.toString()));
     }
 
-    static InvalidRequestException indexNotFound(IndexName indexName, CFMetaData cfm)
+    static InvalidRequestException indexNotFound(IndexName indexName, TableMetadata table)
     {
-        return invalidRequest(INDEX_NOT_FOUND,indexName.getIdx(), cfm.ksName, cfm.cfName);
+        return new InvalidRequestException(String.format(INDEX_NOT_FOUND, indexName.getIdx(), table.toString()));
     }
 
     static InvalidRequestException nonCustomIndexInExpression(IndexName indexName)

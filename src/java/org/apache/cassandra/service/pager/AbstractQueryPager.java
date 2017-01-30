@@ -17,15 +17,14 @@
  */
 package org.apache.cassandra.service.pager;
 
-import org.apache.cassandra.config.CFMetaData;
 import java.util.function.Function;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 
@@ -86,12 +85,12 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     }
 
     @SuppressWarnings("resource")
-    public UnfilteredPartitionIterator fetchPageUnfiltered(int pageSize, ReadExecutionController executionController, CFMetaData cfm)
+    public UnfilteredPartitionIterator fetchPageUnfiltered(int pageSize, ReadExecutionController executionController, TableMetadata metadata)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
-            return EmptyIterators.unfilteredPartition(cfm);
+            return EmptyIterators.unfilteredPartition(metadata);
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);

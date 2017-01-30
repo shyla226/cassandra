@@ -23,13 +23,13 @@ import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -349,7 +349,7 @@ public final class AggregationQueryPager implements QueryPager
                 this.rowIterator = delegate;
             }
 
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return rowIterator.metadata();
             }
@@ -359,7 +359,7 @@ public final class AggregationQueryPager implements QueryPager
                 return rowIterator.isReverseOrder();
             }
 
-            public PartitionColumns columns()
+            public RegularAndStaticColumns columns()
             {
                 return rowIterator.columns();
             }
