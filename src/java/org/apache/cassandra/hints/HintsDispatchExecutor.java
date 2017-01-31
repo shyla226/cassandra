@@ -25,8 +25,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-import javax.ws.rs.HEAD;
-
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.slf4j.Logger;
