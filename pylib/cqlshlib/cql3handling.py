@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from .cqlhandling import CqlParsingRuleSet, Hint
-from cassandra.metadata import maybe_escape_name
+from dse.metadata import maybe_escape_name
 
 
 simple_cql_types = set(('ascii', 'bigint', 'blob', 'boolean', 'counter', 'date', 'decimal', 'double', 'duration', 'float',

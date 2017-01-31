@@ -18,6 +18,7 @@ Merged from 4.0:
 
 
 DSE 5.1.0
+ * Replace open source Python driver with Datastax Enterprise driver (APOLLO-349)
  * Fix OutOfSpaceTest broken by APOLLO-227 (APOLLO-350)
  * Allow to add IndexRestrictions to SelectStatement in an immutable way (APOLLO-323)
  * Allow grammar extensions to be added to cqlsh for tab completion (APOLLO-295)
