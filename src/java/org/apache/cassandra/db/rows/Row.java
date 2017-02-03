@@ -73,8 +73,6 @@ public interface Row extends Unfiltered, Collection<ColumnData>
      */
     public Deletion deletion();
 
-    public Iterator<Single<ColumnData>> rxiterator();
-
     /**
      * Liveness information for the primary key columns of this row.
      * <p>

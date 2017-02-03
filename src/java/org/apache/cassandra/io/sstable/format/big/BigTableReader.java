@@ -21,11 +21,9 @@ import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.columniterator.SSTableIterator;
 import org.apache.cassandra.db.columniterator.SSTableReversedIterator;
-import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -37,6 +35,8 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.reactivex.Flowable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -59,6 +59,16 @@ public class BigTableReader extends SSTableReader
     {
         RowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ);
         return iterator(null, key, rie, slices, selectedColumns, reversed);
+    }
+
+    public Flowable<Unfiltered> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    {
+        return FlowableUnfilteredRows.fromIterator(iterator(key, slices, selectedColumns, reversed));
+//        if (reversed)
+//            return FlowableUnfilteredRows.fromIterator(iterator(key, slices, selectedColumns, reversed));
+//
+//        RowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ);
+//        return flowable(null, key, rie, slices, selectedColumns, reversed);
     }
 
     public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)

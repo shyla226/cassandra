@@ -27,6 +27,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.rows.FlowableUnfilteredRows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sasi.SASIIndex;
@@ -105,7 +106,7 @@ public class QueryController
                                                                                      key,
                                                                                      command.clusteringIndexFilter(key));
 
-            return Single.just(partition.queryMemtableAndDisk(cfs, executionController).toIterator());
+            return Single.just(FlowableUnfilteredRows.toIterator(partition.queryMemtableAndDisk(cfs, executionController)));
         }
         finally
         {

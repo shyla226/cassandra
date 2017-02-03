@@ -64,7 +64,8 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         CLUSTERING                  (2,  0),
         INCL_END_EXCL_START_BOUNDARY(3,  1),
         INCL_END_BOUND              (3,  1),
-        EXCL_START_BOUND            (3,  1);
+        EXCL_START_BOUND            (3,  1),
+        HEADER_CLUSTERING           (-1, 0);  // header compares before everything else, never serialized
 
         private final int comparison;
 
@@ -254,6 +255,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         {
             // We shouldn't serialize static clusterings
             assert clustering.kind() != Kind.STATIC_CLUSTERING;
+            assert clustering.kind() != Kind.HEADER_CLUSTERING;
             if (clustering.kind() == Kind.CLUSTERING)
             {
                 out.writeByte(clustering.kind().ordinal());
@@ -270,6 +272,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             Kind kind = Kind.values()[in.readByte()];
             // We shouldn't serialize static clusterings
             assert kind != Kind.STATIC_CLUSTERING;
+            assert kind != Kind.HEADER_CLUSTERING;
             if (kind == Kind.CLUSTERING)
                 Clustering.serializer.skip(in, version, types);
             else
@@ -281,6 +284,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
             Kind kind = Kind.values()[in.readByte()];
             // We shouldn't serialize static clusterings
             assert kind != Kind.STATIC_CLUSTERING;
+            assert kind != Kind.HEADER_CLUSTERING;
             if (kind == Kind.CLUSTERING)
                 return Clustering.serializer.deserialize(in, version, types);
             else
@@ -291,6 +295,7 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         {
             // We shouldn't serialize static clusterings
             assert clustering.kind() != Kind.STATIC_CLUSTERING;
+            assert clustering.kind() != Kind.HEADER_CLUSTERING;
             if (clustering.kind() == Kind.CLUSTERING)
                 return 1 + Clustering.serializer.serializedSize((Clustering)clustering, version, types);
             else

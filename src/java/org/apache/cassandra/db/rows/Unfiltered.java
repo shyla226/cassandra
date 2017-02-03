@@ -31,10 +31,11 @@ import org.apache.cassandra.db.Clusterable;
  */
 public interface Unfiltered extends Clusterable
 {
-    public enum Kind { ROW, RANGE_TOMBSTONE_MARKER };
+    public enum Kind { ROW, RANGE_TOMBSTONE_MARKER, HEADER };
+    // TODO: add sstable lower bound for clearer merging
 
     /**
-     * The kind of the atom: either row or range tombstone marker.
+     * The kind of the atom: either row or range tombstone marker. In flowables, the first Unfiltered is a header.
      */
     public Kind kind();
 

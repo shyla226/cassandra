@@ -119,6 +119,31 @@ public interface Clustering extends ClusteringPrefix
         }
     };
 
+    /**
+     * The special cased clustering used by all static rows. It is a special case in the
+     * sense that it's always empty, no matter how many clustering columns the table has.
+     */
+    public static final Clustering HEADER_CLUSTERING = new BufferClustering(EMPTY_VALUES_ARRAY)
+    {
+        @Override
+        public Kind kind()
+        {
+            return Kind.HEADER_CLUSTERING;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "HEADER";
+        }
+
+        @Override
+        public String toString(CFMetaData metadata)
+        {
+            return toString();
+        }
+    };
+
     /** Empty clustering for tables having no clustering columns. */
     public static final Clustering EMPTY = new BufferClustering(EMPTY_VALUES_ARRAY)
     {
