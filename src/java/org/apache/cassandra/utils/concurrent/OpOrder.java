@@ -234,7 +234,10 @@ public class OpOrder
         public void markBlocking()
         {
             assert !NettyRxScheduler.isTPCThread() : "This method should never be issued from a TPC thread";
-            final CountDownLatch latch = dispatchToTPCTheads(scheduler -> tpcBarriers[scheduler.cpuId].markBlocking());
+            final CountDownLatch latch = dispatchToTPCTheads(scheduler -> {
+                if (tpcBarriers[scheduler.cpuId] != null)
+                    tpcBarriers[scheduler.cpuId].markBlocking();
+            });
 
             Uninterruptibles.awaitUninterruptibly(latch);
         }
@@ -246,8 +249,10 @@ public class OpOrder
             final boolean allPriorFinished[] = new boolean[tpcBarriers.length];
             //initialize to true in case some TPC threads are not yet running
             Arrays.fill(allPriorFinished, true);
-            final CountDownLatch latch = dispatchToTPCTheads(scheduler ->
-                                                             allPriorFinished[scheduler.cpuId] = tpcBarriers[scheduler.cpuId].allPriorOpsAreFinished());
+            final CountDownLatch latch = dispatchToTPCTheads(scheduler -> allPriorFinished[scheduler.cpuId] =
+                                                                          tpcBarriers[scheduler.cpuId] == null
+                                                                          ? true
+                                                                          : tpcBarriers[scheduler.cpuId].allPriorOpsAreFinished());
 
             Uninterruptibles.awaitUninterruptibly(latch);
 
@@ -270,6 +275,9 @@ public class OpOrder
 
             final CountDownLatch latch = dispatchToTPCTheads(scheduler ->
                                                              {
+                                                                 if (tpcBarriers[scheduler.cpuId] == null)
+                                                                     return; // the barrier was issues just before the TPC thread was initialized,
+
                                                                  Optional<WaitQueue.Signal> signal = tpcBarriers[scheduler.cpuId].await(caller);
                                                                  if (signal.isPresent())
                                                                      signals[scheduler.cpuId] = signal.get();

@@ -42,7 +42,6 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
 import io.reactivex.Completable;
-import io.reactivex.Observable;
 import io.reactivex.Single;
 
 import org.apache.commons.lang3.StringUtils;
@@ -5143,8 +5142,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("Updated hinted_handoff_throttle_in_kb to {}", throttleInKB);
     }
 
-    public static List<Range<Token>> getStartupTokenRanges(String keyspaceName)
+    public static List<Range<Token>> getStartupTokenRanges(Keyspace keyspace)
     {
+
         if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())
             return null;
 
@@ -5152,7 +5152,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (StorageService.instance.isBootstrapMode())
         {
-            lr = StorageService.instance.getTokenMetadata().getPendingRanges(keyspaceName, FBUtilities.getBroadcastAddress());
+            lr = StorageService.instance.getTokenMetadata().getPendingRanges(keyspace.getName(), FBUtilities.getBroadcastAddress());
         }
         else
         {
@@ -5160,7 +5160,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // from that node to the correct location on disk, if we didn't, we would put new files in the wrong places.
             // We do this to minimize the amount of data we need to move in rebalancedisks once everything settled
             TokenMetadata tmd = StorageService.instance.getTokenMetadata().cloneAfterAllSettled();
-            lr = Keyspace.open(keyspaceName).getReplicationStrategy().getAddressRanges(tmd).get(FBUtilities.getBroadcastAddress());
+            lr = keyspace.getReplicationStrategy().getAddressRanges(tmd).get(FBUtilities.getBroadcastAddress());
         }
 
         if (lr == null || lr.isEmpty())
@@ -5171,7 +5171,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
     {
-        List<Range<Token>> localRanges = getStartupTokenRanges(cfs.keyspace.getName());
+        List<Range<Token>> localRanges = getStartupTokenRanges(cfs.keyspace);
         if (localRanges == null)
             return null;
 

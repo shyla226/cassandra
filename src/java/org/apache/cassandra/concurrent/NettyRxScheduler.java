@@ -27,14 +27,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.DefaultEventExecutor;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.EventExecutor;
@@ -42,7 +40,6 @@ import io.netty.util.concurrent.EventExecutorGroup;
 import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.concurrent.FastThreadLocalThread;
 import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.SingleThreadEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.Disposables;
@@ -57,6 +54,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.NativeTransportService;
@@ -300,7 +298,7 @@ public class NettyRxScheduler extends Scheduler
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
         }
 
-        List<Long> keyspaceRanges = getRangeList(keyspaceName);
+        List<Long> keyspaceRanges = getRangeList(keyspaceName, true);
         Long keyToken = (Long)key.getToken().getTokenValue();
 
         Long rangeStart = keyspaceRanges.get(0);
@@ -323,19 +321,19 @@ public class NettyRxScheduler extends Scheduler
         throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
     }
 
-    public static List<Long> getRangeList(String keyspaceName)
-    {
-        return getRangeList(keyspaceName, true);
-    }
-
     public static List<Long> getRangeList(String keyspaceName, boolean persist)
     {
-        List<Long> ranges = keyspaceToRangeMapping.get(keyspaceName);
+        return getRangeList(Keyspace.open(keyspaceName), persist);
+    }
+
+    public static List<Long> getRangeList(Keyspace keyspace, boolean persist)
+    {
+        List<Long> ranges = keyspaceToRangeMapping.get(keyspace.getName());
 
         if (ranges != null)
             return ranges;
 
-        List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspaceName);
+        List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspace);
         List<Long> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS)
                                           .stream()
                                           .map(s -> (Long) s.getToken().getTokenValue())
@@ -345,14 +343,14 @@ public class NettyRxScheduler extends Scheduler
         {
             if (instance().cpuId == 0)
             {
-                keyspaceToRangeMapping.put(keyspaceName, splits);
+                keyspaceToRangeMapping.put(keyspace.getName(), splits);
             }
             else
             {
                 CountDownLatch ready = new CountDownLatch(1);
 
                 getForCore(0).scheduleDirect(() -> {
-                    keyspaceToRangeMapping.put(keyspaceName, splits);
+                    keyspaceToRangeMapping.put(keyspace.getName(), splits);
                     ready.countDown();
                 });
 
