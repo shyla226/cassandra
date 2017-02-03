@@ -28,7 +28,7 @@ import org.apache.cassandra.index.sasi.utils.CombinedValue;
 import org.apache.cassandra.index.sasi.utils.MappedBuffer;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.utils.MergeIterator;
-
+import org.apache.cassandra.utils.Reducer;
 import com.carrotsearch.hppc.LongOpenHashSet;
 import com.carrotsearch.hppc.LongSet;
 import com.google.common.annotations.VisibleForTesting;
@@ -382,31 +382,31 @@ public class TokenTree
 
         public Iterator<DecoratedKey> iterator()
         {
-            List<Iterator<Single<DecoratedKey>>> keys = new ArrayList<>(info.size());
+            List<Iterator<DecoratedKey>> keys = new ArrayList<>(info.size());
 
             for (TokenInfo i : info)
-                keys.add(i.rxiterator());
+                keys.add(i.iterator());
 
             if (!loadedKeys.isEmpty())
-                keys.add(loadedKeys.stream().map(k -> Single.just(k)).iterator());
+                keys.add(loadedKeys.iterator());
 
-            return MergeIterator.get(keys, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey, DecoratedKey>()
+            return MergeIterator.get(keys, DecoratedKey.comparator, new Reducer<DecoratedKey, DecoratedKey>()
             {
-                Single<DecoratedKey> reduced = null;
+                DecoratedKey reduced = null;
 
                 public boolean trivialReduceIsTrivial()
                 {
                     return true;
                 }
 
-                public void reduce(int idx, Single<DecoratedKey> current)
+                public void reduce(int idx, DecoratedKey current)
                 {
                     reduced = current;
                 }
 
                 protected DecoratedKey getReduced()
                 {
-                    return reduced.blockingGet();
+                    return reduced;
                 }
             });
         }

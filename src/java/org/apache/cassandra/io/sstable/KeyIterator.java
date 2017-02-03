@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.RxIterator;
 
-public class KeyIterator extends AbstractIterator<Single<DecoratedKey>> implements RxIterator<DecoratedKey>
+public class KeyIterator extends AbstractIterator<DecoratedKey> implements CloseableIterator<DecoratedKey>
 {
     private final static class In
     {
@@ -95,7 +95,7 @@ public class KeyIterator extends AbstractIterator<Single<DecoratedKey>> implemen
         partitioner = metadata.partitioner;
     }
 
-    protected Single<DecoratedKey> computeNext()
+    protected DecoratedKey computeNext()
     {
         try
         {
@@ -105,7 +105,7 @@ public class KeyIterator extends AbstractIterator<Single<DecoratedKey>> implemen
             keyPosition = in.getFilePointer();
             DecoratedKey key = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in.get()));
             RowIndexEntry.Serializer.skip(in.get(), desc.version); // skip remainder of the entry
-            return Single.just(key);
+            return key;
         }
         catch (IOException e)
         {

@@ -292,7 +292,7 @@ public class CounterMutation implements IMutation
         PeekingIterator<PartitionUpdate.CounterMark> markIter = Iterators.peekingIterator(marks.iterator());
         // TODO queryMemtableAndDisk will become async, need to update how counters writes work based on that
         try (ReadExecutionController controller = cmd.executionController();
-             RowIterator partition = UnfilteredRowIterators.filter(cmd.queryMemtableAndDisk(cfs, controller).blockingGet(), nowInSec))
+             RowIterator partition = UnfilteredRowIterators.filter(cmd.queryMemtableAndDisk(cfs, controller).toIterator(), nowInSec))
         {
             updateForRow(markIter, partition.staticRow(), cfs);
 

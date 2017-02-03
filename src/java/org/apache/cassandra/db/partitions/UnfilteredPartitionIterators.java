@@ -28,6 +28,7 @@ import io.reactivex.Single;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
@@ -35,6 +36,7 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static methods to work with partition iterators.
@@ -43,7 +45,8 @@ public abstract class UnfilteredPartitionIterators
 {
     private static final Serializer serializer = new Serializer();
 
-    private static final Comparator<UnfilteredRowIterator> partitionComparator = Comparator.comparing(BaseRowIterator::partitionKey);
+    private static final Comparator<Single<UnfilteredRowIterator>> partitionComparator = (x, y) -> x.blockingGet().partitionKey().compareTo(y.blockingGet().partitionKey());
+//            Comparator.comparing(BaseRowIterator::partitionKey);
 
     private UnfilteredPartitionIterators() {}
 
@@ -63,6 +66,24 @@ public abstract class UnfilteredPartitionIterators
         }
 
         public void close();
+
+        public static final MergeListener NONE = new MergeListener()
+        {
+            public org.apache.cassandra.db.rows.UnfilteredRowIterators.MergeListener getRowMergeListener(
+                    DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
+            {
+                return null;
+            }
+
+            public boolean callOnTrivialMerge()
+            {
+                return false;
+            }
+
+            public void close()
+            {
+            }
+        };
     }
 
     @SuppressWarnings("resource") // The created resources are returned right away
@@ -130,7 +151,7 @@ public abstract class UnfilteredPartitionIterators
         final CFMetaData metadata = iterators.get(0).metadata();
         final UnfilteredRowIterator emptyIterator = EmptyIterators.unfilteredRow(metadata, null, false);
 
-        final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
+        final MergeIterator<Single<UnfilteredRowIterator>, Single<UnfilteredRowIterator>> merged = MergeIterator.get(iterators, partitionComparator, new Reducer<Single<UnfilteredRowIterator>, Single<UnfilteredRowIterator>>()
         {
             private final List<UnfilteredRowIterator> toMerge = new ArrayList<>(iterators.size());
 
@@ -149,7 +170,7 @@ public abstract class UnfilteredPartitionIterators
                 toMerge.set(idx, it);
             }
 
-            protected UnfilteredRowIterator getReduced()
+            protected Single<UnfilteredRowIterator> getReduced()
             {
                 UnfilteredRowIterators.MergeListener rowListener = listener.getRowMergeListener(partitionKey, toMerge);
 
@@ -173,7 +194,7 @@ public abstract class UnfilteredPartitionIterators
                     }
                 }
 
-                return numNonEmptyRowIterators == 1 && !listener.callOnTrivialMerge() ? nonEmptyRowIterator : UnfilteredRowIterators.merge(toMerge, nowInSec, rowListener);
+                return Single.just(numNonEmptyRowIterators == 1 && !listener.callOnTrivialMerge() ? nonEmptyRowIterator : UnfilteredRowIterators.merge(toMerge, nowInSec, rowListener));
             }
 
             protected void onKeyChange()
@@ -198,7 +219,7 @@ public abstract class UnfilteredPartitionIterators
 
             public Single<UnfilteredRowIterator> next()
             {
-                return Single.just(merged.next());
+                return merged.next();
             }
 
             @Override
@@ -211,64 +232,8 @@ public abstract class UnfilteredPartitionIterators
 
     public static UnfilteredPartitionIterator mergeLazily(final List<? extends UnfilteredPartitionIterator> iterators, final int nowInSec)
     {
-        assert !iterators.isEmpty();
-
-        if (iterators.size() == 1)
-            return iterators.get(0);
-
-        final CFMetaData metadata = iterators.get(0).metadata();
-
-        final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
-        {
-            private final List<UnfilteredRowIterator> toMerge = new ArrayList<>(iterators.size());
-
-            public void reduce(int idx, Single<UnfilteredRowIterator> current)
-            {
-                toMerge.add(current.blockingGet());
-            }
-
-            protected UnfilteredRowIterator getReduced()
-            {
-                LazilyInitializedUnfilteredRowIterator it = new LazilyInitializedUnfilteredRowIterator(toMerge.get(0).partitionKey())
-                {
-                    protected UnfilteredRowIterator initializeIterator()
-                    {
-                        return UnfilteredRowIterators.merge(toMerge, nowInSec);
-                    }
-                };
-
-                return it;
-            }
-
-            protected void onKeyChange()
-            {
-                toMerge.clear();
-            }
-        });
-
-        return new AbstractUnfilteredPartitionIterator()
-        {
-            public CFMetaData metadata()
-            {
-                return metadata;
-            }
-
-            public boolean hasNext()
-            {
-                return merged.hasNext();
-            }
-
-            public Single<UnfilteredRowIterator> next()
-            {
-                return Single.just(merged.next());
-            }
-
-            @Override
-            public void close()
-            {
-                merged.close();
-            }
-        };
+        // Merge is already lazy (in the sense we only do it if the Single is requested).
+        return merge(iterators, nowInSec, MergeListener.NONE);
     }
 
     /**

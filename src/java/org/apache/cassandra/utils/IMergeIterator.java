@@ -23,5 +23,5 @@ import io.reactivex.Single;
 
 public interface IMergeIterator<In, Out> extends CloseableIterator<Out>
 {
-    Iterable<? extends Iterator<Single<In>>> iterators();
+    Iterable<? extends Iterator<In>> iterators();
 }

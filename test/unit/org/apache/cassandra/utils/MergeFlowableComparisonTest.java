@@ -20,14 +20,13 @@ package org.apache.cassandra.utils;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-
-import io.reactivex.Single;
-import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
@@ -35,11 +34,13 @@ import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
 
+import io.reactivex.Flowable;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.utils.Reducer;
 
-public class MergeIteratorComparisonTest
+public class MergeFlowableComparisonTest
 {
     private static class CountingComparator<T> implements Comparator<T>
     {
@@ -60,7 +61,9 @@ public class MergeIteratorComparisonTest
 
     static int ITERATOR_COUNT = 15;
     static int LIST_LENGTH = 15000;
-    static boolean BENCHMARK = true;
+    static boolean BENCHMARK = false;
+    static int DELAY_CHANCE = 3;            // 1/this of the inputs will be async delayed randomly, 0 for all
+    Random rand = new Random();
 
     @Test
     public void testRandomInts()
@@ -76,7 +79,7 @@ public class MergeIteratorComparisonTest
                 return r.nextInt(5 * LIST_LENGTH);
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
     
     @Test
@@ -93,7 +96,7 @@ public class MergeIteratorComparisonTest
                 return next++;
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -111,7 +114,7 @@ public class MergeIteratorComparisonTest
                 return r.nextBoolean() ? r.nextInt(5 * LIST_LENGTH) : next++;
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -168,7 +171,7 @@ public class MergeIteratorComparisonTest
                     return r.nextInt();
                 }
             }.result);
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -185,7 +188,7 @@ public class MergeIteratorComparisonTest
                 return "longish_prefix_" + r.nextInt(5 * LIST_LENGTH);
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
     
     @Test
@@ -202,7 +205,7 @@ public class MergeIteratorComparisonTest
                 return "longish_prefix_" + next++;
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -219,7 +222,7 @@ public class MergeIteratorComparisonTest
                 return "longish_prefix_" + (r.nextBoolean() ? r.nextInt(5 * LIST_LENGTH) : next++);
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -235,7 +238,7 @@ public class MergeIteratorComparisonTest
                 return UUIDGen.getTimeUUID();
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -251,7 +254,7 @@ public class MergeIteratorComparisonTest
                 return UUID.randomUUID();
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -268,7 +271,7 @@ public class MergeIteratorComparisonTest
                 return type.decompose(UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeIterator(reducer, lists, type);
+        testMergeFlowable(reducer, lists, type);
     }
 
     @Test
@@ -285,7 +288,7 @@ public class MergeIteratorComparisonTest
                 return type.decompose(UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeIterator(reducer, lists, type);
+        testMergeFlowable(reducer, lists, type);
     }
 
     
@@ -304,7 +307,7 @@ public class MergeIteratorComparisonTest
                 return new KeyedSet<>(r.nextInt(5 * LIST_LENGTH), UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
     /* */
 
@@ -325,7 +328,7 @@ public class MergeIteratorComparisonTest
                 return "longish_prefix_" + (id + list * LIST_LENGTH / 2);
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     @Test
@@ -345,7 +348,7 @@ public class MergeIteratorComparisonTest
                 return "longish_prefix_" + (id + list * LIST_LENGTH / 3);
             }
         }.result;
-        testMergeIterator(reducer, lists);
+        testMergeFlowable(reducer, lists);
     }
 
     private static abstract class ListGenerator<T>
@@ -460,19 +463,22 @@ public class MergeIteratorComparisonTest
         }
     }
 
-    public <T extends Comparable<T>> void testMergeIterator(Reducer<T, ?> reducer, List<List<T>> lists)
+    public <T extends Comparable<T>> void testMergeFlowable(Reducer<T, ?> reducer, List<List<T>> lists)
     {
-        testMergeIterator(reducer, lists, Ordering.natural());
+        testMergeFlowable(reducer, lists, Ordering.natural());
     }
-    public <T> void testMergeIterator(Reducer<T, ?> reducer, List<List<T>> lists, Comparator<T> comparator)
+    public <T, O> void testMergeFlowable(Reducer<T, O> reducer, List<List<T>> lists, Comparator<T> comparator)
     {
         {
-            IMergeIterator<T,?> tested = MergeIterator.get(closeableIterators(lists), comparator, reducer);
-            IMergeIterator<T,?> base = new MergeIteratorPQ<>(closeableIterators(lists), comparator, reducer);
-            // If test fails, try the version below for improved reporting:
-            Object[] basearr = Iterators.toArray(base, Object.class);
-            Assert.assertArrayEquals(basearr, Iterators.toArray(tested, Object.class));
-            //Assert.assertTrue(Iterators.elementsEqual(base, tested));
+            Flowable<O> tested = MergeFlowable.get(
+                    flowables(lists),
+                    comparator, reducer);
+            MergeIteratorPQ<T,O> baseIter = new MergeIteratorPQ<>(closeableIterators(lists), comparator, reducer);
+            Flowable<O> base = Flowable.fromIterable(() -> baseIter);
+
+            Assert.assertTrue(Flowable.sequenceEqual(base, tested).blockingGet());
+//            List<O> basearr = base.toList().blockingGet();
+//            Assert.assertEquals(basearr, tested.toList().blockingGet());
             if (!BENCHMARK)
                 return;
         }
@@ -481,24 +487,35 @@ public class MergeIteratorComparisonTest
         cmp = new CountingComparator<>(comparator); cmpb = new CountingComparator<>(comparator);
         System.out.println();
         for (int i=0; i<10; ++i) {
-            benchmarkIterator(MergeIterator.get(closeableIterators(lists), cmp, reducer), cmp);
-//            benchmarkIterator(new MergeIteratorPQ<>(closeableIterators(lists), cmpb, reducer), cmpb);
+            benchmarkIterator(MergeFlowable.get(flowables(lists), cmp, reducer), cmp);
         }
-        System.out.format("MI: %.2f\n", cmp.count / (double) cmpb.count);
+    }
+
+    <T> List<Flowable<T>> flowables(List<List<T>> lists)
+    {
+        return lists.stream().map(list -> maybeDelayed(Flowable.fromIterable(list))).collect(Collectors.toList());
     }
     
-    public <T> void benchmarkIterator(IMergeIterator<T, ?> it, CountingComparator<T> comparator)
+    <T> Flowable<T> maybeDelayed(Flowable<T> flowable)
     {
-        System.out.format("Testing %30s... ", it.getClass().getSimpleName());
+        if (rand.nextInt(DELAY_CHANCE) == 0)
+            return flowable.delay(rand.nextInt(15), TimeUnit.MICROSECONDS);
+        else
+            return flowable;
+    }
+    
+    public <T, O> void benchmarkIterator(Flowable<O> flow, CountingComparator<T> comparator)
+    {
+        System.out.format("Testing %30s... ", flow.getClass().getSimpleName());
         long time = System.currentTimeMillis();
-        Object value = null;
-        while (it.hasNext())
-            value = it.next();
+        AtomicReference<O> value = new AtomicReference<O>();
+        flow.blockingForEach(x -> value.set(x));
+        flow.subscribe(x -> value.set(x));
         time = System.currentTimeMillis() - time;
         String type = "";
-        if (value instanceof Counted<?>)
+        if (value.get() instanceof Counted<?>)
         {
-            type = "type " + ((Counted<?>)value).item.getClass().getSimpleName();
+            type = "type " + ((Counted<?>)value.get()).item.getClass().getSimpleName();
         }
         System.out.format("%15s time %5dms; comparisons: %d\n", type, time, comparator.count);
     }
@@ -644,8 +661,9 @@ public class MergeIteratorComparisonTest
     }
 
     // Old MergeIterator implementation for comparison.
-    public class MergeIteratorPQ<In,Out> extends MergeIterator<In,Out> implements IMergeIterator<In, Out>
+    public class MergeIteratorPQ<In,Out> extends AbstractIterator<Out>
     {
+        protected final Reducer<In, Out> reducer;
         // a queue for return: all candidates must be open and have at least one item
         protected final PriorityQueue<CandidatePQ<In>> queue;
         // a stack of the last consumed candidates, so that we can lazily call 'advance()'
@@ -654,7 +672,7 @@ public class MergeIteratorComparisonTest
         protected final ArrayDeque<CandidatePQ<In>> candidates;
         public MergeIteratorPQ(List<? extends Iterator<In>> iters, Comparator<In> comp, Reducer<In, Out> reducer)
         {
-            super(iters, reducer);
+            this.reducer = reducer;
             this.queue = new PriorityQueue<>(Math.max(1, iters.size()));
             for (int i = 0; i < iters.size(); i++)
             {

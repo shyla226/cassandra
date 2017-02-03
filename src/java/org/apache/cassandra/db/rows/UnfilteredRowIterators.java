@@ -39,6 +39,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static methods to work with atom iterators.
@@ -372,9 +373,9 @@ public abstract class UnfilteredRowIterators
                   mergeStaticRows(iterators, columns.statics, nowInSec, listener, partitionDeletion),
                   reversed,
                   mergeStats(iterators));
-            this.mergeIterator = MergeIterator.get(iterators.stream().map(i -> i.asRxIterator()).collect(Collectors.toList()),
+            this.mergeIterator = MergeIterator.get(iterators,
                                                    reversed ? metadata.comparator.reversed() : metadata.comparator,
-                                                   new MergeReducer(iterators.size(), reversed, nowInSec, listener));
+                                                   new MergeReducer(iterators.size(), reversed, partitionDeletion, columns.regulars, nowInSec, listener));
             this.listener = listener;
         }
 
@@ -519,83 +520,87 @@ public abstract class UnfilteredRowIterators
             if (listener != null)
                 listener.close();
         }
+    }
 
-        private class MergeReducer extends MergeIterator.Reducer<Unfiltered, Unfiltered>
+
+    public static class MergeReducer extends Reducer<Unfiltered, Unfiltered>
+    {
+        private final MergeListener listener;
+
+        private Unfiltered.Kind nextKind;
+
+        private final boolean reversed;
+        private final int size;
+
+        private final Row.Merger rowMerger;
+        private RangeTombstoneMarker.Merger markerMerger;
+        
+        private final DeletionTime partitionLevelDeletion;
+
+        public MergeReducer(int size, boolean reversed, DeletionTime partitionLevelDeletion, Columns columns, int nowInSec, MergeListener listener)
         {
-            private final MergeListener listener;
+            this.reversed = reversed;
+            this.size = size;
+            this.rowMerger = new Row.Merger(size, nowInSec, columns.size(), columns.hasComplex());
+            this.markerMerger = null;
+            this.listener = listener;
+            this.partitionLevelDeletion = partitionLevelDeletion;
+        }
 
-            private Unfiltered.Kind nextKind;
+        private void maybeInitMarkerMerger()
+        {
+            if (markerMerger == null)
+                markerMerger = new RangeTombstoneMarker.Merger(size, partitionLevelDeletion, reversed);
+        }
 
-            private final boolean reversed;
-            private final int size;
+        @Override
+        public boolean trivialReduceIsTrivial()
+        {
+            // If we have a listener, we must signal it even when we have a single version
+            return listener == null;
+        }
 
-            private final Row.Merger rowMerger;
-            private RangeTombstoneMarker.Merger markerMerger;
-
-            private MergeReducer(int size, boolean reversed, int nowInSec, MergeListener listener)
+        public void reduce(int idx, Unfiltered current)
+        {
+            nextKind = current.kind();
+            if (nextKind == Unfiltered.Kind.ROW)
+                rowMerger.add(idx, (Row) current);
+            else
             {
-                this.reversed = reversed;
-                this.size = size;
-                this.rowMerger = new Row.Merger(size, nowInSec, columns().regulars.size(), columns().regulars.hasComplex());
-                this.markerMerger = null;
-                this.listener = listener;
+                maybeInitMarkerMerger();
+                markerMerger.add(idx, (RangeTombstoneMarker) current);
             }
+        }
 
-            private void maybeInitMarkerMerger()
+        protected Unfiltered getReduced()
+        {
+            if (nextKind == Unfiltered.Kind.ROW)
             {
-                if (markerMerger == null)
-                    markerMerger = new RangeTombstoneMarker.Merger(size, partitionLevelDeletion(), reversed);
+                Row merged = rowMerger.merge(markerMerger == null ? partitionLevelDeletion : markerMerger.activeDeletion());
+                if (listener != null)
+                    listener.onMergedRows(merged == null ? BTreeRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
+                return merged;
             }
-
-            @Override
-            public boolean trivialReduceIsTrivial()
+            else
             {
-                // If we have a listener, we must signal it even when we have a single version
-                return listener == null;
+                maybeInitMarkerMerger();
+                RangeTombstoneMarker merged = markerMerger.merge();
+                if (listener != null)
+                    listener.onMergedRangeTombstoneMarkers(merged, markerMerger.mergedMarkers());
+                return merged;
             }
+        }
 
-            public void reduce(int idx, Single<Unfiltered> current)
+        protected void onKeyChange()
+        {
+            if (nextKind == Unfiltered.Kind.ROW)
             {
-                nextKind = current.blockingGet().kind();
-                if (nextKind == Unfiltered.Kind.ROW)
-                    rowMerger.add(idx, (Row) current.blockingGet());
-                else
-                {
-                    maybeInitMarkerMerger();
-                    markerMerger.add(idx, (RangeTombstoneMarker) current.blockingGet());
-                }
+                rowMerger.clear();
             }
-
-            protected Unfiltered getReduced()
+            else
             {
-                if (nextKind == Unfiltered.Kind.ROW)
-                {
-                    Row merged = rowMerger.merge(markerMerger == null ? partitionLevelDeletion() : markerMerger.activeDeletion());
-                    if (listener != null)
-                        listener.onMergedRows(merged == null ? BTreeRow.emptyRow(rowMerger.mergedClustering()) : merged, rowMerger.mergedRows());
-                    return merged;
-                }
-                else
-                {
-                    maybeInitMarkerMerger();
-                    RangeTombstoneMarker merged = markerMerger.merge();
-                    if (listener != null)
-                        listener.onMergedRangeTombstoneMarkers(merged, markerMerger.mergedMarkers());
-                    return merged;
-                }
-            }
-
-            protected void onKeyChange()
-            {
-                if (nextKind == Unfiltered.Kind.ROW)
-                {
-                    rowMerger.clear();
-                }
-                else
-                {
-                    if (markerMerger != null)
-                        markerMerger.clear();
-                }
+                if (markerMerger != null)
+                    markerMerger.clear();
             }
         }
     }

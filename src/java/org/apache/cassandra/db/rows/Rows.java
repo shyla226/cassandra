@@ -29,6 +29,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.db.rows.Row.Deletion;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.WrappedInt;
 
 /**
@@ -150,21 +151,22 @@ public abstract class Rows
                 diffListener.onDeletion(i, clustering, mergedDeletion, inputDeletion);
         }
 
-        List<Iterator<Single<ColumnData>>> inputIterators = new ArrayList<>(1 + inputs.length);
-        inputIterators.add(merged.rxiterator());
+        List<Iterator<ColumnData>> inputIterators = new ArrayList<>(1 + inputs.length);
+        inputIterators.add(merged.iterator());
         for (Row row : inputs)
-            inputIterators.add(row == null ? Collections.emptyIterator() : row.rxiterator());
+            if (row != null)
+                inputIterators.add(row.iterator());
 
-        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new MergeIterator.Reducer<ColumnData, Object>()
+        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new Reducer<ColumnData, Object>()
         {
             ColumnData mergedData;
             ColumnData[] inputDatas = new ColumnData[inputs.length];
-            public void reduce(int idx, Single<ColumnData> current)
+            public void reduce(int idx, ColumnData current)
             {
                 if (idx == 0)
-                    mergedData = current.blockingGet();
+                    mergedData = current;
                 else
-                    inputDatas[idx - 1] = current.blockingGet();
+                    inputDatas[idx - 1] = current;
             }
 
             protected Object getReduced()

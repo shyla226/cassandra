@@ -127,10 +127,10 @@ public class SSTableExport
         return StreamSupport.stream(splititer, false);
     }
 
-    private static <T> Stream<T> iterToStream(Iterator<Single<T>> iter)
+    private static <T> Stream<T> iterToStream(Iterator<T> iter)
     {
-        Spliterator<Single<T>> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
-        return StreamSupport.stream(splititer, false).map(s -> s.blockingGet());
+        Spliterator<T> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
+        return StreamSupport.stream(splititer, false);
     }
 
     /**

@@ -19,28 +19,28 @@
 package org.apache.cassandra.utils;
 
 import java.util.Arrays;
-import java.util.Iterator;
 
-import io.reactivex.Single;
-import org.apache.cassandra.utils.AbstractIterator;
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
+
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-public class MergeIteratorTest
+import io.reactivex.Flowable;
+
+public class MergeFlowableTest
 {
-    CLI<String> all = null, cat = null, a = null, b = null, c = null, d = null;
+    Flowable<String> all = null, cat = null, a = null, b = null, c = null, d = null;
 
     @Before
     public void clear()
     {
-        all = new CLI("1", "2", "3", "3", "4", "5", "6", "7", "8", "8", "9");
-        cat = new CLI("1", "2", "33", "4", "5", "6", "7", "88", "9");
-        a = new CLI("1", "3", "5", "8");
-        b = new CLI("2", "4", "6");
-        c = new CLI("3", "7", "8", "9");
-        d = new CLI();
+        all = Flowable.fromArray("1", "2", "3", "3", "4", "5", "6", "7", "8", "8", "9");
+        cat = Flowable.just("1", "2", "33", "4", "5", "6", "7", "88", "9");
+        a = Flowable.just("1", "3", "5", "8");
+        b = Flowable.just("2", "4", "6");
+        c = Flowable.just("3", "7", "8", "9");
+        d = Flowable.empty();
     }
 
     /** Test that duplicate values are concatted. */
@@ -64,34 +64,9 @@ public class MergeIteratorTest
                 return tmp;
             }
         };
-        IMergeIterator<String,String> smi = MergeIterator.get(Arrays.asList(a, b, c, d),
+        Flowable<String> smi = MergeFlowable.get(Arrays.asList(a, b, c, d),
                 Ordering.<String>natural(),
                 reducer);
-        assert Iterators.elementsEqual(cat, smi);
-        smi.close();
-        assert a.closed && b.closed && c.closed && d.closed;
-    }
-
-    // closeable list iterator
-    public static class CLI<E> extends AbstractIterator<E> implements CloseableIterator<E>
-    {
-        Iterator<E> iter;
-        boolean closed = false;
-        public CLI(E... items)
-        {
-            this.iter = Arrays.asList(items).iterator();
-        }
-
-        protected E computeNext()
-        {
-            if (!iter.hasNext()) return endOfData();
-            return (iter.next());
-        }
-
-        public void close()
-        {
-            assert !this.closed;
-            this.closed = true;
-        }
+        Assert.assertTrue(Flowable.sequenceEqual(cat, smi).blockingGet());
     }
 }

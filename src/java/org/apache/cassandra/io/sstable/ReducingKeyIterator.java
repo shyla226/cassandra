@@ -27,6 +27,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Caller must acquire and release references to the sstables used here.
@@ -47,7 +48,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
     {
         if (mi == null)
         {
-            mi = MergeIterator.get(iters, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey,DecoratedKey>()
+            mi = MergeIterator.get(iters, DecoratedKey.comparator, new Reducer<DecoratedKey,DecoratedKey>()
             {
                 DecoratedKey reduced = null;
 
@@ -57,9 +58,9 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
                     return true;
                 }
 
-                public void reduce(int idx, Single<DecoratedKey> current)
+                public void reduce(int idx, DecoratedKey current)
                 {
-                    reduced = current.blockingGet();
+                    reduced = current;
                 }
 
                 protected DecoratedKey getReduced()
@@ -81,7 +82,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         maybeInit();
 
         long m = 0;
-        for (Iterator<Single<DecoratedKey>> iter : mi.iterators())
+        for (Iterator<DecoratedKey> iter : mi.iterators())
         {
             m += ((KeyIterator) iter).getTotalBytes();
         }
@@ -93,7 +94,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         maybeInit();
 
         long m = 0;
-        for (Iterator<Single<DecoratedKey>> iter : mi.iterators())
+        for (Iterator<DecoratedKey> iter : mi.iterators())
         {
             m += ((KeyIterator) iter).getBytesRead();
         }

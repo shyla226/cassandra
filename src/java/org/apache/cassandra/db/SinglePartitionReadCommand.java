@@ -57,13 +57,7 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.LazilyInitializedUnfilteredRowIterator;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIteratorWithLowerBound;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -388,10 +382,11 @@ public class SinglePartitionReadCommand extends ReadCommand
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
     protected Single<UnfilteredPartitionIterator> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        Single<UnfilteredRowIterator> partition = cfs.isRowCacheEnabled()
+        UnfilteredRowContainer partition = /*cfs.isRowCacheEnabled()
                                         ? getThroughCache(cfs, executionController)
-                                        : queryMemtableAndDisk(cfs, executionController);
-        return partition.map(p -> new SingletonUnfilteredPartitionIterator(p));
+                                        : */
+                                        queryMemtableAndDisk(cfs, executionController);
+        return Single.just(new SingletonUnfilteredPartitionIterator(partition.toIterator()));
     }
 
     /**
@@ -403,121 +398,121 @@ public class SinglePartitionReadCommand extends ReadCommand
      * If the partition is is not cached, we figure out what filter is "biggest", read
      * that from disk, then filter the result and either cache that or return it.
      */
-    private Single<UnfilteredRowIterator> getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
-    {
-        assert !cfs.isIndex(); // CASSANDRA-5732
-        assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
-
-        RowCacheKey key = new RowCacheKey(metadata().ksAndCFName, partitionKey());
-
-        // Attempt a sentinel-read-cache sequence.  if a write invalidates our sentinel, we'll return our
-        // (now potentially obsolete) data, but won't cache it. see CASSANDRA-3862
-        // TODO: don't evict entire partitions on writes (#2864)
-        IRowCacheEntry cached = CacheService.instance.rowCache.get(key);
-        if (cached != null)
-        {
-            if (cached instanceof RowCacheSentinel)
-            {
-                // Some other read is trying to cache the value, just do a normal non-caching read
-                Tracing.trace("Row cache miss (race)");
-                cfs.metric.rowCacheMiss.inc();
-                return queryMemtableAndDisk(cfs, executionController);
-            }
-
-            CachedPartition cachedPartition = (CachedPartition)cached;
-            if (cfs.isFilterFullyCoveredBy(clusteringIndexFilter(), limits(), cachedPartition, nowInSec()))
-            {
-                cfs.metric.rowCacheHit.inc();
-                Tracing.trace("Row cache hit");
-                UnfilteredRowIterator unfilteredRowIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
-                cfs.metric.updateSSTableIterated(0);
-                return Single.just(unfilteredRowIterator);
-            }
-
-            cfs.metric.rowCacheHitOutOfRange.inc();
-            Tracing.trace("Ignoring row cache as cached value could not satisfy query");
-            return queryMemtableAndDisk(cfs, executionController);
-        }
-
-        cfs.metric.rowCacheMiss.inc();
-        Tracing.trace("Row cache miss");
-
-        // Note that on tables with no clustering keys, any positive value of
-        // rowsToCache implies caching the full partition
-        boolean cacheFullPartitions = metadata().clusteringColumns().size() > 0 ?
-                                      metadata().params.caching.cacheAllRows() :
-                                      metadata().params.caching.cacheRows();
-
-        // To be able to cache what we read, what we read must at least covers what the cache holds, that
-        // is the 'rowsToCache' first rows of the partition. We could read those 'rowsToCache' first rows
-        // systematically, but we'd have to "extend" that to whatever is needed for the user query that the
-        // 'rowsToCache' first rows don't cover and it's not trivial with our existing filters. So currently
-        // we settle for caching what we read only if the user query does query the head of the partition since
-        // that's the common case of when we'll be able to use the cache anyway. One exception is if we cache
-        // full partitions, in which case we just always read it all and cache.
-        if (cacheFullPartitions || clusteringIndexFilter().isHeadFilter())
-        {
-            RowCacheSentinel sentinel = new RowCacheSentinel();
-            boolean sentinelSuccess = CacheService.instance.rowCache.putIfAbsent(key, sentinel);
-
-            //try
-            //{
-            int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
-            @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
-            Single<UnfilteredRowIterator> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).queryMemtableAndDisk(cfs, executionController);
-
-            // We want to cache only rowsToCache rows
-            Single<CachedPartition> toCache = iter.map(i -> CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(i, nowInSec()), nowInSec()));
-
-            WrappedBoolean sentinelReplaced = new WrappedBoolean(false);
-
-            return toCache.flatMap(c ->
-                                   {
-
-                                       if (sentinelSuccess && !c.isEmpty())
-                                       {
-                                           Tracing.trace("Caching {} rows", c.rowCount());
-                                           CacheService.instance.rowCache.replace(key, sentinel, c);
-                                           // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
-                                           sentinelReplaced.set(true);
-                                       }
-
-                                       // We then re-filter out what this query wants.
-                                       // Note that in the case where we don't cache full partitions, it's possible that the current query is interested in more
-                                       // than what we've cached, so we can't just use toCache.
-                                       UnfilteredRowIterator cacheIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), c);
-                                       return iter.map(i ->
-                                                       {
-                                                           try
-                                                           {
-                                                               if (cacheFullPartitions)
-                                                               {
-
-                                                                   // Everything is guaranteed to be in 'toCache', we're done with 'iter'
-                                                                   assert !i.hasNext();
-                                                                   i.close();
-                                                                   return cacheIterator;
-                                                               }
-                                                               return UnfilteredRowIterators.concat(cacheIterator, clusteringIndexFilter().filterNotIndexed(columnFilter(), i));
-                                                           }
-                                                           catch (RuntimeException | Error e)
-                                                           {
-                                                               i.close();
-                                                               throw e;
-                                                           }
-                                                       });
-                                   }).onErrorResumeNext(t ->
-                                                        {
-                                                            if (sentinelSuccess && !sentinelReplaced.get())
-                                                                cfs.invalidateCachedPartition(key);
-
-                                                            return Single.error(t);
-                                                        });
-        }
-
-        Tracing.trace("Fetching data but not populating cache as query does not query from the start of the partition");
-        return queryMemtableAndDisk(cfs, executionController);
-    }
+//    private UnfilteredRowContainer getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
+//    {
+//        assert !cfs.isIndex(); // CASSANDRA-5732
+//        assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
+//
+//        RowCacheKey key = new RowCacheKey(metadata().ksAndCFName, partitionKey());
+//
+//        // Attempt a sentinel-read-cache sequence.  if a write invalidates our sentinel, we'll return our
+//        // (now potentially obsolete) data, but won't cache it. see CASSANDRA-3862
+//        // TODO: don't evict entire partitions on writes (#2864)
+//        IRowCacheEntry cached = CacheService.instance.rowCache.get(key);
+//        if (cached != null)
+//        {
+//            if (cached instanceof RowCacheSentinel)
+//            {
+//                // Some other read is trying to cache the value, just do a normal non-caching read
+//                Tracing.trace("Row cache miss (race)");
+//                cfs.metric.rowCacheMiss.inc();
+//                return queryMemtableAndDisk(cfs, executionController);
+//            }
+//
+//            CachedPartition cachedPartition = (CachedPartition)cached;
+//            if (cfs.isFilterFullyCoveredBy(clusteringIndexFilter(), limits(), cachedPartition, nowInSec()))
+//            {
+//                cfs.metric.rowCacheHit.inc();
+//                Tracing.trace("Row cache hit");
+//                UnfilteredRowIterator unfilteredRowIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
+//                cfs.metric.updateSSTableIterated(0);
+//                return UnfilteredRowContainer.fromIterator(unfilteredRowIterator);
+//            }
+//
+//            cfs.metric.rowCacheHitOutOfRange.inc();
+//            Tracing.trace("Ignoring row cache as cached value could not satisfy query");
+//            return queryMemtableAndDisk(cfs, executionController);
+//        }
+//
+//        cfs.metric.rowCacheMiss.inc();
+//        Tracing.trace("Row cache miss");
+//
+//        // Note that on tables with no clustering keys, any positive value of
+//        // rowsToCache implies caching the full partition
+//        boolean cacheFullPartitions = metadata().clusteringColumns().size() > 0 ?
+//                                      metadata().params.caching.cacheAllRows() :
+//                                      metadata().params.caching.cacheRows();
+//
+//        // To be able to cache what we read, what we read must at least covers what the cache holds, that
+//        // is the 'rowsToCache' first rows of the partition. We could read those 'rowsToCache' first rows
+//        // systematically, but we'd have to "extend" that to whatever is needed for the user query that the
+//        // 'rowsToCache' first rows don't cover and it's not trivial with our existing filters. So currently
+//        // we settle for caching what we read only if the user query does query the head of the partition since
+//        // that's the common case of when we'll be able to use the cache anyway. One exception is if we cache
+//        // full partitions, in which case we just always read it all and cache.
+//        if (cacheFullPartitions || clusteringIndexFilter().isHeadFilter())
+//        {
+//            RowCacheSentinel sentinel = new RowCacheSentinel();
+//            boolean sentinelSuccess = CacheService.instance.rowCache.putIfAbsent(key, sentinel);
+//
+//            //try
+//            //{
+//            int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
+//            @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
+//            UnfilteredRowContainer iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).queryMemtableAndDisk(cfs, executionController);
+//
+//            // We want to cache only rowsToCache rows
+//            Single<CachedPartition> toCache = iter.map(i -> CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(i, nowInSec()), nowInSec()));
+//
+//            WrappedBoolean sentinelReplaced = new WrappedBoolean(false);
+//
+//            return toCache.flatMap(c ->
+//                                   {
+//
+//                                       if (sentinelSuccess && !c.isEmpty())
+//                                       {
+//                                           Tracing.trace("Caching {} rows", c.rowCount());
+//                                           CacheService.instance.rowCache.replace(key, sentinel, c);
+//                                           // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
+//                                           sentinelReplaced.set(true);
+//                                       }
+//
+//                                       // We then re-filter out what this query wants.
+//                                       // Note that in the case where we don't cache full partitions, it's possible that the current query is interested in more
+//                                       // than what we've cached, so we can't just use toCache.
+//                                       UnfilteredRowIterator cacheIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), c);
+//                                       return iter.map(i ->
+//                                                       {
+//                                                           try
+//                                                           {
+//                                                               if (cacheFullPartitions)
+//                                                               {
+//
+//                                                                   // Everything is guaranteed to be in 'toCache', we're done with 'iter'
+//                                                                   assert !i.hasNext();
+//                                                                   i.close();
+//                                                                   return cacheIterator;
+//                                                               }
+//                                                               return UnfilteredRowIterators.concat(cacheIterator, clusteringIndexFilter().filterNotIndexed(columnFilter(), i));
+//                                                           }
+//                                                           catch (RuntimeException | Error e)
+//                                                           {
+//                                                               i.close();
+//                                                               throw e;
+//                                                           }
+//                                                       });
+//                                   }).onErrorResumeNext(t ->
+//                                                        {
+//                                                            if (sentinelSuccess && !sentinelReplaced.get())
+//                                                                cfs.invalidateCachedPartition(key);
+//
+//                                                            return Single.error(t);
+//                                                        });
+//        }
+//
+//        Tracing.trace("Fetching data but not populating cache as query does not query from the start of the partition");
+//        return queryMemtableAndDisk(cfs, executionController);
+//    }
 
     /**
      * Queries both memtable and sstables to fetch the result of this query.
@@ -534,7 +529,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * Also note that one must have created a {@code ReadExecutionController} on the queried table and we require it as
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
-    public Single<UnfilteredRowIterator> queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public UnfilteredRowContainer queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);
@@ -548,12 +543,8 @@ public class SinglePartitionReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
-    private Single<UnfilteredRowIterator> queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
+    private UnfilteredRowContainer queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
     {
-        return Single.defer(
-        () ->
-        {
-
         /*
          * We have 2 main strategies:
          *   1) We query memtables and sstables simulateneously. This is our most generic strategy and the one we use
@@ -565,125 +556,111 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-            if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata))
-                return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
+        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata))
+            return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
 
-            Tracing.trace("Acquiring sstable references");
-            ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
-            List<UnfilteredRowIterator> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
-            ClusteringIndexFilter filter = clusteringIndexFilter();
-            long minTimestamp = Long.MAX_VALUE;
+        Tracing.trace("Acquiring sstable references");
+        ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
+        List<UnfilteredRowContainer> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
+        ClusteringIndexFilter filter = clusteringIndexFilter();
+        long minTimestamp = Long.MAX_VALUE;
 
-            try
+        {
+            for (Memtable memtable : view.memtables)
             {
-                for (Memtable memtable : view.memtables)
+                Partition partition = memtable.getPartition(partitionKey());
+                if (partition == null)
+                    continue;
+
+                minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
+
+                @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
+                UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
+                oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
+                iterators.add(UnfilteredRowContainer.fromIterator(iter));
+            }
+
+        /*
+         * We can't eliminate full sstables based on the timestamp of what we've already read like
+         * in collectTimeOrderedData, but we still want to eliminate sstable whose maxTimestamp < mostRecentTombstone
+         * we've read. We still rely on the sstable ordering by maxTimestamp since if
+         *   maxTimestamp_s1 > maxTimestamp_s0,
+         * we're guaranteed that s1 cannot have a row tombstone such that
+         *   timestamp(tombstone) > maxTimestamp_s0
+         * since we necessarily have
+         *   timestamp(tombstone) <= maxTimestamp_s1
+         * In other words, iterating in maxTimestamp order allow to do our mostRecentPartitionTombstone elimination
+         * in one pass, and minimize the number of sstables for which we read a partition tombstone.
+         */
+            Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
+            long mostRecentPartitionTombstone = Long.MIN_VALUE;
+            int nonIntersectingSSTables = 0;
+            List<SSTableReader> skippedSSTablesWithTombstones = null;
+
+            for (SSTableReader sstable : view.sstables)
+            {
+                // if we've already seen a partition tombstone with a timestamp greater
+                // than the most recent update to this sstable, we can skip it
+                if (sstable.getMaxTimestamp() < mostRecentPartitionTombstone)
+                    break;
+
+                if (!shouldInclude(sstable))
                 {
-                    Partition partition = memtable.getPartition(partitionKey());
-                    if (partition == null)
-                        continue;
-
-                    minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
-
-                    @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
-                    UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
-                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
-                    iterators.add(iter);
+                    nonIntersectingSSTables++;
+                    if (sstable.hasTombstones())
+                    { // if sstable has tombstones we need to check after one pass if it can be safely skipped
+                        if (skippedSSTablesWithTombstones == null)
+                            skippedSSTablesWithTombstones = new ArrayList<>();
+                        skippedSSTablesWithTombstones.add(sstable);
+                    }
+                    continue;
                 }
 
-            /*
-             * We can't eliminate full sstables based on the timestamp of what we've already read like
-             * in collectTimeOrderedData, but we still want to eliminate sstable whose maxTimestamp < mostRecentTombstone
-             * we've read. We still rely on the sstable ordering by maxTimestamp since if
-             *   maxTimestamp_s1 > maxTimestamp_s0,
-             * we're guaranteed that s1 cannot have a row tombstone such that
-             *   timestamp(tombstone) > maxTimestamp_s0
-             * since we necessarily have
-             *   timestamp(tombstone) <= maxTimestamp_s1
-             * In other words, iterating in maxTimestamp order allow to do our mostRecentPartitionTombstone elimination
-             * in one pass, and minimize the number of sstables for which we read a partition tombstone.
-             */
-                Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
-                long mostRecentPartitionTombstone = Long.MIN_VALUE;
-                int nonIntersectingSSTables = 0;
-                List<SSTableReader> skippedSSTablesWithTombstones = null;
+                minTimestamp = Math.min(minTimestamp, sstable.getMinTimestamp());
 
-                for (SSTableReader sstable : view.sstables)
+                @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception,
+                // or through the closing of the final merged iterator
+                UnfilteredRowContainer/*WithLowerBound*/ iter = makeFlowable(cfs, sstable);
+                if (!sstable.isRepaired())
+                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
+
+                iterators.add(iter);
+                mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
+                                                        iter.partitionLevelDeletion.markedForDeleteAt());
+            }
+
+            int includedDueToTombstones = 0;
+            // Check for sstables with tombstones that are not expired
+            if (skippedSSTablesWithTombstones != null)
+            {
+                for (SSTableReader sstable : skippedSSTablesWithTombstones)
                 {
-                    // if we've already seen a partition tombstone with a timestamp greater
-                    // than the most recent update to this sstable, we can skip it
-                    if (sstable.getMaxTimestamp() < mostRecentPartitionTombstone)
-                        break;
-
-                    if (!shouldInclude(sstable))
-                    {
-                        nonIntersectingSSTables++;
-                        if (sstable.hasTombstones())
-                        { // if sstable has tombstones we need to check after one pass if it can be safely skipped
-                            if (skippedSSTablesWithTombstones == null)
-                                skippedSSTablesWithTombstones = new ArrayList<>();
-                            skippedSSTablesWithTombstones.add(sstable);
-                        }
+                    if (sstable.getMaxTimestamp() <= minTimestamp)
                         continue;
-                    }
 
-                    minTimestamp = Math.min(minTimestamp, sstable.getMinTimestamp());
-
-                    @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception,
+                    @SuppressWarnings("resource") // 'iter' is added to iterators which is close on exception,
                     // or through the closing of the final merged iterator
-                    UnfilteredRowIteratorWithLowerBound iter = makeIterator(cfs, sstable);
+                    UnfilteredRowContainer/*WithLowerBound*/ iter = makeFlowable(cfs, sstable);
                     if (!sstable.isRepaired())
                         oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
                     iterators.add(iter);
-                    mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
-                                                            iter.partitionLevelDeletion().markedForDeleteAt());
+                    includedDueToTombstones++;
                 }
-
-                int includedDueToTombstones = 0;
-                // Check for sstables with tombstones that are not expired
-                if (skippedSSTablesWithTombstones != null)
-                {
-                    for (SSTableReader sstable : skippedSSTablesWithTombstones)
-                    {
-                        if (sstable.getMaxTimestamp() <= minTimestamp)
-                            continue;
-
-                        @SuppressWarnings("resource") // 'iter' is added to iterators which is close on exception,
-                        // or through the closing of the final merged iterator
-                        UnfilteredRowIteratorWithLowerBound iter = makeIterator(cfs, sstable);
-                        if (!sstable.isRepaired())
-                            oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
-
-                        iterators.add(iter);
-                        includedDueToTombstones++;
-                    }
-                }
-                if (Tracing.isTracing())
-                    Tracing.trace("Skipped {}/{} non-slice-intersecting sstables, included {} due to tombstones",
-                                  nonIntersectingSSTables, view.sstables.size(), includedDueToTombstones);
-
-                if (iterators.isEmpty())
-                    return Single.just(EmptyIterators.unfilteredRow(cfs.metadata, partitionKey(), filter.isReversed()));
-
-
-                StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
-                UnfilteredRowIterator result = withSSTablesIterated(iterators, cfs.metric);
-
-                return Single.just(result);
             }
-            catch (RuntimeException | Error e)
-            {
-                try
-                {
-                    FBUtilities.closeAll(iterators);
-                }
-                catch (Exception suppressed)
-                {
-                    e.addSuppressed(suppressed);
-                }
-                throw e;
-            }
-        }).observeOn(NettyRxScheduler.getForKey(cfs.keyspace.getName(), partitionKey, false));
+            if (Tracing.isTracing())
+                Tracing.trace("Skipped {}/{} non-slice-intersecting sstables, included {} due to tombstones",
+                              nonIntersectingSSTables, view.sstables.size(), includedDueToTombstones);
+
+            if (iterators.isEmpty())
+                return UnfilteredRowContainer.empty(cfs.metadata, partitionKey(), filter.isReversed());
+
+
+            StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
+            UnfilteredRowContainer result = withSSTablesIterated(iterators, cfs.metric);
+
+            return result;
+        }
     }
 
 
@@ -708,37 +685,40 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     }
 
+    private UnfilteredRowContainer makeFlowable(ColumnFamilyStore cfs, final SSTableReader sstable)
+    {
+        // synchronous!
+        return UnfilteredRowContainer.fromIterator(makeIterator(cfs, sstable));
+    }
+
     /**
      * Return a wrapped iterator that when closed will update the sstables iterated and READ sample metrics.
      * Note that we cannot use the Transformations framework because they greedily get the static row, which
      * would cause all iterators to be initialized and hence all sstables to be accessed.
      */
-    private UnfilteredRowIterator withSSTablesIterated(List<UnfilteredRowIterator> iterators,
+    private UnfilteredRowContainer withSSTablesIterated(List<UnfilteredRowContainer> iterators,
                                                        TableMetrics metrics)
     {
         @SuppressWarnings("resource") //  Closed through the closing of the result of the caller method.
-        UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators, nowInSec());
+        UnfilteredRowContainer merged = UnfilteredRowContainer.merge(iterators, nowInSec());
 
-        if(!merged.isEmpty())
-        {
-            //DecoratedKey key = merged.partitionKey();
-            //metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
-        }
+//        if(!merged.isEmpty())
+//        {
+//            //DecoratedKey key = merged.partitionKey();
+//            //metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+//        }
 
-        class UpdateSstablesIterated extends Transformation
-        {
-           public void onPartitionClose()
-           {
-               int sstablesIterated = (int)iterators.stream()
-                                                    .filter(it -> it instanceof LazilyInitializedUnfilteredRowIterator)
-                                                    .filter(it -> ((LazilyInitializedUnfilteredRowIterator)it).initialized())
-                                                    .count();
-
-               //metrics.updateSSTableIterated(sstablesIterated);
-               Tracing.trace("Merged data from memtables and {} sstables", sstablesIterated);
-           }
-        };
-        return Transformation.apply(merged, new UpdateSstablesIterated());
+//        merged.content = merged.content.doOnComplete(() ->
+//        {
+//            int sstablesIterated = (int)iterators.stream()
+//                                                .filter(it -> it instanceof LazilyInitializedUnfilteredRowIterator)
+//                                                .filter(it -> ((LazilyInitializedUnfilteredRowIterator)it).initialized())
+//                                                .count();
+//
+//            //metrics.updateSSTableIterated(sstablesIterated);
+//            Tracing.trace("Merged data from memtables and {} sstables", sstablesIterated);
+//        });
+        return merged;
     }
 
     private boolean queriesMulticellType(CFMetaData cfm)
@@ -763,8 +743,9 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private Single<UnfilteredRowIterator> queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ClusteringIndexNamesFilter filter)
+    private UnfilteredRowContainer queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ClusteringIndexNamesFilter filter)
     {
+        // FIXME: Code here is synchronous aka bad.
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
 
@@ -843,7 +824,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         //cfs.metric.updateSSTableIterated(sstablesIterated);
 
         if (result == null || result.isEmpty())
-            return Single.just(EmptyIterators.unfilteredRow(metadata(), partitionKey(), false));
+            return UnfilteredRowContainer.empty(metadata(), partitionKey(), false);
 
         DecoratedKey key = result.partitionKey();
         //cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
@@ -868,7 +849,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        return Single.just(result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()));
+        return UnfilteredRowContainer.fromIterator(result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()));
     }
 
     private ImmutableBTreePartition add(UnfilteredRowIterator iter, ImmutableBTreePartition result, ClusteringIndexNamesFilter filter, boolean isRepaired)

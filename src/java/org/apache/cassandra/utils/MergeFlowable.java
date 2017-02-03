@@ -18,56 +18,60 @@
 package org.apache.cassandra.utils;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Single;
+import io.reactivex.Flowable;
+import org.reactivestreams.Publisher;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
 /** Merges sorted input iterators which individually contain unique items. */
-public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implements IMergeIterator<In, Out>
+// Not closeable -- the subscription is where that belongs, via the cancel method.
+public class MergeFlowable<In,Out> extends Flowable<Out>
 {
     protected final Reducer<In,Out> reducer;
-    protected final List<? extends Iterator<In>> iterators;
+    protected final List<? extends Publisher<In>> iterators;
+    protected final Comparator<? super In> comparator;
 
-    protected MergeIterator(List<? extends Iterator<In>> iters, Reducer<In, Out> reducer)
-    {
-        this.iterators = iters;
-        this.reducer = reducer;
-    }
-
-    public static <In, Out> MergeIterator<In, Out> get(List<? extends Iterator<In>> sources,
-                                                       Comparator<? super In> comparator,
-                                                       Reducer<In, Out> reducer)
+    public static <In, Out> Flowable<Out> get(List<? extends Flowable<In>> sources,
+            Comparator<? super In> comparator,
+            Reducer<In, Out> reducer)
     {
         if (sources.size() == 1)
         {
-            return reducer.trivialReduceIsTrivial()
-                 ? new TrivialOneToOne<>(sources, reducer)
-                 : new OneToOne<>(sources, reducer);
+            if (!reducer.trivialReduceIsTrivial())
+                return sources.get(0).map(next ->
+                {
+                    reducer.onKeyChange();
+                    reducer.reduce(0, next);
+                    return reducer.getReduced();
+                });
+
+            @SuppressWarnings("unchecked")
+            Flowable<Out> converted = (Flowable<Out>) sources.get(0);
+            return converted;
         }
-        return new ManyToOne<>(sources, comparator, reducer);
+        return new MergeFlowable<>(sources, comparator, reducer);
     }
 
-    public Iterable<? extends Iterator<In>> iterators()
+    public MergeFlowable(List<? extends Publisher<In>> iters,
+                             Comparator<? super In> comparator,
+                             Reducer<In, Out> reducer)
     {
-        return iterators;
+        this.iterators = iters;
+        this.reducer = reducer;
+        this.comparator = comparator;
     }
 
-    public void close()
+    @Override
+    public void subscribeActual(Subscriber<? super Out> subscriber)
     {
-        for (int i = 0, length = this.iterators.size(); i < length; i++)
-        {
-            Iterator<In> iterator = iterators.get(i);
-            try
-            {
-                if (iterator instanceof AutoCloseable)
-                    ((AutoCloseable)iterator).close();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
+        ManyToOne<In, Out> merger = new ManyToOne<>(subscriber, reducer);
 
-        reducer.close();
+        // Downstream should already be set up for subscriptions as we might output during subscription.
+        subscriber.onSubscribe(merger);
+
+        merger.subscribe(iterators, comparator);
     }
 
     /**
@@ -116,9 +120,16 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
      *
      * For more formal definitions and proof of correctness, see CASSANDRA-8915.
      */
-    static final class ManyToOne<In,Out> extends MergeIterator<In,Out>
+    static final class ManyToOne<In,Out> implements Subscription
     {
-        protected final Candidate<In>[] heap;
+        protected Candidate<In>[] heap;
+        private final Reducer<In, Out> reducer;
+        Subscriber<? super Out> subscriber;
+        int requested;                  // check for possible threading issue
+                                        // if was 0 on request, advance()
+                                        // if > 0 at end of consume(), advance()
+        AtomicInteger advancing = new AtomicInteger();
+        boolean consuming = false;
 
         /** Number of non-exhausted iterators. */
         int size;
@@ -136,10 +147,15 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          */
         static final int SORTED_SECTION_SIZE = 4;
 
-        public ManyToOne(List<? extends Iterator<In>> iters, Comparator<? super In> comp, Reducer<In, Out> reducer)
+        public ManyToOne(Subscriber<? super Out> subscriber, Reducer<In, Out> reducer)
         {
-            super(iters, reducer);
+            this.subscriber = subscriber;
+            this.reducer = reducer;
+            this.requested = 1; // we start with non-zero request, so that we don't try to advance in incompletely built state
+        }
 
+        void subscribe(List<? extends Publisher<In>> iters, Comparator<? super In> comp)
+        {
             @SuppressWarnings("unchecked")
             Candidate<In>[] heap = new Candidate[iters.size()];
             this.heap = heap;
@@ -147,16 +163,35 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
 
             for (int i = 0; i < iters.size(); i++)
             {
-                Candidate<In> candidate = new Candidate<In>(i, iters.get(i), comp);
-                heap[size++] = candidate;
+                Candidate<In> candidate = new Candidate<In>(this, i, iters.get(i), comp);
+//                if (!candidate.done)
+                    heap[size++] = candidate;
+//                else
+//                    assert candidate.item == null; // make sure it didn't also get an item
             }
             needingAdvance = size;
+
+            // subscribing may have caused a request
+            --requested;
+            if (requested > 0)
+                advance();
         }
 
-        protected final Out computeNext()
+        @Override
+        public void request(long count)
         {
-            advance();
-            return consume();
+            boolean hadRequests = requested > 0;
+            requested += count;
+            if (!hadRequests)
+                advance();
+        }
+
+        @Override
+        public void cancel()
+        {
+            requested = 0;
+            for (int i = 0; i < size; ++i)
+                heap[i].cancel();
         }
 
         /**
@@ -175,7 +210,10 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          */
         private void advance()
         {
-            // Turn the set of candidates into a heap.
+            --requested;
+            assert advancing.get() == 0;
+
+            advancing.set(1);        // guard so we don't get called while we are increasing advancing
             for (int i = needingAdvance - 1; i >= 0; --i)
             {
                 Candidate<In> candidate = heap[i];
@@ -186,8 +224,41 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
                  *  valid sub-heaps and can be skipped-over entirely
                  */
                 if (candidate.needsAdvance())
-                    replaceAndSink(candidate.advance(), i);
+                {
+                    advancing.incrementAndGet();
+                    candidate.advance();        // this can be jumping to/spawning another thread, or calling onAdvance()
+                }
             }
+            onAdvance();
+        }
+
+        public void onError(Throwable error)
+        {
+            cancel();
+            subscriber.onError(error);
+        }
+
+        // This can come concurrently!
+        public void onAdvance()
+        {
+            if (advancing.decrementAndGet() > 0)
+                return;
+
+            // only one thread can be here
+            for (int i = needingAdvance - 1; i >= 0; --i)
+            {
+                Candidate<In> candidate = heap[i];
+                /**
+                 *  needingAdvance runs to the maximum index (and deepest-right node) that may need advancing;
+                 *  since the equal items that were consumed at-once may occur in sub-heap "veins" of equality,
+                 *  not all items above this deepest-right position may have been consumed; these already form
+                 *  valid sub-heaps and can be skipped-over entirely
+                 */
+                if (candidate.justAdvanced())
+                    replaceAndSink(heap[i], i);
+            }
+            needingAdvance = 0;
+            consume();
         }
 
         /**
@@ -196,28 +267,41 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          *
          * This relies on the equalParent flag to avoid doing any comparisons.
          */
-        private Out consume()
+        private void consume()
         {
-            if (size == 0)
-                return endOfData();
-
-            reducer.onKeyChange();
-            assert !heap[0].equalParent;
-            heap[0].consume(reducer);
-            final int size = this.size;
-            final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
-            int i;
-            consume: {
-                for (i = 1; i < sortedSectionSize; ++i)
+            while (!consuming && needingAdvance == 0)
+            {
+                consuming = true;
+                if (size == 0)
                 {
-                    if (!heap[i].equalParent)
-                        break consume;
-                    heap[i].consume(reducer);
+                    subscriber.onComplete();
+                    return;
                 }
-                i = Math.max(i, consumeHeap(i) + 1);
+    
+                reducer.onKeyChange();
+                assert !heap[0].equalParent;
+                heap[0].consume(reducer);
+                final int size = this.size;
+                final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
+                int i;
+                consume: {
+                    for (i = 1; i < sortedSectionSize; ++i)
+                    {
+                        if (!heap[i].equalParent)
+                            break consume;
+                        heap[i].consume(reducer);
+                    }
+                    i = Math.max(i, consumeHeap(i) + 1);
+                }
+                needingAdvance = i;
+    
+                boolean hadRequests = requested > 0;
+                subscriber.onNext(reducer.getReduced());    // usually requests; make sure we don't double-advance or miss a request
+    
+                if (hadRequests)
+                    advance();
+                consuming = false;
             }
-            needingAdvance = i;
-            return reducer.getReduced();
         }
 
         /**
@@ -244,7 +328,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
          */
         private void replaceAndSink(Candidate<In> candidate, int currIdx)
         {
-            if (candidate == null)
+            if (candidate.item == null)
             {
                 // Drop iterator by replacing it with the last one in the heap.
                 candidate = heap[--size];
@@ -348,113 +432,118 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
     }
 
     // Holds and is comparable by the head item of an iterator it owns
-    protected static final class Candidate<In> implements Comparable<Candidate<In>>
+    protected final static class Candidate<In> implements Comparable<Candidate<In>>, Subscriber<In>
     {
-        private final Iterator<? extends In> iter;
+        private final ManyToOne<In, ?> merger;
+        private Subscription source;
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
-        private In lowerBound;
+        boolean done;
+
+        enum State {
+            NEEDS_REQUEST,
+            AWAITING_ADVANCE,
+            ADVANCED,
+            PROCESSED
+            // eventually SMALLER_SIBLING, EQUAL_PARENT (imply PROCESSED)
+        };
+        private State state;
+
         boolean equalParent;
 
-        public Candidate(int idx, Iterator<? extends In> iter, Comparator<? super In> comp)
+        public Candidate(final ManyToOne<In, ?> merger, int idx, Publisher<In> iter, Comparator<? super In> comp)
         {
-            this.iter = iter;
+            this.merger = merger;
             this.comp = comp;
             this.idx = idx;
-            this.lowerBound = iter instanceof IteratorWithLowerBound ? ((IteratorWithLowerBound<In>)iter).lowerBound() : null;
+            this.state = State.NEEDS_REQUEST;
+            done = false;
+            iter.subscribe(this);
         }
 
-        /** @return this if our iterator had an item, and it is now available, otherwise null */
-        protected Candidate<In> advance()
+        @Override
+        public void onSubscribe(Subscription source)
         {
-            if (lowerBound != null)
-            {
-                item = lowerBound;
-                return this;
-            }
-
-            if (!iter.hasNext())
-                return null;
-
-            item = iter.next();
-            return this;
-        }
-
-        public int compareTo(Candidate<In> that)
-        {
-            assert this.item != null && that.item != null;
-            int ret = comp.compare(this.item, that.item);
-            if (ret == 0 && (this.isLowerBound() ^ that.isLowerBound()))
-            {   // if the items are equal and one of them is a lower bound (but not the other one)
-                // then ensure the lower bound is less than the real item so we can safely
-                // skip lower bounds when consuming
-                return this.isLowerBound() ? -1 : 1;
-            }
-            return ret;
-        }
-
-        private boolean isLowerBound()
-        {
-            return item == lowerBound;
-        }
-
-        public void consume(Reducer reducer)
-        {
-            if (isLowerBound())
-            {
-                item = null;
-                lowerBound = null;
-            }
-            else
-            {
-                reducer.reduce(idx, (item));
-                item = null;
-            }
+            this.source = source;
         }
 
         public boolean needsAdvance()
         {
-            return item == null;
-        }
-    }
-
-    private static class OneToOne<In, Out> extends MergeIterator<In, Out>
-    {
-        private final Iterator<In> source;
-
-        public OneToOne(List<? extends Iterator<In>> sources, Reducer<In, Out> reducer)
-        {
-            super(sources, reducer);
-            source = sources.get(0);
+            return state == State.NEEDS_REQUEST;
         }
 
-        protected Out computeNext()
+        /** @return this if our iterator had an item, and it is now available, otherwise null */
+        protected void advance()
         {
-            if (!source.hasNext())
-                return endOfData();
-            reducer.onKeyChange();
-            reducer.reduce(0, source.next());
-            return reducer.getReduced();
-        }
-    }
-
-    private static class TrivialOneToOne<In, Out> extends MergeIterator<In, Out>
-    {
-        private final Iterator<In> source;
-
-        public TrivialOneToOne(List<? extends Iterator<In>> sources, Reducer<In, Out> reducer)
-        {
-            super(sources, reducer);
-            source = sources.get(0);
+            assert state == State.NEEDS_REQUEST;
+            assert item == null;
+            state = State.AWAITING_ADVANCE;
+            if (!done)
+                source.request(1);
+            else        // directly go to advanced, consuming the completion
+                onAdvance(null);
         }
 
-        @SuppressWarnings("unchecked")
-        protected Out computeNext()
+        @Override
+        public void onComplete()
         {
-            if (!source.hasNext())
-                return endOfData();
-            return (Out) source.next();
+            // This may come in response to request, or following a request or subscribe.
+            done = true;
+            if (state == State.AWAITING_ADVANCE)
+                onAdvance(null);
+        }
+
+        @Override
+        public void onError(Throwable error)
+        {
+            merger.onError(error);
+        }
+
+        @Override
+        public void onNext(In next)
+        {
+            assert next != null;
+            onAdvance(next);
+        }
+
+        private void onAdvance(In next)
+        {
+            assert state == State.AWAITING_ADVANCE;
+            item = next;
+            state = State.ADVANCED;
+            merger.onAdvance();
+        }
+
+        public boolean justAdvanced()
+        {
+            if (state == State.PROCESSED)
+                return false;
+
+            assert state == State.ADVANCED;
+            state = State.PROCESSED;
+            return true;
+        }
+
+        public int compareTo(Candidate<In> that)
+        {
+            assert this.state == State.PROCESSED && that.state == State.PROCESSED;
+            assert this.item != null && that.item != null;
+            int ret = comp.compare(this.item, that.item);
+            return ret;
+        }
+
+        public void consume(Reducer<In, ?> reducer)
+        {
+            assert state == State.PROCESSED;
+            state = State.NEEDS_REQUEST;
+            reducer.reduce(idx, item);
+            item = null;
+        }
+
+        public void cancel()
+        {
+            source.cancel();
         }
     }
 }
