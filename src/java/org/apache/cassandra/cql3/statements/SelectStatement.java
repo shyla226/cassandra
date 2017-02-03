@@ -300,7 +300,7 @@ public class SelectStatement implements CQLStatement
         // We know the size can only be in rows currently if continuous paging
         // is not used, so don't bother computing the average row size.
         return pagingOptions.isContinuous()
-             ? size.inEstimatedRows(ResultSet.estimatedRowSize(cfm, selection.getColumns()))
+             ? size.inEstimatedRows(ResultSet.estimatedRowSize(cfm, selection.getColumnMapping()))
              : size.inRows();
     }
 

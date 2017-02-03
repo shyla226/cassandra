@@ -23,15 +23,13 @@ import java.util.*;
 import io.netty.buffer.ByteBuf;
 
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
+import org.apache.cassandra.cql3.selection.SelectionColumns;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -789,7 +787,7 @@ public class ResultSet
      * primary columns, as well as complex columns and ignores disk format overheads.
      * @return - an estimated size of a CQL row.
      */
-    public static int estimatedRowSize(CFMetaData cfm, List<ColumnDefinition> columns)
+    public static int estimatedRowSize(CFMetaData cfm, SelectionColumns columns)
     {
         ColumnFamilyStore cfs = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
 
@@ -798,7 +796,7 @@ public class ResultSet
                                   : cfs.getMeanPartitionSize());
 
         int ret = 0;
-        for (ColumnDefinition def : columns)
+        for (ColumnSpecification def : columns.getColumnSpecifications())
         {
             int fixedLength = def.type.valueLengthIfFixed();
             ret += CBUtil.sizeOfValue(fixedLength > 0 ? fixedLength : avgColumnSize);

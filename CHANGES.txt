@@ -1,4 +1,5 @@
 DSE 5.1.0
+ * Fix AssertionError in Continuous Paging Request on select count(*) query (APOLLO-387)
  * Update internal DSE driver and fix formatting for Duration type (APOLLO-417)
  * Replace open source Python driver with Datastax Enterprise driver (APOLLO-349)
  * Fix OutOfSpaceTest broken by APOLLO-227 (APOLLO-350)
