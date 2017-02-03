@@ -1,4 +1,6 @@
 DSE 5.0.6
+ * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
+   and warn about high GC pressure for values below 4 (APOLLO-386)
  * Filter out duplicate sstables when performing snapshots to avoid
    duplicate hardlink errors (APOLLO-290)
  * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)

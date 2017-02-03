@@ -695,7 +695,14 @@ compaction_large_partition_warning_threshold_mb: 100
 # When compacting, the replacement sstable(s) can be opened before they
 # are completely written, and used in place of the prior sstables for
 # any range that has been written. This helps to smoothly transfer reads 
-# between the sstables, reducing page cache churn and keeping hot rows hot
+# between the sstables, reducing page cache churn and keeping hot rows hot.
+#
+# Setting this to a low value will negatively affect performance
+# and eventually cause huge heap pressure and a lot of GC activity.
+# The "optimal" value depends on the hardware and workload.
+#
+# Values <= 0 will disable this feature. This feature is always disabled
+# on Windows.
 sstable_preemptive_open_interval_in_mb: 50
 
 # Throttles all outbound streaming file transfers on this node to the

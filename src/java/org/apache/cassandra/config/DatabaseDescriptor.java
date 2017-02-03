@@ -334,6 +334,13 @@ public class DatabaseDescriptor
             logger.info("DiskAccessMode is {}, indexAccessMode is {}", conf.disk_access_mode, indexAccessMode);
         }
 
+        if (conf.sstable_preemptive_open_interval_in_mb > 0 && conf.sstable_preemptive_open_interval_in_mb < 4)
+        {
+            logger.warn("Setting sstable_preemptive_open_interval_in_mb to a very low value ({}) will increase GC pressure " +
+                        "significantly during compactions, and will likely have an adverse effect on performance.",
+                        conf.sstable_preemptive_open_interval_in_mb);
+        }
+
         /* Authentication, authorization and role management backend, implementing IAuthenticator, IAuthorizer & IRoleMapper*/
         if (conf.authenticator != null)
             authenticator = FBUtilities.newAuthenticator(conf.authenticator);
