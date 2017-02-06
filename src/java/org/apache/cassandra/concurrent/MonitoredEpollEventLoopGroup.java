@@ -94,11 +94,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         for (int i = 0; i < eventLoops.length; i++)
         {
+            final int cpuId = i;
             EventLoop loop = eventLoops[i];
             eventLoops[i].schedule(() -> {
                 try
                 {
-                    NettyRxScheduler.register(loop);
+                    NettyRxScheduler.register(loop, cpuId);
                 }
                 catch (Exception ex)
                 {

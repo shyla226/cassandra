@@ -205,7 +205,7 @@ public class Config
 
     public String endpoint_snitch;
     public boolean dynamic_snitch = true;
-    public int dynamic_snitch_update_interval_in_ms = 100;
+    public int dynamic_snitch_update_interval_in_ms = 500;
     public int dynamic_snitch_reset_interval_in_ms = 600000;
     public double dynamic_snitch_badness_threshold = 0.1;
 
@@ -337,7 +337,7 @@ public class Config
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 
     /** How often histograms used by JMX metrics are updated, in milliseconds */
-    public int metrics_histogram_update_interval_millis = 2000;
+    public int metrics_histogram_update_interval_millis = 5000;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

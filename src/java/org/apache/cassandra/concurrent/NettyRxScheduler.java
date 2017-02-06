@@ -24,10 +24,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -98,31 +101,52 @@ public class NettyRxScheduler extends Scheduler
 
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
+    final static ScheduledFuture<?> startupSchedulerFuture;
     static
     {
-        perCoreSchedulers[0] = new NettyRxScheduler(new DefaultEventExecutor(new NettyRxThreadFactory("startup-scheduler", Thread.MAX_PRIORITY)), 0);
+        DefaultEventExecutor executor = new DefaultEventExecutor(new NettyRxThreadFactory("startup-scheduler", Thread.MAX_PRIORITY));
+        startupSchedulerFuture = executor.next().schedule(() -> { perCoreSchedulers[0] = new NettyRxScheduler(executor, 0); }, 0, TimeUnit.MICROSECONDS);
+    }
+
+    private static NettyRxScheduler getStartupScheduler()
+    {
+        if (perCoreSchedulers[0] == null)
+        {
+            try
+            {
+                Uninterruptibles.getUninterruptibly(startupSchedulerFuture);
+            }
+            catch (ExecutionException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        return perCoreSchedulers[0];
     }
 
     private final static class NettyRxThread extends FastThreadLocalThread
     {
-        private final int cpuId;
+        private int cpuId;
 
-        public NettyRxThread(ThreadGroup group, Runnable target, String name, int cpuId)
+        public NettyRxThread(ThreadGroup group, Runnable target, String name)
         {
             super(group, target, name);
-            this.cpuId = cpuId;
+            this.cpuId = perCoreSchedulers.length; // this means this is not a TPC thread
         }
 
         public int getCpuId()
         {
             return cpuId;
         }
+
+        void setCpuId(int cpuId)
+        {
+            this.cpuId = cpuId;
+        }
     }
 
     public final static class NettyRxThreadFactory extends DefaultThreadFactory
     {
-        AtomicInteger cpuId = new AtomicInteger(0);
-
         public NettyRxThreadFactory(Class<?> poolType, int priority)
         {
             super(poolType, priority);
@@ -135,7 +159,7 @@ public class NettyRxScheduler extends Scheduler
 
         protected Thread newThread(Runnable r, String name)
         {
-            return new NettyRxThread(this.threadGroup, r, name, cpuId.getAndIncrement());
+            return new NettyRxThread(this.threadGroup, r, name);
         }
     }
 
@@ -165,21 +189,17 @@ public class NettyRxScheduler extends Scheduler
         return localNettyEventLoop.get();
     }
 
-    public static synchronized NettyRxScheduler register(EventExecutor loop)
+    public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
     {
         NettyRxScheduler scheduler = localNettyEventLoop.get();
         if (scheduler.eventLoop != loop)
         {
             assert loop.inEventLoop();
-
-            Thread t = Thread.currentThread();
-            assert t instanceof NettyRxThread;
-
-            int cpuId = ((NettyRxThread)t).getCpuId();
             assert cpuId >= 0 && cpuId < perCoreSchedulers.length;
 
-            if (cpuId == 0)
-                shutdown(perCoreSchedulers[0].eventLoop);
+            NettyRxScheduler previousScheduler = cpuId == 0 ? getStartupScheduler() : null;
+            Thread t = Thread.currentThread();
+            assert t instanceof NettyRxThread;
 
             scheduler = new NettyRxScheduler(loop, cpuId);
             localNettyEventLoop.set(scheduler);
@@ -187,6 +207,11 @@ public class NettyRxScheduler extends Scheduler
 
             logger.info("Putting {} on core {}", t.getName(), cpuId);
             isStartup = false;
+
+            // TODO: we should really stop the startup scheduler but doing so results in events being missed,
+            // we should also avoid executing events queued on the new scheduler until the old one is stopped
+            //if (previousScheduler != null)
+            //    shutdown(previousScheduler.eventLoop);
         }
 
         return scheduler;
@@ -218,7 +243,7 @@ public class NettyRxScheduler extends Scheduler
 
     public static boolean isTPCThread()
     {
-        return Thread.currentThread() instanceof NettyRxThread;
+        return isValidCoreId(getCoreId());
     }
 
     private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
@@ -228,6 +253,9 @@ public class NettyRxScheduler extends Scheduler
         this.eventLoop = eventLoop;
         this.cpuId = cpuId;
         this.cpuThread = Thread.currentThread();
+
+        if (isValidCoreId(cpuId) && cpuThread instanceof NettyRxThread)
+            ((NettyRxThread)cpuThread).setCpuId(cpuId);
     }
 
     public static int getNumCores()
@@ -258,7 +286,7 @@ public class NettyRxScheduler extends Scheduler
     public static NettyRxScheduler getForCore(int core)
     {
         NettyRxScheduler scheduler = perCoreSchedulers[core];
-        return scheduler == null ? perCoreSchedulers[0] : scheduler;
+        return scheduler != null ? scheduler : getStartupScheduler();
     }
 
     /**
@@ -274,7 +302,7 @@ public class NettyRxScheduler extends Scheduler
 
     public static boolean isValidCoreId(Integer coreId)
     {
-        return coreId != null && coreId >= 0 && coreId <= getNumCores();
+        return coreId != null && coreId >= 0 && coreId < getNumCores();
     }
 
     @Inline

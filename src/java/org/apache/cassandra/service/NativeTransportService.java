@@ -153,12 +153,13 @@ public class NativeTransportService
 
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
         {
+            final int cpuId = i;
             if (!useEpoll())
                 ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
 
             EventLoop loop = workerGroup.next();
             loop.schedule(() -> {
-                NettyRxScheduler.register(loop);
+                NettyRxScheduler.register(loop, cpuId);
                 logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
 
                 ready.countDown();

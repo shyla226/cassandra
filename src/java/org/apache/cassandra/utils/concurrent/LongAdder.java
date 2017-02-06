@@ -32,10 +32,8 @@ import sun.misc.Contended;
  * updated with CAS.
  *
  * The ordered put guarantees atomicity, just like a volatile write, but not
- * total ordering. So we may miss the latest value when reading, I added a load
- * fence to help, but I am unsure if it does help.
- *
- * Even if we miss the latest value however, we can tolerate this.
+ * total ordering. So we may miss the latest value when reading, but we can
+ * tolerate this (the reading thread will see the value in a matter of nanoseconds).
  * */
 public class LongAdder
 {
@@ -81,45 +79,47 @@ public class LongAdder
                 UNSAFE.getAndAddLong(this, valueOffset, x);
         }
 
-        void set(long x, boolean lazy)
+        void set(long x)
         {
-            if (lazy)
-                UNSAFE.putOrderedLong(this, valueOffset, x);
-            else
-                UNSAFE.getAndSetLong(this, valueOffset, x);
+            UNSAFE.getAndSetLong(this, valueOffset, x);
         }
 
         long get()
         {
-            UNSAFE.loadFence(); // TODO - is this helping at all?
-            return UNSAFE.getLong(this, valueOffset);
+            return UNSAFE.getLongVolatile(this, valueOffset);
         }
     }
 
     private final int numCores;
     private final Cell[] values;
 
-
     public LongAdder()
     {
         this.numCores = NettyRxScheduler.getNumCores();
         this.values = new Cell[numCores + 1];
+
+        // The last value is shared by multiple threads and so it is
+        // initialized early to avoid races during lazy initialization
+        this.values[numCores] = new Cell(0L);
     }
 
     public void add(long x)
     {
-       int index = NettyRxScheduler.getCoreId();
+       int coreId = NettyRxScheduler.getCoreId();
 
-        // allocate lazily to conserve space and to  make sure they
+        // allocate lazily to conserve space and to make sure they
         // are not on the same cache line, even with the @contended
         // annotation performace drops by 10x if allocating all together
         // when the array is created
-        if (values[index] == null)
-            values[index] = new Cell(0L); //TODO - two threads may race for the last item
+        if (values[coreId] == null)
+        {
+            assert NettyRxScheduler.isValidCoreId(coreId);
+            values[coreId] = new Cell(0L);
+        }
 
         // only the last index requires a cas, for the rest a lazy put
         // is sufficient since only one thread will update this values
-        values[index].add(x, index < numCores);
+        values[coreId].add(x, coreId < numCores);
     }
 
     public void increment() {
@@ -137,7 +137,7 @@ public class LongAdder
 
     public void reset()
     {
-        Arrays.stream(values).filter(cell -> cell != null).forEach(cell -> cell.set(0L, false));
+        Arrays.stream(values).filter(cell -> cell != null).forEach(cell -> cell.set(0L));
     }
 
     public String toString() {

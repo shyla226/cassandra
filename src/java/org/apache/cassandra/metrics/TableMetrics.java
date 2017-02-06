@@ -401,9 +401,9 @@ public class TableMetrics
                 return total > 0 ? (repaired / total) * 100 : 100.0;
             }
         });
-        readLatency = new LatencyMetrics(factory, "Read", cfs.keyspace.metric.readLatency, globalReadLatency);
-        writeLatency = new LatencyMetrics(factory, "Write", cfs.keyspace.metric.writeLatency, globalWriteLatency);
-        rangeLatency = new LatencyMetrics(factory, "Range", cfs.keyspace.metric.rangeLatency, globalRangeLatency);
+        readLatency = new LatencyMetrics(factory, aliasFactory, "Read", cfs.keyspace.metric.readLatency, globalReadLatency);
+        writeLatency = new LatencyMetrics(factory, aliasFactory, "Write", cfs.keyspace.metric.writeLatency, globalWriteLatency);
+        rangeLatency = new LatencyMetrics(factory, aliasFactory, "Range", cfs.keyspace.metric.rangeLatency, globalRangeLatency);
         pendingFlushes = createTableCounter("PendingFlushes");
         bytesFlushed = createTableCounter("BytesFlushed");
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
@@ -690,9 +690,9 @@ public class TableMetrics
         rowCacheMiss = createTableCounter("RowCacheMiss");
         droppedMutations = createTableCounter("DroppedMutations");
 
-        casPrepare = new LatencyMetrics(factory, "CasPrepare", cfs.keyspace.metric.casPrepare);
-        casPropose = new LatencyMetrics(factory, "CasPropose", cfs.keyspace.metric.casPropose);
-        casCommit = new LatencyMetrics(factory, "CasCommit", cfs.keyspace.metric.casCommit);
+        casPrepare = new LatencyMetrics(factory, aliasFactory, "CasPrepare", cfs.keyspace.metric.casPrepare);
+        casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);
+        casCommit = new LatencyMetrics(factory, aliasFactory, "CasCommit", cfs.keyspace.metric.casCommit);
     }
 
     public void updateSSTableIterated(int count)

@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Clock;
-import io.reactivex.Completable;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.agrona.concurrent.AtomicBuffer;
@@ -497,8 +496,7 @@ final class DecayingEstimatedHistogram implements Histogram
             if (!isCompatible(decayingEstimatedHistogram.reservoir))
                 throw new IllegalArgumentException("Histogram reservoir is not compatible");
 
-            this.recorders.add(decayingEstimatedHistogram.recorder);
-
+            add(decayingEstimatedHistogram.recorder);
         }
 
         public long[] getOffsets()

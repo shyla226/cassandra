@@ -111,9 +111,9 @@ public class LatencyMetrics
      * @param namePrefix Prefix to append to each metric name
      * @param parents any amount of parents to replicate updates to
      */
-    public LatencyMetrics(MetricNameFactory factory, String namePrefix, LatencyMetrics ... parents)
+    public LatencyMetrics(MetricNameFactory factory, MetricNameFactory aliasFactory, String namePrefix, LatencyMetrics ... parents)
     {
-        this(factory, null, namePrefix, false);
+        this(factory, aliasFactory, namePrefix, false);
 
         for (LatencyMetrics parent : parents)
             parent.compose(this);
