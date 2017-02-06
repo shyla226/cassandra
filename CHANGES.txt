@@ -7,6 +7,7 @@ DSE 5.0.6
  * Always die on AssertionError and log flush failure errors. (APOLLO-227)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
 Merged from 3.0.X
+ * Abort or retry on failed hints delivery (CASSANDRA-13124)
  * Fix handling of partition with partition-level deletion plus
    live rows in sstabledump (CASSANDRA-13177)
  * Provide user workaround when system_schema.columns does not contain entries
