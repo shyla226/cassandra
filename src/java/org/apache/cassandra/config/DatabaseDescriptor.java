@@ -578,6 +578,13 @@ public class DatabaseDescriptor
         if (conf.concurrent_compactors <= 0)
             throw new ConfigurationException("concurrent_compactors should be strictly greater than 0, but was " + conf.concurrent_compactors, false);
 
+        if (conf.sstable_preemptive_open_interval_in_mb > 0 && conf.sstable_preemptive_open_interval_in_mb < 4)
+        {
+            logger.warn("Setting sstable_preemptive_open_interval_in_mb to a very low value ({}) will increase GC pressure " +
+                        "significantly during compactions, and will likely have an adverse effect on performance.",
+                        conf.sstable_preemptive_open_interval_in_mb);
+        }
+
         if (conf.num_tokens > MAX_NUM_TOKENS)
             throw new ConfigurationException(String.format("A maximum number of %d tokens per node is supported", MAX_NUM_TOKENS), false);
 
