@@ -114,6 +114,8 @@ public class CompactionManager implements CompactionManagerMBean
 
     private final CompactionExecutor executor = new CompactionExecutor();
     private final CompactionExecutor validationExecutor = new ValidationExecutor();
+    // single threaded thread pool executor for anti compaction
+    private final CompactionExecutor antiCompactionExecutor = new CompactionExecutor(1, "AntiCompactionExecutor");
     private final static CompactionExecutor cacheCleanupExecutor = new CacheCleanupExecutor();
 
     private final CompactionMetrics metrics = new CompactionMetrics(executor, validationExecutor);
@@ -201,6 +203,7 @@ public class CompactionManager implements CompactionManagerMBean
         // shutdown executors to prevent further submission
         executor.shutdown();
         validationExecutor.shutdown();
+        antiCompactionExecutor.shutdown();
 
         // interrupt compactions and validations
         for (Holder compactionHolder : CompactionMetrics.getCompactions())
@@ -211,7 +214,7 @@ public class CompactionManager implements CompactionManagerMBean
         // wait for tasks to terminate
         // compaction tasks are interrupted above, so it shuold be fairy quick
         // until not interrupted tasks to complete.
-        for (ExecutorService exec : Arrays.asList(executor, validationExecutor))
+        for (ExecutorService exec : Arrays.asList(executor, validationExecutor, antiCompactionExecutor))
         {
             try
             {
@@ -483,7 +486,7 @@ public class CompactionManager implements CompactionManagerMBean
         ListenableFuture<?> ret = null;
         try
         {
-            ret = executor.submitIfRunning(runnable, "anticompaction");
+            ret = antiCompactionExecutor.submitIfRunning(runnable, "anticompaction");
             return ret;
         }
         finally
