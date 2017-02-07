@@ -2,6 +2,9 @@ DSE 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from 4.0:
+ * Add support for + and - operations on dates (CASSANDRA-11936)
+ * Fix consistency of incrementally repaired data (CASSANDRA-9143)
+ * Increase commitlog version (CASSANDRA-13161)
  * Make TableMetadata immutable, optimize Schema (CASSANDRA-9425)
  * Refactor ColumnCondition (CASSANDRA-12981)
  * Parallelize streaming of different keyspaces (CASSANDRA-4663)

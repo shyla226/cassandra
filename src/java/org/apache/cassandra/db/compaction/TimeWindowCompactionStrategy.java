@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.HashSet;
 import java.util.List;
@@ -180,6 +181,12 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
     public void removeSSTable(SSTableReader sstable)
     {
         sstables.remove(sstable);
+    }
+
+    @Override
+    protected Set<SSTableReader> getSSTables()
+    {
+        return ImmutableSet.copyOf(sstables);
     }
 
     /**
@@ -368,14 +375,15 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor,
                                                        long keyCount,
                                                        long repairedAt,
+                                                       UUID pendingRepair,
                                                        MetadataCollector meta,
                                                        SerializationHeader header,
                                                        Collection<Index> indexes,
                                                        LifecycleTransaction txn)
     {
         if (options.splitDuringFlush)
-            return new TWCSMultiWriter(cfs, options.sstableWindowUnit, options.sstableWindowSize, options.timestampResolution, descriptor, keyCount, repairedAt, meta, header, indexes, txn);
-        return super.createSSTableMultiWriter(descriptor, keyCount, repairedAt, meta, header, indexes, txn);
+            return new TWCSMultiWriter(cfs, options.sstableWindowUnit, options.sstableWindowSize, options.timestampResolution, descriptor, keyCount, repairedAt, pendingRepair, meta, header, indexes, txn);
+        return super.createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, meta, header, indexes, txn);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException

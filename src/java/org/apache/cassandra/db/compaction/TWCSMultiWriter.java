@@ -84,6 +84,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
     private final Descriptor descriptor;
     private final long keyCount;
     private final long repairedAt;
+    private final UUID pendingRepair;
     private final MetadataCollector meta;
     private final SerializationHeader header;
     private final Collection<Index> indexes;
@@ -98,6 +99,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
                            Descriptor descriptor,
                            long keyCount,
                            long repairedAt,
+                           UUID pendingRepair,
                            MetadataCollector meta,
                            SerializationHeader header,
                            Collection<Index> indexes,
@@ -110,6 +112,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
         this.descriptor = descriptor;
         this.keyCount = keyCount;
         this.repairedAt = repairedAt;
+        this.pendingRepair = pendingRepair;
         this.meta = meta;
         this.header = header;
         this.indexes = indexes;
@@ -158,6 +161,7 @@ public class TWCSMultiWriter implements SSTableMultiWriter
                     writer = SimpleSSTableMultiWriter.create(newDesc,
                                                              keyCount,
                                                              repairedAt,
+                                                             pendingRepair,
                                                              cfs.metadata,
                                                              meta.copy(),
                                                              new SerializationHeader(header.isForSSTable(),
