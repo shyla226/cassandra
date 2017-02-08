@@ -21,7 +21,6 @@ package org.apache.cassandra.metrics;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -29,6 +28,7 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -84,31 +84,33 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  */
 final class DecayingEstimatedHistogram implements Histogram
 {
-    /** The recorders takes care of performing real-time updates, there is typically one recorder
-     * for simple histogram (at the table level) and multiple recorders for aggregated histograms
-     * (at the keyspace or global level). */
-    private final Recorder recorder;
-
     /**
      * The reservoir contains the buckets with and without decay, and they are periodically
      * aggregated by looking at the values in the recorder.
      */
     private final ForwardDecayingReservoir reservoir;
 
+    /** The recorders takes care of performing real-time updates, there is typically one recorder
+     * for simple histogram (at the table level) and multiple recorders for aggregated histograms
+     * (at the keyspace or global level). */
+    private final Recorder recorder;
+
+
+
     DecayingEstimatedHistogram(boolean considerZeroes, long maxTrackableValue, int updateTimeMillis, Clock clock)
     {
-        this.recorder = new Recorder(new BucketProperties(maxTrackableValue));
-        this.reservoir = new ForwardDecayingReservoir(recorder.bucketProperties, clock, considerZeroes, updateTimeMillis);
-
-        this.reservoir.add(recorder);
+        BucketProperties bucketProperties = new BucketProperties(maxTrackableValue);
+        this.reservoir = new ForwardDecayingReservoir(bucketProperties, clock, considerZeroes, updateTimeMillis, false);
+        this.recorder = new Recorder(bucketProperties, reservoir);
     }
 
-    static Reservoir makeReservoir(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis)
+    static Reservoir makeCompositeReservoir(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis)
     {
         return new ForwardDecayingReservoir(new BucketProperties(maxTrackableValue),
                                             ApproximateClock.defaultClock(),
                                             considerZeroes,
-                                            updateIntervalMillis);
+                                            updateIntervalMillis,
+                                            true);
     }
 
     /**
@@ -357,6 +359,14 @@ final class DecayingEstimatedHistogram implements Histogram
         /** This is published after a periodic aggregation */
         private volatile Snapshot snapshot;
 
+        /** This is true when this is the reservoir of a composite histogram */
+        private boolean isComposite;
+
+        /** Composite reservoirs are scheduled eagerly, but single reservoir are
+         * scheduled by the recorder.
+         */
+        private AtomicBoolean scheduled;
+
         /**
          * This is set to true by the aggregating thread when at least one of the local buckets
          * is overflowed, that is it could not track a value becasue it was too high even for
@@ -364,7 +374,7 @@ final class DecayingEstimatedHistogram implements Histogram
          */
         private volatile boolean isOverflowed;
 
-        ForwardDecayingReservoir(BucketProperties bucketProperties, Clock clock, boolean considerZeroes, int updateIntervalMillis)
+        ForwardDecayingReservoir(BucketProperties bucketProperties, Clock clock, boolean considerZeroes, int updateIntervalMillis, boolean isComposite)
         {
             this.bucketProperties = bucketProperties;
             this.clock = clock;
@@ -377,19 +387,29 @@ final class DecayingEstimatedHistogram implements Histogram
             this.decayLandmark = clock.getTime();
             this.snapshot = new Snapshot(this);
             this.coreId = NettyRxScheduler.getNextCore();
+            this.scheduled = new AtomicBoolean(false);
+            this.isComposite = isComposite;
+
+            scheduleIfComposite();
         }
 
         void add(Recorder recorder)
         {
             recorders.add(recorder);
-
-            if (recorders.size() == 1)
-                schedule();
         }
 
-        void schedule()
+        void maybeSchedule()
         {
-            if (updateIntervalMillis > 0)
+            if (updateIntervalMillis <= 0 || scheduled.get())
+                return;
+
+            if (scheduled.compareAndSet(false, true))
+                NettyRxScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
+        }
+
+        void scheduleIfComposite()
+        {
+            if (updateIntervalMillis > 0 && isComposite)
                 NettyRxScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
@@ -448,6 +468,8 @@ final class DecayingEstimatedHistogram implements Histogram
         {
             try
             {
+                scheduled.set(false);
+
                 final long now = clock.getTime();
                 rescaleIfNeeded(now);
 
@@ -471,7 +493,7 @@ final class DecayingEstimatedHistogram implements Histogram
             }
             finally
             {
-                schedule();
+                scheduleIfComposite();
             }
         }
 
@@ -569,76 +591,38 @@ final class DecayingEstimatedHistogram implements Histogram
         private final BucketProperties bucketProperties;
         private final int numCores;
         private final Buffer[] buffers;
+        private final ForwardDecayingReservoir reservoir;
 
-        private static final sun.misc.Unsafe UNSAFE;
-        private static final int base;
-        private static final int shift;
-
-        static
-        {
-            try
-            {
-                Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-                field.setAccessible(true);
-                UNSAFE = (sun.misc.Unsafe) field.get(null);
-
-                base = UNSAFE.arrayBaseOffset(Buffer[].class);
-                int scale = UNSAFE.arrayIndexScale(Buffer[].class);
-                if ((scale & (scale - 1)) != 0)
-                    throw new Error("data type scale not a power of two");
-                shift = 31 - Integer.numberOfLeadingZeros(scale);
-            }
-            catch (Exception e)
-            {
-                throw new AssertionError(e);
-            }
-        }
-
-        /**
-         * Return the memory offset in bytes of an item in the buffrs array.
-         * @param i the index of the item
-         * @return the offset of the item in bytes
-         */
-        private static long arrayOffset(int i)
-        {
-            return ((long) i << shift) + base;
-        }
-
-        Recorder(BucketProperties bucketProperties)
+        Recorder(BucketProperties bucketProperties, ForwardDecayingReservoir reservoir)
         {
             this.bucketProperties = bucketProperties;
             this.numCores = NettyRxScheduler.getNumCores();
             this.buffers = new Buffer[numCores + 1];
+            this.reservoir = reservoir;
+
+            // the last buffer is allocated eagerly because it is shared by
+            // multiple threads, and we risk two threads racing in allocating a buffer
+            this.buffers[numCores] = new Buffer(bucketProperties);
+
+            // add the recorder to the reservoir
+            reservoir.add(this);
         }
 
         // thread-safe: called by many threads (the updating threads)
         void update(final long value)
         {
+            reservoir.maybeSchedule();
+
             int coreId = NettyRxScheduler.getCoreId();
 
             Buffer buffer = buffers[coreId];
             if (buffer == null)
-                buffer = allocateBuffer(coreId);
+            {
+                assert NettyRxScheduler.isValidCoreId(coreId);
+                buffer = buffers[coreId] = new Buffer(bucketProperties);
+            }
 
             buffer.update(value, coreId < numCores);
-        }
-
-        private Buffer allocateBuffer(int coreId)
-        {
-            boolean lazySetOk = coreId < numCores;
-            Buffer buffer = new Buffer(bucketProperties);
-
-            if (lazySetOk)
-            { // we know only one thread can update this memory location
-                UNSAFE.putOrderedObject(buffers, arrayOffset(coreId), buffer);
-            }
-            else
-            { // it could be that there are 2 or more threads racing to update the same memory location
-                if (!UNSAFE.compareAndSwapObject(buffers, arrayOffset(coreId), null, buffer))
-                    buffer = (Buffer)UNSAFE.getObjectVolatile(buffers, arrayOffset(coreId));
-            }
-
-            return buffer;
         }
 
         // not thread-safe: must only be called by the aggregating thread

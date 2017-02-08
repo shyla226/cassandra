@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.metrics;
 
-import java.util.concurrent.TimeUnit;
-
 import com.codahale.metrics.Clock;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 
@@ -39,7 +37,6 @@ class ApproximateClock extends Clock
 
     public long getTick()
     {
-        //return System.nanoTime();
-        return TimeUnit.MILLISECONDS.toNanos(ApproximateTime.currentTimeMillis());
+        return ApproximateTime.nanoTime();
     }
 }

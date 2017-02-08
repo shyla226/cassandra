@@ -27,8 +27,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -47,14 +49,35 @@ public class MonitoringTaskTest
     private static final int REPORT_INTERVAL_MS = 600000; // long enough so that it won't check unless told to do so
     private static final int MAX_TIMEDOUT_OPERATIONS = -1; // unlimited
 
+    private static volatile boolean finished = false;
+
     @BeforeClass
-    public static void setup()
+    public static void setupClass()
     {
         MonitoringTask.instance = MonitoringTask.make(REPORT_INTERVAL_MS, MAX_TIMEDOUT_OPERATIONS);
+
+        // The approximate time needs to be ticked forward manually, this is normally done by
+        // the monitoring thread of MonitoredEpollEventLoopGroup, which also parks for 1 nanosecond
+        Thread advanceApproximateTime = new Thread(() ->
+                                                   {
+                                                       while(!finished)
+                                                       {
+                                                           LockSupport.parkNanos(1);
+                                                           ApproximateTime.tick();
+                                                       }
+                                                   });
+        advanceApproximateTime.setDaemon(true);
+        advanceApproximateTime.start();
+    }
+
+    @AfterClass
+    public static void cleanupClass()
+    {
+        finished = true;
     }
 
     @After
-    public void cleanUp()
+    public void cleanup()
     {
         // these clear the queues of the monitorint task
         MonitoringTask.instance.getSlowOperations();
@@ -121,7 +144,7 @@ public class MonitoringTaskTest
     @Test
     public void testAbort() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test abort", System.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test abort", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isAborted());
@@ -132,7 +155,7 @@ public class MonitoringTaskTest
     @Test
     public void testAbortIdemPotent() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test abort", System.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test abort", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.abort());
@@ -145,7 +168,7 @@ public class MonitoringTaskTest
     @Test
     public void testAbortCrossNode() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test for cross node", System.currentTimeMillis(), true, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test for cross node", ApproximateTime.currentTimeMillis(), true, timeout, slowTimeout);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isAborted());
@@ -156,7 +179,7 @@ public class MonitoringTaskTest
     @Test
     public void testComplete() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test complete", System.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test complete", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
         operation.complete();
         waitForOperationsToComplete(operation);
 
@@ -168,7 +191,7 @@ public class MonitoringTaskTest
     @Test
     public void testCompleteIdemPotent() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test complete", System.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test complete", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
         operation.complete();
         waitForOperationsToComplete(operation);
 
@@ -182,7 +205,7 @@ public class MonitoringTaskTest
     @Test
     public void testReportSlow() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test report slow", System.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test report slow", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
         waitForOperationsToBeReportedAsSlow(operation);
 
         assertTrue(operation.isSlow());
@@ -196,7 +219,7 @@ public class MonitoringTaskTest
     public void testNoReportSlowIfZeroSlowTimeout() throws InterruptedException
     {
         // when the slow timeout is set to zero then operation won't be reported as slow
-        Monitorable operation = new TestMonitor("Test report slow disabled", System.currentTimeMillis(), false, timeout, 0);
+        Monitorable operation = new TestMonitor("Test report slow disabled", ApproximateTime.currentTimeMillis(), false, timeout, 0);
         waitForOperationsToBeReportedAsSlow(operation);
 
         assertTrue(operation.isSlow());
@@ -209,7 +232,7 @@ public class MonitoringTaskTest
     @Test
     public void testReport() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test report", System.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitorable operation = new TestMonitor("Test report", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isSlow());
@@ -227,7 +250,7 @@ public class MonitoringTaskTest
     @Test
     public void testSkipReporting() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test skip reporting", System.currentTimeMillis(), false, timeout, slowTimeout, true);
+        Monitorable operation = new TestMonitor("Test skip reporting", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout, true);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isSlow());
@@ -249,13 +272,13 @@ public class MonitoringTaskTest
         MonitoringTask.instance = MonitoringTask.make(10, -1);
         try
         {
-            Monitorable operation1 = new TestMonitor("Test report 1", System.currentTimeMillis(), false, timeout, slowTimeout);
+            Monitorable operation1 = new TestMonitor("Test report 1", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
             waitForOperationsToComplete(operation1);
 
             assertTrue(operation1.isAborted());
             assertFalse(operation1.isCompleted());
 
-            Monitorable operation2 = new TestMonitor("Test report 2", System.currentTimeMillis(), false, timeout, slowTimeout);
+            Monitorable operation2 = new TestMonitor("Test report 2", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
             waitForOperationsToBeReportedAsSlow(operation2);
 
             operation2.complete();
@@ -282,7 +305,7 @@ public class MonitoringTaskTest
         for (int i = 0; i < opCount; i++)
         {
             executorService.submit(() ->
-                operations.add(new TestMonitor(UUID.randomUUID().toString(), System.currentTimeMillis(), false, timeout, slowTimeout))
+                operations.add(new TestMonitor(UUID.randomUUID().toString(), ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout))
             );
         }
 
@@ -327,14 +350,14 @@ public class MonitoringTaskTest
                         for (int j = 0; j < numTimes; j++)
                         {
                             Monitorable operation1 = new TestMonitor(operationName,
-                                                                     System.currentTimeMillis(),
+                                                                     ApproximateTime.currentTimeMillis(),
                                                                      false,
                                                                      timeout,
                                                                      slowTimeout);
                             waitForOperationsToComplete(operation1);
 
                             Monitorable operation2 = new TestMonitor(operationName,
-                                                                     System.currentTimeMillis(),
+                                                                     ApproximateTime.currentTimeMillis(),
                                                                      false,
                                                                      timeout,
                                                                      slowTimeout);
@@ -382,7 +405,7 @@ public class MonitoringTaskTest
                 try
                 {
                     Monitorable operation = new TestMonitor("Test testMultipleThreadsSameName failed",
-                                                            System.currentTimeMillis(),
+                                                            ApproximateTime.currentTimeMillis(),
                                                             false,
                                                             timeout,
                                                             slowTimeout);
@@ -416,7 +439,7 @@ public class MonitoringTaskTest
                 try
                 {
                     Monitorable operation = new TestMonitor("Test testMultipleThreadsSameName slow",
-                                                            System.currentTimeMillis(),
+                                                            ApproximateTime.currentTimeMillis(),
                                                             false,
                                                             timeout,
                                                             slowTimeout);
@@ -452,7 +475,7 @@ public class MonitoringTaskTest
                 try
                 {
                     Monitorable operation = new TestMonitor("Test thread " + Thread.currentThread().getName(),
-                                                            System.currentTimeMillis(),
+                                                            ApproximateTime.currentTimeMillis(),
                                                             false,
                                                             timeout,
                                                             slowTimeout);

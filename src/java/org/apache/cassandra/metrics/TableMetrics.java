@@ -261,7 +261,7 @@ public class TableMetrics
         factory = new TableMetricNameFactory(cfs, "Table");
         aliasFactory = new TableMetricNameFactory(cfs, "ColumnFamily");
 
-        samplers = Maps.newHashMap();
+        samplers = new EnumMap<>(Sampler.class);
         for (Sampler sampler : Sampler.values())
         {
             samplers.put(sampler, new TopKSampler<>());

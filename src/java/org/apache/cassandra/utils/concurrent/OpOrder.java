@@ -276,7 +276,7 @@ public class OpOrder
             final CountDownLatch latch = dispatchToTPCTheads(scheduler ->
                                                              {
                                                                  if (tpcBarriers[scheduler.cpuId] == null)
-                                                                     return; // the barrier was issues just before the TPC thread was initialized,
+                                                                     return; // the barrier was issued just before the TPC thread was initialized,
 
                                                                  Optional<WaitQueue.Signal> signal = tpcBarriers[scheduler.cpuId].await(caller);
                                                                  if (signal.isPresent())

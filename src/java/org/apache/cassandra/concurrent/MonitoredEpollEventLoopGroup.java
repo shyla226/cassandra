@@ -33,7 +33,6 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.MultithreadEventLoopGroup;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.epoll.Native;
@@ -44,11 +43,10 @@ import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
-
-import org.apache.cassandra.service.NativeTransportService;
 
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 {
@@ -79,8 +77,8 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     /**
      * This constructor is called by jmh benchmarks, when using a custom executor.
      * It should only be called for testing, not production code, since it wires the NettyRxScheduler
-     * as well, but unlike {@link NativeTransportService#initializeTPC()}, it will not set any CPU
-     * affinity or epoll IO ratio.
+     * as well, but unlike {@link org.apache.cassandra.service.CassandraDaemon#initializeTPC()},
+     * it will not set any CPU affinity or epoll IO ratio.
      *
      * @param nThreads - the number of threads
      * @param name - the thread name (unused)
@@ -133,10 +131,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             while (!shutdown)
             {
+                long nanoTime = SingleCoreEventLoop.nanoTime();
                 for (int i = 0; i < length; i++)
-                    eventLoops[i].checkQueues();
+                    eventLoops[i].checkQueues(nanoTime);
 
                 LockSupport.parkNanos(1);
+                ApproximateTime.tick();
             }
 
             for (int i = 0; i < length; i++)
@@ -240,8 +240,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         WORKING
     }
 
-    private class SingleCoreEventLoop extends EpollEventLoop implements Runnable
+    private static class SingleCoreEventLoop extends EpollEventLoop implements Runnable
     {
+        private final MonitoredEpollEventLoopGroup parent;
         private final int threadOffset;
 
         private static final int busyExtraSpins =  1024 * 128;
@@ -260,10 +261,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Contended
         private final ArrayDeque<Runnable> internalQueue;
 
-        private SingleCoreEventLoop(EventLoopGroup parent, Executor executor, int threadOffset, int totalCores)
+        private SingleCoreEventLoop(MonitoredEpollEventLoopGroup parent, Executor executor, int threadOffset, int totalCores)
         {
             super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject());
 
+            this.parent = parent;
             this.threadOffset = threadOffset;
             this.externalQueue = new MpscArrayQueue<>(1 << 16);
             this.internalQueue = new ArrayDeque<>(1 << 16);
@@ -275,13 +277,13 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             try
             {
-                while (!shutdown)
+                while (!parent.shutdown)
                 {
                     //deal with spurious wakeups
                     if (state == CoreState.WORKING)
                     {
                         int spins = 0;
-                        while (!shutdown)
+                        while (!parent.shutdown)
                         {
                             int drained = drain();
                             if (drained > 0 || ++spins < busyExtraSpins)
@@ -330,12 +332,12 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private void unpark()
         {
             state = CoreState.WORKING;
-            LockSupport.unpark(runningThreads[threadOffset]);
+            LockSupport.unpark(parent.runningThreads[threadOffset]);
         }
 
-        private void checkQueues()
+        private void checkQueues(long nanoTime)
         {
-            delayedNanosDeadline = nanotime();
+            delayedNanosDeadline = nanoTime;
 
             if (state == CoreState.PARKED && !isEmpty())
                 unpark();
@@ -345,9 +347,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             Thread currentThread = Thread.currentThread();
 
-            if (runningThreads != null)
+            if (parent.runningThreads != null)
             {
-                if (currentThread == runningThreads[threadOffset])
+                if (currentThread == parent.runningThreads[threadOffset])
                 {
                     if (!internalQueue.offer(task))
                         throw new RuntimeException("Backpressure");
@@ -508,7 +510,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             return empty;
         }
 
-        long nanotime()
+        protected static long nanoTime()
         {
             return AbstractScheduledEventExecutor.nanoTime();
         }

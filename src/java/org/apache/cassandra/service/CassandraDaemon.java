@@ -25,7 +25,7 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -45,9 +45,8 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.reactivex.Scheduler;
-import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
+import io.netty.channel.EventLoop;
+import io.netty.channel.EventLoopGroup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +71,8 @@ import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
+
+import static org.apache.cassandra.concurrent.NettyRxScheduler.NUM_NETTY_THREADS;
 
 /**
  * The <code>CassandraDaemon</code> is an abstraction for a Cassandra daemon
@@ -155,6 +156,9 @@ public class CassandraDaemon
 
     static final CassandraDaemon instance = new CassandraDaemon();
 
+    /** The Netty worker group for TPC threads*/
+    private EventLoopGroup workerGroup;
+
     private NativeTransportService nativeTransportService;
     private JMXConnectorServer jmxServer;
 
@@ -172,6 +176,30 @@ public class CassandraDaemon
         this.runManaged = runManaged;
         this.startupChecks = new StartupChecks().withDefaultTests();
         this.setupCompleted = false;
+    }
+
+    /**
+     * Initialize the thread-per-core workers.
+     */
+    public void initializeTPC()
+    {
+        workerGroup = NativeTransportService.makeWorkerGroup();
+
+        CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
+
+        for (int i = 0; i < NUM_NETTY_THREADS; i++)
+        {
+            final int cpuId = i;
+            final EventLoop loop = workerGroup.next();
+            loop.schedule(() -> {
+                NettyRxScheduler.register(loop, cpuId);
+                logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
+
+                ready.countDown();
+            }, 0, TimeUnit.SECONDS);
+        }
+
+        Uninterruptibles.awaitUninterruptibly(ready);
     }
 
     /**
@@ -542,6 +570,8 @@ public class CassandraDaemon
         // Do not put any references to DatabaseDescriptor above the forceStaticInitialization call.
         try
         {
+            initializeTPC();
+
             applyConfig();
 
             try
@@ -615,7 +645,7 @@ public class CassandraDaemon
         if (nativeTransportService == null)
             throw new IllegalStateException("setup() must be called first for CassandraDaemon");
         else
-            nativeTransportService.start();
+            nativeTransportService.start(workerGroup);
     }
 
     public void stopNativeTransport()

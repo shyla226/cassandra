@@ -37,7 +37,7 @@ public class CompositeHistogramTest
     private static final DecayingEstimatedHistogramTest.TestClock CLOCK = new DecayingEstimatedHistogramTest.TestClock();
     private static final int TEST_UPDATE_INTERVAL_MILLIS = 0; // zero ensures updates are performed on read
     private static final DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR =
-        DecayingEstimatedHistogram.makeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS);
+        DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS);
 
     @Test
     public void testSingleAggregation()
@@ -146,9 +146,9 @@ public class CompositeHistogramTest
         for (int i = 0; i < numHistograms; i++)
             histograms[i] = new DecayingEstimatedHistogram(considerZeroes, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
 
-        DecayingEstimatedHistogram.Reservoir reservoir = DecayingEstimatedHistogram.makeReservoir(considerZeroes,
-                                                                                                  DEFAULT_MAX_TRACKABLE_VALUE,
-                                                                                                  TEST_UPDATE_INTERVAL_MILLIS);
+        DecayingEstimatedHistogram.Reservoir reservoir = DecayingEstimatedHistogram.makeCompositeReservoir(considerZeroes,
+                                                                                                           DEFAULT_MAX_TRACKABLE_VALUE,
+                                                                                                           TEST_UPDATE_INTERVAL_MILLIS);
         CompositeHistogram compositeHistogram = new CompositeHistogram(reservoir);
         DecayingEstimatedHistogram controlHistogram = new DecayingEstimatedHistogram(considerZeroes,
                                                                                      DEFAULT_MAX_TRACKABLE_VALUE,

@@ -337,7 +337,7 @@ public class Config
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 
     /** How often histograms used by JMX metrics are updated, in milliseconds */
-    public int metrics_histogram_update_interval_millis = 5000;
+    public int metrics_histogram_update_interval_millis = 1000;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

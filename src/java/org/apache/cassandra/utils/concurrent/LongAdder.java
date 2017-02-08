@@ -22,6 +22,7 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 
 import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 import sun.misc.Contended;
 
 /**
@@ -37,19 +38,14 @@ import sun.misc.Contended;
  * */
 public class LongAdder
 {
-    private static final sun.misc.Unsafe UNSAFE;
     private static final long valueOffset;
 
     static
     {
         try
         {
-            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            UNSAFE = (sun.misc.Unsafe) field.get(null);
-
             Class<?> ak = Cell.class;
-            valueOffset = UNSAFE.objectFieldOffset(ak.getDeclaredField("value"));
+            valueOffset = MemoryUtil.unsafe.objectFieldOffset(ak.getDeclaredField("value"));
         }
         catch (Exception e)
         {
@@ -74,19 +70,19 @@ public class LongAdder
         void add(long x, boolean lazy)
         {
             if (lazy)
-                UNSAFE.putOrderedLong(this, valueOffset, value + x);
+                MemoryUtil.unsafe.putOrderedLong(this, valueOffset, value + x);
             else
-                UNSAFE.getAndAddLong(this, valueOffset, x);
+                MemoryUtil.unsafe.getAndAddLong(this, valueOffset, x);
         }
 
         void set(long x)
         {
-            UNSAFE.getAndSetLong(this, valueOffset, x);
+            MemoryUtil.unsafe.getAndSetLong(this, valueOffset, x);
         }
 
         long get()
         {
-            return UNSAFE.getLongVolatile(this, valueOffset);
+            return MemoryUtil.unsafe.getLongVolatile(this, valueOffset);
         }
     }
 

@@ -54,14 +54,15 @@ import org.openjdk.jmh.annotations.Warmup;
 public class HistogramAggregationBench
 {
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(HistogramAggregationBench.class);
+    private static final int UPDATE_TIME_MILLIS = 0; // zero means update on read only
+    private static final long testValueLevel = 12340;
 
-    static final long testValueLevel = 12340;
     Histogram histogram;
 
     @Setup(Level.Iteration)
     public void setup() throws InterruptedException
     {
-        histogram = Histogram.make(false);
+        histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
 
         int numCores = NettyRxScheduler.getNumCores();
         Thread[] threads = new Thread[numCores];

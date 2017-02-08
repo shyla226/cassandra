@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
+import io.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -96,6 +97,7 @@ public abstract class CQLTester
     public static final String DATA_CENTER = "datacenter1";
     public static final String RACK1 = "rack1";
 
+    private static EventLoopGroup workerGroup;
     private static NativeTransportService server;
 
     protected static final int nativePort;
@@ -380,8 +382,9 @@ public abstract class CQLTester
         Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
 
+        workerGroup = NativeTransportService.makeWorkerGroup();
         server = new NativeTransportService(nativeAddr, nativePort);
-        server.start();
+        server.start(workerGroup);
 
         if (initClientClusters)
         {

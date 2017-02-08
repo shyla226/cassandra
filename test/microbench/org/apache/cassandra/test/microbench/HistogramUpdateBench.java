@@ -50,13 +50,14 @@ import sun.misc.Contended;
 @State(Scope.Benchmark)
 public class HistogramUpdateBench
 {
+    static final int UPDATE_TIME_MILLIS = 1000;
     static final long testValueLevel = 12340;
     Histogram histogram;
 
     @Setup
     public void setup()
     {
-       histogram = Histogram.make(false);
+       histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
     }
 
     @State(Scope.Thread)

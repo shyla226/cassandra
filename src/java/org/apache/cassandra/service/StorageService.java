@@ -5144,7 +5144,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<Range<Token>> getStartupTokenRanges(Keyspace keyspace)
     {
-
         if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())
             return null;
 

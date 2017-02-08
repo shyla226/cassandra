@@ -17,27 +17,14 @@
  */
 package org.apache.cassandra.utils.concurrent;
 
+import org.apache.cassandra.utils.memory.MemoryUtil;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
 
 public class Locks
 {
-    static final Unsafe unsafe;
-
-    static
-    {
-        try
-        {
-            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            unsafe = (sun.misc.Unsafe) field.get(null);
-        }
-        catch (Exception e)
-        {
-            throw new AssertionError(e);
-        }
-    }
+    static final Unsafe unsafe = MemoryUtil.unsafe;
 
     // enters the object's monitor IF UNSAFE IS PRESENT. If it isn't, this is a no-op.
     public static void monitorEnterUnsafe(Object object)

@@ -18,25 +18,20 @@
 
 package org.apache.cassandra.concurrent;
 
-import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.netty.util.concurrent.DefaultEventExecutor;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.EventExecutorGroup;
@@ -60,7 +55,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.service.NativeTransportService;
+import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -72,7 +67,7 @@ import org.slf4j.LoggerFactory;
  * RxScheduler which wraps the Netty event loop scheduler.
  *
  * This is initialized on startup:
- * @see NativeTransportService#initializeTPC()
+ * @see CassandraDaemon#initializeTPC()
  *
  * Each netty loop run managed on a single thread which may be pinned to a particular
  * CPU.  Cassandra can route tasks relative to a particular partition to a single loop
@@ -97,32 +92,10 @@ public class NettyRxScheduler extends Scheduler
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
-    private final static AtomicInteger roundRobinIndex = new AtomicInteger(0);
+    private final static AtomicLong roundRobinIndex = new AtomicLong(0);
 
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
-    final static ScheduledFuture<?> startupSchedulerFuture;
-    static
-    {
-        DefaultEventExecutor executor = new DefaultEventExecutor(new NettyRxThreadFactory("startup-scheduler", Thread.MAX_PRIORITY));
-        startupSchedulerFuture = executor.next().schedule(() -> { perCoreSchedulers[0] = new NettyRxScheduler(executor, 0); }, 0, TimeUnit.MICROSECONDS);
-    }
-
-    private static NettyRxScheduler getStartupScheduler()
-    {
-        if (perCoreSchedulers[0] == null)
-        {
-            try
-            {
-                Uninterruptibles.getUninterruptibly(startupSchedulerFuture);
-            }
-            catch (ExecutionException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-        return perCoreSchedulers[0];
-    }
 
     private final static class NettyRxThread extends FastThreadLocalThread
     {
@@ -163,14 +136,6 @@ public class NettyRxScheduler extends Scheduler
         }
     }
 
-    /**
-     * This flag is set to false once core zero is assigned to its final scheduler, whilst
-     * this is true core zero is assigned to the netty global event executor and all other
-     * cores are unassigned yet. When this flag becomes false, it doesn't mean all cores
-     * are assigned, but only that the first one is assigned and final.
-     */
-    private static volatile boolean isStartup = true;
-
     /** The event loop for executing tasks on the thread assigned to a core. Note that all threads have a thread
      * local NettyRxScheduler, but only threads assigned to a core have a dedicated event loop, the other ones
      * share the Netty global executor and should really not rely on the event loop, so this must stay private.
@@ -191,43 +156,19 @@ public class NettyRxScheduler extends Scheduler
 
     public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
     {
-        NettyRxScheduler scheduler = localNettyEventLoop.get();
-        if (scheduler.eventLoop != loop)
-        {
-            assert loop.inEventLoop();
-            assert cpuId >= 0 && cpuId < perCoreSchedulers.length;
+        assert loop.inEventLoop();
+        assert cpuId >= 0 && cpuId < perCoreSchedulers.length;
+        assert perCoreSchedulers[cpuId] == null;
 
-            NettyRxScheduler previousScheduler = cpuId == 0 ? getStartupScheduler() : null;
-            Thread t = Thread.currentThread();
-            assert t instanceof NettyRxThread;
+        Thread t = Thread.currentThread();
+        assert t instanceof NettyRxThread;
 
-            scheduler = new NettyRxScheduler(loop, cpuId);
-            localNettyEventLoop.set(scheduler);
-            perCoreSchedulers[cpuId] = scheduler;
+        NettyRxScheduler scheduler = new NettyRxScheduler(loop, cpuId);
+        localNettyEventLoop.set(scheduler);
+        perCoreSchedulers[cpuId] = scheduler;
 
-            logger.info("Putting {} on core {}", t.getName(), cpuId);
-            isStartup = false;
-
-            // TODO: we should really stop the startup scheduler but doing so results in events being missed,
-            // we should also avoid executing events queued on the new scheduler until the old one is stopped
-            //if (previousScheduler != null)
-            //    shutdown(previousScheduler.eventLoop);
-        }
-
+        logger.info("Putting {} on core {}", t.getName(), cpuId);
         return scheduler;
-    }
-
-    private static void shutdown(EventExecutorGroup loop)
-    {
-        try
-        {
-           loop.shutdownGracefully();
-           loop.awaitTermination(1, TimeUnit.SECONDS);
-        }
-        catch (InterruptedException ex)
-        {
-            logger.warn("Got interrupted exception when switching away from global event executor", ex);
-        }
     }
 
     /**
@@ -264,20 +205,21 @@ public class NettyRxScheduler extends Scheduler
     }
 
     /**
-     * Return the next core for scheduling one or more tasks.
+     * Return a valid core number for scheduling one or more tasks always on the same core.
+     * To balance the execution of tasks, we select the next available core in a round-robin fashion.
+     *
+     * This method should normally be called during initialization, it should not be called
+     * by methods in the critical execution patch, since the modulo operator is not optimized.
      *
      * @return a valid core id, distributed in a round-robin way
      */
     public static int getNextCore()
     {
-        return roundRobinIndex.getAndIncrement() % getNumCores();
+        return (int)(roundRobinIndex.getAndIncrement() % getNumCores());
     }
 
     /**
-     * Return a scheduler for a specific core. If the scheduler for that core is null,
-     * then that means that the core is unassigned yet, in this case, execute on core zero,
-     * which uses the global netty executor. Note that isStartup may already be false, since
-     * that only means that core zero was assigned.
+     * Return a scheduler for a specific core.
      *
      * @param core - the core number for which we want a scheduler of
      *
@@ -285,8 +227,7 @@ public class NettyRxScheduler extends Scheduler
      */
     public static NettyRxScheduler getForCore(int core)
     {
-        NettyRxScheduler scheduler = perCoreSchedulers[core];
-        return scheduler != null ? scheduler : getStartupScheduler();
+        return perCoreSchedulers[core];
     }
 
     /**
@@ -308,8 +249,8 @@ public class NettyRxScheduler extends Scheduler
     @Inline
     public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
     {
-        // force all system table operations to go through a single core
-        if (isStartup)
+        // nothing we can do until we have the local ranges
+        if (!StorageService.instance.isInitialized())
             return ImmediateThinScheduler.INSTANCE;
 
         int callerCoreId = -1;
