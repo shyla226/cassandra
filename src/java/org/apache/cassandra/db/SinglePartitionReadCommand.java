@@ -721,8 +721,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         if(!merged.isEmpty())
         {
-            //DecoratedKey key = merged.partitionKey();
-            //metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+            DecoratedKey key = merged.partitionKey();
+            metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
         }
 
         class UpdateSstablesIterated extends Transformation
@@ -814,7 +814,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     continue; // no tombstone at all, we can skip that sstable
 
                 // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-                //sstable.incrementReadCount();
+                sstable.incrementReadCount();
                 try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), Slices.ALL, columnFilter(), filter.isReversed()))
                 {
                     if (!iter.partitionLevelDeletion().isLive())
@@ -827,7 +827,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
 
             Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
-           // sstable.incrementReadCount();
+            sstable.incrementReadCount();
             try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed()))
             {
                 if (iter.isEmpty())
@@ -846,7 +846,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             return Single.just(EmptyIterators.unfilteredRow(metadata(), partitionKey(), false));
 
         DecoratedKey key = result.partitionKey();
-        //cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+        cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
         StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
 
         // "hoist up" the requested data into a more recent sstable
