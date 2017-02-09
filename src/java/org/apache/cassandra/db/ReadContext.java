@@ -210,7 +210,18 @@ public class ReadContext
          */
         public Builder useDigests()
         {
-            this.withDigests = true;
+            return useDigests(true);
+        }
+
+        /**
+         * Sets whether digests should be used or not when performing the read.
+         *
+         * @param withDigests should pass {@code true} if digests should be used, {@code false} otherwise.
+         * @return this builder.
+         */
+        public Builder useDigests(boolean withDigests)
+        {
+            this.withDigests = withDigests;
             return this;
         }
 

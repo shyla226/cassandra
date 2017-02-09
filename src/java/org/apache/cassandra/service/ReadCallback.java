@@ -18,13 +18,14 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -50,6 +51,7 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.DeferredFlow;
 import org.apache.cassandra.utils.flow.Flow;
 
@@ -83,25 +85,60 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
     }
 
-    @VisibleForTesting
-    public static ReadCallback<FlowablePartition> forDigestRead(ReadCommand command, List<InetAddress> targets, ReadContext ctx)
-    {
-        return forResolver(new DigestResolver(command, ctx, targets.size()), targets);
-    }
-
-    public static ReadCallback<FlowablePartition> forDataRead(ReadCommand command, List<InetAddress> targets, ReadContext ctx)
-    {
-        return forResolver(new DataResolver(command, ctx, targets.size()), targets);
-    }
-
     static <T> ReadCallback<T> forResolver(ResponseResolver<T> resolver, List<InetAddress> targets)
     {
         return new ReadCallback<>(resolver, targets);
     }
 
-    static ReadCallback<FlowablePartition> forInitialRead(ReadCommand command, List<InetAddress> targets, ReadContext ctx)
+    // Publicly visible for testing purposes
+    public static ReadCallback<FlowablePartition> forInitialRead(ReadCommand command, List<InetAddress> targets, ReadContext ctx)
     {
-        return ctx.withDigests ? forDigestRead(command, targets, ctx) : forDataRead(command, targets, ctx);
+        return forResolver(ctx.withDigests ? new DigestResolver(command, ctx, targets.size())
+                                           : new DataResolver(command, ctx, targets.size()),
+                           targets);
+    }
+
+    /**
+     * Assuming this callback was for a digest read and the corresponding read resulted in a mismatch, returns a new
+     * callback suitable for a followup full data read, as well as the endpoints that should be queried for said data
+     * read.
+     *
+     * @param targets the target for the data read. This would always be the same as this callback endpoints if not for
+     *                speculative read retries. Namely, the initial digest callback was created including potential
+     *                speculative targets since we _may_ decide to speculate. If we didn't however (meaning that all
+     *                non-speculative endpoints responded quickly, just with non-matching responses), we'll only query
+     *                the non-speculative endpoints for the data read (we're kind of assuming those endpoints are fast
+     *                enough).
+     * @return a pair of the created {@code ReadCallback} and the endpoints to query. The reason we also return the
+     * endpoints to query (instead of directly using the returned callback {@code endpoints} field) is that we reuse the
+     * data response we got on the digest read (APOLLO-368) and so should not query the corresponding node. In other
+     * words, the returned endpoints will be the endpoints of the callback minus one.
+     */
+    Pair<ReadCallback<FlowablePartition>, Collection<InetAddress>> forDigestMismatchRepair(List<InetAddress> targets)
+    {
+        assert resolver instanceof DigestResolver;
+        DigestResolver digestResolver = (DigestResolver)resolver;
+        assert digestResolver.isDataPresent(); // We should only call this method when we got a mismatch, which imply we go
+                                               // the data read (we don't bother comparing any digest until we have it)
+
+        Response<ReadResponse> dataResponse = digestResolver.dataResponse;
+
+        // Create the data read callback and directly feed the already known response
+        ReadCallback<FlowablePartition> callback = forResolver(new DataResolver(command(), readContext(), targets.size()), targets);
+        callback.onResponse(dataResponse);
+        return Pair.create(callback, subtractTarget(targets, dataResponse.from()));
+    }
+
+    private List<InetAddress> subtractTarget(List<InetAddress> targets, InetAddress toSubstract)
+    {
+        assert !targets.isEmpty() : "We shouldn't have got a mismatch with no targets";
+        List<InetAddress> toQuery = new ArrayList<>(targets.size() - 1);
+        for (InetAddress target : targets)
+        {
+            if (!target.equals(toSubstract))
+                toQuery.add(target);
+        }
+        return toQuery;
     }
 
     ReadCommand command()
@@ -267,9 +304,13 @@ public class ReadCallback<T> implements MessageCallback<ReadResponse>
 
             ReadRepairMetrics.repairedBackground.mark();
 
+            // We only run the AsyncRepairRunner when we got a data response, so reuse that response to save work.
+            Response<ReadResponse> dataResponse = ((DigestResolver)resolver).dataResponse;
+            assert dataResponse != null;
             final DataResolver repairResolver = new DataResolver(command(), readContext(), endpoints.size());
             AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
-            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command()), repairHandler);
+            repairHandler.onResponse(dataResponse);
+            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(subtractTarget(endpoints, dataResponse.from()), command()), repairHandler);
         }
     }
 
