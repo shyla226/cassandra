@@ -88,7 +88,7 @@ public abstract class Verbs
         return group;
     }
 
-    static Iterable<VerbGroup<?>> allGroups()
+    public static Iterable<VerbGroup<?>> allGroups()
     {
         return Collections.unmodifiableList(allGroups);
     }

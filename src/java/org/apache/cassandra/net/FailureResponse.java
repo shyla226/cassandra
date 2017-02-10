@@ -75,7 +75,7 @@ public class FailureResponse<Q> extends Response<Q>
     }
 
     @Override
-    void deliverTo(MessageCallback<Q> callback)
+    public void deliverTo(MessageCallback<Q> callback)
     {
         callback.onFailure(this);
     }

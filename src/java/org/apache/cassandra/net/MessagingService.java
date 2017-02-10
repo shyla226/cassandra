@@ -26,7 +26,6 @@ import java.nio.channels.ServerSocketChannel;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -63,6 +62,8 @@ import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ConnectionMetrics;
 import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
+import org.apache.cassandra.net.interceptors.Interceptor;
+import org.apache.cassandra.net.interceptors.Interceptors;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
@@ -73,6 +74,8 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 public final class MessagingService implements MessagingServiceMBean
 {
+    private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
+
     public static final String MBEAN_NAME = "org.apache.cassandra.net:type=MessagingService";
 
     public static final MessagingVersion current_version = MessagingVersion.DSE_60;
@@ -85,6 +88,12 @@ public final class MessagingService implements MessagingServiceMBean
 
     private static final AtomicInteger idGen = new AtomicInteger(0);
 
+    /**
+     * Message interceptors: either populated in the ctor through {@link Interceptors#load(String)}, or programmatically by
+     * calling {@link #addInterceptor}/{@link #clearInterceptors()} for tests.
+     */
+    private final Interceptors messageInterceptors = new Interceptors();
+
     public final MessagingMetrics metrics = new MessagingMetrics();
 
     /* This records all the results mapped by message Id */
@@ -93,7 +102,6 @@ public final class MessagingService implements MessagingServiceMBean
     @VisibleForTesting
     final ConcurrentMap<InetAddress, OutboundTcpConnectionPool> connectionManagers = new NonBlockingHashMap<>();
 
-    private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
     private static final int LOG_DROPPED_INTERVAL_IN_MS = 5000;
 
     private final List<SocketThread> socketThreads = Lists.newArrayList();
@@ -140,9 +148,6 @@ public final class MessagingService implements MessagingServiceMBean
 
     // protocol versions of the other nodes in the cluster
     private final ConcurrentMap<InetAddress, MessagingVersion> versions = new NonBlockingHashMap<>();
-
-    // message sinks are a testing hook
-    private final Set<IMessageSink> messageSinks = new CopyOnWriteArraySet<>();
 
     // back-pressure implementation
     private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();
@@ -206,6 +211,8 @@ public final class MessagingService implements MessagingServiceMBean
                 throw new RuntimeException(e);
             }
         }
+
+        messageInterceptors.load();
     }
 
     private Map<Verb<?, ?>, DroppedMessages> initializeDroppedMessageMap()
@@ -224,19 +231,19 @@ public final class MessagingService implements MessagingServiceMBean
         return builder.build();
     }
 
-    public void addMessageSink(IMessageSink sink)
+    public void addInterceptor(Interceptor interceptor)
     {
-        messageSinks.add(sink);
+        this.messageInterceptors.add(interceptor);
     }
 
-    public void removeMessageSink(IMessageSink sink)
+    public void removeInterceptor(Interceptor interceptor)
     {
-        messageSinks.remove(sink);
+        this.messageInterceptors.remove(interceptor);
     }
 
-    public void clearMessageSinks()
+    public void clearInterceptors()
     {
-        messageSinks.clear();
+        this.messageInterceptors.clear();
     }
 
     static int newMessageId()
@@ -265,7 +272,7 @@ public final class MessagingService implements MessagingServiceMBean
         {
             registerCallback(request, callback);
             updateBackPressureOnSend(request);
-            sendInternal(request, callback);
+            sendRequest(request, callback);
         }
     }
 
@@ -296,27 +303,32 @@ public final class MessagingService implements MessagingServiceMBean
 
     private <P, Q> void deliverLocally(Request<P, Q> request, MessageCallback<Q> callback)
     {
-        Consumer<Response<Q>> onResponse = response ->
+        Consumer<Response<Q>> handleResponse = response ->
         {
             addLatency(request.verb(), request.to(), request.lifetimeMillis());
             response.deliverTo(callback);
         };
+
+        Consumer<Response<Q>> onResponse = messageInterceptors.isEmpty()
+                                           ? handleResponse
+                                           : r -> messageInterceptors.intercept(r, handleResponse, null);
+
         Runnable onAborted = () ->
         {
             Tracing.trace("Discarding partial local response (timed out)");
             MessagingService.instance().incrementDroppedMessages(request);
             callback.onTimeout(FBUtilities.getBroadcastAddress());
         };
-        Runnable runnable = () ->
+        Consumer<Request<P, Q>> consumer = rq ->
         {
-            if (request.isTimedOut())
+            if (rq.isTimedOut())
             {
                 onAborted.run();
                 return;
             }
-            request.execute(onResponse, onAborted);
+            rq.execute(onResponse, onAborted);
         };
-        deliverLocallyInternal(request, callback, runnable);
+        deliverLocallyInternal(request, consumer, callback);
     }
 
     private <P, Q> void registerCallback(Request<P, Q> request, MessageCallback<Q> callback)
@@ -364,7 +376,9 @@ public final class MessagingService implements MessagingServiceMBean
      */
     void forward(ForwardRequest<?, ?> request)
     {
-        sendInternal(request, null);
+        // Note that we don't attempt to intercept requests for which we're just the forwarder. Those will be intercepted
+        // on the final receiver if needs be.
+        sendInternal(request);
     }
 
     /**
@@ -385,7 +399,7 @@ public final class MessagingService implements MessagingServiceMBean
         if (request.isLocal())
             deliverLocallyOneWay(request);
         else
-            sendInternal(request, null);
+            sendRequest(request, null);
     }
 
     /**
@@ -404,7 +418,7 @@ public final class MessagingService implements MessagingServiceMBean
     public void send(OneWayRequest.Dispatcher<?> dispatcher)
     {
         for (OneWayRequest<?> request : dispatcher.remoteRequests())
-            send(request);
+            sendRequest(request, null);
 
         // It is important to deliver the local request last (after other have been sent) because we use
         // LocalAwareExecutorService.maybeExecuteImmediately() which might execute on the current thread and would
@@ -415,7 +429,7 @@ public final class MessagingService implements MessagingServiceMBean
 
     private void deliverLocallyOneWay(OneWayRequest<?> request)
     {
-        deliverLocallyInternal(request, null, request::execute);
+        deliverLocallyInternal(request, r -> r.execute(r.verb().EMPTY_RESPONSE_CONSUMER, () -> {}), null);
     }
 
     /**
@@ -424,32 +438,36 @@ public final class MessagingService implements MessagingServiceMBean
     void reply(Response<?> response)
     {
         Tracing.trace("Enqueuing {} response to {}", response.verb(), response.from());
-        sendInternal(response, null);
+        sendResponse(response);
     }
 
-    private void sendInternal(Message message, MessageCallback<?> callback)
+    private <P, Q> void sendRequest(Request<P, Q> request, MessageCallback<Q> callback)
+    {
+        messageInterceptors.interceptRequest(request, this::sendInternal, callback);
+    }
+
+    private <Q> void sendResponse(Response<Q> response)
+    {
+        messageInterceptors.intercept(response, this::sendInternal, null);
+    }
+
+    private void sendInternal(Message<?> message)
     {
         if (logger.isTraceEnabled())
             logger.trace("Sending {}", message);
-
-        // message sinks are a testing hook
-        for (IMessageSink ms : messageSinks)
-            if (!ms.allowOutgoingMessage(message, callback))
-                return;
-
+        
         getConnection(message).enqueue(message);
     }
 
-    private void deliverLocallyInternal(Request<?, ?> request, MessageCallback<?> callback, Runnable runnable)
+    private <P, Q, M extends Request<P, Q>> void deliverLocallyInternal(M request,
+                                                                        Consumer<M> consumer,
+                                                                        MessageCallback<Q> callback)
     {
-        // message sinks are a testing hook
-        for (IMessageSink ms : messageSinks)
-            if (!ms.allowOutgoingMessage(request, callback))
-                return;
-
-        StageManager.getStage(request.stage()).maybeExecuteImmediately(runnable);
+        messageInterceptors.interceptRequest(request,
+                                             rq -> StageManager.getStage(rq.stage())
+                                                               .maybeExecuteImmediately(() -> consumer.accept(rq)),
+                                             callback);
     }
-
 
     /**
      * Updates the back-pressure state on sending the provided message.
@@ -745,16 +763,16 @@ public final class MessagingService implements MessagingServiceMBean
         }
     }
 
-    public void receive(Message message)
+    public void receive(Message<?> message)
+    {
+        messageInterceptors.intercept(message, this::receiveInternal, this::reply);
+    }
+
+    private void receiveInternal(Message<?> message)
     {
         TraceState state = Tracing.instance.initializeFromMessage(message);
         if (state != null)
             state.trace("{} message received from {}", message.verb(), message.from());
-
-        // message sinks are a testing hook
-        for (IMessageSink ms : messageSinks)
-            if (!ms.allowIncomingMessage(message))
-                return;
 
         StageManager.getStage(message.stage()).execute(new MessageDeliveryTask(message),
                                                        ExecutorLocals.create(state));

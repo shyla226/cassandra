@@ -99,7 +99,7 @@ public class RemoveTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().clearInterceptors();
         MessagingService.instance().clearCallbacksUnsafe();
         MessagingService.instance().shutdown();
     }

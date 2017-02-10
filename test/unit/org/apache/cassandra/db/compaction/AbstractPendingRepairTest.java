@@ -19,7 +19,6 @@
 package org.apache.cassandra.db.compaction;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -31,14 +30,14 @@ import org.junit.Ignore;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.net.interceptors.InterceptionContext;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.net.IMessageSink;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
@@ -65,16 +64,11 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         LocalSessionAccessor.startup();
 
         // cutoff messaging service
-        MessagingService.instance().addMessageSink(new IMessageSink()
+        MessagingService.instance().addInterceptor(new Interceptor()
         {
-            public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
+            public <M extends Message<?>> void intercept(M message, InterceptionContext<M> context)
             {
-                return false;
-            }
-
-            public boolean allowIncomingMessage(Message message)
-            {
-                return false;
+                context.drop(message);
             }
         });
     }

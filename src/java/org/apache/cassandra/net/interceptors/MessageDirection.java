@@ -15,21 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.net;
+package org.apache.cassandra.net.interceptors;
 
-public interface IMessageSink
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+
+/**
+ * The direction of a message in the messaging service.
+ * <p>
+ * On a given host, a message is either being sent ({@link #SENDING}) or being received {@link #RECEIVING}.
+ */
+public enum MessageDirection
 {
-    /**
-     * Allow or drop an outgoing message
-     *
-     * @return true if the message is allowed, false if it should be dropped
-     */
-    boolean allowOutgoingMessage(Message message, MessageCallback<?> callback);
+    SENDING, RECEIVING;
 
-    /**
-     * Allow or drop an incoming message
-     *
-     * @return true if the message is allowed, false if it should be dropped
-     */
-    boolean allowIncomingMessage(Message message);
+    public static ImmutableSet<MessageDirection> all()
+    {
+        return Sets.immutableEnumSet(SENDING, RECEIVING);
+    }
 }

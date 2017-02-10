@@ -34,8 +34,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.net.interceptors.InterceptionContext;
+import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.BufferDecoratedKey;
@@ -45,7 +46,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.net.IMessageSink;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.ValidationComplete;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -83,7 +83,7 @@ public class ValidatorTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().clearInterceptors();
     }
 
     @Test
@@ -217,17 +217,13 @@ public class ValidatorTest
     private CompletableFuture<Message> registerOutgoingMessageSink()
     {
         final CompletableFuture<Message> future = new CompletableFuture<>();
-        MessagingService.instance().addMessageSink(new IMessageSink()
+        MessagingService.instance().addInterceptor(new Interceptor()
         {
-            public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
+            public <M extends Message<?>> void intercept(M message, InterceptionContext<M> context)
             {
-                future.complete(message);
-                return false;
-            }
-
-            public boolean allowIncomingMessage(Message message)
-            {
-                return false;
+                if (context.isSending())
+                    future.complete(message);
+                context.drop(message);
             }
         });
         return future;

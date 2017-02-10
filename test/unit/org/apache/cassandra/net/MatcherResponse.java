@@ -24,6 +24,9 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
+import org.apache.cassandra.net.interceptors.InterceptionContext;
+import org.apache.cassandra.net.interceptors.Interceptor;
+
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
  * The actual behavior by any instance of this class can be inspected by
@@ -35,7 +38,7 @@ public class MatcherResponse
     private final Set<Integer> sendResponses = new HashSet<>();
     private final MockMessagingSpy spy = new MockMessagingSpy();
     private final AtomicInteger limitCounter = new AtomicInteger(Integer.MAX_VALUE);
-    private IMessageSink sink;
+    private Interceptor interceptor;
 
     MatcherResponse(Matcher matcher)
     {
@@ -144,61 +147,59 @@ public class MatcherResponse
     {
         limitCounter.set(limit);
 
-        assert sink == null: "destroy() must be called first to register new response";
+        assert interceptor == null: "destroy() must be called first to register new response";
 
-        sink = new IMessageSink()
+        interceptor = new Interceptor()
         {
-            @SuppressWarnings("unchecked")
-            public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
+            public <M extends Message<?>> void intercept(M message, InterceptionContext<M> context)
             {
-                System.out.println("Caught " + message);
+                if (context.isReceiving() || !message.isRequest())
+                {
+                    context.passDown(message);
+                    return;
+                }
 
-                if (!message.isRequest())
-                    return true;
-
+                @SuppressWarnings("unchecked")
                 Request<T, S> request = (Request<T, S>)message;
 
                 // prevent outgoing message from being send in case matcher indicates a match
                 // and instead send the mocked response
-                if (matcher.matches(request))
+                if (!matcher.matches(request))
                 {
-                    spy.matchingRequest(request);
-
-                    if (limitCounter.decrementAndGet() < 0)
-                        return false;
-
-                    synchronized (sendResponses)
-                    {
-                        // I'm not sure about retry semantics regarding message/ID relationships, but I assume
-                        // sending a message multiple times using the same ID shouldn't happen..
-                        assert message.id() == -1 || !sendResponses.contains(message.id()) : "ID re-use for outgoing message";
-                        sendResponses.add(message.id());
-                    }
-
-                    // create response asynchronously to match request/response communication execution behavior
-                    new Thread(() -> {
-                        Response<S> response = fnResponse.apply(request);
-                        if (response != null)
-                        {
-                            if (callback != null)
-                                ((MessageCallback<S>)callback).onResponse(response);
-                            else
-                                MessagingService.instance().receive(response);
-                            spy.matchingResponse(response);
-                        }
-                    }).start();
-
-                    return false;
+                    context.passDown(message);
+                    return;
                 }
-                return true;
-            }
 
-            public boolean allowIncomingMessage(Message message)
-            {
-                return true;
+                // We're going to response explicitly, so as far as interception goes, we're done with this request.
+                context.drop(message);
+
+                spy.matchingRequest(request);
+
+                if (limitCounter.decrementAndGet() < 0)
+                    return;
+
+                synchronized (sendResponses)
+                {
+                    // I'm not sure about retry semantics regarding message/ID relationships, but I assume
+                    // sending a message multiple times using the same ID shouldn't happen..
+                    assert message.id() == -1 || !sendResponses.contains(message.id()) : "ID re-use for outgoing message";
+                    sendResponses.add(message.id());
+                }
+
+                // create response asynchronously to match request/response communication execution behavior
+                new Thread(() -> {
+                    Response<S> response = fnResponse.apply(request);
+                    // We support null response so one can do something on receiving one-way requests: such function
+                    // will return null but produce some side-effect instead. This could probably be more explicit.
+                    if (response == null)
+                        return;
+
+                    context.responseCallback().accept(response);
+                    spy.matchingResponse(response);
+                }).start();
             }
         };
-        MessagingService.instance().addMessageSink(sink);
+        MessagingService.instance().addInterceptor(interceptor);
 
         return spy;
     }
@@ -208,6 +209,6 @@ public class MatcherResponse
      */
     public void destroy()
     {
-        MessagingService.instance().removeMessageSink(sink);
+        MessagingService.instance().removeInterceptor(interceptor);
     }
 }

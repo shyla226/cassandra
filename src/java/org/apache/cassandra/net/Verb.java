@@ -113,6 +113,14 @@ public abstract class Verb<P, Q>
     }
 
     /**
+     * The name by which this verb can be identified.
+     */
+    public String name()
+    {
+        return info.name;
+    }
+
+    /**
      * The "index" of the verb inside its group. This is only used by groups to make lookups faster and shouldn't be
      * used by any other class than {@link VerbGroup}.
      *
@@ -262,7 +270,7 @@ public abstract class Verb<P, Q>
     {
         // The way the code is made, each verb is it's own singleton object, so reference equality is fine and actually
         // what we want. And the only purpose of this (redundant) definition is to make it clear that this is intended,
-        // especially as Tracing.TRACE_MSG_DEF currently rely on use not really acessing anything of the object.
+        // especially as Tracing.TRACE_MSG_DEF currently rely on us not really accessing anything of the object.
         return this == o;
     }
 

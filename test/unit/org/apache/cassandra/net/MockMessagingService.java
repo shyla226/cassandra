@@ -24,6 +24,8 @@ import java.util.function.Predicate;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.net.interceptors.Interceptor;
+
 /**
  * Starting point for mocking {@link MessagingService} interactions. Outgoing messages can be
  * intercepted by first creating a {@link MatcherResponse} by calling {@link MockMessagingService#when(Matcher)}.
@@ -49,12 +51,12 @@ public class MockMessagingService
     }
 
     /**
-     * Unsubscribes any handlers added by calling {@link MessagingService#addMessageSink(IMessageSink)}.
+     * Unsubscribes any handlers added by calling {@link MessagingService#addInterceptor(Interceptor)}.
      * This should be called after each test.
      */
     public static void cleanup()
     {
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().clearInterceptors();
     }
 
     /**

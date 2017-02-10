@@ -36,6 +36,7 @@ import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Response;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 /**
@@ -117,13 +118,14 @@ final class HintsDispatcher implements AutoCloseable
         Collection<Callback> callbacks = new ArrayList<>();
 
         /*
-         * If hints file messaging version matches the version of the target host, we'll use the optimised path -
-         * skipping the redundant decoding/encoding cycle of the already encoded hint.
+         * If hints file messaging version matches the version of the target host (and we're not delivering to the
+         * localhost), we'll use the optimised path - skipping the redundant decoding/encoding cycle of the already
+         * encoded hint.
          *
          * If that is not the case, we'll need to perform conversion to a newer (or an older) format, and decoding the hint
          * is an unavoidable intermediate step.
          */
-        Action action = reader.descriptor().version == version
+        Action action = reader.descriptor().version == version && !address.equals(FBUtilities.getBroadcastAddress())
                       ? sendHints(page.buffersIterator(), callbacks, this::sendEncodedHint)
                       : sendHints(page.hintsIterator(), callbacks, this::sendHint);
 
