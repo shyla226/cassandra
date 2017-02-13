@@ -24,6 +24,7 @@ import io.netty.buffer.ByteBuf;
 
 import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
+import org.apache.cassandra.cql3.selection.SelectionColumns;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
@@ -743,7 +744,7 @@ public class ResultSet
      * primary columns, as well as complex columns and ignores disk format overheads.
      * @return - an estimated size of a CQL row.
      */
-    public static int estimatedRowSize(TableMetadata cfm, List<ColumnMetadata> columns)
+    public static int estimatedRowSize(TableMetadata cfm, SelectionColumns columns)
     {
         ColumnFamilyStore cfs = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
 
@@ -752,7 +753,7 @@ public class ResultSet
                                   : cfs.getMeanPartitionSize());
 
         int ret = 0;
-        for (ColumnMetadata def : columns)
+        for (ColumnSpecification def : columns.getColumnSpecifications())
         {
             int fixedLength = def.type.valueLengthIfFixed();
             ret += CBUtil.sizeOfValue(fixedLength > 0 ? fixedLength : avgColumnSize);

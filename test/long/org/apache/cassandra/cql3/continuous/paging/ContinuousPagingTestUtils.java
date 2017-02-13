@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -31,21 +32,23 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.collect.Lists;
 import org.junit.Assert;
 import org.junit.Ignore;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.driver.core.AsyncContinuousPagingResult;
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.ColumnDefinitions;
+import com.datastax.driver.core.ContinuousPagingSession;
 import com.datastax.driver.core.NettyOptions;
 import com.datastax.driver.core.ContinuousPagingOptions;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
-import com.datastax.driver.core.RowIterator;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
@@ -424,6 +427,7 @@ class ContinuousPagingTestUtils
         int maxPagesPerSecond; // we ask the server to send at most max pages per second
         int cancelAfter; // send a cancel after this number of pages
         int failAfter = -1; // we expect a failure after this number of pages
+        Class<? extends Throwable> exception; // we expect an exception
 
         TestBuilder(CQLTester tester)
         {
@@ -524,6 +528,12 @@ class ContinuousPagingTestUtils
             return this;
         }
 
+        TestBuilder exception(Class<? extends Throwable> exception)
+        {
+            this.exception = exception;
+            return this;
+        }
+
         TestSchema buildSchema() throws Throwable
         {
             if (schema != null)
@@ -554,6 +564,7 @@ class ContinuousPagingTestUtils
         private final int maxPagesPerSecond;
         private final int cancelAfter;
         private final int failAfter;
+        private final Class<? extends Throwable> exception;
         private final Cluster cluster;
         private final Session session;
 
@@ -571,6 +582,7 @@ class ContinuousPagingTestUtils
             this.maxPagesPerSecond = builder.maxPagesPerSecond;
             this.cancelAfter = builder.cancelAfter;
             this.failAfter = builder.failAfter;
+            this.exception = builder.exception;
             this.cluster = CQLTester.createClientCluster(protocolVersion,
                                                          String.format("Test cluster %d", clusterNo.incrementAndGet()),
                                                          new CustomNettyOptions(numClientThreads));
@@ -621,43 +633,40 @@ class ContinuousPagingTestUtils
 
                 final CheckResultSet checker = new CheckResultSet(pageSize, pageUnit);
 
-                ContinuousPagingOptions pagingOptions = ContinuousPagingOptions.create(pageSize, pageUnit, maxPages, maxPagesPerSecond);
-                try(RowIterator it = session.execute(statement, pagingOptions))
+                ContinuousPagingOptions pagingOptions = ContinuousPagingOptions.builder()
+                        .withPageSize(pageSize, pageUnit)
+                        .withMaxPages(maxPages)
+                        .withMaxPagesPerSecond(maxPagesPerSecond)
+                        .build();
+
+                int expectedPage = 1;
+
+                try
                 {
-                    int currentPage = it.pageNo();
-                    assertEquals(0, currentPage);
+                    AsyncContinuousPagingResult result = ((ContinuousPagingSession) session).executeContinuouslyAsync(statement, pagingOptions).get();
 
-                    List<Row> rows = new ArrayList<>(pageUnit == ContinuousPagingOptions.PageUnit.ROWS ? pageSize : 1000);
-                    while (it.hasNext())
+                    while (true)
                     {
-                        if (currentPage != it.pageNo())
+                        assertEquals(expectedPage, result.pageNumber());
+
+                        checker.checkPage(Lists.newArrayList(result.currentPage()), result.getColumnDefinitions());
+
+                        if (result.isLast() || cancelAfter > 0 && expectedPage >= cancelAfter)
                         {
-                            assertEquals(currentPage + 1, it.pageNo());
-
-                            if (rows.size() > 0)
-                            {
-                                checker.checkPage(rows, it.getColumnDefinitions());
-
-                                if (cancelAfter > 0 && currentPage >= cancelAfter)
-                                    break;
-
-                                maybePauseClient();
-                            }
-                            else
-                            {
-                                // zero means no page, this is the only case where we are OK with no rows
-                                assertEquals(0, currentPage);
-                            }
-
-
-                            currentPage = it.pageNo();
+                            break;
                         }
-
-                        rows.add(it.next());
+                        else
+                        {
+                            expectedPage += 1;
+                            maybePauseClient();
+                            result = result.nextPage().get();
+                        }
                     }
-
-                    if (rows.size() > 0)
-                        checker.checkPage(rows, it.getColumnDefinitions());
+                }
+                catch (ExecutionException ex)
+                {
+                    checker.checkError(ex.getCause(), expectedPage);
+                    break;
                 }
 
                 checker.checkAll();
@@ -687,80 +696,72 @@ class ContinuousPagingTestUtils
 
             final CheckResultSet checker = new CheckResultSet(pageSize, pageUnit);
 
-            ContinuousPagingOptions pagingOptions = ContinuousPagingOptions.create(pageSize, pageUnit, maxPages, maxPagesPerSecond);
+            ContinuousPagingOptions pagingOptions = ContinuousPagingOptions.builder()
+                    .withPageSize(pageSize, pageUnit)
+                    .withMaxPages(maxPages)
+                    .withMaxPagesPerSecond(maxPagesPerSecond)
+                    .build();
 
-            RowIterator.State state = null;
-            int num = 0;
-            List<Row> rows = new ArrayList<>(pageUnit == ContinuousPagingOptions.PageUnit.ROWS ? pageSize : 1000);
+            AsyncContinuousPagingResult result;
+            byte[] pagingState = null;
+            int rowIndex = 0;
 
             for (int interruptAt : interruptions)
             {
-                try(RowIterator it = state == null ? session.execute(statement, pagingOptions) : state.resume())
+                if (pagingState != null)
+                    statement.setPagingStateUnsafe(pagingState);
+
+                result = ((ContinuousPagingSession) session).executeContinuouslyAsync(statement, pagingOptions).get();
+                int expectedPage = 1;
+                while (true)
                 {
-                    int currentPage = it.pageNo();
-                    logger.debug("Current page {}, rows {}, interrupting at {}", currentPage, rows.size(), interruptAt);
+                    assertEquals(expectedPage, result.pageNumber());
+                    List<Row> rows = Lists.newArrayList(result.currentPage());
+                    rowIndex += rows.size();
+                    logger.debug("Current page {}, rows {}, interrupting at {}", expectedPage, rows.size(), interruptAt);
+                    checker.checkPage(rows, result.getColumnDefinitions());
 
-                    if (state == null)
-                        assertEquals(0, currentPage);
-                    else
-                        assertTrue(String.format("Current page: %d, rows %d", currentPage, rows.size()),
-                                   currentPage == 0 || currentPage == 1);
-
-                    while (it.hasNext() && num < interruptAt)
+                    if (rowIndex >= interruptAt)
                     {
-                        if (currentPage != it.pageNo())
-                        {
-                            assertEquals(currentPage + 1, it.pageNo());
-                            if (rows.size() > 0)
-                            {
-                                checker.checkPage(rows, it.getColumnDefinitions());
-                            }
-                            else
-                            {
-                                assertEquals(0, currentPage);
-                            }
-                            currentPage = it.pageNo();
-                        }
-
-                        rows.add(it.next());
-                        num++;
+                        result.cancel();
+                        pagingState = result.getExecutionInfo().getPagingStateUnsafe();
+                        break;
                     }
-
-                    if ((rows.size() > 0 && pageUnit == ContinuousPagingOptions.PageUnit.BYTES) || rows.size() == pageSize)
-                        checker.checkPage(rows, it.getColumnDefinitions());
-
-                    state = it.state();
+                    else if (result.isLast())
+                    {
+                        throw new AssertionError(String.format(
+                                "Reached last page before last pause, check that interruptions are set correctly " +
+                                " (page=%d, rows=%d, interruptAt=%d)", expectedPage, rowIndex, interruptAt));
+                    }
+                    else
+                    {
+                        result = result.nextPage().get();
+                        expectedPage += 1;
+                    }
                 }
             }
 
-            if (state != null)
+            if (pagingState != null)
             {
-                try(RowIterator it = state.resume())
+                statement.setPagingStateUnsafe(pagingState);
+                result = ((ContinuousPagingSession) session).executeContinuouslyAsync(statement, pagingOptions).get();
+                int expectedPage = 1;
+                while (true)
                 {
-                    int currentPage = it.pageNo();
-                    logger.debug("Current page {}, rows {}, final iteration", currentPage, rows.size());
+                    assertEquals(expectedPage, result.pageNumber());
+                    List<Row> rows = Lists.newArrayList(result.currentPage());
+                    logger.debug("Current page {}, rows {}, final iteration", expectedPage, rows.size());
+                    checker.checkPage(rows, result.getColumnDefinitions());
 
-                    assertTrue(String.format("Current page: %d, rows %d", currentPage, rows.size()),
-                               currentPage == 0 || currentPage == 1);
-
-                    while (it.hasNext())
+                    if (result.isLast())
                     {
-                        if (currentPage != it.pageNo())
-                        {
-                            assertEquals(currentPage + 1, it.pageNo());
-                            if (rows.size() > 0)
-                                checker.checkPage(rows, it.getColumnDefinitions());
-                            else
-                                assertEquals(0, currentPage);
-
-                            currentPage = it.pageNo();
-                        }
-
-                        rows.add(it.next());
+                        break;
                     }
-
-                    if (rows.size() > 0)
-                        checker.checkPage(rows, it.getColumnDefinitions());
+                    else
+                    {
+                        result = result.nextPage().get();
+                        expectedPage += 1;
+                    }
                 }
             }
 
@@ -861,15 +862,16 @@ class ContinuousPagingTestUtils
                 pageRows.clear();
             }
 
+            private void checkError(Throwable t, int expectedPageNum)
+            {
+                assertTrue(exception != null);
+                assertEquals(exception, t.getClass());
+                assertEquals(failAfter, numPagesReceived);
+                assertEquals(numPagesReceived, expectedPageNum - 1);
+            }
+
             private void checkAll()
             {
-                if (failAfter >= 0)
-                {   // check that if the server was supposed to fail after failAfterPages, we haven't received any
-                    // extra pages
-                    assertEquals(failAfter, numPagesReceived);
-                    return;
-                }
-
                 if (maxPages > 0)
                 { // check that we've received exactly the number of pages requested
                     assertFalse("Cannot check rows if receiving fewer pages", checkRows);

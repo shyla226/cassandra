@@ -137,7 +137,7 @@ public class PageSize
      */
     public int inEstimatedRows(int avgRowSize)
     {
-        assert avgRowSize > 0;
+        assert unit == PageUnit.ROWS || avgRowSize > 0;
         return unit == PageUnit.ROWS
              ? size
              : Math.max(1, size / avgRowSize);
@@ -159,7 +159,7 @@ public class PageSize
      */
     public int inEstimatedBytes(int avgRowSize)
     {
-        assert avgRowSize > 0;
+        assert unit == PageUnit.BYTES || avgRowSize > 0;
         return unit == PageUnit.BYTES
              ? size
              : size * avgRowSize;
