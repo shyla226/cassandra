@@ -58,6 +58,7 @@ Backported from 4.0:
  * More fixes to the TokenAllocator (CASSANDRA-12990)
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
 Merged from 3.0:
+ * Add repaired percentage metric (Backport CASSANDRA-11503)
  * Add vm.max_map_count StartupCheck (CASSANDRA-13008)
  * Hint related logging should include the IP address of the destination in addition to
    host ID (CASSANDRA-13205)
@@ -65,6 +66,7 @@ Merged from 3.0:
  * Lightweight transactions temporarily fail after upgrade from 2.1 to 3.0 (CASSANDRA-13109)
  * Duplicate rows after upgrading from 2.1.16 to 3.0.10/3.9 (CASSANDRA-13125)
  * Fix UPDATE queries with empty IN restrictions (CASSANDRA-13152)
+ * Abort or retry on failed hints delivery (CASSANDRA-13124)
  * Fix handling of partition with partition-level deletion plus
    live rows in sstabledump (CASSANDRA-13177)
  * Provide user workaround when system_schema.columns does not contain entries
