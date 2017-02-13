@@ -35,10 +35,7 @@ import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.ArrayBackedRow;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
@@ -79,32 +76,6 @@ public class OutOfSpaceTest extends CQLTester
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.die);
             flushAndExpectError(FSWriteError.class);
-            Assert.assertTrue(killerForTests.wasKilled());
-            Assert.assertFalse(killerForTests.wasKilledQuietly()); //only killed quietly on startup failure
-        }
-        finally
-        {
-            DatabaseDescriptor.setDiskFailurePolicy(oldPolicy);
-            JVMStabilityInspector.replaceKiller(originalKiller);
-        }
-    }
-
-    @Test
-    public void testFlushAssertionErrorDie() throws Throwable
-    {
-        makeTable();
-
-        KillerForTests killerForTests = new KillerForTests();
-        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
-        DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
-        try
-        {
-            DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.ignore);  // we should always die on assertion errors
-            Mutation m = new Mutation(PartitionUpdate.singleRowUpdate(currentTableMetadata(),
-                                                                      Util.dk("broken"),
-                                                                      ArrayBackedRow.emptyRow(Util.clustering(currentTableMetadata().comparator, "col"))));
-            m.applyUnsafe();
-            flushAndExpectError(AssertionError.class);
             Assert.assertTrue(killerForTests.wasKilled());
             Assert.assertFalse(killerForTests.wasKilledQuietly()); //only killed quietly on startup failure
         }
