@@ -1,4 +1,5 @@
 DSE 5.1.0
+ * Update internal DSE driver and fix formatting for Duration type (APOLLO-417)
  * Replace open source Python driver with Datastax Enterprise driver (APOLLO-349)
  * Fix OutOfSpaceTest broken by APOLLO-227 (APOLLO-350)
  * Allow to add IndexRestrictions to SelectStatement in an immutable way (APOLLO-323)
