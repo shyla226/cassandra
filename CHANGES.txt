@@ -50,6 +50,7 @@ Backported from 4.0:
 
 
 3.11.0
+ * Obfuscate password in stress-graphs (CASSANDRA-12233)
  * Move to FastThreadLocalThread and FastThreadLocal (CASSANDRA-13034)
  * nodetool stopdaemon errors out (CASSANDRA-13030)
  * Tables in system_distributed should not use gcgs of 0 (CASSANDRA-12954)
@@ -57,6 +58,10 @@ Backported from 4.0:
  * More fixes to the TokenAllocator (CASSANDRA-12990)
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
 Merged from 3.0:
+ * Add vm.max_map_count StartupCheck (CASSANDRA-13008)
+ * Hint related logging should include the IP address of the destination in addition to
+   host ID (CASSANDRA-13205)
+ * Reloading logback.xml does not work (CASSANDRA-13173)
  * Lightweight transactions temporarily fail after upgrade from 2.1 to 3.0 (CASSANDRA-13109)
  * Duplicate rows after upgrading from 2.1.16 to 3.0.10/3.9 (CASSANDRA-13125)
  * Fix UPDATE queries with empty IN restrictions (CASSANDRA-13152)
@@ -64,7 +69,12 @@ Merged from 3.0:
    live rows in sstabledump (CASSANDRA-13177)
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
-
+Merged from 2.2:
+ * Fix negative mean latency metric (CASSANDRA-12876)
+ * Use only one file pointer when creating commitlog segments (CASSANDRA-12539)
+Merged from 2.1:
+ * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
+ * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
 
 3.10
  * Fix secondary index queries regression (CASSANDRA-13013)
@@ -295,6 +305,7 @@ Merged from 2.2:
  * Enable repair -pr and -local together (fix regression of CASSANDRA-7450) (CASSANDRA-12522)
  * Split consistent range movement flag correction (CASSANDRA-12786)
 Merged from 2.1:
+ * Upgrade netty version to fix memory leak with client encryption (CASSANDRA-13114)
  * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
  * Don't skip sstables based on maxLocalDeletionTime (CASSANDRA-12765)
 
