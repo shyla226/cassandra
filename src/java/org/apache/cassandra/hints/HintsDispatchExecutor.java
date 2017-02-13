@@ -149,11 +149,12 @@ final class HintsDispatchExecutor
         public void run()
         {
             UUID hostId = hostIdSupplier.get();
-            logger.info("Transferring all hints to {}", hostId);
+            InetAddress address = StorageService.instance.getEndpointForHostId(hostId);
+            logger.info("Transferring all hints to {}: {}", address, hostId);
             if (transfer(hostId))
                 return;
 
-            logger.warn("Failed to transfer all hints to {}; will retry in {} seconds", hostId, 10);
+            logger.warn("Failed to transfer all hints to {}: {}; will retry in {} seconds", address, hostId, 10);
 
             try
             {
@@ -165,10 +166,10 @@ final class HintsDispatchExecutor
             }
 
             hostId = hostIdSupplier.get();
-            logger.info("Transferring all hints to {}", hostId);
+            logger.info("Transferring all hints to {}: {}", address, hostId);
             if (!transfer(hostId))
             {
-                logger.error("Failed to transfer all hints to {}", hostId);
+                logger.error("Failed to transfer all hints to {}: {}", address, hostId);
                 throw new RuntimeException("Failed to transfer all hints to " + hostId);
             }
         }
@@ -274,7 +275,7 @@ final class HintsDispatchExecutor
                     store.recordDispatchSuccess();
                     store.delete(descriptor);
                     store.cleanUp(descriptor);
-                    logger.info("Finished hinted handoff of file {} to endpoint {}", descriptor.fileName(), hostId);
+                    logger.info("Finished hinted handoff of file {} to endpoint {}: {}", descriptor.fileName(), address, hostId);
                     return true;
                 }
                 else
@@ -282,7 +283,7 @@ final class HintsDispatchExecutor
                     store.recordDispatchFailure();
                     store.markDispatchOffset(descriptor, dispatcher.dispatchPosition());
                     store.offerFirst(descriptor);
-                    logger.info("Finished hinted handoff of file {} to endpoint {}, partially", descriptor.fileName(), hostId);
+                    logger.info("Finished hinted handoff of file {} to endpoint {}: {}, partially", descriptor.fileName(), address, hostId);
                     return false;
                 }
             }
