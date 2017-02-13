@@ -8,6 +8,13 @@ DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
  * Add repaired percentage metric (Backport CASSANDRA-11503)
 Merged from 3.0.X
+ * Add vm.max_map_count StartupCheck (CASSANDRA-13008)
+ * Hint related logging should include the IP address of the destination in addition to 
+   host ID (CASSANDRA-13205)
+ * Reloading logback.xml does not work (CASSANDRA-13173)
+ * Lightweight transactions temporarily fail after upgrade from 2.1 to 3.0 (CASSANDRA-13109)
+ * Duplicate rows after upgrading from 2.1.16 to 3.0.10/3.9 (CASSANDRA-13125)
+ * Fix UPDATE queries with empty IN restrictions (CASSANDRA-13152)
  * Abort or retry on failed hints delivery (CASSANDRA-13124)
  * Fix handling of partition with partition-level deletion plus
    live rows in sstabledump (CASSANDRA-13177)
@@ -35,6 +42,10 @@ Merged from 2.2:
  * cqlsh copy-from: encode column names to avoid primary key parsing errors (CASSANDRA-12909)
  * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
 Merged from 2.1:
+ * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
+ * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
+ * Upgrade netty version to fix memory leak with client encryption (CASSANDRA-13114)
+ * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
  * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
 
 DSE 5.0.5
@@ -53,6 +64,8 @@ Merged from 3.0.X
  * Prevent reloading of logback.xml from UDF sandbox (CASSANDRA-12535)
  * Reenable HeapPool (CASSANDRA-12900)
 Merged from 2.2:
+ * Fix negative mean latency metric (CASSANDRA-12876)
+ * Use only one file pointer when creating commitlog segments (CASSANDRA-12539)
  * Fix speculative retry bugs (CASSANDRA-13009)
  * Fix handling of nulls and unsets in IN conditions (CASSANDRA-12981)
  * Fix race causing infinite loop if Thrift server is stopped before it starts listening (CASSANDRA-12856)
@@ -69,7 +82,6 @@ Merged from 2.2:
  * Fix leak on skipped SSTables in sstableupgrade (CASSANDRA-12899)
  * Avoid blocking gossip during pending range calculation (CASSANDRA-12281)
  * Fix purgeability of tombstones with max timestamp (CASSANDRA-12792)
-
  * Fail repair if participant dies during sync or anticompaction (CASSANDRA-12901)
 
 
