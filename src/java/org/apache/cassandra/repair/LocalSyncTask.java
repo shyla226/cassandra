@@ -18,9 +18,12 @@
 package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +40,7 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.RangeHash;
 
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
@@ -52,7 +56,13 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
     public LocalSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, long repairedAt,
                          Executor taskExecutor, SyncTask next)
     {
-        super(desc, r1, r2, taskExecutor, next);
+        this(desc, r1, r2, repairedAt, taskExecutor, next, Collections.EMPTY_MAP);
+    }
+
+    public LocalSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, long repairedAt,
+                         Executor taskExecutor, SyncTask next, Map<InetAddress, Set<RangeHash>> receivedRangeCache)
+    {
+        super(desc, r1, r2, taskExecutor, next, receivedRangeCache);
         this.repairedAt = repairedAt;
     }
 
@@ -60,14 +70,20 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
      * Starts sending/receiving our list of differences to/from the remote endpoint: creates a callback
      * that will be called out of band once the streams complete.
      */
-    protected void startSync(List<Range<Token>> differences)
+    protected void startSync(List<Range<Token>> transferToLeft, List<Range<Token>> transferToRight)
     {
         InetAddress local = FBUtilities.getBroadcastAddress();
         // We can take anyone of the node as source or destination, however if one is localhost, we put at source to avoid a forwarding
         InetAddress dst = r2.endpoint.equals(local) ? r1.endpoint : r2.endpoint;
+        List<Range<Token>> toRequest = r2.endpoint.equals(local) ? transferToRight : transferToLeft;
+        List<Range<Token>> toTransfer = r2.endpoint.equals(local) ? transferToLeft : transferToRight;
+
         InetAddress preferred = SystemKeyspace.getPreferredIP(dst);
 
-        String message = String.format("Performing streaming repair of %d ranges with %s", differences.size(), dst);
+        String message = String.format("Performing streaming repair of %d ranges to %s%s",
+                                       transferToLeft.size(), transferToLeft.size() != transferToRight.size()?
+                                                              String.format(" and %d ranges from", transferToRight.size()) : "",
+                                       dst);
         logger.info("[repair #{}] {}", desc.sessionId, message);
         boolean isIncremental = false;
         if (desc.parentSessionId != null)
@@ -79,9 +95,9 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
         new StreamPlan("Repair", repairedAt, 1, false, isIncremental).listeners(this)
                                             .flushBeforeTransfer(true)
                                             // request ranges from the remote node
-                                            .requestRanges(dst, preferred, desc.keyspace, differences, desc.columnFamily)
+                                            .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily)
                                             // send ranges to the remote node
-                                            .transferRanges(dst, preferred, desc.keyspace, differences, desc.columnFamily)
+                                            .transferRanges(dst, preferred, desc.keyspace, toTransfer, desc.columnFamily)
                                             .execute();
     }
 

@@ -20,6 +20,8 @@ package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -60,10 +62,10 @@ public class LocalSyncTaskTest extends SchemaLoader
 
         public TestSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, Executor taskExecutor, SyncTask next)
         {
-            super(desc, r1, r2, taskExecutor, next);
+            super(desc, r1, r2, taskExecutor, next, new HashMap<>());
         }
 
-        protected void startSync(List<Range<Token>> differences)
+        protected void startSync(List<Range<Token>> leftDiff, List<Range<Token>> rightDiff)
         {
             finished = true;
         }

@@ -20,6 +20,7 @@ package org.apache.cassandra.utils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.AbstractIterator;
@@ -377,10 +378,19 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
      */
     public static List<Range<Token>> difference(MerkleTrees ltree, MerkleTrees rtree)
     {
-        List<Range<Token>> differences = new ArrayList<>();
+        List<MerkleTree.TreeDifference> diff = diff(ltree, rtree);
+        List<Range<Token>> result = new ArrayList<>();
+        result.addAll(diff);
+        return result;
+
+    }
+
+    public static List<MerkleTree.TreeDifference> diff(MerkleTrees ltree, MerkleTrees rtree)
+    {
+        List<MerkleTree.TreeDifference> differences = new ArrayList<>();
         for (MerkleTree tree : ltree.merkleTrees.values())
         {
-            differences.addAll(MerkleTree.difference(tree, rtree.getMerkleTree(tree.fullRange)));
+            differences.addAll(MerkleTree.diff(tree, rtree.getMerkleTree(tree.fullRange)));
         }
         return differences;
     }
