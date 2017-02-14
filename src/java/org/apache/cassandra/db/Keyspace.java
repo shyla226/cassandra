@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
@@ -38,6 +39,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -85,11 +87,32 @@ public class Keyspace
     private volatile AbstractReplicationStrategy replicationStrategy;
     public final ViewManager viewManager;
 
+    /**
+     * The keyspace transformer is kept for backward compatibility and will be dropped in 4.0.
+     * It is not safe to use for keyspaces that may be dropped, since a race whilst dropping the keyspace
+     * may cause Keyspace.open to throw an exception. The transformer will catch exceptions and will
+     * return a null keyspace, previously it would have propagated the exception, including an AssertionError.
+     */
+    @Deprecated
     public static final Function<String,Keyspace> keyspaceTransformer = new Function<String, Keyspace>()
     {
         public Keyspace apply(String keyspaceName)
         {
-            return Keyspace.open(keyspaceName);
+            try
+            {
+                return Keyspace.open(keyspaceName);
+            }
+            catch (UnknownKeyspaceException ex)
+            {
+                logger.info("Could not open keyspace {}, it was probably dropped.", ex.keyspaceName);
+                return null;
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.error("Failed to open keyspace {} due to unexpected exception", keyspaceName, t);
+                return null;
+            }
         }
     };
 
@@ -318,13 +341,22 @@ public class Keyspace
     private Keyspace(String keyspaceName, boolean loadSSTables)
     {
         metadata = Schema.instance.getKSMetaData(keyspaceName);
-        assert metadata != null : "Unknown keyspace " + keyspaceName;
+        // with the current synchronization mechanism, the ks metadata may disappear whilst
+        // opening a keyspace. I think keyspace creation (and deletion) should be synchronized
+        // differently, i.e. using the same lock for modifying the schema (SystemKeyspace.class)
+        // in 5.1.
+        if (metadata == null)
+            throw new UnknownKeyspaceException(keyspaceName);
+
         createReplicationStrategy(metadata);
 
         this.metric = new KeyspaceMetrics(this);
         this.viewManager = new ViewManager(this);
         for (CFMetaData cfm : metadata.tablesAndViews())
         {
+            if (cfm == null) // unsure how this can happen but it did (APOLLO-395)
+                throw new IllegalStateException("Unexpected null metadata for keyspace " + keyspaceName);
+
             logger.trace("Initializing {}.{}", getName(), cfm.cfName);
             initCf(cfm, loadSSTables);
         }
@@ -690,22 +722,56 @@ public class Keyspace
 
     public static Iterable<Keyspace> all()
     {
-        return Iterables.transform(Schema.instance.getKeyspaces(), keyspaceTransformer);
+        return toKeyspaces(Schema.instance.getKeyspaces());
     }
 
     public static Iterable<Keyspace> nonSystem()
     {
-        return Iterables.transform(Schema.instance.getNonSystemKeyspaces(), keyspaceTransformer);
+        return toKeyspaces(Schema.instance.getNonSystemKeyspaces());
     }
 
     public static Iterable<Keyspace> nonLocalStrategy()
     {
-        return Iterables.transform(Schema.instance.getNonLocalStrategyKeyspaces(), keyspaceTransformer);
+        return toKeyspaces(Schema.instance.getNonLocalStrategyKeyspaces());
     }
 
     public static Iterable<Keyspace> system()
     {
-        return Iterables.transform(Schema.SYSTEM_KEYSPACE_NAMES, keyspaceTransformer);
+        return toKeyspaces(Schema.SYSTEM_KEYSPACE_NAMES);
+    }
+
+    /**
+     * Convert a list of ks names to ks instances, if possible. If we fail to open the ks,
+     * it is suppressed. Even though we receive ksName for keyspaces with valid metadata, if
+     * there is a race with dropping the keyspace, the metadata and ks instance may be deleted
+     * after the ks names were returned, see APOLLO-395.
+     *
+     * @param ksNames - the list of keyspace names to convert
+     *
+     * @return - the list of keyspace instances, may be empty
+     */
+    private static Iterable<Keyspace> toKeyspaces(Collection<String> ksNames)
+    {
+        return ksNames.stream()
+                      .map(ksName -> {
+                          try
+                          {
+                              return Keyspace.open(ksName);
+                          }
+                          catch (UnknownKeyspaceException ex)
+                          {
+                              logger.info("Could not open keyspace {}, it was probably dropped.", ex.keyspaceName);
+                              return null;
+                          }
+                          catch (Throwable t)
+                          {
+                              JVMStabilityInspector.inspectThrowable(t);
+                              logger.error("Failed to open keyspace {} due to unexpected exception", ksName, t);
+                              return null;
+                          }
+                      })
+                      .filter(Objects::nonNull)
+                      .collect(Collectors.toList());
     }
 
     @Override

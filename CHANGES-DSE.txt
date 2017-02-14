@@ -1,4 +1,5 @@
 DSE 5.0.8
+ * Handle missing metadata when opening a keyspace (APOLLO-395)
  * Bounded range splitting token allocation for first RF nodes (APOLLO-121)
  * Backport CASSANDRA-12858: Add the range limit for the split ratio in PartitionerTestCase (APOLLO-121)
  * Partial backport of token splitting from CASSANDRA-12777: Implement the NoReplicationTokenAllocator (APOLLO-121)
