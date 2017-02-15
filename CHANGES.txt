@@ -8,6 +8,7 @@ DSE 5.0.6
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
  * Add repaired percentage metric (Backport CASSANDRA-11503)
 Merged from 3.0.X
+ * Use keyspace replication settings on system.size_estimates table (CASSANDRA-9639)
  * Add vm.max_map_count StartupCheck (CASSANDRA-13008)
  * Hint related logging should include the IP address of the destination in addition to 
    host ID (CASSANDRA-13205)
