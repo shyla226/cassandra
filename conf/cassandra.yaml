@@ -1229,7 +1229,7 @@ back_pressure_strategy:
 # Do not try to coalesce messages if we already got that many messages. This should be more than 2 and less than 128.
 # otc_coalescing_enough_coalesced_messages: 8
 
-# Continous paging settings. When requested by the client, pages are pushed continously to the client.
+# Continuous paging settings. When requested by the client, pages are pushed continuously to the client.
 # Use these settings to control continuous paging parameters such as the maximum memory used,
 # (max_concurrent_sessions * max_session_pages * max_page_size_mb, by default 24 x 4 x 8 = 768 mb),
 # the maximum number of threads and the maximum duration for local queries.
@@ -1244,15 +1244,12 @@ back_pressure_strategy:
 ##   if you have high write workloads on tables for which there are continuous paging requests. Setting
 ##   max_client_wait_time_ms to a value which is too low may however results in errors client side.
 ## - if there are fewer threads than sessions (max_threads < max_concurrent_sessions) then a session
-##   may not execute until another one is swapped out, which by default can take up to
-##   max_local_query_time_ms + max_client_wait_time_ms. Therefore, unless you have a valid
-##   reason to decrease the number of threads, leave max_threads commented out or set it to the same value as
-##   max_concurrent_sessions. Distributed queries (CL > ONE or non local data) are swapped out after every page,
-##   whist local queries are swapped out after max_local_query_time_ms, but if the client is not reding this
-##   may be delayed up to max_client_wait_time_ms.
+##   may not execute until another one is swapped out. Distributed queries (CL > ONE or non local data)
+##   are swapped out after every page, whilst local queries are swapped out after max_local_query_time_ms,
+##   but if the client is not reading this may be delayed up to max_client_wait_time_ms.
 continuous_paging:
     # The maximum number of concurrent sessions, any additional session will be rejected with an unavailable error.
-    max_concurrent_sessions: 24
+    max_concurrent_sessions: 60
     # The maximum number of pages that can be buffered for each session
     max_session_pages: 4
     # The maximum size of a page, in mb
@@ -1264,7 +1261,6 @@ continuous_paging:
     # the session is swapped out and rescheduled. This is required to ensure we release the resources and do
     # not prevent memtables from flushing. The swapping out is to ensure fairness if max_threads < max_concurrent_sessions.
     max_local_query_time_ms: 5000
-    # The number of threads dedicated to continuous paging sessions, this should be the same as max_concurrent_sessions
-    # for optimal performance, see note above.
-    # max_threads: max_concurrent_sessions
+    # The number of threads dedicated to continuous paging sessions
+    max_threads: 24
 

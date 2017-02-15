@@ -1482,7 +1482,7 @@ public class DatabaseDescriptor
 
     public static int getContinuousPagingThreads()
     {
-        return conf.continuous_paging.getNumThreads();
+        return conf.continuous_paging.max_threads;
     }
 
     public static int getConcurrentWriters()
