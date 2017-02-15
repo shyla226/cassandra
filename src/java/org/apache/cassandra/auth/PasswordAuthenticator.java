@@ -23,7 +23,9 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BiFunction;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.UncheckedExecutionException;
@@ -192,22 +194,26 @@ public class PasswordAuthenticator implements IAuthenticator
         legacyAuthenticateStatement = prepare(query);
     }
 
-    public AuthenticatedUser legacyAuthenticate(Map<String, String> credentials) throws AuthenticationException
+    static void checkValidCredentials(Map<String, String> credentials) throws AuthenticationException
     {
         String username = credentials.get(USERNAME_KEY);
-        if (username == null)
+        if (username == null || username.isEmpty())
             throw new AuthenticationException(String.format("Required key '%s' is missing", USERNAME_KEY));
 
         String password = credentials.get(PASSWORD_KEY);
-        if (password == null)
+        if (password == null || password.isEmpty())
             throw new AuthenticationException(String.format("Required key '%s' is missing for provided username %s", PASSWORD_KEY, username));
+    }
 
-        return authenticate(username, password);
+    public AuthenticatedUser legacyAuthenticate(Map<String, String> credentials) throws AuthenticationException
+    {
+        checkValidCredentials(credentials);
+        return authenticate(credentials.get(USERNAME_KEY), credentials.get(PASSWORD_KEY));
     }
 
     public SaslNegotiator newSaslNegotiator(InetAddress clientAddress)
     {
-        return new PlainTextSaslAuthenticator();
+        return new PlainTextSaslAuthenticator(this::authenticate);
     }
 
     private static SelectStatement prepare(String query)
@@ -215,11 +221,18 @@ public class PasswordAuthenticator implements IAuthenticator
         return (SelectStatement) QueryProcessor.getStatement(query, ClientState.forInternalCalls()).statement;
     }
 
-    private class PlainTextSaslAuthenticator implements SaslNegotiator
+    @VisibleForTesting
+    static class PlainTextSaslAuthenticator implements SaslNegotiator
     {
+        private final BiFunction<String, String, AuthenticatedUser> authFunction;
         private boolean complete = false;
         private String username;
         private String password;
+
+        PlainTextSaslAuthenticator(BiFunction<String, String, AuthenticatedUser> authFunction)
+        {
+            this.authFunction = authFunction;
+        }
 
         public byte[] evaluateResponse(byte[] clientResponse) throws AuthenticationException
         {
@@ -237,7 +250,7 @@ public class PasswordAuthenticator implements IAuthenticator
         {
             if (!complete)
                 throw new AuthenticationException("SASL negotiation not complete");
-            return authenticate(username, password);
+            return authFunction.apply(username, password);
         }
 
         /**

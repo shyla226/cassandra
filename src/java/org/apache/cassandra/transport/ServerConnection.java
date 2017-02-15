@@ -68,9 +68,8 @@ public class ServerConnection extends Connection
                     throw new ProtocolException(String.format("Unexpected message %s, expecting STARTUP or OPTIONS", type));
                 break;
             case AUTHENTICATION:
-                // Support both SASL auth from protocol v2 and the older style Credentials auth from v1
-                if (type != Message.Type.AUTH_RESPONSE && type != Message.Type.CREDENTIALS)
-                    throw new ProtocolException(String.format("Unexpected message %s, expecting %s", type, version == ProtocolVersion.V1 ? "CREDENTIALS" : "SASL_RESPONSE"));
+                if (type != Message.Type.AUTH_RESPONSE)
+                    throw new ProtocolException(String.format("Unexpected message %s, expecting SASL_RESPONSE", type));
                 break;
             case READY:
                 if (type == Message.Type.STARTUP)
@@ -96,10 +95,9 @@ public class ServerConnection extends Connection
                 }
                 break;
             case AUTHENTICATION:
-                // Support both SASL auth from protocol v2 and the older style Credentials auth from v1
-                assert requestType == Message.Type.AUTH_RESPONSE || requestType == Message.Type.CREDENTIALS;
+                assert requestType == Message.Type.AUTH_RESPONSE;
 
-                if (responseType == Message.Type.READY || responseType == Message.Type.AUTH_SUCCESS)
+                if (responseType == Message.Type.AUTH_SUCCESS)
                 {
                     state = State.READY;
                     // we won't use the authenticator again, null it so that it can be GC'd

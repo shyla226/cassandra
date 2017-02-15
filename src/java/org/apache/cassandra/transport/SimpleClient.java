@@ -21,6 +21,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -42,10 +43,12 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
+import org.apache.cassandra.auth.PasswordAuthenticator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.security.SSLFactory;
-import org.apache.cassandra.transport.messages.CredentialsMessage;
+import org.apache.cassandra.transport.messages.AuthResponse;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.transport.messages.ExecuteMessage;
@@ -170,9 +173,24 @@ public class SimpleClient implements Closeable
 
     public void login(Map<String, String> credentials)
     {
-        CredentialsMessage msg = new CredentialsMessage();
-        msg.credentials.putAll(credentials);
+        if(credentials.get(PasswordAuthenticator.USERNAME_KEY) == null ||
+           credentials.get(PasswordAuthenticator.PASSWORD_KEY) == null)
+            throw new AuthenticationException("Authentication requires both 'username' and 'password'");
+
+        AuthResponse msg = new AuthResponse(encodeCredentialsForSasl(credentials));
         execute(msg);
+    }
+
+    protected byte[] encodeCredentialsForSasl(Map<String, String> credentials)
+    {
+        byte[] username = credentials.get(PasswordAuthenticator.USERNAME_KEY).getBytes(StandardCharsets.UTF_8);
+        byte[] password = credentials.get(PasswordAuthenticator.PASSWORD_KEY).getBytes(StandardCharsets.UTF_8);
+        byte[] initialResponse = new byte[username.length + password.length + 2];
+        initialResponse[0] = 0;
+        System.arraycopy(username, 0, initialResponse, 1, username.length);
+        initialResponse[username.length + 1] = 0;
+        System.arraycopy(password, 0, initialResponse, username.length + 2, password.length);
+        return initialResponse;
     }
 
     public ResultMessage execute(String query, ConsistencyLevel consistency)

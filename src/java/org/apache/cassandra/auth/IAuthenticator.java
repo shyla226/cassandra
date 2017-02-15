@@ -67,8 +67,7 @@ public interface IAuthenticator
     /**
      * For implementations which support the Thrift login method that accepts arbitrary
      * key/value pairs containing credentials data.
-     * Also used by CQL native protocol v1, in which username and password are sent from
-     * client to server in a {@link org.apache.cassandra.transport.messages.CredentialsMessage}
+     *
      * Implementations where support for Thrift and CQL protocol v1 is not required should make
      * this an unsupported operation.
      *

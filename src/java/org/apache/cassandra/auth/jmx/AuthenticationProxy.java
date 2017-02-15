@@ -26,6 +26,7 @@ import javax.security.auth.callback.*;
 import javax.security.auth.login.LoginContext;
 import javax.security.auth.login.LoginException;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -121,11 +122,12 @@ public final class AuthenticationProxy implements JMXAuthenticator
      * prompting is necessary because the credentials are already available to
      * this class (via its enclosing class).
      */
-    private static final class JMXCallbackHandler implements CallbackHandler
+    @VisibleForTesting
+    public static final class JMXCallbackHandler implements CallbackHandler
     {
         private char[] username;
         private char[] password;
-        private JMXCallbackHandler(Object credentials)
+        public JMXCallbackHandler(Object credentials)
         {
             // if username/password credentials were supplied, store them in
             // the relevant variables to make them accessible to LoginModules
