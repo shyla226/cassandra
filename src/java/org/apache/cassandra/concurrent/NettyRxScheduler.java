@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.netty.channel.EventLoop;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.EventExecutorGroup;
@@ -154,6 +156,25 @@ public class NettyRxScheduler extends Scheduler
         return localNettyEventLoop.get();
     }
 
+    public static void register(EventLoopGroup workerGroup)
+    {
+        CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
+
+        for (int i = 0; i < NUM_NETTY_THREADS; i++)
+        {
+            final int cpuId = i;
+            final EventLoop loop = workerGroup.next();
+            loop.schedule(() -> {
+                NettyRxScheduler.register(loop, cpuId);
+                logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
+
+                ready.countDown();
+            }, 0, TimeUnit.SECONDS);
+        }
+
+        Uninterruptibles.awaitUninterruptibly(ready);
+    }
+
     public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
     {
         assert loop.inEventLoop();
@@ -226,17 +247,6 @@ public class NettyRxScheduler extends Scheduler
      * @return - the scheduler of the core specified, or the scheduler of core zero if not yet assigned
      */
     public static NettyRxScheduler getForCore(int core)
-    {
-        return perCoreSchedulers[core];
-    }
-
-    /**
-     * Return a scheduler for a specific core, if assigned, otherwise null.
-     *
-     * @param core - the core number for which we want a scheduler of
-     * @return - the scheduler of the core specified, or null if not yet assigned
-     */
-    public static NettyRxScheduler maybeGetForCore(int core)
     {
         return perCoreSchedulers[core];
     }

@@ -145,7 +145,7 @@ public class LongAdderTest
 
         // fail test early if for any reason Rx scheduler not setup correctly
         for (int i = 0; i < numCores; i++)
-            Assert.assertNotNull(NettyRxScheduler.maybeGetForCore(i));
+            Assert.assertNotNull(NettyRxScheduler.getForCore(i));
 
         // test increment of counter
         final CountDownLatch latchForIncrement = new CountDownLatch(numThreads);

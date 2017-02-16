@@ -184,22 +184,7 @@ public class CassandraDaemon
     public void initializeTPC()
     {
         workerGroup = NativeTransportService.makeWorkerGroup();
-
-        CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
-
-        for (int i = 0; i < NUM_NETTY_THREADS; i++)
-        {
-            final int cpuId = i;
-            final EventLoop loop = workerGroup.next();
-            loop.schedule(() -> {
-                NettyRxScheduler.register(loop, cpuId);
-                logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
-
-                ready.countDown();
-            }, 0, TimeUnit.SECONDS);
-        }
-
-        Uninterruptibles.awaitUninterruptibly(ready);
+        NettyRxScheduler.register(workerGroup);
     }
 
     /**

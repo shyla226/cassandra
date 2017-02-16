@@ -176,6 +176,10 @@ public abstract class CQLTester
 
         DatabaseDescriptor.daemonInitialization();
 
+        //Required early for TPC
+        workerGroup = NativeTransportService.makeWorkerGroup();
+        NettyRxScheduler.register(workerGroup);
+
         NettyRxScheduler.initRx();
 
         // Cleanup first
@@ -375,6 +379,8 @@ public abstract class CQLTester
         if (server != null)
             return;
 
+        assert workerGroup != null;
+
         SystemKeyspace.finishStartup();
         SystemKeyspace.persistLocalMetadata();
         StorageService.instance.populateTokenMetadata();
@@ -382,7 +388,6 @@ public abstract class CQLTester
         Gossiper.instance.register(StorageService.instance);
         SchemaLoader.startGossiper();
 
-        workerGroup = NativeTransportService.makeWorkerGroup();
         server = new NativeTransportService(nativeAddr, nativePort);
         server.start(workerGroup);
 

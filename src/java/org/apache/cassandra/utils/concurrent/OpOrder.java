@@ -186,12 +186,8 @@ public class OpOrder
 
             for (int i = 0; i < tpcBarriers.length; i++)
             {
-                // during startup, schedulers on cores other than zero will be null, in this case
-                // there is no need to perform any operation on these cores
-                final NettyRxScheduler scheduler = NettyRxScheduler.maybeGetForCore(i);
-
-                if (scheduler != null)
-                    scheduler.scheduleDirect(() -> {
+                final NettyRxScheduler scheduler = NettyRxScheduler.getForCore(i);
+                scheduler.scheduleDirect(() -> {
                         try
                         {
                             function.accept(scheduler);
@@ -206,8 +202,6 @@ public class OpOrder
                             latch.countDown();
                         }
                     });
-                else
-                    latch.countDown();
             }
 
             return latch;
