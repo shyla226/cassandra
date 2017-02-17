@@ -1495,10 +1495,10 @@ class ExportSession(object):
     def __init__(self, cluster, export_process):
         session = cluster.connect(export_process.ks)
         session.default_fetch_size = export_process.options.copy['pagesize']
-        session.default_timeout = export_process.options.copy['pagetimeout']
 
         printdebugmsg("Created connection to %s with page size %d and timeout %d seconds per page"
-                      % (cluster.contact_points, session.default_fetch_size, session.default_timeout))
+                      % (cluster.contact_points, session.default_fetch_size,
+                         cluster.profile_manager.default.request_timeout))
 
         self.cluster = cluster
         self.session = session
@@ -1644,7 +1644,8 @@ class ExportProcess(ChildProcess):
                               ExecutionProfile(load_balancing_policy=WhiteListRoundRobinPolicy([host]),
                                                retry_policy=ExpBackoffRetryPolicy(self),
                                                row_factory=tuple_factory,
-                                               consistency_level=self.consistency_level)}
+                                               consistency_level=self.consistency_level,
+                                               request_timeout=self.options.copy['pagetimeout'])}
         new_cluster = Cluster(
             contact_points=(host,),
             port=self.port,
@@ -2285,7 +2286,8 @@ class ImportProcess(ChildProcess):
                                   ExecutionProfile(load_balancing_policy=FastTokenAwarePolicy(self),
                                                    # we throw on timeouts and retry in the error callback
                                                    retry_policy=FallthroughRetryPolicy(),
-                                                   consistency_level=self.consistency_level)}
+                                                   consistency_level=self.consistency_level,
+                                                   request_timeout=self.request_timeout)}
             cluster = Cluster(
                 contact_points=(self.hostname,),
                 port=self.port,
@@ -2301,7 +2303,6 @@ class ImportProcess(ChildProcess):
                 execution_profiles=execution_profiles)
 
             self._session = cluster.connect(self.ks)
-            self._session.default_timeout = self.request_timeout
         return self._session
 
     def run(self):

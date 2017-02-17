@@ -34,6 +34,7 @@ Merged from 4.0:
 
 
 DSE 5.1.0
+ * Apply request timeout in cqlsh COPY correctly, after upgrading to execution profiles (APOLLO-411)
  * Update java driver to DSE driver version 1.2.0-eap5-SNAPSHOT (APOLLO-357)
  * Fix AssertionError in Continuous Paging Request on select count(*) query (APOLLO-387)
  * Update internal DSE driver and fix formatting for Duration type (APOLLO-417)
