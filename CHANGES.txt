@@ -250,28 +250,6 @@ Merged from 3.0:
  * Improve contention handling on failure to acquire MV lock for streaming and hints (CASSANDRA-12905)
  * Fix DELETE and UPDATE queries with empty IN restrictions (CASSANDRA-12829)
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
-<<<<<<< HEAD
-=======
-Merged from 2.2:
- * Exceptions encountered calling getSeeds() breaks OTC thread (CASSANDRA-13018)
- * Fix race causing infinite loop if Thrift server is stopped before it starts listening (CASSANDRA-12856)
- * CompactionTasks now correctly drops sstables out of compaction when not enough disk space is available (CASSANDRA-12979)
- * Remove support for non-JavaScript UDFs (CASSANDRA-12883)
- * cqlsh copy-from: encode column names to avoid primary key parsing errors (CASSANDRA-12909)
- * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
-Merged from 2.1:
- * Use portable stderr for java error in startup (CASSANDRA-13211)
- * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
- * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
- * Upgrade netty version to fix memory leak with client encryption (CASSANDRA-13114)
- * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
- * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
-
-DSE 5.0.5
- * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
- * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
-Merged from 3.0.X
->>>>>>> dse5.0
  * Estimated TS drop-time histogram updated with Cell.NO_DELETION_TIME (CASSANDRA-13040)
  * Nodetool compactionstats fails with NullPointerException (CASSANDRA-13021)
  * Thread local pools never cleaned up (CASSANDRA-13033)
