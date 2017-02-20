@@ -2,6 +2,7 @@ DSE 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from 4.0:
+ * Output warning if user increases RF (CASSANDRA-13079)
  * Remove pre-3.0 streaming compatibility code for 4.0 (CASSANDRA-13081)
  * Add support for + and - operations on dates (CASSANDRA-11936)
  * Fix consistency of incrementally repaired data (CASSANDRA-9143)
@@ -109,6 +110,7 @@ Merged from 3.0:
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
 Merged from 2.2:
+ * Fix ColumnCounter::countAll behaviour for reverse queries (CASSANDRA-13222)
  * Exceptions encountered calling getSeeds() breaks OTC thread (CASSANDRA-13018)
  * Fix negative mean latency metric (CASSANDRA-12876)
  * Use only one file pointer when creating commitlog segments (CASSANDRA-12539)
