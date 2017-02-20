@@ -32,8 +32,7 @@ import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.transport.SimpleClient;
 import org.apache.cassandra.transport.messages.QueryMessage;
 
-import static junit.framework.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.*;
 
 public class ClientWarningsTest extends CQLTester
 {
@@ -116,6 +115,107 @@ public class ClientWarningsTest extends CQLTester
                 Message.Response resp = client.execute(query);
                 assertEquals(1, resp.getWarnings().size());
             }
+        }
+    }
+
+    @Test
+    public void testDTCSDeprecationWarning() throws Exception
+    {
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort, Server.CURRENT_VERSION))
+        {
+            client.connect(false);
+
+            String currentTable = createTableName();
+
+            // Create a table with SizeTieredCompactionStrategy and check that no warning is present
+            QueryMessage query = new QueryMessage(String.format("CREATE TABLE %s.%s (pk int, ck int, val int, PRIMARY KEY (pk,ck)) " +
+                                                                "with compaction = {'class':'SizeTieredCompactionStrategy'}",
+                                                                KEYSPACE,
+                                                                currentTable),
+                                                  QueryOptions.DEFAULT);
+            Message.Response resp = client.execute(query);
+            assertNull(resp.getWarnings());
+
+
+            // Alter the table with DateTieredCompactionStrategy and check that a warning is present
+            query = new QueryMessage(String.format("ALTER TABLE %s.%s with compaction = {'class':'DateTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+
+            resp = client.execute(query);
+            assertNotNull(resp.getWarnings());
+            assertEquals(1, resp.getWarnings().size());
+            assertTrue(resp.getWarnings().get(0).contains("DateTieredCompactionStrategy"));
+
+
+            // Create a new table with DateTieredCompactionStrategy and check that a warning is present
+            currentTable = createTableName();
+            query = new QueryMessage(String.format("CREATE TABLE %s.%s (pk int, ck int, val int, PRIMARY KEY (pk,ck)) " +
+                                                   "with compaction = {'class':'DateTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+            resp = client.execute(query);
+            assertNotNull(resp.getWarnings());
+            assertEquals(1, resp.getWarnings().size());
+            assertTrue(resp.getWarnings().get(0).contains("DateTieredCompactionStrategy"));
+
+
+            // Alter the table with SizeTieredCompactionStrategy and check that no warning is present
+            query = new QueryMessage(String.format("ALTER TABLE %s.%s with compaction = {'class':'SizeTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+
+            resp = client.execute(query);
+            assertNull(resp.getWarnings());
+
+
+            // Create a view with SizeTieredCompactionStrategy and check that no warning is present
+            query = new QueryMessage(String.format("CREATE MATERIALIZED VIEW %1$s.%2$s_view1 AS " +
+                                                   "SELECT * FROM %1$s.%2$s WHERE pk IS NOT NULL AND ck IS NOT NULL AND val IS NOT NULL " +
+                                                   "PRIMARY KEY (ck, pk, val) with compaction = {'class':'SizeTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+            resp = client.execute(query);
+            assertNull(resp.getWarnings());
+
+
+            // Alter the view with DateTieredCompactionStrategy and check that a warning is present
+            query = new QueryMessage(String.format("ALTER MATERIALIZED VIEW  %1$s.%2$s_view1 with compaction = {'class':'DateTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+
+            resp = client.execute(query);
+            assertNotNull(resp.getWarnings());
+            assertEquals(1, resp.getWarnings().size());
+            assertTrue(resp.getWarnings().get(0).contains("DateTieredCompactionStrategy"));
+
+
+            // Create another view with DateTieredCompactionStrategy and check that a warning is present
+            query = new QueryMessage(String.format("CREATE MATERIALIZED VIEW %1$s.%2$s_view2 AS " +
+                                                   "SELECT * FROM %1$s.%2$s WHERE pk IS NOT NULL AND ck IS NOT NULL AND val IS NOT NULL " +
+                                                   "PRIMARY KEY (ck, pk, val) with compaction = {'class':'DateTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+            resp = client.execute(query);
+            assertNotNull(resp.getWarnings());
+            assertEquals(1, resp.getWarnings().size());
+            assertTrue(resp.getWarnings().get(0).contains("DateTieredCompactionStrategy"));
+
+
+            // Alter the view with SizeTieredCompactionStrategy and check that no warning is present
+            query = new QueryMessage(String.format("ALTER MATERIALIZED VIEW  %1$s.%2$s_view2 with compaction = {'class':'SizeTieredCompactionStrategy'}",
+                                                   KEYSPACE,
+                                                   currentTable),
+                                     QueryOptions.DEFAULT);
+
+            resp = client.execute(query);
+            assertNull(resp.getWarnings());
         }
     }
 
