@@ -15,6 +15,9 @@ DSE backports
  * Reduce contention getting instances of CompositeType (CASSANDRA-10433)
  * Fix potential NPE for compactionstats (CASSANDRA-12462)
 
+2.1.18
+ * 
+
 2.1.17
  * Use portable stderr for java error in startup (CASSANDRA-13211)
  * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
@@ -26,6 +29,7 @@ DSE backports
  * Fix missed signal when commit log segments are recycled (CASSANDRA-13037)
  * Fix RecoveryManagerTruncateTest (CASSANDRA-12802)
  * Don't skip sstables based on maxLocalDeletionTime (CASSANDRA-12765)
+
 
 2.1.16
  * Avoid infinitely looping result set when paging SELECT queries with
