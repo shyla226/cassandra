@@ -51,7 +51,7 @@ DSE 5.1.0
  * Add client warning to SASI index (APOLLO-93)
  * Cqlsh copy-from: add support for UNSET values (APOLLO-4)
  * Improve error message for incompatible authn/authz config (APOLLO-226)
- * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291, APOLLO-312, APOLLO-316)
+ * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291, APOLLO-312, APOLLO-316, APOLLO-432)
  * Added show-queries, query-log-file and no-progress log options to cassandra-stress (APOLLO-41)
  * Allow large partition generation in cassandra-stress user mode (APOLLO-35)
  * Optimize VIntCoding and BufferedDataOutputStreamPlus (APOLLO-49)
