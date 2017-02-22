@@ -25,7 +25,7 @@ DSE 5.1.0
  * Make IResource more easily extensible (APOLLO-26)
  * Add method to IAuthenticator to login by user as well as by role (APOLLO-70)
  * Add private protocol version (APOLLO-2)
-Merged from DSE 5.0.x:
+Merged from dse5.0:
  * Always log flush errors (APOLLO-227)
  * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
    and warn about high GC pressure for values below 4 (APOLLO-386)
