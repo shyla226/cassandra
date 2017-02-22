@@ -1,0 +1,25 @@
+DSE 5.0.7
+ * Always log flush errors (APOLLO-227)
+
+
+DSE 5.0.6
+ * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
+   and warn about high GC pressure for values below 4 (APOLLO-386)
+ * Filter out duplicate sstables when performing snapshots to avoid
+   duplicate hardlink errors (APOLLO-290)
+ * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
+ * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
+ * Backport CASSANDRA-11503: Add repaired percentage metric (APOLLO-88)
+Merged from cassandra-2.1_dse:
+ * Fix NPE in CompactionInfo.getId (Backport CASSANDRA-12462)
+ * Avoid NPE duraing table creation (APOLLO-273)
+
+
+DSE 5.0.5
+ * Backport CASSANDRA-10134: Always perform collision check before joining ring (APOLLO-232)
+ * Backport CASSANDRA-12461: Add pre- and post-shutdown hooks to Storage Service (APOLLO-48)
+
+
+DSE 5.0.4
+ * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
+ * Exponential backoff when hint delivery fails (APOLLO-17)

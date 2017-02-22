@@ -1,14 +1,13 @@
-DSE 5.0.6
- * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
-   and warn about high GC pressure for values below 4 (APOLLO-386)
- * Filter out duplicate sstables when performing snapshots to avoid
-   duplicate hardlink errors (APOLLO-290)
- * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
- * Always log flush errors. (APOLLO-227)
- * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
- * Add repaired percentage metric (Backport CASSANDRA-11503)
-Merged from 3.0.X
+3.0.12
  * Fix cqlsh COPY for dates before 1900 (CASSANDRA-13185)
+
+Merged from 2.2
+ * Fix ColumnCounter::countAll behaviour for reverse queries (CASSANDRA-13222)
+ * Exceptions encountered calling getSeeds() breaks OTC thread (CASSANDRA-13018)
+Merged from 2.1:
+ * Log stacktrace of uncaught exceptions (CASSANDRA-13108)
+
+3.0.11
  * Use keyspace replication settings on system.size_estimates table (CASSANDRA-9639)
  * Add vm.max_map_count StartupCheck (CASSANDRA-13008)
  * Hint related logging should include the IP address of the destination in addition to 
@@ -37,27 +36,6 @@ Merged from 3.0.X
  * Improve contention handling on failure to acquire MV lock for streaming and hints (CASSANDRA-12905)
  * Fix DELETE and UPDATE queries with empty IN restrictions (CASSANDRA-12829)
  * Mark MVs as built after successful bootstrap (CASSANDRA-12984)
-Merged from 2.2:
- * Fix ColumnCounter::countAll behaviour for reverse queries (CASSANDRA-13222)
- * Exceptions encountered calling getSeeds() breaks OTC thread (CASSANDRA-13018)
- * Fix race causing infinite loop if Thrift server is stopped before it starts listening (CASSANDRA-12856)
- * CompactionTasks now correctly drops sstables out of compaction when not enough disk space is available (CASSANDRA-12979)
- * Remove support for non-JavaScript UDFs (CASSANDRA-12883)
- * cqlsh copy-from: encode column names to avoid primary key parsing errors (CASSANDRA-12909)
- * Temporarily fix bug that creates commit log when running offline tools (CASSANDRA-8616)
-Merged from 2.1:
- * Log stacktrace of uncaught exceptions (CASSANDRA-13108)
- * Use portable stderr for java error in startup (CASSANDRA-13211)
- * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
- * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
- * Upgrade netty version to fix memory leak with client encryption (CASSANDRA-13114)
- * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
- * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
-
-DSE 5.0.5
- * Backport CASSANDRA-10134 Always perform collision check before joining ring (CASSANDRA-10134)
- * Backport CASSANDRA-12461 (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
-Merged from 3.0.X
  * Estimated TS drop-time histogram updated with Cell.NO_DELETION_TIME (CASSANDRA-13040)
  * Nodetool compactionstats fails with NullPointerException (CASSANDRA-13021)
  * Thread local pools never cleaned up (CASSANDRA-13033)
@@ -88,14 +66,16 @@ Merged from 2.2:
  * cqlsh: fix DESC TYPES errors (CASSANDRA-12914)
  * Fix leak on skipped SSTables in sstableupgrade (CASSANDRA-12899)
  * Avoid blocking gossip during pending range calculation (CASSANDRA-12281)
- * Fix purgeability of tombstones with max timestamp (CASSANDRA-12792)
- * Fail repair if participant dies during sync or anticompaction (CASSANDRA-12901)
+Merged from 2.1:
+ * Use portable stderr for java error in startup (CASSANDRA-13211)
+ * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
+ * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
+ * Upgrade netty version to fix memory leak with client encryption (CASSANDRA-13114)
+ * cqlsh copy-from: sort user type fields in csv (CASSANDRA-12959)
 
 
-DSE 5.0.4
- * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
- * Allow the prepared statement cache size to be changed. (APOLLO-50)
-Merged from 3.0.X
+
+3.0.10
  * Disallow offheap_buffers memtable allocation (CASSANDRA-11039)
  * Fix CommitLogSegmentManagerTest (CASSANDRA-12283)
  * Pass root cause to CorruptBlockException when uncompression failed (CASSANDRA-12889)
@@ -131,7 +111,8 @@ Merged from 3.0.X
  * Correct log message for statistics of offheap memtable flush (CASSANDRA-12776)
  * Explicitly set locale for string validation (CASSANDRA-12541,CASSANDRA-12542,CASSANDRA-12543,CASSANDRA-12545)
 Merged from 2.2:
- * Fix CommitLogSegmentManagerTest (CASSANDRA-12283)
+ * Fix purgeability of tombstones with max timestamp (CASSANDRA-12792)
+ * Fail repair if participant dies during sync or anticompaction (CASSANDRA-12901)
  * cqlsh COPY: unprotected pk values before converting them if not using prepared statements (CASSANDRA-12863)
  * Fix Util.spinAssertEquals (CASSANDRA-12283)
  * Fix potential NPE for compactionstats (CASSANDRA-12462)
