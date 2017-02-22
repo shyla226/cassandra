@@ -1,0 +1,3 @@
+DSE 5.2.0
+ * For TWCS, flush to separate sstables based on write time (APOLLO-42)
+ * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
