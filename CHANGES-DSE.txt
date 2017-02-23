@@ -11,9 +11,6 @@ DSE 5.0.6
  * Prevent duplicate SyncUtil.force() in SeqentialWriter on close (APOLLO-351)
  * Perform repair sync sequentially to avoid overloading coordinator (APOLLO-216)
  * Backport CASSANDRA-11503: Add repaired percentage metric (APOLLO-88)
-Merged from cassandra-2.1_dse:
- * Fix NPE in CompactionInfo.getId (Backport CASSANDRA-12462)
- * Avoid NPE duraing table creation (APOLLO-273)
 
 
 DSE 5.0.5
