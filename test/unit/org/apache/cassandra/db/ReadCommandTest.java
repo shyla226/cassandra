@@ -261,7 +261,7 @@ public class ReadCommandTest
                 UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter,
                                                                                 columnFilter,
                                                                                 buffer,
-                                                                                MessagingService.current_version).blockingGet();
+                                                                                MessagingService.current_version).blockingAwait();
                 buffers.add(buffer.buffer());
             }
         }

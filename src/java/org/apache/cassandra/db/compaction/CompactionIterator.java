@@ -208,7 +208,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
                     {
                         indexTransaction.start();
                         indexTransaction.onRowMerge(merged, versions);
-                        indexTransaction.commit().blockingGet();
+                        indexTransaction.commit().blockingAwait();
                     }
 
                     public void onMergedRangeTombstoneMarkers(RangeTombstoneMarker mergedMarker, RangeTombstoneMarker[] versions)

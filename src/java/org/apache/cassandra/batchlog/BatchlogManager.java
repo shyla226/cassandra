@@ -247,7 +247,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 }
                 else
                 {
-                    remove(id).blockingGet(); // no write mutations were sent (either expired or all CFs involved truncated).
+                    remove(id).blockingAwait(); // no write mutations were sent (either expired or all CFs involved truncated).
                     ++totalBatchesReplayed;
                 }
             }

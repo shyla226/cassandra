@@ -41,7 +41,7 @@ public abstract class Splitter
 
     public List<Token> splitOwnedRanges(int parts, List<Range<Token>> localRanges, boolean dontSplitRanges)
     {
-        if (localRanges.isEmpty() || parts == 1)
+        if (localRanges == null || localRanges.isEmpty() || parts == 1)
             return Collections.singletonList(partitioner.getMaximumToken());
 
         BigInteger totalTokens = BigInteger.ZERO;

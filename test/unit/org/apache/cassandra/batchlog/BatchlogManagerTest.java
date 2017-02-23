@@ -154,7 +154,7 @@ public class BatchlogManagerTest extends CQLTester
                            ? (System.currentTimeMillis() - BatchlogManager.getBatchlogTimeout())
                            : (System.currentTimeMillis() + BatchlogManager.getBatchlogTimeout());
 
-            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingGet();
+            BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), timestamp * 1000, mutations)).blockingAwait();
         }
 
         // Flush the batchlog to disk (see CASSANDRA-6822).
