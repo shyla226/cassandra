@@ -29,6 +29,7 @@ Merged from dse5.1:
  * Add method to IAuthenticator to login by user as well as by role (APOLLO-70)
  * Add private protocol version (APOLLO-2)
 Merged from dse5.0:
+ * Connection refused should be logged less frequently (APOLLO-455)
  * Always log flush errors (APOLLO-227)
  * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
    and warn about high GC pressure for values below 4 (APOLLO-386)
@@ -43,4 +44,4 @@ Merged from dse5.0:
  * Exponential backoff when hint delivery fails (APOLLO-17)
 Merged from cassandra-2.1_dse:
  * Backport CASSANDRA-12462: Fix NPE in CompactionInfo.getId()  (APOLLO-330)
-* Avoid NPE duraing table creation (APOLLO-273)
+ * Avoid NPE duraing table creation (APOLLO-273)
