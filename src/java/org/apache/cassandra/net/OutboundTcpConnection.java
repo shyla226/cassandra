@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
@@ -57,6 +58,7 @@ import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NanoTimeToCurrentTimeMillis;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.UUIDGen;
 import org.xerial.snappy.SnappyOutputStream;
 import org.apache.cassandra.config.Config;
@@ -67,6 +69,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 public class OutboundTcpConnection extends Thread
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnection.class);
+    private static final NoSpamLogger nospamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
 
     private static final String PREFIX = Config.PROPERTY_PREFIX;
 
@@ -514,6 +517,12 @@ public class OutboundTcpConnection extends Thread
                 socket = null;
                 // SSL errors won't be recoverable within timeout period so we'll just abort
                 return false;
+            }
+            catch (ConnectException e)
+            {
+                socket = null;
+                nospamLogger.debug(String.format("Unable to connect to %s (%s)", poolReference.endPoint(), e.toString()));
+                Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
             catch (IOException e)
             {
