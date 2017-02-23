@@ -85,12 +85,7 @@ public class UserType extends TupleType
     {
         return true;
     }
-
-    public boolean isTuple()
-    {
-        return false;
-    }
-
+    
     @Override
     public boolean isMultiCell()
     {
@@ -409,6 +404,12 @@ public class UserType extends TupleType
     public String toString()
     {
         return this.toString(false);
+    }
+
+    @Override
+    public boolean isTuple()
+    {
+        return false;
     }
 
     @Override

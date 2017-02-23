@@ -1,4 +1,5 @@
 3.11.0
+ * Fix equality comparisons of columns using the duration type (CASSANDRA-13174)
  * Obfuscate password in stress-graphs (CASSANDRA-12233)
  * Move to FastThreadLocalThread and FastThreadLocal (CASSANDRA-13034)
  * nodetool stopdaemon errors out (CASSANDRA-13030)
@@ -7,6 +8,7 @@
  * More fixes to the TokenAllocator (CASSANDRA-12990)
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
 Merged from 3.0:
+ * Legacy deserializer can create unexpected boundary range tombstones (CASSANDRA-13237)
  * Remove unnecessary assertion from AntiCompactionTest (CASSANDRA-13070)
  * Fix cqlsh COPY for dates before 1900 (CASSANDRA-13185)
  * Use keyspace replication settings on system.size_estimates table (CASSANDRA-9639)
