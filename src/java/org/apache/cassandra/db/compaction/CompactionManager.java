@@ -1419,6 +1419,11 @@ public class CompactionManager implements CompactionManagerMBean
             int maxDepth = rangeOwningRatio > 0 ? (int) Math.floor(20 - Math.log(1 / rangeOwningRatio) / Math.log(2)) : 0;
             // determine tree depth from number of partitions, capping at max tree depth (CASSANDRA-5263)
             int depth = numPartitions > 0 ? (int) Math.min(Math.ceil(Math.log(numPartitions) / Math.log(2)), maxDepth) : 0;
+
+            if (depth > maxDepth)
+                logger.debug("Range {} with {} partitions require a merkle tree with depth {} but the maximum allowed depth " +
+                             "for this range is {}.", range, numPartitions, depth, maxDepth);
+
             tree.addMerkleTree((int) Math.pow(2, depth), range);
         }
         if (logger.isDebugEnabled())

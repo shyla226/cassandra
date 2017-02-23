@@ -37,6 +37,7 @@ DSE 5.1.0
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
  * Connection refused should be logged less frequently (APOLLO-455)
  * Always log flush errors (APOLLO-227)
  * Disable preemptive sstable opening if sstable_preemptive_open_interval_in_mb <= 0,
