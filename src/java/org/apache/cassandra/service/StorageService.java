@@ -1115,6 +1115,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
 
         logger.info("rebuild from dc: {}", sourceDc == null ? "(any dc)" : sourceDc);
+        long t0 = System.currentTimeMillis();
 
         try
         {
@@ -1135,6 +1136,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             StreamResultFuture resultFuture = streamer.fetchAsync();
             // wait for result
             resultFuture.get();
+
+            long t = System.currentTimeMillis() - t0;
+            long totalBytes = 0L;
+            for (SessionInfo session : resultFuture.getCurrentState().sessions)
+                totalBytes += session.getTotalSizeReceived();
+            logger.info("finished rebuild from dc: {} after {} seconds receiving {} bytes", sourceDc == null ? "(any dc)" : sourceDc, t / 1000, totalBytes);
         }
         catch (InterruptedException e)
         {

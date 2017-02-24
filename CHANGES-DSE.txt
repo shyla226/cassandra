@@ -1,4 +1,5 @@
 DSE 5.0.7
+ * Log message when rebuild has finished (APOLLO-465)
  * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
  * Connection refused should be logged less frequently (APOLLO-455)
  * Always log flush errors (APOLLO-227)
