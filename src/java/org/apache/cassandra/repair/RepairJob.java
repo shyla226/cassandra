@@ -20,7 +20,9 @@ package org.apache.cassandra.repair;
 import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
+import com.google.common.math.IntMath;
 import com.google.common.util.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.RangeHash;
 
 /**
  * RepairJob runs repair on given ColumnFamily.
@@ -120,34 +123,55 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
             validations = sendValidationRequest(allEndpoints);
         }
 
+        // This caches token ranges digests received by a given node in this session
+        // to avoid sending the same range to a destination multiple times (APOLLO-390)
+        Map<InetAddress, Set<RangeHash>> receivedRangeCache = new HashMap<>();
         List<SyncTask> syncTasks = new ArrayList<>();
         try
         {
             //this will throw exception if any validation task fails
             List<TreeResponse> trees = Futures.allAsList(validations).get();
-            InetAddress local = FBUtilities.getLocalAddress();
+
+            List<List<TreeResponse>> treesByDc = new ArrayList<>(trees
+                                                                 .stream()
+                                                                 .collect(Collectors
+                                                                          .groupingBy(t -> DatabaseDescriptor.getEndpointSnitch()
+                                                                                                             .getDatacenter(t.endpoint)))
+                                                                 .values());
 
             SyncTask previous = null;
-            // We need to difference all trees one against another
-            for (int i = 0; i < trees.size() - 1; ++i)
+
+            // Sync tasks are submitted sequentially
+            // At the tail, inter-dc syncs task so ranges already transferred from local DC are skipped (APOLLO-390)
+            for (int i = 0; i < treesByDc.size(); i++)
             {
-                TreeResponse r1 = trees.get(i);
-                for (int j = i + 1; j < trees.size(); ++j)
+                for (int j = i + 1; j < treesByDc.size(); j++)
                 {
-                    TreeResponse r2 = trees.get(j);
-                    SyncTask task;
-                    if (r1.endpoint.equals(local) || r2.endpoint.equals(local))
+                    for (TreeResponse r1 : treesByDc.get(i))
                     {
-                        task = new LocalSyncTask(desc, r1, r2, repairedAt, isConsistent ? desc.parentSessionId : null, session.pullRepair, taskExecutor, previous);
+                        for (TreeResponse r2 : treesByDc.get(j))
+                        {
+                            previous = createSyncTask(receivedRangeCache, syncTasks, previous, r1, r2);
+                        }
                     }
-                    else
-                    {
-                        task = new RemoteSyncTask(desc, r1, r2, session, taskExecutor, previous);
-                    }
-                    syncTasks.add(task);
-                    previous = task;
                 }
             }
+
+            // At the head, intra-dc sync tasks so local range transfers are prioritized (APOLLO-390)
+            for (List<TreeResponse> localDc : treesByDc)
+            {
+                for (int i = 0; i < localDc.size(); i++)
+                {
+                    TreeResponse r1 = localDc.get(i);
+                    for (int j = i + 1; j < localDc.size(); j++)
+                    {
+                        TreeResponse r2 = localDc.get(j);
+                        previous = createSyncTask(receivedRangeCache, syncTasks, previous, r1, r2);
+                    }
+                }
+            }
+
+            assert syncTasks.size() == IntMath.binomial(trees.size(), 2) : "Not enough sync tasks.";
 
             //run sync tasks sequentially to avoid overloading coordinator (APOLLO-216)
             //after the stream session is started, it will run in paralell
@@ -184,11 +208,27 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
         }
     }
 
+    private SyncTask createSyncTask(Map<InetAddress, Set<RangeHash>> receivedRangeCache, List<SyncTask> syncTasks,
+                                    SyncTask previous, TreeResponse r1, TreeResponse r2)
+    {
+        InetAddress local = FBUtilities.getLocalAddress();
+        SyncTask task;
+        if (r1.endpoint.equals(local) || r2.endpoint.equals(local))
+        {
+            task = new LocalSyncTask(desc, r1, r2, repairedAt, isConsistent ? desc.parentSessionId : null, session.pullRepair, taskExecutor, previous, receivedRangeCache);
+        }
+        else
+        {
+            task = new RemoteSyncTask(desc, r1, r2, session, taskExecutor, previous, receivedRangeCache);
+        }
+        syncTasks.add(task);
+        return task;
+    }
 
     private <T> void waitForRemainingTasksAndFail(String phase, Iterable<? extends ListenableFuture<? extends T>> tasks,
                                                   Throwable t)
     {
-        logger.warn("[{}] [repair #{}] {} {} failed", session.parentRepairSession, session.getId(), desc.columnFamily, phase);
+        logger.warn("[{}] [repair #{}] {} {} failed", session.parentRepairSession, session.getId(), desc.columnFamily, phase, t);
         //wait for remaining tasks to complete
         try
         {

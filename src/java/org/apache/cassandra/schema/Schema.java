@@ -20,8 +20,6 @@ package org.apache.cassandra.schema;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
@@ -30,6 +28,8 @@ import com.google.common.collect.Sets;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.*;
@@ -72,8 +72,6 @@ public final class Schema
     private volatile UUID version;
 
     private final List<SchemaChangeListener> changeListeners = new CopyOnWriteArrayList<>();
-
-    private final Lock lock = new ReentrantLock();
 
     /**
      * Initialize empty schema object and load the hardcoded system tables
@@ -137,25 +135,16 @@ public final class Schema
      *
      * @param ksm The metadata about keyspace
      */
-    public void load(KeyspaceMetadata ksm)
+    synchronized public void load(KeyspaceMetadata ksm)
     {
-        try
-        {
-            lock.lock();
+        KeyspaceMetadata previous = keyspaces.getNullable(ksm.name);
 
-            KeyspaceMetadata previous = keyspaces.getNullable(ksm.name);
+        if (previous == null)
+            loadNew(ksm);
+        else
+            reload(previous, ksm);
 
-            if (previous == null)
-                loadNew(ksm);
-            else
-                reload(previous, ksm);
-
-            keyspaces = keyspaces.withAddedOrUpdated(ksm);
-        }
-        finally
-        {
-            lock.unlock();
-        }
+        keyspaces = keyspaces.withAddedOrUpdated(ksm);
     }
 
     private void loadNew(KeyspaceMetadata ksm)
@@ -293,25 +282,17 @@ public final class Schema
      *
      * @param ksm The keyspace definition to remove
      */
-    void unload(KeyspaceMetadata ksm)
+    synchronized void unload(KeyspaceMetadata ksm)
     {
-        try
-        {
-            lock.lock();
-            keyspaces = keyspaces.without(ksm.name);
+        keyspaces = keyspaces.without(ksm.name);
 
-            ksm.tablesAndViews()
-               .forEach(t -> metadataRefs.remove(t.id));
+        ksm.tablesAndViews()
+           .forEach(t -> metadataRefs.remove(t.id));
 
-            ksm.tables
-            .indexTables()
-            .keySet()
-            .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
-        }
-        finally
-        {
-            lock.unlock();
-        }
+        ksm.tables
+        .indexTables()
+        .keySet()
+        .forEach(name -> indexMetadataRefs.remove(Pair.create(ksm.name, name)));
     }
 
     public int getNumberOfTables()
@@ -570,17 +551,8 @@ public final class Schema
      */
     public synchronized void clear()
     {
-        try
-        {
-            lock.lock();
-
-            getNonSystemKeyspaces().forEach(k -> unload(getKeyspaceMetadata(k)));
-            updateVersionAndAnnounce();
-        }
-        finally
-        {
-            lock.unlock();
-        }
+        getNonSystemKeyspaces().forEach(k -> unload(getKeyspaceMetadata(k)));
+        updateVersionAndAnnounce();
     }
 
     /**
@@ -591,17 +563,14 @@ public final class Schema
      *
      * @throws ConfigurationException If one of metadata attributes has invalid value
      */
-    Completable mergeAndAnnounceVersion(Collection<Mutation> mutations)
+    // TODO - fix synchronization
+    synchronized Completable mergeAndAnnounceVersion(Collection<Mutation> mutations)
     {
-        return merge(mutations, true);
+        return merge(mutations).concatWith(Completable.fromRunnable(() -> Schema.instance.updateVersionAndAnnounce()));
     }
 
-    Completable merge(Collection<Mutation> mutations)
-    {
-        return merge(mutations, false);
-    }
-
-    Completable merge(Collection<Mutation> mutations, boolean announce)
+    // TODO - fix synchronization
+    synchronized Completable merge(Collection<Mutation> mutations)
     {
         // only compare the keyspaces affected by this set of schema mutations
         Set<String> affectedKeyspaces = SchemaKeyspace.affectedKeyspaces(mutations);
@@ -614,30 +583,26 @@ public final class Schema
         for (Mutation mutation : mutations)
             writes.add(mutation.applyAsync());
 
-        return Completable.fromAction(() -> lock.lock())
-                          .concatWith(Completable.concat(writes))
-                          .andThen(Completable.defer(() ->
-                                              {
-                                                  // apply the schema mutations and fetch the new versions of the altered keyspaces
-                                                  Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
+        Runnable updateSchema = () ->
+            {
+                // apply the schema mutations and fetch the new versions of the altered keyspaces
+                Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
 
-                                                  MapDifference<String, KeyspaceMetadata> keyspacesDiff = before.diff(after);
+                MapDifference<String, KeyspaceMetadata> keyspacesDiff = before.diff(after);
 
-                                                  // dropped keyspaces
-                                                  keyspacesDiff.entriesOnlyOnLeft().values().forEach(this::dropKeyspace);
+                // dropped keyspaces
+                keyspacesDiff.entriesOnlyOnLeft().values().forEach(this::dropKeyspace);
 
-                                                  // new keyspaces
-                                                  keyspacesDiff.entriesOnlyOnRight().values().forEach(this::createKeyspace);
+                // new keyspaces
+                keyspacesDiff.entriesOnlyOnRight().values().forEach(this::createKeyspace);
 
-                                                  // updated keyspaces
-                                                  keyspacesDiff.entriesDiffering().entrySet().forEach(diff -> alterKeyspace(diff.getValue().leftValue(), diff.getValue().rightValue()));
+                // updated keyspaces
+                keyspacesDiff.entriesDiffering().entrySet().forEach(diff -> alterKeyspace(diff.getValue().leftValue(), diff.getValue().rightValue()));
+            };
 
-                                                  if (announce)
-                                                      return Schema.instance.updateVersionAndAnnounce().toCompletable();
-                                                  else
-                                                      return Completable.complete();
-                                              }))
-                          .doOnTerminate(() -> lock.unlock());
+        return Completable.concat(writes)
+                          .observeOn(NettyRxScheduler.instance())
+                          .concatWith(Completable.fromRunnable(updateSchema));
     }
 
     private void alterKeyspace(KeyspaceMetadata before, KeyspaceMetadata after)

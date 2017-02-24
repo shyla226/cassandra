@@ -658,7 +658,7 @@ public final class SystemKeyspace
     public static synchronized Single<UntypedResultSet> updateSchemaVersion(UUID version)
     {
         String req = "INSERT INTO system.%s (key, schema_version) VALUES ('%s', ?)";
-        return executeInternal(String.format(req, LOCAL, LOCAL), version);
+        return executeInternal(format(req, LOCAL, LOCAL), version);
     }
 
     private static Set<String> tokensAsSet(Collection<Token> tokens)
@@ -1390,7 +1390,7 @@ public final class SystemKeyspace
     {
         logger.debug("stored prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
         return executeInternal(
-                format("INSERT INTO %s.%s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?)",
+                format("INSERT INTO %s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?)",
                 PreparedStatements.toString()),
                 loggedKeyspace, key.byteBuffer(), cql);
     }
