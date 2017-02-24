@@ -183,7 +183,10 @@ public class ContinuousPagingService
      */
     public static long liveSessions()
     {
-        return sessions.size();
+        synchronized (sessions)
+        {
+            return sessions.size();
+        }
     }
 
     /**
@@ -191,7 +194,10 @@ public class ContinuousPagingService
      */
     public static long pendingPages()
     {
-        return sessions.values().stream().map(PageBuilder::pendingPages).reduce(Integer::sum).orElseGet(() -> 0);
+        synchronized (sessions)
+        {
+            return sessions.values().stream().map(PageBuilder::pendingPages).reduce(Integer::sum).orElseGet(() -> 0);
+        }
     }
 
     /**
