@@ -30,7 +30,6 @@ import org.junit.Test;
 import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -41,8 +40,8 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 
 public class CompactionIteratorTest
 {
@@ -53,7 +52,7 @@ public class CompactionIteratorTest
     private static final String CFNAME = "Integer1";
 
     static final DecoratedKey kk;
-    static final CFMetaData metadata;
+    static final TableMetadata metadata;
     private static final int RANGE = 1000;
     private static final int COUNT = 100;
 
@@ -72,7 +71,7 @@ public class CompactionIteratorTest
                                                                          1,
                                                                          UTF8Type.instance,
                                                                          Int32Type.instance,
-                                                                         Int32Type.instance));
+                                                                         Int32Type.instance).build());
     }
 
     // See org.apache.cassandra.db.rows.UnfilteredRowsGenerator.parse for the syntax used in these tests.
@@ -340,7 +339,7 @@ public class CompactionIteratorTest
         }
 
         @Override
-        public CFMetaData metadata()
+        public TableMetadata metadata()
         {
             return metadata;
         }

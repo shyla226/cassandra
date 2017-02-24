@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,12 +25,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -72,6 +69,11 @@ public class CompositeType extends AbstractCompositeType
     public static CompositeType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         return getInstance(parser.getTypeParameters());
+    }
+
+    public static CompositeType getInstance(Iterable<AbstractType<?>> types)
+    {
+        return getInstance(Lists.newArrayList(types));
     }
 
     public static CompositeType getInstance(AbstractType... types)

@@ -28,30 +28,26 @@ import Parser,Lexer;
 @header {
     package org.apache.cassandra.cql3;
 
-    import java.util.ArrayList;
     import java.util.Arrays;
     import java.util.Collections;
     import java.util.EnumSet;
     import java.util.HashSet;
-    import java.util.HashMap;
     import java.util.LinkedHashMap;
-    import java.util.List;
     import java.util.Map;
     import java.util.Set;
 
     import org.apache.cassandra.auth.*;
     import org.apache.cassandra.auth.permission.*;
-    import org.apache.cassandra.config.ColumnDefinition;
-    import org.apache.cassandra.config.DatabaseDescriptor;
-    import org.apache.cassandra.cql3.*;
-    import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
-    import org.apache.cassandra.cql3.statements.*;
-    import org.apache.cassandra.cql3.selection.*;
+	import org.apache.cassandra.config.DatabaseDescriptor;
+    import org.apache.cassandra.cql3.conditions.*;
     import org.apache.cassandra.cql3.functions.*;
-    import org.apache.cassandra.db.marshal.CollectionType;
+    import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
+    import org.apache.cassandra.cql3.selection.*;
+    import org.apache.cassandra.cql3.statements.*;
     import org.apache.cassandra.exceptions.ConfigurationException;
     import org.apache.cassandra.exceptions.InvalidRequestException;
     import org.apache.cassandra.exceptions.SyntaxException;
+    import org.apache.cassandra.schema.ColumnMetadata;
     import org.apache.cassandra.utils.Pair;
 }
 

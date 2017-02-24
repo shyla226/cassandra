@@ -74,6 +74,8 @@ import org.apache.cassandra.metrics.ConnectionMetrics;
 import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.repair.messages.RepairMessage;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.paxos.Commit;
@@ -89,7 +91,8 @@ public final class MessagingService implements MessagingServiceMBean
 
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
-    public static final int current_version = VERSION_30;
+    public static final int VERSION_40 = 11;
+    public static final int current_version = VERSION_40;
 
     public static final String FAILURE_CALLBACK_PARAM = "CAL_BAC";
     public static final byte[] ONE_BYTE = new byte[1];
@@ -1118,9 +1121,9 @@ public final class MessagingService implements MessagingServiceMBean
     {
         assert mutation != null : "Mutation should not be null when updating dropped mutations count";
 
-        for (UUID columnFamilyId : mutation.getColumnFamilyIds())
+        for (TableId tableId : mutation.getTableIds())
         {
-            ColumnFamilyStore cfs = Keyspace.open(mutation.getKeyspaceName()).getColumnFamilyStore(columnFamilyId);
+            ColumnFamilyStore cfs = Keyspace.open(mutation.getKeyspaceName()).getColumnFamilyStore(tableId);
             if (cfs != null)
             {
                 cfs.metric.droppedMutations.inc();

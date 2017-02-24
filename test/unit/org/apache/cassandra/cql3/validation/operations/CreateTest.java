@@ -18,16 +18,18 @@
 package org.apache.cassandra.cql3.validation.operations;
 
 import java.net.InetAddress;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.UUID;
 
 import org.junit.Test;
 
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.Mutation;
@@ -36,6 +38,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.triggers.ITrigger;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -118,6 +121,8 @@ public class CreateTest extends CQLTester
         execute("INSERT INTO %s (a, b, c) VALUES (1, 18, P1Y3MT2H10M)");
         execute("INSERT INTO %s (a, b, c) VALUES (1, 19, P0000-00-00T30:20:00)");
         execute("INSERT INTO %s (a, b, c) VALUES (1, 20, P0001-03-00T02:10:00)");
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 21, duration(12, 10, 0));
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 22, duration(-12, -10, 0));
 
         assertRows(execute("SELECT * FROM %s"),
                    row(1, 1, Duration.newInstance(14, 0, 0)),
@@ -139,7 +144,9 @@ public class CreateTest extends CQLTester
                    row(1, 17, Duration.newInstance(0, 14, 0)),
                    row(1, 18, Duration.newInstance(15, 0, 130 * NANOS_PER_MINUTE)),
                    row(1, 19, Duration.newInstance(0, 0, 30 * NANOS_PER_HOUR + 20 * NANOS_PER_MINUTE)),
-                   row(1, 20, Duration.newInstance(15, 0, 130 * NANOS_PER_MINUTE)));
+                   row(1, 20, Duration.newInstance(15, 0, 130 * NANOS_PER_MINUTE)),
+                   row(1, 21, Duration.newInstance(12, 10, 0)),
+                   row(1, 22, Duration.newInstance(-12, -10, 0)));
 
         assertInvalidMessage("Slice restriction are not supported on duration columns",
                              "SELECT * FROM %s WHERE c > 1y ALLOW FILTERING");
@@ -153,6 +160,12 @@ public class CreateTest extends CQLTester
                              "INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 2, 1, ByteBufferUtil.EMPTY_BYTE_BUFFER);
         assertInvalidMessage("Invalid duration. The total number of days must be less or equal to 2147483647",
                              "INSERT INTO %s (a, b, c) VALUES (1, 2, " + Long.MAX_VALUE + "d)");
+
+        assertInvalidMessage("The duration months, days and nanoseconds must be all of the same sign (2, -2, 0)",
+                             "INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 2, 1, duration(2, -2, 0));
+
+        assertInvalidMessage("The duration months, days and nanoseconds must be all of the same sign (-2, 0, 2000000)",
+                             "INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 2, 1, duration(-2, 0, 2000000));
 
         // Test with duration column name
         createTable("CREATE TABLE %s (a text PRIMARY KEY, duration duration);");
@@ -211,6 +224,17 @@ public class CreateTest extends CQLTester
         // Test duration with several level of depth
         assertInvalidMessage("duration type is not supported for PRIMARY KEY part m",
                 "CREATE TABLE %s(pk int, m frozen<map<text, list<tuple<int, duration>>>>, v int, PRIMARY KEY (pk, m))");
+    }
+
+    private ByteBuffer duration(int months, int days, long nanoseconds) throws IOException
+    {
+        try(DataOutputBuffer output = new DataOutputBuffer())
+        {
+            output.writeVInt(months);
+            output.writeVInt(days);
+            output.writeVInt(nanoseconds);
+            return output.buffer();
+        }
     }
 
     /**
@@ -698,7 +722,7 @@ public class CreateTest extends CQLTester
                                   SchemaKeyspace.TABLES),
                            KEYSPACE,
                            currentTable()),
-                   row(map("chunk_length_in_kb", "64", "class", "org.apache.cassandra.io.compress.LZ4Compressor")));
+                   row(map("chunk_length_in_kb", "64", "class", "org.apache.cassandra.io.compress.LZ4Compressor", "min_compress_ratio", "1.1")));
 
         createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                 + " WITH compression = { 'class' : 'SnappyCompressor', 'chunk_length_in_kb' : 32 };");
@@ -708,7 +732,7 @@ public class CreateTest extends CQLTester
                                   SchemaKeyspace.TABLES),
                            KEYSPACE,
                            currentTable()),
-                   row(map("chunk_length_in_kb", "32", "class", "org.apache.cassandra.io.compress.SnappyCompressor")));
+                   row(map("chunk_length_in_kb", "32", "class", "org.apache.cassandra.io.compress.SnappyCompressor", "min_compress_ratio", "1.1")));
 
         createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                 + " WITH compression = { 'class' : 'SnappyCompressor', 'chunk_length_in_kb' : 32, 'enabled' : true };");
@@ -718,7 +742,7 @@ public class CreateTest extends CQLTester
                                   SchemaKeyspace.TABLES),
                            KEYSPACE,
                            currentTable()),
-                   row(map("chunk_length_in_kb", "32", "class", "org.apache.cassandra.io.compress.SnappyCompressor")));
+                   row(map("chunk_length_in_kb", "32", "class", "org.apache.cassandra.io.compress.SnappyCompressor", "min_compress_ratio", "1.1")));
 
         createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                 + " WITH compression = { 'sstable_compression' : 'SnappyCompressor', 'chunk_length_kb' : 32 };");
@@ -728,7 +752,27 @@ public class CreateTest extends CQLTester
                                   SchemaKeyspace.TABLES),
                            KEYSPACE,
                            currentTable()),
-                   row(map("chunk_length_in_kb", "32", "class", "org.apache.cassandra.io.compress.SnappyCompressor")));
+                   row(map("chunk_length_in_kb", "32", "class", "org.apache.cassandra.io.compress.SnappyCompressor", "min_compress_ratio", "1.1")));
+
+        createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                + " WITH compression = { 'sstable_compression' : 'SnappyCompressor', 'min_compress_ratio' : 2 };");
+
+        assertRows(execute(format("SELECT compression FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                  SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                  SchemaKeyspace.TABLES),
+                           KEYSPACE,
+                           currentTable()),
+                   row(map("chunk_length_in_kb", "64", "class", "org.apache.cassandra.io.compress.SnappyCompressor", "min_compress_ratio", "2.0")));
+
+        createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                + " WITH compression = { 'sstable_compression' : 'SnappyCompressor', 'min_compress_ratio' : 0 };");
+
+        assertRows(execute(format("SELECT compression FROM %s.%s WHERE keyspace_name = ? and table_name = ?;",
+                                  SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                  SchemaKeyspace.TABLES),
+                           KEYSPACE,
+                           currentTable()),
+                   row(map("chunk_length_in_kb", "64", "class", "org.apache.cassandra.io.compress.SnappyCompressor", "min_compress_ratio", "0.0")));
 
         createTable("CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                 + " WITH compression = { 'sstable_compression' : '', 'chunk_length_kb' : 32 };");
@@ -774,6 +818,18 @@ public class CreateTest extends CQLTester
                                            "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                                            + " WITH compression = { 'class' : 'SnappyCompressor', 'chunk_length_kb' : 32 , 'chunk_length_in_kb' : 32 };");
 
+        assertThrowsConfigurationException("chunk_length_in_kb must be a power of 2",
+                                           "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                                           + " WITH compression = { 'class' : 'SnappyCompressor', 'chunk_length_in_kb' : 31 };");
+
+        assertThrowsConfigurationException("Invalid negative or null chunk_length_in_kb",
+                                           "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                                           + " WITH compression = { 'class' : 'SnappyCompressor', 'chunk_length_in_kb' : -1 };");
+
+        assertThrowsConfigurationException("Invalid negative min_compress_ratio",
+                                           "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
+                                            + " WITH compression = { 'class' : 'SnappyCompressor', 'min_compress_ratio' : -1 };");
+
         assertThrowsConfigurationException("Unknown compression options unknownOption",
                                            "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
                                             + " WITH compression = { 'class' : 'SnappyCompressor', 'unknownOption' : 32 };");
@@ -795,14 +851,14 @@ public class CreateTest extends CQLTester
 
     private void assertTriggerExists(String name)
     {
-        CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), currentTable()).copy();
-        assertTrue("the trigger does not exist", cfm.getTriggers().get(name).isPresent());
+        TableMetadata metadata = Schema.instance.getTableMetadata(keyspace(), currentTable());
+        assertTrue("the trigger does not exist", metadata.triggers.get(name).isPresent());
     }
 
     private void assertTriggerDoesNotExists(String name)
     {
-        CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), currentTable()).copy();
-        assertFalse("the trigger exists", cfm.getTriggers().get(name).isPresent());
+        TableMetadata metadata = Schema.instance.getTableMetadata(keyspace(), currentTable());
+        assertFalse("the trigger exists", metadata.triggers.get(name).isPresent());
     }
 
     public static class TestTrigger implements ITrigger

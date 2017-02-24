@@ -27,7 +27,7 @@ import org.junit.*;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.util.FileUtils;
@@ -100,6 +100,13 @@ public class StartupChecksTest
         copyLegacyNonSSTableFiles(sstableDir);
         assertFalse(sstableDir.toFile().listFiles().length == 0);
 
+        startupChecks.verify();
+    }
+
+    @Test
+    public void maxMapCountCheck() throws Exception
+    {
+        startupChecks = startupChecks.withTest(StartupChecks.checkMaxMapCount);
         startupChecks.verify();
     }
 

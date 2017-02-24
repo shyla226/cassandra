@@ -24,7 +24,6 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -33,6 +32,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class KeysSearcher extends CassandraIndexSearcher
@@ -57,7 +57,7 @@ public class KeysSearcher extends CassandraIndexSearcher
         {
             private Single<UnfilteredRowIterator> next;
 
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return command.metadata();
             }
@@ -87,7 +87,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                         continue;
 
                     ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
-                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata,
+                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
                                                                                            command.nowInSec(),
                                                                                            extendedFilter,
                                                                                            command.rowFilter(),

@@ -29,7 +29,6 @@ import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -107,9 +106,10 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
         SSTableWriter writer = SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(location)),
                                                     currentPartitionsToWrite,
                                                     minRepairedAt,
+                                                    pendingRepair,
                                                     cfs.metadata,
-                                                    new MetadataCollector(allSSTables, cfs.metadata.comparator, 0),
-                                                    SerializationHeader.make(cfs.metadata, nonExpiredSSTables),
+                                                    new MetadataCollector(allSSTables, cfs.metadata().comparator, 0),
+                                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
                                                     cfs.indexManager.listIndexes(),
                                                     txn);
         logger.trace("Switching writer, currentPartitionsToWrite = {}", currentPartitionsToWrite);

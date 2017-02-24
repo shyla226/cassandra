@@ -26,17 +26,17 @@ import com.google.common.base.Joiner;
 import io.reactivex.Maybe;
 import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
 /**
@@ -65,7 +65,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
     @Override
     public Prepared prepare() throws InvalidRequestException
     {
-        if (Schema.instance.getKSMetaData(functionName.keyspace) != null)
+        if (Schema.instance.getKeyspaceMetadata(functionName.keyspace) != null)
         {
             argTypes = new ArrayList<>(argRawTypes.size());
             for (CQL3Type.Raw rawType : argRawTypes)
@@ -94,7 +94,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
         if (!functionName.hasKeyspace())
             throw new InvalidRequestException("Functions must be fully qualified with a keyspace name if a keyspace is not set for the session");
 
-        Validation.validateKeyspaceNotSystem(functionName.keyspace);
+        Schema.validateKeyspaceNotSystem(functionName.keyspace);
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
@@ -128,7 +128,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
                                                             functionName, functionName, functionName));
     }
 
-    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         Function old = findFunction();
         if (old == null)
@@ -139,7 +139,7 @@ public final class DropFunctionStatement extends SchemaAlteringStatement
                 return Maybe.error(new InvalidRequestException(getMissingFunctionError()));
         }
 
-        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(old.name().keyspace);
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(old.name().keyspace);
         Collection<UDAggregate> referrers = ksm.functions.aggregatesUsingFunction(old);
         if (!referrers.isEmpty())
             return error(String.format("Function '%s' still referenced by %s", old, referrers));

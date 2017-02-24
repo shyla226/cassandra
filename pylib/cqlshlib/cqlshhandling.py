@@ -207,6 +207,18 @@ cqlsh_question_mark = r'''
 <qmark> ::= "?" ;
 '''
 
+cqlsh_third_party_statement = r'''
+<thirdPartyStatement> ::= "" ;
+'''
+
+cqlsh_third_party_permission = r'''
+<thirdPartyPermission> ::= "" ;
+'''
+
+cqlsh_third_party_resource = r'''
+<thirdPartyResource> ::= "" ;
+'''
+
 cqlsh_extra_syntax_rules = cqlsh_cmd_syntax_rules + \
     cqlsh_special_cmd_command_syntax_rules + \
     cqlsh_describe_cmd_syntax_rules + \
@@ -228,7 +240,10 @@ cqlsh_extra_syntax_rules = cqlsh_cmd_syntax_rules + \
     cqlsh_login_cmd_syntax_rules + \
     cqlsh_exit_cmd_syntax_rules + \
     cqlsh_clear_cmd_syntax_rules + \
-    cqlsh_question_mark
+    cqlsh_question_mark + \
+    cqlsh_third_party_statement + \
+    cqlsh_third_party_permission + \
+    cqlsh_third_party_resource
 
 
 def complete_source_quoted_filename(ctxt, cqlsh):

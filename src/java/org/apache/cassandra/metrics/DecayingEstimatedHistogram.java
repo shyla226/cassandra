@@ -560,6 +560,11 @@ final class DecayingEstimatedHistogram implements Histogram
             return (now - decayLandmark) > LANDMARK_RESET_INTERVAL_IN_MS;
         }
 
+        private double forwardDecayWeight()
+        {
+            return forwardDecayWeight(clock.getTime(), decayLandmark);
+        }
+
         private static double forwardDecayWeight(long now, long decayLandmark)
         {
             return Math.exp(((now - decayLandmark) / 1000.0) / MEAN_LIFETIME_IN_S);
@@ -733,7 +738,8 @@ final class DecayingEstimatedHistogram implements Histogram
             this.bucketOffsets = reservoir.getOffsets();
             this.isOverflowed = reservoir.isOverflowed;
             this.buckets = copyBuckets(reservoir.buckets, reservoir.considerZeroes);
-            this.decayingBuckets = copyBuckets(reservoir.decayingBuckets, reservoir.considerZeroes);
+            this.decayingBuckets = rescaleBuckets(copyBuckets(reservoir.decayingBuckets, reservoir.considerZeroes),
+                                                  reservoir.forwardDecayWeight());
             this.count = countBuckets(buckets);
             this.countWithDecay = countBuckets(decayingBuckets);
         }
@@ -758,6 +764,15 @@ final class DecayingEstimatedHistogram implements Histogram
                 ret[index++] = buckets[i];
             }
             return ret;
+        }
+
+        private long[] rescaleBuckets(long[] buckets, final double rescaleFactor)
+        {
+            final int length = buckets.length;
+            for (int i = 0; i < length; i++)
+                buckets[i] = Math.round(buckets[i] / rescaleFactor);
+
+            return buckets;
         }
 
         private long countBuckets(long[] buckets)

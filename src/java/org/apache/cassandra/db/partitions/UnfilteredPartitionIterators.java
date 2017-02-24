@@ -25,7 +25,6 @@ import java.util.*;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.Single;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
@@ -34,6 +33,7 @@ import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.MergeIterator;
 
 /**
@@ -127,7 +127,7 @@ public abstract class UnfilteredPartitionIterators
         assert listener != null;
         assert !iterators.isEmpty();
 
-        final CFMetaData metadata = iterators.get(0).metadata();
+        final TableMetadata metadata = iterators.get(0).metadata();
         final UnfilteredRowIterator emptyIterator = EmptyIterators.unfilteredRow(metadata, null, false);
 
         final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
@@ -186,7 +186,7 @@ public abstract class UnfilteredPartitionIterators
 
         return new AbstractUnfilteredPartitionIterator()
         {
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return metadata;
             }
@@ -205,6 +205,7 @@ public abstract class UnfilteredPartitionIterators
             public void close()
             {
                 merged.close();
+                listener.close();
             }
         };
     }
@@ -216,7 +217,7 @@ public abstract class UnfilteredPartitionIterators
         if (iterators.size() == 1)
             return iterators.get(0);
 
-        final CFMetaData metadata = iterators.get(0).metadata();
+        final TableMetadata metadata = iterators.get(0).metadata();
 
         final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
         {
@@ -248,7 +249,7 @@ public abstract class UnfilteredPartitionIterators
 
         return new AbstractUnfilteredPartitionIterator()
         {
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return metadata;
             }
@@ -331,7 +332,7 @@ public abstract class UnfilteredPartitionIterators
                               .concatWith(Completable.fromAction(() -> out.writeBoolean(false)));
         }
 
-        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final CFMetaData metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
+        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final TableMetadata metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
         {
             // Skip now unused isForThrift boolean
             in.readBoolean();
@@ -342,7 +343,7 @@ public abstract class UnfilteredPartitionIterators
                 private boolean hasNext;
                 private boolean nextReturned = true;
 
-                public CFMetaData metadata()
+                public TableMetadata metadata()
                 {
                     return metadata;
                 }

@@ -22,11 +22,11 @@ import java.util.*;
 import java.util.concurrent.TimeoutException;
 
 import io.reactivex.Scheduler;
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -44,7 +44,8 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class DataResolver extends ResponseResolver
 {
-    private final List<AsyncOneResponse> repairResults = Collections.synchronizedList(new ArrayList<>());
+    @VisibleForTesting
+    final List<AsyncOneResponse> repairResults = Collections.synchronizedList(new ArrayList<>());
     private final long queryStartNanoTime;
 
     public DataResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount, long queryStartNanoTime)
@@ -77,6 +78,15 @@ public class DataResolver extends ResponseResolver
         // so ensure we're respecting the limit.
         DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true);
         return counter.applyTo(mergeWithShortReadProtection(iters, sources, counter));
+    }
+
+    public void compareResponses()
+    {
+        // We need to fully consume the results to trigger read repairs if appropriate
+        try (PartitionIterator iterator = resolve())
+        {
+            PartitionIterators.consume(iterator);
+        }
     }
 
     private PartitionIterator mergeWithShortReadProtection(List<UnfilteredPartitionIterator> results, InetAddress[] sources, DataLimits.Counter resultCounter)
@@ -112,7 +122,7 @@ public class DataResolver extends ResponseResolver
             return new MergeListener(partitionKey, columns(versions), isReversed(versions));
         }
 
-        private PartitionColumns columns(List<UnfilteredRowIterator> versions)
+        private RegularAndStaticColumns columns(List<UnfilteredRowIterator> versions)
         {
             Columns statics = Columns.NONE;
             Columns regulars = Columns.NONE;
@@ -121,11 +131,11 @@ public class DataResolver extends ResponseResolver
                 if (iter == null)
                     continue;
 
-                PartitionColumns cols = iter.columns();
+                RegularAndStaticColumns cols = iter.columns();
                 statics = statics.mergeTo(cols.statics);
                 regulars = regulars.mergeTo(cols.regulars);
             }
-            return new PartitionColumns(statics, regulars);
+            return new RegularAndStaticColumns(statics, regulars);
         }
 
         private boolean isReversed(List<UnfilteredRowIterator> versions)
@@ -165,7 +175,7 @@ public class DataResolver extends ResponseResolver
         private class MergeListener implements UnfilteredRowIterators.MergeListener
         {
             private final DecoratedKey partitionKey;
-            private final PartitionColumns columns;
+            private final RegularAndStaticColumns columns;
             private final boolean isReversed;
             private final PartitionUpdate[] repairs = new PartitionUpdate[sources.length];
 
@@ -181,7 +191,7 @@ public class DataResolver extends ResponseResolver
             // For each source, record if there is an open range to send as repair, and from where.
             private final ClusteringBound[] markerToRepair = new ClusteringBound[sources.length];
 
-            public MergeListener(DecoratedKey partitionKey, PartitionColumns columns, boolean isReversed)
+            public MergeListener(DecoratedKey partitionKey, RegularAndStaticColumns columns, boolean isReversed)
             {
                 this.partitionKey = partitionKey;
                 this.columns = columns;
@@ -201,7 +211,7 @@ public class DataResolver extends ResponseResolver
                             currentRow(i, clustering).addRowDeletion(merged);
                     }
 
-                    public void onComplexDeletion(int i, Clustering clustering, ColumnDefinition column, DeletionTime merged, DeletionTime original)
+                    public void onComplexDeletion(int i, Clustering clustering, ColumnMetadata column, DeletionTime merged, DeletionTime original)
                     {
                         if (merged != null && !merged.equals(original))
                             currentRow(i, clustering).addComplexDeletion(column, merged);
@@ -221,7 +231,7 @@ public class DataResolver extends ResponseResolver
                         // semantic (making sure we can always distinguish between a row that doesn't exist from one that do exist but has
                         /// no value for the column requested by the user) and so it won't be unexpected by the user that those columns are
                         // not repaired.
-                        ColumnDefinition column = cell.column();
+                        ColumnMetadata column = cell.column();
                         ColumnFilter filter = command.columnFilter();
                         return column.isComplex() ? filter.fetchedCellIsQueried(column, cell.path()) : filter.fetchedColumnIsQueried(column);
                     }
@@ -412,12 +422,12 @@ public class DataResolver extends ResponseResolver
 
         private class ShortReadRowProtection extends Transformation implements MoreRows<UnfilteredRowIterator>
         {
-            final CFMetaData metadata;
+            final TableMetadata metadata;
             final DecoratedKey partitionKey;
             Clustering lastClustering;
             int lastCount = 0;
 
-            private ShortReadRowProtection(CFMetaData metadata, DecoratedKey partitionKey)
+            private ShortReadRowProtection(TableMetadata metadata, DecoratedKey partitionKey)
             {
                 this.metadata = metadata;
                 this.partitionKey = partitionKey;
@@ -517,7 +527,7 @@ public class DataResolver extends ResponseResolver
                     {
                         SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
 
-                        Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().ksName, singleCommand.partitionKey(), false);
+                        Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().keyspace, singleCommand.partitionKey(), false);
 
                         scheduler.scheduleDirect(new StorageProxy.LocalReadRunnable(retryCommand, handler));
                     }

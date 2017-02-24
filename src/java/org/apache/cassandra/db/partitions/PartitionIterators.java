@@ -20,14 +20,10 @@ package org.apache.cassandra.db.partitions;
 import java.util.*;
 
 import io.reactivex.Flowable;
-import io.reactivex.Observable;
 import io.reactivex.Single;
-import io.reactivex.internal.schedulers.ImmediateThinScheduler;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.RowIterators;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -94,6 +90,18 @@ public abstract class PartitionIterators
     public static PartitionIterator singletonIterator(RowIterator iterator)
     {
         return new SingletonPartitionIterator(iterator);
+    }
+
+    public static void consume(PartitionIterator iterator)
+    {
+        while (iterator.hasNext())
+        {
+            try (RowIterator partition = iterator.next().blockingGet())
+            {
+                while (partition.hasNext())
+                    partition.next();
+            }
+        }
     }
 
     /**

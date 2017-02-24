@@ -62,7 +62,7 @@ public interface ReadQuery
 
         public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
         {
-            return Single.just(EmptyIterators.unfilteredPartition(executionController.metaData()));
+            return Single.just(EmptyIterators.unfilteredPartition(executionController.metadata()));
         }
 
         public DataLimits limits()
@@ -159,7 +159,7 @@ public interface ReadQuery
      * {@link ReadQuery#executeInternal(ReadExecutionController)} is the filtering, only unfiltered iterators can
      * be merged later on.
      *
-     * @param controller the {@code ReadExecutionController} protecting the read.
+     * @param executionController the {@code ReadExecutionController} protecting the read.
      * @return the result of the read query.
      */
     public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController controller);

@@ -18,20 +18,20 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
-import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.cql3.CFName;
-import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
 public class AlterViewStatement extends SchemaAlteringStatement
@@ -46,9 +46,9 @@ public class AlterViewStatement extends SchemaAlteringStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        CFMetaData baseTable = View.findBaseTable(keyspace(), columnFamily());
+        TableMetadataRef baseTable = View.findBaseTable(keyspace(), columnFamily());
         if (baseTable != null)
-            state.hasColumnFamilyAccess(keyspace(), baseTable.cfName, CorePermission.ALTER);
+            state.hasColumnFamilyAccess(keyspace(), baseTable.name, CorePermission.ALTER);
     }
 
     public void validate(ClientState state)
@@ -56,20 +56,20 @@ public class AlterViewStatement extends SchemaAlteringStatement
         // validated in announceMigration()
     }
 
-    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
-        CFMetaData meta = Validation.validateColumnFamily(keyspace(), columnFamily());
+        TableMetadata meta = Schema.instance.validateTable(keyspace(), columnFamily());
         if (!meta.isView())
             return error("Cannot use ALTER MATERIALIZED VIEW on Table");
 
-        ViewDefinition viewCopy = Schema.instance.getView(keyspace(), columnFamily()).copy();
+        ViewMetadata current = Schema.instance.getView(keyspace(), columnFamily());
 
         if (attrs == null)
             return error("ALTER MATERIALIZED VIEW WITH invoked, but no parameters found");
 
         attrs.validate();
 
-        TableParams params = attrs.asAlteredTableParams(viewCopy.metadata.params);
+        TableParams params = attrs.asAlteredTableParams(current.metadata.params);
         if (params.gcGraceSeconds == 0)
         {
             return error("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
@@ -84,10 +84,13 @@ public class AlterViewStatement extends SchemaAlteringStatement
                                               "the corresponding data in the parent table.");
         }
 
-        viewCopy.metadata.params(params);
+        ViewMetadata updated = current.copy(current.metadata.unbuild().params(params).build());
 
-        return MigrationManager.announceViewUpdate(viewCopy, isLocalOnly)
-                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())));
+        return MigrationManager.announceViewUpdate(updated, isLocalOnly)
+                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED,
+                                                                          Event.SchemaChange.Target.TABLE,
+                                                                          keyspace(),
+                                                                          columnFamily())));
     }
 
     public String toString()

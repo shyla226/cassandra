@@ -20,13 +20,14 @@ package org.apache.cassandra.cql3.statements;
 import io.reactivex.Maybe;
 
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
 public class DropKeyspaceStatement extends SchemaAlteringStatement
@@ -48,7 +49,7 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        Validation.validateKeyspaceNotSystem(keyspace);
+        Schema.validateKeyspaceNotSystem(keyspace);
     }
 
     @Override
@@ -57,7 +58,7 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
         return keyspace;
     }
 
-    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws ConfigurationException
     {
         return MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly)
                                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, keyspace())))

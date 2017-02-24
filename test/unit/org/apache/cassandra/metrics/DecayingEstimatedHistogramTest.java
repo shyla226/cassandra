@@ -380,6 +380,35 @@ public class DecayingEstimatedHistogramTest
         }
     }
 
+    @Test
+    public void testDecayingMean()
+    {
+        {
+            TestClock clock = new TestClock();
+
+            DecayingEstimatedHistogram histogram = new DecayingEstimatedHistogram(Histogram.DEFAULT_ZERO_CONSIDERATION,
+                                                                                  Histogram.DEFAULT_MAX_TRACKABLE_VALUE,
+                                                                                  TEST_UPDATE_INTERVAL_MILLIS,
+                                                                                  clock);
+
+            clock.addMillis(DecayingEstimatedHistogram.ForwardDecayingReservoir.LANDMARK_RESET_INTERVAL_IN_MS - 1_000L);
+
+            while (clock.getTime() < DecayingEstimatedHistogram.ForwardDecayingReservoir.LANDMARK_RESET_INTERVAL_IN_MS + 1_000L)
+            {
+                clock.addMillis(900);
+                for (int i = 0; i < 1_000_000; i++)
+                {
+                    histogram.update(1000);
+                    histogram.update(2000);
+                    histogram.update(3000);
+                    histogram.update(4000);
+                    histogram.update(5000);
+                }
+                assertEquals(3000D, histogram.getSnapshot().getMean(), 500D);
+            }
+        }
+    }
+
     private void assertEstimatedQuantile(long expectedValue, double actualValue)
     {
         assertTrue("Expected at least [" + expectedValue + "] but actual is [" + actualValue + "]",
@@ -390,6 +419,11 @@ public class DecayingEstimatedHistogramTest
 
     public static class TestClock extends Clock {
         private long tick = 0;
+
+        public void addMillis(long millis)
+        {
+            tick += millis * 1_000_000L;
+        }
 
         public void addSeconds(long seconds)
         {

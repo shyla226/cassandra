@@ -96,11 +96,12 @@ public class Config
     public volatile long truncate_request_timeout_in_ms = 60000L;
 
     /**
-     * @deprecated use {@link this#streaming_keep_alive_period_in_secs} instead
+     * @deprecated use {@link #streaming_keep_alive_period_in_secs} instead
      */
     @Deprecated
     public int streaming_socket_timeout_in_ms = 86400000; //24 hours
 
+    public Integer streaming_connections_per_host = 1;
     public Integer streaming_keep_alive_period_in_secs = 300; //5 minutes
 
     public boolean cross_node_timeout = false;
@@ -282,12 +283,13 @@ public class Config
 
     /*
      * How many microseconds to wait for coalescing. For fixed strategy this is the amount of time after the first
-     * messgae is received before it will be sent with any accompanying messages. For moving average this is the
+     * message is received before it will be sent with any accompanying messages. For moving average this is the
      * maximum amount of time that will be waited as well as the interval at which messages must arrive on average
      * for coalescing to be enabled.
      */
     public static final int otc_coalescing_window_us_default = 200;
     public int otc_coalescing_window_us = otc_coalescing_window_us_default;
+    public int otc_coalescing_enough_coalesced_messages = 8;
 
     public int windows_timer_interval = 0;
 

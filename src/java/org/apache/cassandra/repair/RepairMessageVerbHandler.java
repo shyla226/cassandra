@@ -21,8 +21,6 @@ import java.net.InetAddress;
 import java.util.*;
 
 import com.google.common.base.Predicate;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +33,7 @@ import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.*;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 
 /**
@@ -45,6 +44,12 @@ import org.apache.cassandra.service.ActiveRepairService;
 public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairMessageVerbHandler.class);
+
+    private boolean isConsistent(UUID sessionID)
+    {
+        return ActiveRepairService.instance.consistent.local.isSessionInProgress(sessionID);
+    }
+
     public void doVerb(final MessageIn<RepairMessage> message, final int id)
     {
         // TODO add cancel/interrupt message
@@ -56,14 +61,14 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                 case PREPARE_MESSAGE:
                     PrepareMessage prepareMessage = (PrepareMessage) message.payload;
                     logger.debug("Preparing, {}", prepareMessage);
-                    List<ColumnFamilyStore> columnFamilyStores = new ArrayList<>(prepareMessage.cfIds.size());
-                    for (UUID cfId : prepareMessage.cfIds)
+                    List<ColumnFamilyStore> columnFamilyStores = new ArrayList<>(prepareMessage.tableIds.size());
+                    for (TableId tableId : prepareMessage.tableIds)
                     {
-                        ColumnFamilyStore columnFamilyStore = ColumnFamilyStore.getIfExists(cfId);
+                        ColumnFamilyStore columnFamilyStore = ColumnFamilyStore.getIfExists(tableId);
                         if (columnFamilyStore == null)
                         {
                             logErrorAndSendFailureResponse(String.format("Table with id %s was dropped during prepare phase of repair",
-                                                                         cfId.toString()), message.from, id);
+                                                                         tableId), message.from, id);
                             return;
                         }
                         columnFamilyStores.add(columnFamilyStore);
@@ -91,7 +96,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId);
                     if (prs.isGlobal)
                     {
-                        prs.maybeSnapshot(cfs.metadata.cfId, desc.parentSessionId);
+                        prs.maybeSnapshot(cfs.metadata.id, desc.parentSessionId);
                     }
                     else
                     {
@@ -100,10 +105,10 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                             public boolean apply(SSTableReader sstable)
                             {
                                 return sstable != null &&
-                                       !sstable.metadata.isIndex() && // exclude SSTables from 2i
+                                       !sstable.metadata().isIndex() && // exclude SSTables from 2i
                                        new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(desc.ranges);
                             }
-                        }, true, false); //ephemeral snapshot, if repair fails, it will be cleaned next startup
+                        }, true, false, new HashSet<>()); //ephemeral snapshot, if repair fails, it will be cleaned next startup
                     }
                     logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from);
                     MessagingService.instance().sendReply(new MessageOut(MessagingService.Verb.INTERNAL_RESPONSE), id, message.from);
@@ -121,7 +126,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                         return;
                     }
 
-                    Validator validator = new Validator(desc, message.from, validationRequest.gcBefore);
+                    ActiveRepairService.instance.consistent.local.maybeSetRepairing(desc.parentSessionId);
+                    Validator validator = new Validator(desc, message.from, validationRequest.gcBefore, isConsistent(desc.parentSessionId));
                     CompactionManager.instance.submitValidation(store, validator);
                     break;
 
@@ -133,22 +139,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     if (desc.parentSessionId != null && ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId) != null)
                         repairedAt = ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId).getRepairedAt();
 
-                    StreamingRepairTask task = new StreamingRepairTask(desc, request, repairedAt);
+                    StreamingRepairTask task = new StreamingRepairTask(desc, request, repairedAt, isConsistent(desc.parentSessionId));
                     task.run();
-                    break;
-
-                case ANTICOMPACTION_REQUEST:
-                    AnticompactionRequest anticompactionRequest = (AnticompactionRequest) message.payload;
-                    logger.debug("Got anticompaction request {}", anticompactionRequest);
-                    ListenableFuture<?> compactionDone = ActiveRepairService.instance.doAntiCompaction(anticompactionRequest.parentRepairSession, anticompactionRequest.successfulRanges);
-                    compactionDone.addListener(new Runnable()
-                    {
-                        @Override
-                        public void run()
-                        {
-                            MessagingService.instance().sendReply(new MessageOut(MessagingService.Verb.INTERNAL_RESPONSE), id, message.from);
-                        }
-                    }, MoreExecutors.directExecutor());
                     break;
 
                 case CLEANUP:
@@ -156,6 +148,40 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     CleanupMessage cleanup = (CleanupMessage) message.payload;
                     ActiveRepairService.instance.removeParentRepairSession(cleanup.parentRepairSession);
                     MessagingService.instance().sendReply(new MessageOut(MessagingService.Verb.INTERNAL_RESPONSE), id, message.from);
+                    break;
+
+                case CONSISTENT_REQUEST:
+                    ActiveRepairService.instance.consistent.local.handlePrepareMessage(message.from, (PrepareConsistentRequest) message.payload);
+                    break;
+
+                case CONSISTENT_RESPONSE:
+                    ActiveRepairService.instance.consistent.coordinated.handlePrepareResponse((PrepareConsistentResponse) message.payload);
+                    break;
+
+                case FINALIZE_PROPOSE:
+                    ActiveRepairService.instance.consistent.local.handleFinalizeProposeMessage(message.from, (FinalizePropose) message.payload);
+                    break;
+
+                case FINALIZE_PROMISE:
+                    ActiveRepairService.instance.consistent.coordinated.handleFinalizePromiseMessage((FinalizePromise) message.payload);
+                    break;
+
+                case FINALIZE_COMMIT:
+                    ActiveRepairService.instance.consistent.local.handleFinalizeCommitMessage(message.from, (FinalizeCommit) message.payload);
+                    break;
+
+                case FAILED_SESSION:
+                    FailSession failure = (FailSession) message.payload;
+                    ActiveRepairService.instance.consistent.coordinated.handleFailSessionMessage(failure);
+                    ActiveRepairService.instance.consistent.local.handleFailSessionMessage(message.from, failure);
+                    break;
+
+                case STATUS_REQUEST:
+                    ActiveRepairService.instance.consistent.local.handleStatusRequest(message.from, (StatusRequest) message.payload);
+                    break;
+
+                case STATUS_RESPONSE:
+                    ActiveRepairService.instance.consistent.local.handleStatusResponse(message.from, (StatusResponse) message.payload);
                     break;
 
                 default:

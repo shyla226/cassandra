@@ -29,7 +29,7 @@ import org.junit.Test;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.FunctionName;
@@ -444,6 +444,31 @@ public class UFAuthTest extends CQLTester
         grantExecuteOnFunction(innerFunc);
 
         getStatement(cql).checkAccess(clientState);
+    }
+
+    @Test
+    public void grantAndRevokeSyntaxRequiresExplicitKeyspace() throws Throwable
+    {
+        setupTable("CREATE TABLE %s (k int, s int STATIC, v1 int, v2 int, PRIMARY KEY(k, v1))");
+        String functionName = shortFunctionName(createSimpleFunction());
+        assertRequiresKeyspace(String.format("GRANT EXECUTE ON FUNCTION %s() TO %s",
+                                             functionName,
+                                             role.getRoleName()));
+        assertRequiresKeyspace(String.format("REVOKE EXECUTE ON FUNCTION %s() FROM %s",
+                                             functionName,
+                                             role.getRoleName()));
+    }
+
+    private void assertRequiresKeyspace(String cql) throws Throwable
+    {
+        try
+        {
+            getStatement(cql);
+        }
+        catch (InvalidRequestException e)
+        {
+            assertEquals("In this context function name must be explictly qualified by a keyspace", e.getMessage());
+        }
     }
 
     private void assertPermissionsOnNestedFunctions(String innerFunction, String outerFunction) throws Throwable

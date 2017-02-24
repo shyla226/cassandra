@@ -35,8 +35,9 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.*;
@@ -78,7 +79,7 @@ public abstract class CassandraIndex implements Index
     public final ColumnFamilyStore baseCfs;
     protected IndexMetadata metadata;
     protected ColumnFamilyStore indexCfs;
-    protected ColumnDefinition indexedColumn;
+    protected ColumnMetadata indexedColumn;
     protected CassandraIndexFunctions functions;
 
     protected CassandraIndex(ColumnFamilyStore baseCfs, IndexMetadata indexDef)
@@ -93,7 +94,7 @@ public abstract class CassandraIndex implements Index
      * @param operator
      * @return
      */
-    protected boolean supportsOperator(ColumnDefinition indexedColumn, Operator operator)
+    protected boolean supportsOperator(ColumnMetadata indexedColumn, Operator operator)
     {
         return operator == Operator.EQ;
     }
@@ -147,14 +148,14 @@ public abstract class CassandraIndex implements Index
                                                   CellPath path,
                                                   ByteBuffer cellValue);
 
-    public ColumnDefinition getIndexedColumn()
+    public ColumnMetadata getIndexedColumn()
     {
         return indexedColumn;
     }
 
     public ClusteringComparator getIndexComparator()
     {
-        return indexCfs.metadata.comparator;
+        return indexCfs.metadata().comparator;
     }
 
     public ColumnFamilyStore getIndexCfs()
@@ -203,7 +204,6 @@ public abstract class CassandraIndex implements Index
     public Callable<?> getMetadataReloadTask(IndexMetadata indexDef)
     {
         return () -> {
-            indexCfs.metadata.reloadIndexMetadataProperties(baseCfs.metadata);
             indexCfs.reload();
             return null;
         };
@@ -225,12 +225,12 @@ public abstract class CassandraIndex implements Index
     private void setMetadata(IndexMetadata indexDef)
     {
         metadata = indexDef;
-        Pair<ColumnDefinition, IndexTarget.Type> target = TargetParser.parse(baseCfs.metadata, indexDef);
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(baseCfs.metadata(), indexDef);
         functions = getFunctions(indexDef, target);
-        CFMetaData cfm = indexCfsMetadata(baseCfs.metadata, indexDef);
+        TableMetadataRef tableRef = TableMetadataRef.forOfflineTools(indexCfsMetadata(baseCfs.metadata(), indexDef));
         indexCfs = ColumnFamilyStore.createColumnFamilyStore(baseCfs.keyspace,
-                                                             cfm.cfName,
-                                                             cfm,
+                                                             tableRef.name,
+                                                             tableRef,
                                                              baseCfs.getTracker().loadsstables);
         indexedColumn = target.left;
     }
@@ -249,12 +249,12 @@ public abstract class CassandraIndex implements Index
         return true;
     }
 
-    public boolean dependsOn(ColumnDefinition column)
+    public boolean dependsOn(ColumnMetadata column)
     {
         return indexedColumn.name.equals(column.name);
     }
 
-    public boolean supportsExpression(ColumnDefinition column, Operator operator)
+    public boolean supportsExpression(ColumnMetadata column, Operator operator)
     {
         return indexedColumn.name.equals(column.name)
                && supportsOperator(indexedColumn, operator);
@@ -340,7 +340,7 @@ public abstract class CassandraIndex implements Index
     }
 
     public Indexer indexerFor(final DecoratedKey key,
-                              final PartitionColumns columns,
+                              final RegularAndStaticColumns columns,
                               final int nowInSec,
                               final TPCOpOrder.Group opGroup,
                               final IndexTransaction.Type transactionType)
@@ -637,11 +637,10 @@ public abstract class CassandraIndex implements Index
     {
         if (value != null && value.remaining() >= FBUtilities.MAX_UNSIGNED_SHORT)
             throw new InvalidRequestException(String.format(
-                                                           "Cannot index value of size %d for index %s on %s.%s(%s) (maximum allowed size=%d)",
+                                                           "Cannot index value of size %d for index %s on %s(%s) (maximum allowed size=%d)",
                                                            value.remaining(),
                                                            metadata.name,
-                                                           baseCfs.metadata.ksName,
-                                                           baseCfs.metadata.cfName,
+                                                           baseCfs.metadata,
                                                            indexedColumn.name.toString(),
                                                            FBUtilities.MAX_UNSIGNED_SHORT));
     }
@@ -673,7 +672,7 @@ public abstract class CassandraIndex implements Index
 
     private PartitionUpdate partitionUpdate(DecoratedKey valueKey, Row row)
     {
-        return PartitionUpdate.singleRowUpdate(indexCfs.metadata, valueKey, row);
+        return PartitionUpdate.singleRowUpdate(indexCfs.metadata(), valueKey, row);
     }
 
     private void invalidate()
@@ -716,8 +715,8 @@ public abstract class CassandraIndex implements Index
             if (sstables.isEmpty())
             {
                 logger.info("No SSTable data for {}.{} to build index {} from, marking empty index as built",
-                            baseCfs.metadata.ksName,
-                            baseCfs.metadata.cfName,
+                            baseCfs.metadata.keyspace,
+                            baseCfs.metadata.name,
                             metadata.name);
                 baseCfs.indexManager.markIndexBuilt(metadata.name);
                 return;
@@ -746,31 +745,27 @@ public abstract class CassandraIndex implements Index
     }
 
     /**
-     * Construct the CFMetadata for an index table, the clustering columns in the index table
+     * Construct the TableMetadata for an index table, the clustering columns in the index table
      * vary dependent on the kind of the indexed value.
      * @param baseCfsMetadata
      * @param indexMetadata
      * @return
      */
-    public static final CFMetaData indexCfsMetadata(CFMetaData baseCfsMetadata, IndexMetadata indexMetadata)
+    public static TableMetadata indexCfsMetadata(TableMetadata baseCfsMetadata, IndexMetadata indexMetadata)
     {
-        Pair<ColumnDefinition, IndexTarget.Type> target = TargetParser.parse(baseCfsMetadata, indexMetadata);
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(baseCfsMetadata, indexMetadata);
         CassandraIndexFunctions utils = getFunctions(indexMetadata, target);
-        ColumnDefinition indexedColumn = target.left;
+        ColumnMetadata indexedColumn = target.left;
         AbstractType<?> indexedValueType = utils.getIndexedValueType(indexedColumn);
 
-        // Tables for legacy KEYS indexes are non-compound and dense
-        CFMetaData.Builder builder = indexMetadata.isKeys()
-                                     ? CFMetaData.Builder.create(baseCfsMetadata.ksName,
-                                                                 baseCfsMetadata.indexColumnFamilyName(indexMetadata),
-                                                                 true, false, false)
-                                     : CFMetaData.Builder.create(baseCfsMetadata.ksName,
-                                                                 baseCfsMetadata.indexColumnFamilyName(indexMetadata));
-
-        builder =  builder.withId(baseCfsMetadata.cfId)
-                          .withPartitioner(new LocalPartitioner(indexedValueType))
-                          .addPartitionKey(indexedColumn.name, indexedColumn.type)
-                          .addClusteringColumn("partition_key", baseCfsMetadata.partitioner.partitionOrdering());
+        TableMetadata.Builder builder =
+            TableMetadata.builder(baseCfsMetadata.keyspace, baseCfsMetadata.indexTableName(indexMetadata), baseCfsMetadata.id)
+                         // tables for legacy KEYS indexes are non-compound and dense
+                         .isDense(indexMetadata.isKeys())
+                         .isCompound(!indexMetadata.isKeys())
+                         .partitioner(new LocalPartitioner(indexedValueType))
+                         .addPartitionKeyColumn(indexedColumn.name, indexedColumn.type)
+                         .addClusteringColumn("partition_key", baseCfsMetadata.partitioner.partitionOrdering());
 
         if (indexMetadata.isKeys())
         {
@@ -778,16 +773,16 @@ public abstract class CassandraIndex implements Index
             // value column defined, even though it is never used
             CompactTables.DefaultNames names =
                 CompactTables.defaultNameGenerator(ImmutableSet.of(indexedColumn.name.toString(), "partition_key"));
-            builder = builder.addRegularColumn(names.defaultCompactValueName(), EmptyType.instance);
+            builder.addRegularColumn(names.defaultCompactValueName(), EmptyType.instance);
         }
         else
         {
             // The clustering columns for a table backing a COMPOSITES index are dependent
             // on the specific type of index (there are specializations for indexes on collections)
-            builder = utils.addIndexClusteringColumns(builder, baseCfsMetadata, indexedColumn);
+            utils.addIndexClusteringColumns(builder, baseCfsMetadata, indexedColumn);
         }
 
-        return builder.build().reloadIndexMetadataProperties(baseCfsMetadata);
+        return builder.build().updateIndexTableMetadata(baseCfsMetadata.params);
     }
 
     /**
@@ -798,16 +793,16 @@ public abstract class CassandraIndex implements Index
      */
     public static CassandraIndex newIndex(ColumnFamilyStore baseCfs, IndexMetadata indexMetadata)
     {
-        return getFunctions(indexMetadata, TargetParser.parse(baseCfs.metadata, indexMetadata)).newIndexInstance(baseCfs, indexMetadata);
+        return getFunctions(indexMetadata, TargetParser.parse(baseCfs.metadata(), indexMetadata)).newIndexInstance(baseCfs, indexMetadata);
     }
 
     static CassandraIndexFunctions getFunctions(IndexMetadata indexDef,
-                                                Pair<ColumnDefinition, IndexTarget.Type> target)
+                                                Pair<ColumnMetadata, IndexTarget.Type> target)
     {
         if (indexDef.isKeys())
             return CassandraIndexFunctions.KEYS_INDEX_FUNCTIONS;
 
-        ColumnDefinition indexedColumn = target.left;
+        ColumnMetadata indexedColumn = target.left;
         if (indexedColumn.type.isCollection() && indexedColumn.type.isMultiCell())
         {
             switch (((CollectionType)indexedColumn.type).kind)

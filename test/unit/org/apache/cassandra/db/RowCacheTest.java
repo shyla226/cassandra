@@ -32,9 +32,8 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.RowCacheKey;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -106,9 +105,9 @@ public class RowCacheTest
 
         ByteBuffer key = ByteBufferUtil.bytes("rowcachekey");
         DecoratedKey dk = cachedStore.decorateKey(key);
-        RowCacheKey rck = new RowCacheKey(cachedStore.metadata.ksAndCFName, dk);
+        RowCacheKey rck = new RowCacheKey(cachedStore.metadata(), dk);
 
-        RowUpdateBuilder rub = new RowUpdateBuilder(cachedStore.metadata, System.currentTimeMillis(), key);
+        RowUpdateBuilder rub = new RowUpdateBuilder(cachedStore.metadata(), System.currentTimeMillis(), key);
         rub.clustering(String.valueOf(0));
         rub.add("val", ByteBufferUtil.bytes("val" + 0));
         rub.build().applyUnsafe();
@@ -421,11 +420,11 @@ public class RowCacheTest
 
         ByteBuffer key = ByteBufferUtil.bytes("rowcachekey");
         DecoratedKey dk = cachedStore.decorateKey(key);
-        RowCacheKey rck = new RowCacheKey(cachedStore.metadata.ksAndCFName, dk);
+        RowCacheKey rck = new RowCacheKey(cachedStore.metadata(), dk);
         String values[] = new String[200];
         for (int i = 0; i < 200; i++)
         {
-            RowUpdateBuilder rub = new RowUpdateBuilder(cachedStore.metadata, System.currentTimeMillis(), key);
+            RowUpdateBuilder rub = new RowUpdateBuilder(cachedStore.metadata(), System.currentTimeMillis(), key);
             rub.clustering(String.valueOf(i));
             values[i] = "val" + i;
             rub.add("val", ByteBufferUtil.bytes(values[i]));
@@ -555,12 +554,10 @@ public class RowCacheTest
     private static void readData(String keyspace, String columnFamily, int offset, int numberOfRows)
     {
         ColumnFamilyStore store = Keyspace.open(keyspace).getColumnFamilyStore(columnFamily);
-        CFMetaData cfm = Schema.instance.getCFMetaData(keyspace, columnFamily);
 
         for (int i = offset; i < offset + numberOfRows; i++)
         {
             DecoratedKey key = Util.dk("key" + i);
-            Clustering cl = Clustering.make(ByteBufferUtil.bytes("col" + i));
             Util.getAll(Util.cmd(store, key).build());
         }
     }

@@ -29,7 +29,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 

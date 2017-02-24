@@ -18,20 +18,20 @@
 package org.apache.cassandra.db;
 
 import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class ReadExecutionController implements AutoCloseable
 {
     // For every reads
-    private final CFMetaData baseMetadata; // kept to sanity check that we have take the op order on the right table
+    private final TableMetadata baseMetadata; // kept to sanity check that we have take the op order on the right table
 
     // For index reads
     private final ReadExecutionController indexController;
     private final TPCOpOrder.Group writeOp;
 
-    private ReadExecutionController(CFMetaData baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
+    private ReadExecutionController(TableMetadata baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -52,7 +52,7 @@ public class ReadExecutionController implements AutoCloseable
 
     public boolean validForReadOn(ColumnFamilyStore cfs)
     {
-        return cfs.metadata.cfId.equals(baseMetadata.cfId);
+        return cfs.metadata.id.equals(baseMetadata.id);
     }
 
     public static ReadExecutionController empty()
@@ -77,7 +77,7 @@ public class ReadExecutionController implements AutoCloseable
 
         if (indexCfs == null)
         {
-            return new ReadExecutionController(baseCfs.metadata, null, null);
+            return new ReadExecutionController(baseCfs.metadata(), null, null);
         }
         else
         {
@@ -86,11 +86,11 @@ public class ReadExecutionController implements AutoCloseable
             // OpOrder.start() shouldn't fail, but better safe than sorry.
             try
             {
-                indexController = new ReadExecutionController(indexCfs.metadata, null, null);
+                indexController = new ReadExecutionController(indexCfs.metadata(), null, null);
                 // TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try* to delete stale entries, without blocking if there's no room
                 // as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
                 writeOp = Keyspace.writeOrder.start();
-                return new ReadExecutionController(baseCfs.metadata, indexController, writeOp);
+                return new ReadExecutionController(baseCfs.metadata(), indexController, writeOp);
             }
             catch (RuntimeException e)
             {
@@ -111,7 +111,7 @@ public class ReadExecutionController implements AutoCloseable
         return index == null ? null : index.getBackingTable().orElse(null);
     }
 
-    public CFMetaData metaData()
+    public TableMetadata metadata()
     {
         return baseMetadata;
     }

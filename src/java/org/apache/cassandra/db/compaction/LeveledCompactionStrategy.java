@@ -29,7 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -63,18 +63,18 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         int configuredLevelFanoutSize = DEFAULT_LEVEL_FANOUT_SIZE;
         SizeTieredCompactionStrategyOptions localOptions = new SizeTieredCompactionStrategyOptions(options);
         if (options != null)
-        {             
-            if (options.containsKey(SSTABLE_SIZE_OPTION))             
-            {                 
-                configuredMaxSSTableSize = Integer.parseInt(options.get(SSTABLE_SIZE_OPTION));                 
+        {
+            if (options.containsKey(SSTABLE_SIZE_OPTION))
+            {
+                configuredMaxSSTableSize = Integer.parseInt(options.get(SSTABLE_SIZE_OPTION));
                 if (!tolerateSstableSize)
-                {                     
+                {
                     if (configuredMaxSSTableSize >= 1000)
                         logger.warn("Max sstable size of {}MB is configured for {}.{}; having a unit of compaction this large is probably a bad idea",
-                                configuredMaxSSTableSize, cfs.name, cfs.getColumnFamilyName());
+                                configuredMaxSSTableSize, cfs.name, cfs.getTableName());
                     if (configuredMaxSSTableSize < 50)
                         logger.warn("Max sstable size of {}MB is configured for {}.{}.  Testing done for CASSANDRA-5727 indicates that performance improves up to 160MB",
-                                configuredMaxSSTableSize, cfs.name, cfs.getColumnFamilyName());
+                                configuredMaxSSTableSize, cfs.name, cfs.getTableName());
                 }
             }
 
@@ -300,7 +300,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
                     if (!intersecting.isEmpty())
                     {
                         @SuppressWarnings("resource") // The ScannerList will be in charge of closing (and we close properly on errors)
-                        ISSTableScanner scanner = new LeveledScanner(intersecting, ranges);
+                        ISSTableScanner scanner = new LeveledScanner(cfs.metadata(), intersecting, ranges);
                         scanners.add(scanner);
                     }
                 }
@@ -340,10 +340,17 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         manifest.remove(sstable);
     }
 
+    @Override
+    protected Set<SSTableReader> getSSTables()
+    {
+        return manifest.getSSTables();
+    }
+
     // Lazily creates SSTableBoundedScanner for sstable that are assumed to be from the
     // same level (e.g. non overlapping) - see #4142
     private static class LeveledScanner extends AbstractIterator<Single<UnfilteredRowIterator>> implements ISSTableScanner
     {
+        private final TableMetadata metadata;
         private final Collection<Range<Token>> ranges;
         private final List<SSTableReader> sstables;
         private final Iterator<SSTableReader> sstableIterator;
@@ -354,8 +361,9 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
         private long positionOffset;
         private long totalBytesScanned = 0;
 
-        public LeveledScanner(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+        public LeveledScanner(TableMetadata metadata, Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
         {
+            this.metadata = metadata;
             this.ranges = ranges;
 
             // add only sstables that intersect our range, and estimate how much data that involves
@@ -403,9 +411,9 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy
             return filtered;
         }
 
-        public CFMetaData metadata()
+        public TableMetadata metadata()
         {
-            return sstables.get(0).metadata; // The ctor checks we have at least one sstable
+            return metadata;
         }
 
         protected Single<UnfilteredRowIterator> computeNext()

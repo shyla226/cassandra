@@ -54,7 +54,7 @@ public class JavaDriverClient
     private final ProtocolVersion protocolVersion;
     private final EncryptionOptions.ClientEncryptionOptions encryptionOptions;
     private Cluster cluster;
-    private Session session;
+    private ContinuousPagingSession session;
     private final LoadBalancingPolicy loadBalancingPolicy;
     private final boolean showQueries;
     private final PrintStream queryLog;
@@ -184,7 +184,7 @@ public class JavaDriverClient
                     host.getDatacenter(), host.getAddress(), host.getRack());
         }
 
-        session = cluster.connect();
+        session = (ContinuousPagingSession) cluster.connect();
 
         if (showQueries)
         {
@@ -197,7 +197,7 @@ public class JavaDriverClient
         return cluster;
     }
 
-    private Session getSession()
+    private ContinuousPagingSession getSession()
     {
         return session;
     }
@@ -219,12 +219,12 @@ public class JavaDriverClient
         return result;
     }
 
-    public RowIterator execute(Statement statement, ContinuousPagingOptions pagingOptions)
+    public ContinuousPagingResult execute(Statement statement, ContinuousPagingOptions pagingOptions)
     {
-        RowIterator it = null;
+        ContinuousPagingResult result = null;
         try
         {
-            it = getSession().execute(statement, pagingOptions);
+            result = getSession().executeContinuously(statement, pagingOptions);
         }
         finally
         {
@@ -233,7 +233,7 @@ public class JavaDriverClient
                 statementPrinter.print(Thread.currentThread().getId(), statement);
             }
         }
-        return it;
+        return result;
     }
 
     public ResultSet execute(String query, org.apache.cassandra.db.ConsistencyLevel consistency)

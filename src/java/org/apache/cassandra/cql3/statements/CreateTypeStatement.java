@@ -24,15 +24,16 @@ import io.reactivex.Maybe;
 import io.reactivex.Single;
 
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
 public class CreateTypeStatement extends SchemaAlteringStatement
@@ -69,7 +70,7 @@ public class CreateTypeStatement extends SchemaAlteringStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(name.getKeyspace());
         if (ksm == null)
             throw new InvalidRequestException(String.format("Cannot add type in unknown keyspace %s", name.getKeyspace()));
 
@@ -121,9 +122,9 @@ public class CreateTypeStatement extends SchemaAlteringStatement
         return new UserType(name.getKeyspace(), name.getUserTypeName(), columnNames, types, true);
     }
 
-    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
-        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(name.getKeyspace());
         assert ksm != null; // should haven't validate otherwise
 
         // Can happen with ifNotExists

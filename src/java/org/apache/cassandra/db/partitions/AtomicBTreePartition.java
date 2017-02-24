@@ -24,7 +24,8 @@ import java.util.List;
 
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -35,7 +36,6 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 
@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.memory.MemtableAllocator;
  */
 public class AtomicBTreePartition extends AbstractBTreePartition
 {
-    public static final long EMPTY_SIZE = ObjectSizes.measure(new AtomicBTreePartition(CFMetaData.createFake("keyspace", "table"),
+    public static final long EMPTY_SIZE = ObjectSizes.measure(new AtomicBTreePartition(null,
             DatabaseDescriptor.getPartitioner().decorateKey(ByteBuffer.allocate(1)),
             null));
 
@@ -57,12 +57,20 @@ public class AtomicBTreePartition extends AbstractBTreePartition
 
     private volatile Holder ref;
 
-    public AtomicBTreePartition(CFMetaData metadata, DecoratedKey partitionKey, MemtableAllocator allocator)
+    private final TableMetadataRef metadata;
+
+    public AtomicBTreePartition(TableMetadataRef metadata, DecoratedKey partitionKey, MemtableAllocator allocator)
     {
         // involved in potential bug? partition columns may be a subset if we alter columns while it's in memtable
-        super(metadata, partitionKey);
+        super(partitionKey);
+        this.metadata = metadata;
         this.allocator = allocator;
         this.ref = EMPTY;
+    }
+
+    public TableMetadata metadata()
+    {
+        return metadata.get();
     }
 
     protected boolean canHaveShadowedData()
@@ -97,7 +105,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
                 updater.allocated(newDeletionInfo.unsharedHeapSize() - ref.deletionInfo.unsharedHeapSize());
             }
 
-            PartitionColumns newColumns = update.columns().mergeTo(ref.columns);
+            RegularAndStaticColumns newColumns = update.columns().mergeTo(ref.columns);
             Row newStatic = update.staticRow();
             newStatic = newStatic.isEmpty()
                       ? ref.staticRow

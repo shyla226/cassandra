@@ -28,7 +28,7 @@ import org.apache.cassandra.auth.PermissionDetails;
 import org.apache.cassandra.auth.Resources;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;

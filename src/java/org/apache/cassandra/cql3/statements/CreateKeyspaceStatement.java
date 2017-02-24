@@ -23,13 +23,14 @@ import io.reactivex.Maybe;
 
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.transport.Event;
 
@@ -77,7 +78,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
      */
     public void validate(ClientState state) throws RequestValidationException
     {
-        Validation.validateKeyspaceNotSystem(name);
+        Schema.validateKeyspaceNotSystem(name);
 
         // keyspace name
         if (!PATTERN_WORD_CHARS.matcher(name).matches())
@@ -99,7 +100,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
             throw new ConfigurationException("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
     }
 
-    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws RequestValidationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
         KeyspaceMetadata ksm = KeyspaceMetadata.create(name, attrs.asNewKeyspaceParams());
         return MigrationManager.announceNewKeyspace(ksm, isLocalOnly)

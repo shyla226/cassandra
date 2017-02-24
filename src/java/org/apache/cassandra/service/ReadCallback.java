@@ -82,9 +82,9 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     {
         this(resolver,
              consistencyLevel,
-             consistencyLevel.blockFor(Keyspace.open(command.metadata().ksName)),
+             consistencyLevel.blockFor(Keyspace.open(command.metadata().keyspace)),
              command,
-             Keyspace.open(command.metadata().ksName),
+             Keyspace.open(command.metadata().keyspace),
              filteredEndpoints,
              queryStartNanoTime);
     }
@@ -265,10 +265,10 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         {
             // If the resolver is a DigestResolver, we need to do a full data read if there is a mismatch.
             // Otherwise, resolve will send the repairs directly if needs be (and in that case we should never
-            // get a digest mismatch)
+            // get a digest mismatch).
             try
             {
-                resolver.resolve();
+                resolver.compareResponses();
             }
             catch (DigestMismatchException e)
             {

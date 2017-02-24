@@ -47,6 +47,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.metrics.StreamingMetrics;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.messages.*;
 import org.apache.cassandra.utils.CassandraVersion;
@@ -149,9 +150,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     protected final Set<StreamRequest> requests = Sets.newConcurrentHashSet();
     // streaming tasks are created and managed per ColumnFamily ID
     @VisibleForTesting
-    protected final ConcurrentHashMap<UUID, StreamTransferTask> transfers = new ConcurrentHashMap<>();
+    protected final ConcurrentHashMap<TableId, StreamTransferTask> transfers = new ConcurrentHashMap<>();
     // data receivers, filled after receiving prepare message
-    private final Map<UUID, StreamReceiveTask> receivers = new ConcurrentHashMap<>();
+    private final Map<TableId, StreamReceiveTask> receivers = new ConcurrentHashMap<>();
     private final StreamingMetrics metrics;
     /* can be null when session is created in remote */
     private final StreamConnectionFactory factory;
@@ -164,6 +165,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     private final boolean keepSSTableLevel;
     private final boolean isIncremental;
     private ScheduledFuture<?> keepAliveFuture = null;
+    private final UUID pendingRepair;
 
     public static enum State
     {
@@ -185,7 +187,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * @param connecting Actual connecting address
      * @param factory is used for establishing connection
      */
-    public StreamSession(InetAddress peer, InetAddress connecting, StreamConnectionFactory factory, int index, boolean keepSSTableLevel, boolean isIncremental)
+    public StreamSession(InetAddress peer, InetAddress connecting, StreamConnectionFactory factory, int index, boolean keepSSTableLevel, boolean isIncremental, UUID pendingRepair)
     {
         this.peer = peer;
         this.connecting = connecting;
@@ -197,6 +199,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         this.metrics = StreamingMetrics.get(connecting);
         this.keepSSTableLevel = keepSSTableLevel;
         this.isIncremental = isIncremental;
+        this.pendingRepair = pendingRepair;
     }
 
     public UUID planId()
@@ -224,11 +227,15 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         return isIncremental;
     }
 
-
-    public LifecycleTransaction getTransaction(UUID cfId)
+    public UUID getPendingRepair()
     {
-        assert receivers.containsKey(cfId);
-        return receivers.get(cfId).getTransaction();
+        return pendingRepair;
+    }
+
+    public LifecycleTransaction getTransaction(TableId tableId)
+    {
+        assert receivers.containsKey(tableId);
+        return receivers.get(tableId).getTransaction();
     }
 
     private boolean isKeepAliveSupported()
@@ -426,13 +433,13 @@ public class StreamSession implements IEndpointStateChangeSubscriber
                 continue;
             }
 
-            UUID cfId = details.ref.get().metadata.cfId;
-            StreamTransferTask task = transfers.get(cfId);
+            TableId tableId = details.ref.get().metadata().id;
+            StreamTransferTask task = transfers.get(tableId);
             if (task == null)
             {
                 //guarantee atomicity
-                StreamTransferTask newTask = new StreamTransferTask(this, cfId);
-                task = transfers.putIfAbsent(cfId, newTask);
+                StreamTransferTask newTask = new StreamTransferTask(this, tableId);
+                task = transfers.putIfAbsent(tableId, newTask);
                 if (task == null)
                     task = newTask;
             }
@@ -527,7 +534,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
 
             case RECEIVED:
                 ReceivedMessage received = (ReceivedMessage) message;
-                received(received.cfId, received.sequenceNumber);
+                received(received.tableId, received.sequenceNumber);
                 break;
 
             case COMPLETE:
@@ -636,7 +643,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         StreamingMetrics.totalOutgoingBytes.inc(headerSize);
         metrics.outgoingBytes.inc(headerSize);
         // schedule timeout for receiving ACK
-        StreamTransferTask task = transfers.get(header.cfId);
+        StreamTransferTask task = transfers.get(header.tableId);
         if (task != null)
         {
             task.scheduleTimeout(header.sequenceNumber, 12, TimeUnit.HOURS);
@@ -654,8 +661,8 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         StreamingMetrics.totalIncomingBytes.inc(headerSize);
         metrics.incomingBytes.inc(headerSize);
         // send back file received message
-        handler.sendMessage(new ReceivedMessage(message.header.cfId, message.header.sequenceNumber));
-        receivers.get(message.header.cfId).received(message.sstable);
+        handler.sendMessage(new ReceivedMessage(message.header.tableId, message.header.sequenceNumber));
+        receivers.get(message.header.tableId).received(message.sstable);
     }
 
     public void progress(String filename, ProgressInfo.Direction direction, long bytes, long total)
@@ -664,9 +671,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         streamResult.handleProgress(progress);
     }
 
-    public void received(UUID cfId, int sequenceNumber)
+    public void received(TableId tableId, int sequenceNumber)
     {
-        transfers.get(cfId).complete(sequenceNumber);
+        transfers.get(tableId).complete(sequenceNumber);
     }
 
     /**
@@ -725,13 +732,13 @@ public class StreamSession implements IEndpointStateChangeSubscriber
 
     public synchronized void taskCompleted(StreamReceiveTask completedTask)
     {
-        receivers.remove(completedTask.cfId);
+        receivers.remove(completedTask.tableId);
         maybeCompleted();
     }
 
     public synchronized void taskCompleted(StreamTransferTask completedTask)
     {
-        transfers.remove(completedTask.cfId);
+        transfers.remove(completedTask.tableId);
         maybeCompleted();
     }
 
@@ -795,7 +802,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         failIfFinished();
         if (summary.files > 0)
-            receivers.put(summary.cfId, new StreamReceiveTask(this, summary.cfId, summary.files, summary.totalSize));
+            receivers.put(summary.tableId, new StreamReceiveTask(this, summary.tableId, summary.files, summary.totalSize));
     }
 
     private void startStreamingFiles()

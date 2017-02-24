@@ -52,10 +52,10 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.*;
@@ -230,7 +230,7 @@ public class CassandraDaemon
             public void uncaughtException(Thread t, Throwable e)
             {
                 StorageMetrics.exceptions.inc();
-                logger.error("Exception in thread {}", t, e);
+                logger.error("Exception in thread " + t, e);
                 Tracing.trace("Exception in thread {}", t, e);
                 for (Throwable e2 = e; e2 != null; e2 = e2.getCause())
                 {
@@ -239,7 +239,7 @@ public class CassandraDaemon
                     if (e2 instanceof FSError)
                     {
                         if (e2 != e) // make sure FSError gets logged exactly once.
-                            logger.error("Exception in thread {}", t, e2);
+                            logger.error("Exception in thread " + t, e2);
                         FileUtils.handleFSError((FSError) e2);
                     }
 
@@ -266,7 +266,7 @@ public class CassandraDaemon
             if (keyspaceName.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 continue;
 
-            for (CFMetaData cfm : Schema.instance.getTablesAndViews(keyspaceName))
+            for (TableMetadata cfm : Schema.instance.getTablesAndViews(keyspaceName))
             {
                 try
                 {
@@ -344,6 +344,7 @@ public class CassandraDaemon
         }
 
         SystemKeyspace.finishStartup();
+        ActiveRepairService.instance.start();
 
         // Prepared statements
         QueryProcessor.preloadPreparedStatement();

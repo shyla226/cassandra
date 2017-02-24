@@ -18,17 +18,17 @@
 package org.apache.cassandra.service.pager;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import java.util.function.Function;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 
@@ -88,6 +88,21 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal(executionController));
     }
 
+    @SuppressWarnings("resource")
+    public Single<UnfilteredPartitionIterator> fetchPageUnfiltered(int pageSize, ReadExecutionController executionController, TableMetadata metadata)
+    {
+        assert internalPager == null : "only one iteration at a time is supported";
+
+        if (isExhausted())
+            return Single.just(EmptyIterators.unfilteredPartition(metadata));
+
+        final int toFetch = Math.min(pageSize, remaining);
+        final ReadCommand pageCommand = nextPageReadCommand(toFetch);
+        internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
+        Single<UnfilteredPartitionIterator> iter = pageCommand.executeLocally(executionController);
+        return iter.map(it -> Transformation.apply(it, internalPager));
+    }
+
     private Single<PartitionIterator> innerFetch(int pageSize, Function<ReadCommand, Single<PartitionIterator>> itSupplier)
     {
         assert internalPager == null : "only one iteration at a time is supported";
@@ -97,19 +112,46 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
-        internalPager = new Pager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
+        internalPager = new RowPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
         Single<PartitionIterator> iter = itSupplier.apply(pageCommand);
         return iter.map(it -> Transformation.apply(it, internalPager));
+    }
+
+    private class UnfilteredPager extends Pager<Unfiltered>
+    {
+        private UnfilteredPager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        {
+            super(pageLimits, pageCommand, nowInSec);
+        }
+
+        protected BaseRowIterator<Unfiltered> apply(BaseRowIterator<Unfiltered> partition)
+        {
+            return Transformation.apply(counter.applyTo((UnfilteredRowIterator) partition), this);
+        }
+    }
+
+    private class RowPager extends Pager<Row>
+    {
+
+        private RowPager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        {
+            super(pageLimits, pageCommand, nowInSec);
+        }
+
+        protected BaseRowIterator<Row> apply(BaseRowIterator<Row> partition)
+        {
+            return Transformation.apply(counter.applyTo((RowIterator) partition), this);
+        }
     }
 
     /**
      * A transformation to keep track of the lastRow that was iterated and to determine
      * when a page is available. If fetching only a single page, it also stops the iteration after 1 page.
      */
-    private class Pager extends Transformation<RowIterator>
+    private abstract class Pager<T extends Unfiltered> extends Transformation<BaseRowIterator<T>>
     {
         private final DataLimits pageLimits;
-        private final DataLimits.Counter counter;
+        protected final DataLimits.Counter counter;
         private final ReadCommand pageCommand;
         private DecoratedKey currentKey;
         private Row lastRow;
@@ -123,7 +165,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         }
 
         @Override
-        public RowIterator applyToPartition(RowIterator partition)
+        public BaseRowIterator<T> applyToPartition(BaseRowIterator<T> partition)
         {
             currentKey = partition.partitionKey();
 
@@ -142,8 +184,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 }
             }
 
-            return Transformation.apply(counter.applyTo(partition), this);
+            return apply(partition);
         }
+
+        protected abstract BaseRowIterator<T> apply(BaseRowIterator<T> partition);
 
         @Override
         public void onClose()

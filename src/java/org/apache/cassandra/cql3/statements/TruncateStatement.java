@@ -21,18 +21,12 @@ import java.util.concurrent.TimeoutException;
 
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.CFName;
-import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.Validation;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.TruncateException;
-import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
@@ -62,14 +56,14 @@ public class TruncateStatement extends CFStatement implements CQLStatement
 
     public void validate(ClientState state) throws InvalidRequestException
     {
-        Validation.validateColumnFamily(keyspace(), columnFamily());
+        Schema.instance.validateTable(keyspace(), columnFamily());
     }
 
     public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException
     {
         try
         {
-            CFMetaData metaData = Schema.instance.getCFMetaData(keyspace(), columnFamily());
+            TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
             if (metaData.isView())
                 throw new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead");
 

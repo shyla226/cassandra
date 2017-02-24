@@ -21,14 +21,13 @@ import math
 import os
 import re
 import sys
-import six
 import platform
 import wcwidth
 
 from collections import defaultdict
 from displaying import colorme, get_str, FormattedValue, DEFAULT_VALUE_COLORS, NO_COLOR_MAP
-from cassandra.cqltypes import EMPTY
-from cassandra.util import datetime_from_timestamp
+from dse.cqltypes import EMPTY
+from dse.util import datetime_from_timestamp
 from util import UTC
 
 is_win = platform.system() == 'Windows'
@@ -356,7 +355,15 @@ def strftime(time_format, seconds, microseconds=0, timezone=None):
     ret_dt = ret_dt.replace(tzinfo=UTC())
     if timezone:
         ret_dt = ret_dt.astimezone(timezone)
-    return ret_dt.strftime(time_format)
+    try:
+        return ret_dt.strftime(time_format)
+    except ValueError:
+        # CASSANDRA-13185: if the date cannot be formatted as a string, return a string with the milliseconds
+        # since the epoch. cqlsh does the exact same thing for values below datetime.MINYEAR (1) or above
+        # datetime.MAXYEAR (9999). Some versions of strftime() also have problems for dates between MIN_YEAR and 1900.
+        # cqlsh COPY assumes milliseconds from the epoch if it fails to parse a datetime string, and so it is
+        # able to correctly import timestamps exported as milliseconds since the epoch.
+        return '%d' % (seconds * 1000.0)
 
 microseconds_regex = re.compile("(.*)(?:\.(\d{1,6}))(.*)")
 
@@ -388,11 +395,7 @@ def format_value_time(val, colormap, **_):
 
 @formatter_for('Duration')
 def format_value_duration(val, colormap, **_):
-    buf = six.iterbytes(val)
-    months = decode_vint(buf)
-    days = decode_vint(buf)
-    nanoseconds = decode_vint(buf)
-    return format_python_formatted_type(duration_as_str(months, days, nanoseconds), colormap, 'duration')
+    return format_python_formatted_type(duration_as_str(val.months, val.days, val.nanoseconds), colormap, 'duration')
 
 
 def duration_as_str(months, days, nanoseconds):

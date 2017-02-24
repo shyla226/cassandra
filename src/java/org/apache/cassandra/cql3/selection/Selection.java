@@ -25,13 +25,12 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 public abstract class Selection
@@ -39,28 +38,22 @@ public abstract class Selection
     /**
      * A predicate that returns <code>true</code> for static columns.
      */
-    private static final Predicate<ColumnDefinition> STATIC_COLUMN_FILTER = new Predicate<ColumnDefinition>()
-    {
-        public boolean apply(ColumnDefinition def)
-        {
-            return def.isStatic();
-        }
-    };
+    private static final Predicate<ColumnMetadata> STATIC_COLUMN_FILTER = (column) -> column.isStatic();
 
-    final CFMetaData cfm;
-    final List<ColumnDefinition> columns;
-    final SelectionColumnMapping columnMapping;
+    private final TableMetadata table;
+    final List<ColumnMetadata> columns;
+    private final SelectionColumnMapping columnMapping;
     final ResultSet.ResultMetadata metadata;
     final boolean collectTimestamps;
     final boolean collectTTLs;
 
-    protected Selection(CFMetaData cfm,
-                        List<ColumnDefinition> columns,
+    protected Selection(TableMetadata table,
+                        List<ColumnMetadata> columns,
                         SelectionColumnMapping columnMapping,
                         boolean collectTimestamps,
                         boolean collectTTLs)
     {
-        this.cfm = cfm;
+        this.table = table;
         this.columns = columns;
         this.columnMapping = columnMapping;
         this.metadata = new ResultSet.ResultMetadata(columnMapping.getColumnSpecifications());
@@ -80,7 +73,7 @@ public abstract class Selection
      */
     public boolean containsStaticColumns()
     {
-        if (!cfm.hasStaticColumns())
+        if (!table.hasStaticColumns())
             return false;
 
         if (isWildcard())
@@ -101,7 +94,7 @@ public abstract class Selection
         if (isWildcard())
             return false;
 
-        for (ColumnDefinition def : getColumns())
+        for (ColumnMetadata def : getColumns())
         {
             if (!def.isPartitionKey() && !def.isStatic())
                 return false;
@@ -120,19 +113,19 @@ public abstract class Selection
         return new ResultSet.ResultMetadata(Arrays.asList(jsonSpec));
     }
 
-    public static Selection wildcard(CFMetaData cfm)
+    public static Selection wildcard(TableMetadata table)
     {
-        List<ColumnDefinition> all = new ArrayList<>(cfm.allColumns().size());
-        Iterators.addAll(all, cfm.allColumnsInSelectOrder());
-        return new SimpleSelection(cfm, all, true);
+        List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
+        Iterators.addAll(all, table.allColumnsInSelectOrder());
+        return new SimpleSelection(table, all, true);
     }
 
-    public static Selection forColumns(CFMetaData cfm, List<ColumnDefinition> columns)
+    public static Selection forColumns(TableMetadata table, List<ColumnMetadata> columns)
     {
-        return new SimpleSelection(cfm, columns, false);
+        return new SimpleSelection(table, columns, false);
     }
 
-    public int addColumnForOrdering(ColumnDefinition c)
+    public int addColumnForOrdering(ColumnMetadata c)
     {
         columns.add(c);
         metadata.addNonSerializedColumn(c);
@@ -153,17 +146,17 @@ public abstract class Selection
         return false;
     }
 
-    public static Selection fromSelectors(CFMetaData cfm, List<RawSelector> rawSelectors, VariableSpecifications boundNames, boolean hasGroupBy)
+    public static Selection fromSelectors(TableMetadata table, List<RawSelector> rawSelectors, VariableSpecifications boundNames, boolean hasGroupBy)
     {
-        List<ColumnDefinition> defs = new ArrayList<>();
+        List<ColumnMetadata> defs = new ArrayList<>();
 
         SelectorFactories factories =
-                SelectorFactories.createFactoriesAndCollectColumnDefinitions(RawSelector.toSelectables(rawSelectors, cfm), null, cfm, defs, boundNames);
-        SelectionColumnMapping mapping = collectColumnMappings(cfm, rawSelectors, factories);
+                SelectorFactories.createFactoriesAndCollectColumnDefinitions(RawSelector.toSelectables(rawSelectors, table), null, table, defs, boundNames);
+        SelectionColumnMapping mapping = collectColumnMappings(table, rawSelectors, factories);
 
         return (processesSelection(rawSelectors) || rawSelectors.size() != defs.size() || hasGroupBy)
-               ? new SelectionWithProcessing(cfm, defs, mapping, factories)
-               : new SimpleSelection(cfm, defs, mapping, false);
+               ? new SelectionWithProcessing(table, defs, mapping, factories)
+               : new SimpleSelection(table, defs, mapping, false);
     }
 
     /**
@@ -171,7 +164,7 @@ public abstract class Selection
      * @param c the column
      * @return the index of the specified column within the resultset or -1
      */
-    public int getResultSetIndex(ColumnDefinition c)
+    public int getResultSetIndex(ColumnMetadata c)
     {
         return getColumnIndex(c);
     }
@@ -181,7 +174,7 @@ public abstract class Selection
      * @param c the column
      * @return the index of the specified column or -1
      */
-    protected final int getColumnIndex(ColumnDefinition c)
+    protected final int getColumnIndex(ColumnMetadata c)
     {
         for (int i = 0, m = columns.size(); i < m; i++)
             if (columns.get(i).name.equals(c.name))
@@ -189,7 +182,7 @@ public abstract class Selection
         return -1;
     }
 
-    private static SelectionColumnMapping collectColumnMappings(CFMetaData cfm,
+    private static SelectionColumnMapping collectColumnMappings(TableMetadata table,
                                                                 List<RawSelector> rawSelectors,
                                                                 SelectorFactories factories)
     {
@@ -197,7 +190,7 @@ public abstract class Selection
         Iterator<RawSelector> iter = rawSelectors.iterator();
         for (Selector.Factory factory : factories)
         {
-            ColumnSpecification colSpec = factory.getColumnSpecification(cfm);
+            ColumnSpecification colSpec = factory.getColumnSpecification(table);
             ColumnIdentifier alias = iter.next().alias;
             factory.addColumnMapping(selectionColumns,
                                      alias == null ? colSpec : colSpec.withAlias(alias));
@@ -210,7 +203,7 @@ public abstract class Selection
     /**
      * @return the list of CQL3 columns value this SelectionClause needs.
      */
-    public List<ColumnDefinition> getColumns()
+    public List<ColumnMetadata> getColumns()
     {
         return columns;
     }
@@ -287,13 +280,13 @@ public abstract class Selection
     {
         private final boolean isWildcard;
 
-        public SimpleSelection(CFMetaData cfm, List<ColumnDefinition> columns, boolean isWildcard)
+        public SimpleSelection(TableMetadata table, List<ColumnMetadata> columns, boolean isWildcard)
         {
-            this(cfm, columns, SelectionColumnMapping.simpleMapping(columns), isWildcard);
+            this(table, columns, SelectionColumnMapping.simpleMapping(columns), isWildcard);
         }
 
-        public SimpleSelection(CFMetaData cfm,
-                               List<ColumnDefinition> columns,
+        public SimpleSelection(TableMetadata table,
+                               List<ColumnMetadata> columns,
                                SelectionColumnMapping metadata,
                                boolean isWildcard)
         {
@@ -302,7 +295,7 @@ public abstract class Selection
              * could filter those duplicate out of columns. But since we're very unlikely to
              * get much duplicate in practice, it's more efficient not to bother.
              */
-            super(cfm, columns, metadata, false, false);
+            super(table, columns, metadata, false, false);
             this.isWildcard = isWildcard;
         }
 
@@ -350,12 +343,12 @@ public abstract class Selection
     {
         private final SelectorFactories factories;
 
-        public SelectionWithProcessing(CFMetaData cfm,
-                                       List<ColumnDefinition> columns,
+        public SelectionWithProcessing(TableMetadata table,
+                                       List<ColumnMetadata> columns,
                                        SelectionColumnMapping metadata,
                                        SelectorFactories factories) throws InvalidRequestException
         {
-            super(cfm,
+            super(table,
                   columns,
                   metadata,
                   factories.containsWritetimeSelectorFactory(),
@@ -371,7 +364,7 @@ public abstract class Selection
         }
 
         @Override
-        public int getResultSetIndex(ColumnDefinition c)
+        public int getResultSetIndex(ColumnMetadata c)
         {
             int index = getColumnIndex(c);
 
@@ -386,7 +379,7 @@ public abstract class Selection
         }
 
         @Override
-        public int addColumnForOrdering(ColumnDefinition c)
+        public int addColumnForOrdering(ColumnMetadata c)
         {
             int index = super.addColumnForOrdering(c);
             factories.addSelectorForOrdering(c, index);

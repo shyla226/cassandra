@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
@@ -58,8 +59,8 @@ import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NanoTimeToCurrentTimeMillis;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.UUIDGen;
-import org.xerial.snappy.SnappyOutputStream;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
@@ -68,6 +69,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 public class OutboundTcpConnection extends FastThreadLocalThread
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnection.class);
+    private static final NoSpamLogger nospamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
 
     private static final String PREFIX = Config.PROPERTY_PREFIX;
 
@@ -85,6 +87,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     //Size of 3 elements added to every message
     private static final int PROTOCOL_MAGIC_ID_TIMESTAMP_SIZE = 12;
+
+    public static final int MAX_COALESCED_MESSAGES = 128;
 
     private static CoalescingStrategy newCoalescingStrategy(String displayName)
     {
@@ -181,8 +185,11 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     void closeSocket(boolean destroyThread)
     {
         logger.debug("Enqueuing socket close for {}", poolReference.endPoint());
-        backlog.clear();
         isStopped = destroyThread; // Exit loop to stop the thread
+        backlog.clear();
+        // in the "destroyThread = true" case, enqueuing the sentinel is important mostly to unblock the backlog.take()
+        // (via the CoalescingStrategy) in case there's a data race between this method enqueuing the sentinel
+        // and run() clearing the backlog on connection failure.
         enqueue(CLOSE_SENTINEL, -1);
     }
 
@@ -198,12 +205,12 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     public void run()
     {
-        final int drainedMessageSize = 128;
+        final int drainedMessageSize = MAX_COALESCED_MESSAGES;
         // keeping list (batch) size small for now; that way we don't have an unbounded array (that we never resize)
         final List<QueuedMessage> drainedMessages = new ArrayList<>(drainedMessageSize);
 
         outer:
-        while (true)
+        while (!isStopped)
         {
             try
             {
@@ -219,6 +226,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             int count = drainedMessages.size();
             //The timestamp of the first message has already been provided to the coalescing strategy
             //so skip logging it.
+            inner:
             for (QueuedMessage qm : drainedMessages)
             {
                 try
@@ -237,8 +245,12 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                     else if (socket != null || connect())
                         writeConnected(qm, count == 1 && backlog.isEmpty());
                     else
+                    {
                         // clear out the queue, else gossip messages back up.
+                        drainedMessages.clear();
                         backlog.clear();
+                        break inner;
+                    }
                 }
                 catch (Exception e)
                 {
@@ -432,8 +444,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 {
                     // no version is returned, so disconnect an try again
                     logger.trace("Target max version is {}; no version information yet, will retry", maxTargetVersion);
-                    if (DatabaseDescriptor.getSeeds().contains(poolReference.endPoint()))
-                        logger.warn("Seed gossip version is {}; will not connect with that version", maxTargetVersion);
                     disconnect();
                     continue;
                 }
@@ -445,8 +455,24 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 if (targetVersion > maxTargetVersion)
                 {
                     logger.trace("Target max version is {}; will reconnect with that version", maxTargetVersion);
-                    disconnect();
-                    return false;
+                    try
+                    {
+                        if (DatabaseDescriptor.getSeeds().contains(poolReference.endPoint()))
+                            logger.warn("Seed gossip version is {}; will not connect with that version", maxTargetVersion);
+                    }
+                    catch (Throwable e)
+                    {
+                        // If invalid yaml has been added to the config since startup, getSeeds() will throw an AssertionError
+                        // Additionally, third party seed providers may throw exceptions if network is flakey
+                        // Regardless of what's thrown, we must catch it, disconnect, and try again
+                        JVMStabilityInspector.inspectThrowable(e);
+                        logger.warn("Configuration error prevented outbound connection: {}", e.getLocalizedMessage());
+                    }
+                    finally
+                    {
+                        disconnect();
+                        return false;
+                    }
                 }
 
                 if (targetVersion < maxTargetVersion && targetVersion < MessagingService.current_version)
@@ -481,6 +507,12 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 socket = null;
                 // SSL errors won't be recoverable within timeout period so we'll just abort
                 return false;
+            }
+            catch (ConnectException e)
+            {
+                socket = null;
+                nospamLogger.debug(String.format("Unable to connect to %s (%s)", poolReference.endPoint(), e.toString()));
+                Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
             catch (IOException e)
             {
