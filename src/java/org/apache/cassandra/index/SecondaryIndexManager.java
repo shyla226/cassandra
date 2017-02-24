@@ -679,7 +679,7 @@ public class SecondaryIndexManager implements IndexRegistry
                                                                     nowInSec);
         indexTransaction.start();
         indexTransaction.onPartitionDeletion(new DeletionTime(FBUtilities.timestampMicros(), nowInSec));
-        indexTransaction.commit().blockingGet();
+        indexTransaction.commit().blockingAwait();
 
         while (partition.hasNext())
         {
@@ -692,7 +692,7 @@ public class SecondaryIndexManager implements IndexRegistry
                                                      nowInSec);
             indexTransaction.start();
             indexTransaction.onRowDelete((Row)unfiltered);
-            indexTransaction.commit().blockingGet();
+            indexTransaction.commit().blockingAwait();
         }
     }
 

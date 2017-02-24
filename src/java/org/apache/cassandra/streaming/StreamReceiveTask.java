@@ -210,7 +210,7 @@ public class StreamReceiveTask extends StreamTask
                             }
                         }
 
-                        Completable.merge(writes).blockingGet();
+                        Completable.merge(writes).blockingAwait();
                     }
                     else
                     {

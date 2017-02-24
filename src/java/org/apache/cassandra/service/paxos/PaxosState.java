@@ -145,7 +145,7 @@ public class PaxosState
             {
                 Tracing.trace("Committing proposal {}", proposal);
                 Mutation mutation = proposal.makeMutation();
-                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true).blockingGet();
+                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, true).blockingAwait();
             }
             else
             {

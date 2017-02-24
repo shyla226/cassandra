@@ -966,10 +966,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
 
-        // TODO chain all this together
         // if we don't have system_traces keyspace at this point, then create it manually
-        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata()).blockingGet();
-        maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata()).blockingGet();
+        maybeAddOrUpdateKeyspace(TraceKeyspace.metadata()).andThen(maybeAddOrUpdateKeyspace(SystemDistributedKeyspace.metadata()))
+                                                          .blockingAwait();
 
         if (!isSurveyMode)
         {
@@ -1052,7 +1051,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         setTokens(tokens);
 
         assert tokenMetadata.sortedTokens().size() > 0;
-        doAuthSetup().blockingGet();
+        doAuthSetup().blockingAwait();
     }
 
     private Completable doAuthSetup()

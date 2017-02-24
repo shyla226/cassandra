@@ -302,7 +302,7 @@ public class SecondaryIndexTest
         // now apply another update, but force the index update to be skipped
         keyspace.apply(new RowUpdateBuilder(cfs.metadata(), 2, "k1").noRowMarker().add("birthdate", 2L).build(),
                        true,
-                       false, false).blockingGet();
+                       false, false).blockingAwait();
 
         // Now searching the index for either the old or new value should return 0 rows
         // because the new value was not indexed and the old value should be ignored
@@ -315,7 +315,7 @@ public class SecondaryIndexTest
         // make sure the value was expunged from the index when it was discovered to be inconsistent
         keyspace.apply(new RowUpdateBuilder(cfs.metadata(), 3, "k1").noRowMarker().add("birthdate", 1L).build(),
                        true,
-                       false, false).blockingGet();
+                       false, false).blockingAwait();
         assertIndexedNone(cfs, col, 1L);
         ColumnFamilyStore indexCfs = cfs.indexManager.getAllIndexColumnFamilyStores().iterator().next();
         assertIndexCfsIsEmpty(indexCfs);
@@ -361,7 +361,7 @@ public class SecondaryIndexTest
         if (!isStatic)
             builder = builder.clustering("c");
         builder.add(colName, 20l);
-        keyspace.apply(builder.build(), true, false, false).blockingGet();
+        keyspace.apply(builder.build(), true, false, false).blockingAwait();
 
         // Now searching the index for either the old or new value should return 0 rows
         // because the new value was not indexed and the old value should be ignored
@@ -377,7 +377,7 @@ public class SecondaryIndexTest
         if (!isStatic)
             builder = builder.clustering("c");
         builder.add(colName, 10L);
-        keyspace.apply(builder.build(), true, false, false).blockingGet();
+        keyspace.apply(builder.build(), true, false, false).blockingAwait();
         assertIndexedNone(cfs, col, 20l);
 
         ColumnFamilyStore indexCfs = cfs.indexManager.getAllIndexColumnFamilyStores().iterator().next();
