@@ -21,7 +21,6 @@ import java.net.InetAddress;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,6 +40,8 @@ import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.RangeHash;
+
+import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
 
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
@@ -92,13 +93,13 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
             isIncremental = prs.isIncremental;
         }
         Tracing.traceRepair(message);
-        new StreamPlan("Repair", repairedAt, 1, false, isIncremental).listeners(this)
-                                            .flushBeforeTransfer(true)
-                                            // request ranges from the remote node
-                                            .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily)
-                                            // send ranges to the remote node
-                                            .transferRanges(dst, preferred, desc.keyspace, toTransfer, desc.columnFamily)
-                                            .execute();
+        new StreamPlan(REPAIR_STREAM_PLAN_DESCRIPTION, repairedAt, 1, false, isIncremental).listeners(this)
+                        .flushBeforeTransfer(false)
+                        // request ranges from the remote node
+                        .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily)
+                        // send ranges to the remote node
+                        .transferRanges(dst, preferred, desc.keyspace, toTransfer, desc.columnFamily)
+                        .execute();
     }
 
     public void handleStreamEvent(StreamEvent event)

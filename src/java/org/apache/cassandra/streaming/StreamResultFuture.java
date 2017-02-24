@@ -29,6 +29,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.IncomingStreamingConnection;
 
+import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
+
 /**
  * A future on the result ({@link StreamState}) of a streaming plan.
  *
@@ -89,7 +91,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
         // Initialize and start all sessions
         for (final StreamSession session : coordinator.getAllStreamSessions())
         {
-            session.init(future);
+            session.init(future, !future.isRepairSession());
         }
         coordinator.connectAllStreamSessions();
 
@@ -130,8 +132,13 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
     private void attachConnection(InetAddress from, int sessionIndex, IncomingStreamingConnection connection, boolean isForOutgoing, int version) throws IOException
     {
         StreamSession session = coordinator.getOrCreateSessionById(from, sessionIndex, connection.socket.getInetAddress());
-        session.init(this);
+        session.init(this, !isRepairSession()); //Avoid flush storm during repair (APOLLO-466)
         session.handler.initiateOnReceivingSide(connection, isForOutgoing, version);
+    }
+
+    private boolean isRepairSession()
+    {
+        return REPAIR_STREAM_PLAN_DESCRIPTION.equals(description);
     }
 
     public void addEventListener(StreamEventHandler listener)
