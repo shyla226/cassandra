@@ -18,12 +18,16 @@
 package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
+import java.util.LinkedList;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncComplete;
 import org.apache.cassandra.repair.messages.SyncRequest;
@@ -46,6 +50,12 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     private final long repairedAt;
     private final boolean isConsistent;
 
+    // Since adding transferToLeft and transferToRight fields to SyncRequest would require
+    // a protocol version change, we separate those by an empty range (MIN_VALUE, MIN_VALUE)
+    // using the existing ranges field
+    public static final Range<Token> RANGE_SEPARATOR = new Range<>(MessagingService.globalPartitioner().getMinimumToken(),
+                                                                   MessagingService.globalPartitioner().getMinimumToken());
+
     public StreamingRepairTask(RepairJobDesc desc, SyncRequest request, long repairedAt, boolean isConsistent)
     {
         this.desc = desc;
@@ -58,7 +68,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     {
         InetAddress dest = request.dst;
         InetAddress preferred = SystemKeyspace.getPreferredIP(dest);
-        logger.info("[streaming task #{}] Performing streaming repair of {} ranges with {}", desc.sessionId, request.ranges.size(), request.dst);
+
         boolean isIncremental = false;
         if (desc.parentSessionId != null)
         {
@@ -71,11 +81,33 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     @VisibleForTesting
     StreamPlan createStreamPlan(InetAddress dest, InetAddress preferred, boolean isIncremental)
     {
-        return new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false, isConsistent ? desc.parentSessionId : null)
-               .listeners(this)
-               .flushBeforeTransfer(!isIncremental) // sstables are isolated at the beginning of an incremental repair session, so flushing isn't neccessary
-               .requestRanges(dest, preferred, desc.keyspace, request.ranges, desc.columnFamily) // request ranges from the remote node
-               .transferRanges(dest, preferred, desc.keyspace, request.ranges, desc.columnFamily); // send ranges to the remote node
+        List<Range<Token>> toRequest = new LinkedList<>();
+        List<Range<Token>> toTransfer = new LinkedList<>();
+        boolean head = true;
+        for (Range<Token> range : request.ranges)
+        {
+            if (range.equals(RANGE_SEPARATOR))
+            {
+                head = false;
+            }
+            else if (head)
+            {
+                toRequest.add(range);
+            }
+            else
+            {
+                toTransfer.add(range);
+            }
+        }
+
+
+        logger.info(String.format("[streaming task #%s] Performing streaming repair of %d ranges to and %d ranges from %s.",
+                                  desc.sessionId, toTransfer.size(), toRequest.size(), request.dst));
+
+        return new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false, isConsistent ? desc.parentSessionId : null).listeners(this)
+                        .flushBeforeTransfer(!isIncremental) // sstables are isolated at the beginning of an incremental repair session, so flushing isn't neccessary
+                        .requestRanges(dest, preferred, desc.keyspace, toRequest, desc.columnFamily) // request ranges from the remote node
+                        .transferRanges(dest, preferred, desc.keyspace, toTransfer, desc.columnFamily); // send ranges to the remote node
     }
 
     public void handleStreamEvent(StreamEvent event)
