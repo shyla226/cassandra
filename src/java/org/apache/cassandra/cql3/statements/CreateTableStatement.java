@@ -29,6 +29,7 @@ import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -87,6 +88,9 @@ public class CreateTableStatement extends SchemaAlteringStatement
     {
         try
         {
+            if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
+                DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
+
             MigrationManager.announceNewColumnFamily(getCFMetaData(), isLocalOnly);
             return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily());
         }

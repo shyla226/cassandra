@@ -32,6 +32,7 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DurationType;
 import org.apache.cassandra.db.marshal.ReversedType;
@@ -274,6 +275,8 @@ public class CreateViewStatement extends SchemaAlteringStatement
             throw new InvalidRequestException("No columns are defined for Materialized View other than primary key");
 
         TableParams params = properties.properties.asNewTableParams();
+        if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
+            DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
 
         if (params.defaultTimeToLive > 0)
         {

@@ -27,6 +27,7 @@ import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.view.View;
@@ -258,6 +259,11 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 attrs.validate();
 
                 TableParams params = attrs.asAlteredTableParams(cfm.params);
+                if (params.compaction.klass().equals(DateTieredCompactionStrategy.class) &&
+                    !cfm.params.compaction.klass().equals(DateTieredCompactionStrategy.class))
+                {
+                    DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
+                }
 
                 if (!Iterables.isEmpty(views) && params.gcGraceSeconds == 0)
                 {
