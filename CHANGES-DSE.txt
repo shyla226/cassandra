@@ -14,7 +14,7 @@ Merged from dse5.1:
  * Add client warning to SASI index (APOLLO-93)
  * Cqlsh copy-from: add support for UNSET values (APOLLO-4)
  * Improve error message for incompatible authn/authz config (APOLLO-226)
- * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291, APOLLO-312, APOLLO-316, APOLLO-432)
+ * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291, APOLLO-312, APOLLO-316, APOLLO-432, APOLLO-438)
  * Added show-queries, query-log-file and no-progress log options to cassandra-stress (APOLLO-41)
  * Allow large partition generation in cassandra-stress user mode (APOLLO-35)
  * Optimize VIntCoding and BufferedDataOutputStreamPlus (APOLLO-49)
@@ -40,6 +40,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Log message when rebuild has finished (APOLLO-465)
  * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
  * Connection refused should be logged less frequently (APOLLO-455)
  * Always log flush errors (APOLLO-227)
