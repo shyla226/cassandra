@@ -31,6 +31,7 @@ import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.*;
@@ -84,6 +85,9 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws RequestValidationException
     {
+        if (params.compaction.klass().equals(DateTieredCompactionStrategy.class))
+            DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
+
         return MigrationManager.announceNewTable(toTableMetadata(), isLocalOnly)
                                .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
                                .onErrorResumeNext(e ->
