@@ -40,6 +40,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Minor optimization in GPFS, and related snitches (APOLLO-479)
  * Issue CQL native protocol warning that DTCS is deprecated (APOLLO-327)
  * Log message when rebuild has finished (APOLLO-465)
  * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
