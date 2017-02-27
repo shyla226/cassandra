@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.CFName;
+import org.apache.cassandra.db.compaction.DateTieredCompactionStrategy;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -69,6 +70,12 @@ public class AlterViewStatement extends SchemaAlteringStatement
         attrs.validate();
 
         TableParams params = attrs.asAlteredTableParams(current.metadata.params);
+        if (params.compaction.klass().equals(DateTieredCompactionStrategy.class) &&
+            !current.metadata.params.compaction.klass().equals(DateTieredCompactionStrategy.class))
+        {
+            DateTieredCompactionStrategy.deprecatedWarning(keyspace(), columnFamily());
+        }
+
         if (params.gcGraceSeconds == 0)
         {
             throw new InvalidRequestException("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
