@@ -22,20 +22,13 @@ import java.nio.charset.CharacterCodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.LockSupport;
-import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.MapDifference;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Maps;
 import io.reactivex.*;
-import io.reactivex.Observable;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +40,6 @@ import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -56,7 +48,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.Locks;
 
 import static java.lang.String.format;
 
@@ -1295,14 +1286,13 @@ public final class SchemaKeyspace
                         .collect(toSet());
     }
 
-    static Completable applyChanges(Collection<Mutation> mutations)
+    static void applyChanges(Collection<Mutation> mutations)
     {
-        List<Completable> writes = new ArrayList<>(mutations.size());
-        for (Mutation mutation : mutations)
-            writes.add(mutation.applyAsync());
+        // TODO - schould we merge rather than concat? (merge would process mutations in parallel)
+        Completable.concat(mutations.stream().map(Mutation::applyAsync).collect(toList())).blockingAwait();
 
-        return Completable.concat(writes)
-                          .andThen(Completable.defer(() -> FLUSH_SCHEMA_TABLES ? flush() : Completable.complete()).subscribeOn(Schedulers.io()));
+        if (SchemaKeyspace.FLUSH_SCHEMA_TABLES)
+            SchemaKeyspace.flush();
     }
 
     static Keyspaces fetchKeyspaces(Set<String> toFetch)

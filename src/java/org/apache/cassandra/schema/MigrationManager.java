@@ -44,6 +44,7 @@ import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.WrappedRunnable;
 
 public class MigrationManager
 {
@@ -382,7 +383,8 @@ public class MigrationManager
         List<Mutation> mutations = Collections.singletonList(schema.build());
 
         if (announceLocally)
-            return Schema.instance.merge(mutations);
+            return Completable.fromRunnable(() -> Schema.instance.merge(mutations))
+                              .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
         else
             return announce(mutations);
     }
@@ -398,7 +400,8 @@ public class MigrationManager
     // Returns a future on the local application of the schema
     private static Completable announce(final Collection<Mutation> schema)
     {
-        Completable observable = Schema.instance.mergeAndAnnounceVersion(schema);
+        Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
+                                            .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
 
         for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
         {

@@ -806,7 +806,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // gossip snitch infos (local DC and rack)
             gossipSnitchInfo();
             // gossip Schema.emptyVersion forcing immediate check for schema updates (see MigrationManager#maybeScheduleSchemaPull)
-            Schema.instance.updateVersionAndAnnounce().blockingGet(); // Ensure we know our own actual Schema UUID in preparation for updates
+            Schema.instance.updateVersionAndAnnounce(); // Ensure we know our own actual Schema UUID in preparation for updates
             LoadBroadcaster.instance.startBroadcasting();
             HintsService.instance.startDispatch();
             BatchlogManager.instance.start();

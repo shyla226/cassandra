@@ -301,7 +301,7 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         dropTable("DROP TABLE %s");
-        Schema.instance.updateVersion().blockingGet();
+        Schema.instance.updateVersion();
 
         //Test loading for a dropped 2i/table
         CacheService.instance.keyCache.clear();

@@ -23,6 +23,8 @@ import java.util.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Scheduler;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -39,6 +41,9 @@ public class StageManager
     private static final Logger logger = LoggerFactory.getLogger(StageManager.class);
 
     private static final EnumMap<Stage, LocalAwareExecutorService> stages = new EnumMap<Stage, LocalAwareExecutorService>(Stage.class);
+
+    // The RX schedulers derived from the stages executors
+    private static final EnumMap<Stage, Scheduler> schedulers = new EnumMap<>(Stage.class);
 
     public static final long KEEPALIVE = 60; // seconds to keep "extra" threads alive for when idle
 
@@ -58,6 +63,9 @@ public class StageManager
         stages.put(Stage.READ_REPAIR, multiThreadedStage(Stage.READ_REPAIR, FBUtilities.getAvailableProcessors()));
         stages.put(Stage.TRACING, tracingExecutor());
         stages.put(Stage.CONTINUOUS_PAGING, multiThreadedStage(Stage.CONTINUOUS_PAGING, getContinuousPagingThreads()));
+
+        // add the corresponding scheduler to each stage
+        stages.forEach((stage, executor) -> schedulers.put(stage, Schedulers.from(executor)));
     }
 
     private static LocalAwareExecutorService tracingExecutor()
@@ -95,6 +103,17 @@ public class StageManager
     public static LocalAwareExecutorService getStage(Stage stage)
     {
         return stages.get(stage);
+    }
+
+    /**
+     * Retrieve the RX scheduler corresponding to a stage.
+     *
+     * @param stage name of the stage to be retrieved.
+     * @return RX scheduler executing on the stage
+     */
+    public static Scheduler getScheduler(Stage stage)
+    {
+        return schedulers.get(stage);
     }
 
     /**
