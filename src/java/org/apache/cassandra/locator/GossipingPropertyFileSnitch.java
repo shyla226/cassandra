@@ -30,6 +30,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -90,20 +91,18 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
             return myDC;
 
         EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        if (epState == null || epState.getApplicationState(ApplicationState.DC) == null)
-        {
-            if (psnitch == null)
-            {
-                if (savedEndpoints == null)
-                    savedEndpoints = SystemKeyspace.loadDcRackInfo();
-                if (savedEndpoints.containsKey(endpoint))
-                    return savedEndpoints.get(endpoint).get("data_center");
-                return DEFAULT_DC;
-            }
-            else
-                return psnitch.getDatacenter(endpoint);
-        }
-        return epState.getApplicationState(ApplicationState.DC).value;
+        VersionedValue dc = epState != null ? epState.getApplicationState(ApplicationState.DC) : null;
+        if (dc != null)
+            return dc.value;
+
+        if (psnitch != null)
+            return psnitch.getDatacenter(endpoint);
+
+        if (savedEndpoints == null)
+            savedEndpoints = SystemKeyspace.loadDcRackInfo();
+        if (savedEndpoints.containsKey(endpoint))
+            return savedEndpoints.get(endpoint).get("data_center");
+        return DEFAULT_DC;
     }
 
     /**
@@ -118,20 +117,18 @@ public class GossipingPropertyFileSnitch extends AbstractNetworkTopologySnitch//
             return myRack;
 
         EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        if (epState == null || epState.getApplicationState(ApplicationState.RACK) == null)
-        {
-            if (psnitch == null)
-            {
-                if (savedEndpoints == null)
-                    savedEndpoints = SystemKeyspace.loadDcRackInfo();
-                if (savedEndpoints.containsKey(endpoint))
-                    return savedEndpoints.get(endpoint).get("rack");
-                return DEFAULT_RACK;
-            }
-            else
-                return psnitch.getRack(endpoint);
-        }
-        return epState.getApplicationState(ApplicationState.RACK).value;
+        VersionedValue rack = epState != null ? epState.getApplicationState(ApplicationState.RACK) : null;
+        if (rack != null)
+            return rack.value;
+
+        if (psnitch != null)
+            return psnitch.getRack(endpoint);
+
+        if (savedEndpoints == null)
+            savedEndpoints = SystemKeyspace.loadDcRackInfo();
+        if (savedEndpoints.containsKey(endpoint))
+            return savedEndpoints.get(endpoint).get("rack");
+        return DEFAULT_RACK;
     }
 
     public void gossiperStarting()
