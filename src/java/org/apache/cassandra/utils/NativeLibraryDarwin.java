@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
 
 /**
@@ -75,6 +76,7 @@ public class NativeLibraryDarwin implements NativeLibraryWrapper
     private static native int close(int fd) throws LastErrorException;
     private static native Pointer strerror(int errnum) throws LastErrorException;
     private static native long getpid() throws LastErrorException;
+    private static native int mlock(Pointer addr, NativeLong len) throws LastErrorException;
 
     public int callMlockall(int flags) throws UnsatisfiedLinkError, RuntimeException
     {
@@ -120,6 +122,11 @@ public class NativeLibraryDarwin implements NativeLibraryWrapper
     public long callGetpid() throws UnsatisfiedLinkError, RuntimeException
     {
         return getpid();
+    }
+
+    public int callMlock(long address, long length) throws UnsatisfiedLinkError, RuntimeException
+    {
+        return mlock(new Pointer(address), new NativeLong(length));
     }
 
     public boolean isAvailable()

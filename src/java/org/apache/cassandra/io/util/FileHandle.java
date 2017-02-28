@@ -17,17 +17,24 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+
+import javax.annotation.Nullable;
 
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.db.mos.MemoryLockedBuffer;
+import org.apache.cassandra.db.mos.MemoryOnlyStatus;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
@@ -54,27 +61,40 @@ public class FileHandle extends SharedCloseableImpl
 
     public final long onDiskLength;
 
-    /*
+    /**
      * Rebufferer factory to use when constructing RandomAccessReaders
      */
     private final RebuffererFactory rebuffererFactory;
 
-    /*
+    /**
      * Optional CompressionMetadata when dealing with compressed file
      */
     private final Optional<CompressionMetadata> compressionMetadata;
+
+    /**
+     A private copy of the memory mapped regions for files that are memory mapped,
+     null otherwise.
+
+     This is needed for MemoryOnlyStrategy, see APOLLO-342. It could be removed by storing
+     a property in the regions to determine if the memory should be locked, rather than driving
+     the decision to lock the memory from the compaction strategy.
+     */
+    @Nullable
+    private MmappedRegions regions;
 
     private FileHandle(Cleanup cleanup,
                        ChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
                        CompressionMetadata compressionMetadata,
-                       long onDiskLength)
+                       long onDiskLength,
+                       MmappedRegions regions)
     {
         super(cleanup);
         this.rebuffererFactory = rebuffererFactory;
         this.channel = channel;
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
         this.onDiskLength = onDiskLength;
+        this.regions = regions;
     }
 
     private FileHandle(FileHandle copy)
@@ -84,6 +104,7 @@ public class FileHandle extends SharedCloseableImpl
         rebuffererFactory = copy.rebuffererFactory;
         compressionMetadata = copy.compressionMetadata;
         onDiskLength = copy.onDiskLength;
+        regions = copy.regions;
     }
 
     /**
@@ -176,6 +197,32 @@ public class FileHandle extends SharedCloseableImpl
         return rebufferer;
     }
 
+    public void lock(MemoryOnlyStatus instance)
+    {
+        if (regions != null)
+            regions.lock(instance);
+        else
+            instance.reportFailedAttemptedLocking(onDiskLength);
+    }
+
+    public void unlock(MemoryOnlyStatus instance)
+    {
+        if (regions != null)
+            regions.unlock(instance);
+        else
+            instance.clearFailedAttemptedLocking(onDiskLength);
+    }
+
+    public List<MemoryLockedBuffer> getLockedMemory()
+    {
+        if (regions != null)
+            return regions.getLockedMemory();
+
+        // the existing behavior ported from DSE is that if memory locked is enabled withough memory mapping,
+        // then we should report to the user that we could not lock the entire length on disk
+        return Collections.singletonList(MemoryLockedBuffer.failed(0, onDiskLength));
+    }
+
     /**
      * Perform clean up of all resources held by {@link FileHandle}.
      */
@@ -185,16 +232,19 @@ public class FileHandle extends SharedCloseableImpl
         final RebuffererFactory rebufferer;
         final CompressionMetadata compressionMetadata;
         final Optional<ChunkCache> chunkCache;
+        final MmappedRegions regions;
 
         private Cleanup(ChannelProxy channel,
                         RebuffererFactory rebufferer,
                         CompressionMetadata compressionMetadata,
-                        ChunkCache chunkCache)
+                        ChunkCache chunkCache,
+                        MmappedRegions regions)
         {
             this.channel = channel;
             this.rebufferer = rebufferer;
             this.compressionMetadata = compressionMetadata;
             this.chunkCache = Optional.ofNullable(chunkCache);
+            this.regions = regions;
         }
 
         public String name()
@@ -204,25 +254,11 @@ public class FileHandle extends SharedCloseableImpl
 
         public void tidy()
         {
-            chunkCache.ifPresent(cache -> cache.invalidateFile(name()));
-            try
-            {
-                if (compressionMetadata != null)
-                {
-                    compressionMetadata.close();
-                }
-            }
-            finally
-            {
-                try
-                {
-                    channel.close();
-                }
-                finally
-                {
-                    rebufferer.close();
-                }
-            }
+            Throwables.perform(()-> chunkCache.ifPresent(cache -> cache.invalidateFile(name())),
+                               () -> { if (compressionMetadata != null) compressionMetadata.close();},
+                               () -> channel.close(),
+                               () -> rebufferer.close(),
+                               () -> { if (regions != null) regions.close();});
         }
     }
 
@@ -385,8 +421,9 @@ public class FileHandle extends SharedCloseableImpl
                         rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, length, bufferType, bufferSize));
                     }
                 }
-                Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata, chunkCache);
-                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, length);
+
+                Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata, chunkCache, regions == null ? null : regions.sharedCopy());
+                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, length, cleanup.regions);
             }
             catch (Throwable t)
             {

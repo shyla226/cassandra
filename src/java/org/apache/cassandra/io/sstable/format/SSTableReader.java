@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
@@ -47,6 +48,8 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.mos.MemoryLockedBuffer;
+import org.apache.cassandra.db.mos.MemoryOnlyStatus;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -1530,6 +1533,55 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         dataFile.addTo(identities);
         bf.addTo(identities);
     }
+
+    /**
+     * Lock memory mapped segments in RAM, see APOLLO-342.
+     * @param instance - the memory only status instance, that keeps track of global limits
+     */
+    public void lock(MemoryOnlyStatus instance)
+    {
+        Throwable ret = Throwables.perform(null, Arrays.stream(getFilesToBeLocked()).map(f -> () -> f.lock(instance)));
+        if (ret != null)
+        {
+            JVMStabilityInspector.inspectThrowable(ret);
+            logger.error("Failed to lock {}", this, ret);
+        }
+    }
+
+    /**
+     * Unlock memory mapped segments that were locked in RAM, if any, see APOLLO-342.
+     * @param instance - the memory only status instance, that keeps track of global limits
+     */
+    public void unlock(MemoryOnlyStatus instance)
+    {
+        Throwable ret = Throwables.perform(null, Arrays.stream(getFilesToBeLocked()).map(f -> () -> f.unlock(instance)));
+        if (ret != null)
+        {
+            JVMStabilityInspector.inspectThrowable(ret);
+            logger.error("Failed to unlock {}", this, ret);
+        }
+    }
+
+    /**
+     * @return - the buffers that were locked in memory, if any.
+     */
+    public Iterable<MemoryLockedBuffer> getLockedMemory()
+    {
+        return Iterables.concat(Arrays.stream(getFilesToBeLocked()).map(f -> f.getLockedMemory()).collect(Collectors.toList()));
+    }
+
+    /**
+     * Return the file handles to the files on disk that should be locked in RAM when said files are memory mapped.
+     *
+     * APOLLO-342: it's kind of ugly that we need to expose {@link MemoryOnlyStatus} to the sstable
+     * reader, so I prefer to only limit it to the base class by asking the sub-classes for their
+     * files, rather than polluting them with MemoryOnlyStatus by making the {@link SSTableReader#lock(MemoryOnlyStatus)}
+     * and related methods abstract, this also avoids duplicating code. See APOLLO-342 and the follow up ticket
+     * for possible improvements.
+     *
+     * @return - the file handles to the files on disk that can be locked in RAM.
+     */
+    protected abstract FileHandle[] getFilesToBeLocked();
 
     /**
      * One instance per SSTableReader we create.

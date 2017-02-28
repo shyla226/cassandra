@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Port Memory Only Strategy from DSE to Apollo (APOLLO-342)
  * Internode message interceptors for testing (APOLLO-419)
  * Byte-ordered types and trie-based indices (APOLLO-111)
  * Refactor messaging service code (APOLLO-497)

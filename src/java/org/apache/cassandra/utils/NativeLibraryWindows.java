@@ -107,6 +107,11 @@ public class NativeLibraryWindows implements NativeLibraryWrapper
         throw new UnsatisfiedLinkError();
     }
 
+    public int callMlock(long address, long length) throws UnsatisfiedLinkError, RuntimeException
+    {
+        throw new UnsatisfiedLinkError();
+    }
+
     /**
      * @return the PID of the JVM running
      * @throws UnsatisfiedLinkError if we fail to link against Sigar

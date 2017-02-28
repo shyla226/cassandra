@@ -41,4 +41,5 @@ interface NativeLibraryWrapper
     int callClose(int fd) throws UnsatisfiedLinkError, RuntimeException;
     Pointer callStrerror(int errnum) throws UnsatisfiedLinkError, RuntimeException;
     long callGetpid() throws UnsatisfiedLinkError, RuntimeException;
+    int callMlock(long address, long length) throws UnsatisfiedLinkError, RuntimeException;
 }

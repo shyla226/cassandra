@@ -63,6 +63,8 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.mos.MemoryOnlyStatus;
+import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token.TokenFactory;
@@ -244,7 +246,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             jmxObjectName = new ObjectName("org.apache.cassandra.db:type=StorageService");
             mbs.registerMBean(this, jmxObjectName);
+
             mbs.registerMBean(StreamManager.instance, new ObjectName(StreamManager.OBJECT_NAME));
+            mbs.registerMBean(MemoryOnlyStatus.instance, new ObjectName(MemoryOnlyStatusMBean.MBEAN_NAME));
         }
         catch (Exception e)
         {

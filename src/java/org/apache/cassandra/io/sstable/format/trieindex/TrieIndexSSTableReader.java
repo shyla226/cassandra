@@ -19,6 +19,8 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -351,6 +353,11 @@ class TrieIndexSSTableReader extends SSTableReader
             markSuspect();
             throw new CorruptSSTableException(e, rowIndexFile.path());
         }
+    }
+
+    protected FileHandle[] getFilesToBeLocked()
+    {
+        return new FileHandle[] { dataFile, rowIndexFile, partitionIndex.getFileHandle() };
     }
 
     public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException

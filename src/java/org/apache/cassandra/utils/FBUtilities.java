@@ -865,7 +865,7 @@ public class FBUtilities
 
     public static long align(long val, int boundary)
     {
-        return (val + boundary) & ~(boundary - 1);
+        return (val + boundary - 1) & ~(boundary - 1);
     }
 
     @VisibleForTesting

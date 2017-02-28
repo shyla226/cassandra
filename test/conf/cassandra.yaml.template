@@ -1,0 +1,96 @@
+cluster_name: ${state.clusterName}
+#if (${state.authenticator})
+authenticator: ${state.authenticator}
+#end
+#if (${state.authorizer})
+authorizer: ${state.authorizer}
+permissions_validity_in_ms: 0
+roles_validity_in_ms: 0
+#end
+#if (${state.roleManager})
+role_manager: ${state.roleManager}
+#end
+#if (${state.autoBootstrap})
+auto_bootstrap: ${state.autoBootstrap}
+#end
+read_request_timeout_in_ms: ${state.readRequestTimeoutInMs}
+write_request_timeout_in_ms: 10000
+#if (${state.useBatchCommitlogSync})
+commitlog_sync: batch
+commitlog_sync_batch_window_in_ms: 1.0
+#else
+commitlog_sync: periodic
+commitlog_sync_period_in_ms: ${state.commitlogSyncPeriod}
+#end
+partitioner: ${state.partitioner}
+#if (${state.numberOfTokens})
+num_tokens: ${state.numberOfTokens}
+#else
+initial_token: ${state.token}
+#end
+listen_address: ${state.hostIp}
+storage_port: 7000
+start_native_transport: true
+column_index_size_in_kb: 4
+commitlog_directory: ${state.rootDir}/commitlog
+saved_caches_directory: ${state.rootDir}/saved_caches
+hinted_handoff_enabled: ${state.hintedHandoffEnabled}
+hints_directory: ${state.rootDir}/hints
+hints_flush_period_in_ms: 10000
+max_hints_file_size_in_mb: 128
+data_file_directories:
+    - ${state.rootDir}/data
+cdc_enabled: ${state.cdcEnabled}
+#if (${state.cdcRawDirectory})
+cdc_raw_directory: ${state.cdcRawDirectory})
+#else
+cdc_raw_directory: ${state.rootDir}/cdc_raw
+#end
+disk_access_mode: mmap
+seed_provider:
+    - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+      parameters:
+          - seeds: ${state.seeds}
+endpoint_snitch: ${state.snitch}
+dynamic_snitch: ${state.dynamicSnitch}
+#if (${state.clientEncryption})
+client_encryption_options:
+    enabled: true
+    keystore: ${state.rootDir}/keystore.client
+    keystore_password: ${state.clientEncryptionKeystorePassword}
+    truststore: ${state.rootDir}/truststore.client
+    truststore_password: ${state.clientEncryptionTruststorePassword}
+#if (${state.requireClientAuth})
+    require_client_auth: true
+#end
+#end
+#if (${state.internodeEncryption})
+server_encryption_options:
+    internode_encryption: ${state.internodeEncryption}
+    keystore: ${state.rootDir}/keystore.server
+    keystore_password: ${state.serverEncryptionKeystorePassword}
+    truststore: ${state.rootDir}/truststore.server
+    truststore_password: ${state.serverEncryptionTruststorePassword}
+    require_client_auth: ${state.internodeRequireClientAuth}
+#else
+server_encryption_options:
+    internode_encryption: none
+    keystore: conf/.keystore
+    keystore_password: cassandra
+    truststore: conf/.truststore
+    truststore_password: cassandra
+#end
+incremental_backups: ${state.incrementalBackups}
+#if (${state.diskFailurePolicy})
+disk_failure_policy: ${state.diskFailurePolicy}
+#end
+#if (${state.batchSizeFailThresholdInKb})
+batch_size_fail_threshold_in_kb: ${state.batchSizeFailThresholdInKb}
+#end
+#if (${state.allowUDF})
+enable_user_defined_functions: true
+#end
+#if (${state.diskAccessMode})
+disk_access_mode: ${state.diskAccessMode}
+#end
+otc_coalescing_strategy: DISABLED

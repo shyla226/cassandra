@@ -416,4 +416,41 @@ public final class NativeLibrary
 
         return -1;
     }
+
+    public static boolean tryMlock(long address, long length)
+    {
+        try
+        {
+            int result = wrappedLibrary.callMlock(address, length);
+            logger.debug("JNA mlock successful result: {} address: {} length: {}", result, address, length);
+        }
+        catch (UnsatisfiedLinkError e)
+        {
+            // this will have already been logged by CLibrary, no need to repeat it.
+            logger.debug("mlock failed: " + e.getMessage());
+            return false;
+        }
+        catch (RuntimeException e)
+        {
+            if (!(e instanceof LastErrorException))
+                throw e;
+
+            int errNum = NativeLibrary.errno(e);
+            if (errNum == NativeLibrary.ENOMEM)
+            {
+                logger.warn("Unable to lock JVM memory (ENOMEM) at address: {} length: {}."
+                            + " You may need to increase RLIMIT_MEMLOCK for the dse user.",
+                            address,
+                            length);
+                logger.debug("Exception: ", e);
+            }
+            else
+            {
+                logger.warn("Unknown mlock error: {} msg: {}", errNum, wrappedLibrary.callStrerror(errNum));
+                logger.debug("Exception: ", e);
+            }
+            return false;
+        }
+        return true;
+    }
 }

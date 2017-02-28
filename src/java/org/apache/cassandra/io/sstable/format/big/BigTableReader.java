@@ -22,6 +22,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -600,4 +602,8 @@ public class BigTableReader extends SSTableReader
         return new ScrubIterator(ifile, rowIndexEntrySerializer);
     }
 
+    protected FileHandle[] getFilesToBeLocked()
+    {
+        return new FileHandle[] { dataFile, ifile };
+    }
 }

@@ -341,9 +341,13 @@ public class Config
 
     public volatile boolean back_pressure_enabled = false;
     public volatile ParameterizedClass back_pressure_strategy;
-	
+
 	/** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
+
+    // main memory options
+    public int max_memory_to_lock_mb = 0;
+    public double max_memory_to_lock_fraction = 0.20;
 
 
     /**
