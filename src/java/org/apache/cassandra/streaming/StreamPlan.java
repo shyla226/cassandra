@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.UUIDGen;
 public class StreamPlan
 {
     private final UUID planId = UUIDGen.getTimeUUID();
-    private final String description;
+    private final StreamOperation streamOperation;
     private final List<StreamEventHandler> handlers = new ArrayList<>();
     private final long repairedAt;
     private final StreamCoordinator coordinator;
@@ -43,21 +43,21 @@ public class StreamPlan
     /**
      * Start building stream plan.
      *
-     * @param description Stream type that describes this StreamPlan
+     * @param streamOperation Stream streamOperation that describes this StreamPlan
      */
-    public StreamPlan(String description)
+    public StreamPlan(StreamOperation streamOperation)
     {
-        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1, false, false);
+        this(streamOperation, ActiveRepairService.UNREPAIRED_SSTABLE, 1, false, false);
     }
 
-    public StreamPlan(String description, boolean keepSSTableLevels)
+    public StreamPlan(StreamOperation streamOperation, boolean keepSSTableLevels)
     {
-        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1, keepSSTableLevels, false);
+        this(streamOperation, ActiveRepairService.UNREPAIRED_SSTABLE, 1, keepSSTableLevels, false);
     }
 
-    public StreamPlan(String description, long repairedAt, int connectionsPerHost, boolean keepSSTableLevels, boolean isIncremental)
+    public StreamPlan(StreamOperation streamOperation, long repairedAt, int connectionsPerHost, boolean keepSSTableLevels, boolean isIncremental)
     {
-        this.description = description;
+        this.streamOperation = streamOperation;
         this.repairedAt = repairedAt;
         this.coordinator = new StreamCoordinator(connectionsPerHost, keepSSTableLevels, isIncremental, new DefaultConnectionFactory());
     }
@@ -184,7 +184,7 @@ public class StreamPlan
      */
     public StreamResultFuture execute()
     {
-        return StreamResultFuture.init(planId, description, handlers, coordinator);
+        return StreamResultFuture.init(planId, streamOperation, handlers, coordinator);
     }
 
     /**

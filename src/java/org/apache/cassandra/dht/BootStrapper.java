@@ -84,7 +84,7 @@ public class BootStrapper extends ProgressEventNotifierSupport
         RangeStreamer streamer = new RangeStreamer(tokenMetadata,
                                                    tokens,
                                                    address,
-                                                   "Bootstrap",
+                                                   StreamOperation.BOOTSTRAP,
                                                    useStrictConsistency,
                                                    streamConsistency,
                                                    DatabaseDescriptor.getEndpointSnitch(),

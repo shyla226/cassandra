@@ -52,6 +52,7 @@ import org.apache.cassandra.locator.RackInferringSnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.utils.FBUtilities;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
@@ -120,7 +121,7 @@ public class BootStrapperTest
         RangeStreamer s = new RangeStreamer(tmd,
                                             null,
                                             myEndpoint,
-                                            "Bootstrap",
+                                            StreamOperation.BOOTSTRAP,
                                             useStrictConsistency, // useConsistentRangeMovement
                                             streamConsistency, // streamConsistency
                                             DatabaseDescriptor.getEndpointSnitch(),

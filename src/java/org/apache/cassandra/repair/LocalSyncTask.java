@@ -34,14 +34,13 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamEventHandler;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.RangeHash;
-
-import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
 
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
@@ -93,13 +92,13 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
             isIncremental = prs.isIncremental;
         }
         Tracing.traceRepair(message);
-        new StreamPlan(REPAIR_STREAM_PLAN_DESCRIPTION, repairedAt, 1, false, isIncremental).listeners(this)
-                        .flushBeforeTransfer(false)
-                        // request ranges from the remote node
-                        .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily)
-                        // send ranges to the remote node
-                        .transferRanges(dst, preferred, desc.keyspace, toTransfer, desc.columnFamily)
-                        .execute();
+        new StreamPlan(StreamOperation.REPAIR, repairedAt, 1, false, isIncremental).listeners(this)
+                                                                                   .flushBeforeTransfer(false)
+                                                                                   // request ranges from the remote node
+                                                                                   .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily)
+                                                                                   // send ranges to the remote node
+                                                                                   .transferRanges(dst, preferred, desc.keyspace, toTransfer, desc.columnFamily)
+                                                                                   .execute();
     }
 
     public void handleStreamEvent(StreamEvent event)
