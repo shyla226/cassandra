@@ -27,8 +27,9 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.db.monitoring.Monitorable;
@@ -147,6 +148,11 @@ public abstract class ReadCommand implements ReadQuery
     public TableMetadata metadata()
     {
         return metadata;
+    }
+
+    public boolean isEmpty()
+    {
+        return false;
     }
 
     /**
@@ -288,6 +294,16 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract boolean isReversed();
 
+    /**
+     * Create a read response and takes care of eventually closing the iterator.
+     *
+     * Digest responses calculate the digest in the construstor and close the iterator immediately,
+     * whilst data responses may keep it open until the iterator is closed by the final handler, e.g.
+     * {@link org.apache.cassandra.cql3.statements.SelectStatement#processPartition(RowIterator, QueryOptions, ResultBuilder, int)}
+     * @param iterator - the iterator containing the results, the response will take ownership
+     *
+     * @return An appropriate response, either of type digest or data.
+     */
     public ReadResponse createResponse(UnfilteredPartitionIterator iterator)
     {
         return isDigestQuery()
@@ -347,19 +363,19 @@ public abstract class ReadCommand implements ReadQuery
     /**
      * Executes this command on the local host.
      *
-     * @param executionController the execution controller spanning this command
-     *
      * @return an iterator over the result of executing this command locally.
      */
-    @SuppressWarnings("resource") // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
+    // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
-    public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
+    @SuppressWarnings("resource")
+    @Override
+    public Single<UnfilteredPartitionIterator> executeLocally()
     {
-        Single s =  Single.defer(
+        Single s = Single.defer(
         () ->
         {
             long startTimeNanos = System.nanoTime();
-            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
             Index index = getIndex(cfs);
 
             Index.Searcher pickSearcher = null;
@@ -372,44 +388,82 @@ public abstract class ReadCommand implements ReadQuery
                 Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
             }
 
-            //Local requests track their own oporder
-            TPCOpOrder.Group group = cfs.readOrdering.start();
-
             Index.Searcher searcher = pickSearcher;
-            Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                                                                 ? queryStorage(cfs, executionController)
-                                                                 : searcher.search(executionController);
-
-            return resultIterator.map(
-            r ->
+            ReadExecutionController controller = ReadExecutionController.forCommand(this);
+            try
             {
-                r = withTracking(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos, group);
+                Single<UnfilteredPartitionIterator> resultIterator = searcher == null
+                                                                     ? queryStorage(cfs, controller)
+                                                                     : searcher.search(controller);
 
-                // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
-                // no point in checking it again.
-                RowFilter updatedFilter = searcher == null
-                                          ? rowFilter()
-                                          : index.getPostIndexQueryFilter(rowFilter());
+                return resultIterator.map(r ->
+                                          {
+                                              r = withTracking(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos);
 
-                // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
-                // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
-                // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
-                // processing we do on it).
-                return limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
-            });
+                                              // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+                                              // no point in checking it again.
+                                              RowFilter updatedFilter = searcher == null
+                                                                        ? rowFilter()
+                                                                        : index.getPostIndexQueryFilter(rowFilter());
+
+                                              // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+                                              // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+                                              // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+                                              // processing we do on it).
+                                              final UnfilteredPartitionIterator res = limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
+
+                                              // TODO - to be removed after final implementation with MergeFlowable is integrated.
+                                              // Closing the execution controller is too important for it to be buried in a transformation,
+                                              // so I've temporarily wrapped the iterator - I understand that in the final flowable implementation
+                                              // we'll convert a Flowable<Unfiltered> to an iterator or use the Flowable directly, so the idea
+                                              // is to close the controller when the subscription to the flowable is cancelled, i.e. when the
+                                              // iterator is closed.
+                                              // I have checked that all the callers of executeLocally() indeed close the iterator.
+                                              return new UnfilteredPartitionIterator()
+                                              {
+
+                                                  public boolean hasNext()
+                                                  {
+                                                      return res.hasNext();
+                                                  }
+
+                                                  public Single<UnfilteredRowIterator> next()
+                                                  {
+                                                      return res.next();
+                                                  }
+
+                                                  public TableMetadata metadata()
+                                                  {
+                                                      return res.metadata();
+                                                  }
+
+                                                  public void close()
+                                                  {
+                                                      controller.close();
+                                                      res.close();
+                                                  }
+                                              };
+                                          });
+            }
+            catch (Throwable t)
+            {
+                controller.close(); // idempotent
+                return Single.error(t);
+            }
         });
 
+
         if (this instanceof SinglePartitionReadCommand)
-            s = s.subscribeOn(NettyRxScheduler.getForKey(executionController.metadata().keyspace, ((SinglePartitionReadCommand)this).partitionKey(), false ));
+            s = s.subscribeOn(NettyRxScheduler.getForKey(metadata.keyspace, ((SinglePartitionReadCommand)this).partitionKey(), false ));
 
         return s;
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
-    public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
+    public Single<PartitionIterator> executeInternal()
     {
-        return executeLocally(controller).map(p -> UnfilteredPartitionIterators.filter(p, nowInSec()));
+        return executeLocally().map(p -> UnfilteredPartitionIterators.filter(p, nowInSec()));
     }
 
     public ReadExecutionController executionController()
@@ -422,9 +476,8 @@ public abstract class ReadCommand implements ReadQuery
      * - metrics on what is scanned by the command are recorded.
      * - log warning/trow TombstoneOverwhelmingException if appropriate.
      * - check if command should be aborted (if it's taking too long)
-     * - the opOrder is closed when the iterator is closed
-	 *
-	 * A read command is aborted if it has been running for longer
+     *
+     * A read command is aborted if it has been running for longer
      * that the client timeout, since in this case the client has already received a
      * timeout error. Also, for continuous paging, local commands are time limited in
      * order to prevent keeping resources for too long. In this case, after a command
@@ -434,8 +487,7 @@ public abstract class ReadCommand implements ReadQuery
      */
     private UnfilteredPartitionIterator withTracking(UnfilteredPartitionIterator iter,
                                                      final TableMetrics metric,
-                                                     final long startTimeNanos,
-                                                     final TPCOpOrder.Group opOrder)
+                                                     final long startTimeNanos)
     {
         class TrackingTransformation extends StoppingTransformation<UnfilteredRowIterator>
         {
@@ -450,8 +502,7 @@ public abstract class ReadCommand implements ReadQuery
             private int tombstones = 0;
 
             private DecoratedKey currentKey;
-            private boolean opOrderClosed;
-			private Row lastRow = null;
+            private Row lastRow = null;
 
             @Override
             public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator iter)
@@ -463,7 +514,7 @@ public abstract class ReadCommand implements ReadQuery
                 }
 
                 currentKey = iter.partitionKey();
-				lastRow = null;
+                lastRow = null;
                 return Transformation.apply(iter, this);
             }
 
@@ -562,19 +613,6 @@ public abstract class ReadCommand implements ReadQuery
             @Override
             public void onClose()
             {
-                // TODO - port of the logic in TrackOpOrder but I am not entirely sure this is correct,
-                // I think in some cases onClose is called multiple times, see RxBaseIterator.tryGetMoreContents(0
-                if (!opOrderClosed)
-                {
-                    opOrder.close();
-                    opOrderClosed = true;
-                }
-                else
-                {
-                    throw new AssertionError("OpOrder already closed");
-                }
-                //end TODO
-
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 
                 metric.tombstoneScannedHistogram.update(tombstones);
@@ -600,32 +638,6 @@ public abstract class ReadCommand implements ReadQuery
         if (!metadata.keyspace.startsWith("system"))
             FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
     }
-
-
-//    class TrackOpOrder extends Transformation<UnfilteredRowIterator>
-//    {
-//        final TPCOpOrder.Group group;
-//        boolean closed = false;
-//
-//        TrackOpOrder(TPCOpOrder.Group group)
-//        {
-//            this.group = group;
-//        }
-//
-//        protected void onClose()
-//        {
-//            if (closed)
-//                throw new AssertionError("OpOrder already closed");
-//
-//            group.close();
-//            closed = true;
-//        }
-//    }
-//
-//    protected UnfilteredPartitionIterator withOpOrderTracking(UnfilteredPartitionIterator iter, TPCOpOrder.Group group)
-//    {
-//        return Transformation.apply(iter, new TrackOpOrder(group));
-//    }
 
 
     /**

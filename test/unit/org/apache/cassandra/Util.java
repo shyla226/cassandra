@@ -284,8 +284,7 @@ public class Util
 
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
-        try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
         {
             if (iterator.hasNext())
             {
@@ -299,8 +298,7 @@ public class Util
 
     public static void assertEmpty(ReadCommand command)
     {
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
+        try (PartitionIterator iterator = command.executeInternal().blockingGet())
         {
             if (iterator.hasNext())
             {
@@ -315,8 +313,7 @@ public class Util
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
         List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (ReadExecutionController executionController = command.executionController();
-             UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
         {
             while (iterator.hasNext())
             {
@@ -332,8 +329,7 @@ public class Util
     public static List<FilteredPartition> getAll(ReadCommand command)
     {
         List<FilteredPartition> results = new ArrayList<>();
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
+        try (PartitionIterator iterator = command.executeInternal().blockingGet())
         {
             while (iterator.hasNext())
             {
@@ -348,8 +344,7 @@ public class Util
 
     public static Row getOnlyRowUnfiltered(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next().blockingGet())
@@ -366,8 +361,7 @@ public class Util
 
     public static Row getOnlyRow(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController).blockingGet())
+        try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
             try (RowIterator partition = iterator.next().blockingGet())
@@ -383,8 +377,7 @@ public class Util
 
     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next().blockingGet())
@@ -397,8 +390,7 @@ public class Util
 
     public static FilteredPartition getOnlyPartition(ReadCommand cmd)
     {
-        try (ReadExecutionController executionController = cmd.executionController();
-             PartitionIterator iterator = cmd.executeInternal(executionController).blockingGet())
+        try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
             try (RowIterator partition = iterator.next().blockingGet())

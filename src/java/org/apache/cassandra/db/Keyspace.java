@@ -32,7 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -483,144 +482,150 @@ public class Keyspace
 
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
-        final Lock[] locks = requiresViewUpdate ? new Lock[mutation.getTableIds().size()] : null;
-        return Completable.defer(() ->
-        {
-            if (requiresViewUpdate)
+        return Completable.using(
+            () -> requiresViewUpdate ? new Lock[mutation.getTableIds().size()] : null,
+
+            (locks) -> Completable.defer(() ->
             {
-                if (mutation.viewLockAcquireStart == 0)
-                    mutation.viewLockAcquireStart = System.currentTimeMillis();
-
-                // the order of lock acquisition doesn't matter (from a deadlock perspective) because we only use tryLock()
-                Collection<TableId> tableIds = mutation.getTableIds();
-                Iterator<TableId> idIterator = tableIds.iterator();
-
-                for (int i = 0; i < tableIds.size(); i++)
+                if (requiresViewUpdate)
                 {
-                    TableId tableId = idIterator.next();
-                    int lockKey = Objects.hash(mutation.key().getKey(), tableId);
-                    Lock lock = null;
+                    if (mutation.viewLockAcquireStart == 0)
+                        mutation.viewLockAcquireStart = System.currentTimeMillis();
 
-                    if (TEST_FAIL_MV_LOCKS_COUNT == 0)
-                        lock = ViewManager.acquireLockFor(lockKey);
-                    else
-                        TEST_FAIL_MV_LOCKS_COUNT--;
+                    // the order of lock acquisition doesn't matter (from a deadlock perspective) because we only use tryLock()
+                    Collection<TableId> tableIds = mutation.getTableIds();
+                    Iterator<TableId> idIterator = tableIds.iterator();
 
-                    if (lock == null)
+                    for (int i = 0; i < tableIds.size(); i++)
                     {
-                        //throw WTE only if request is droppable
-                        if (isDroppable && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
-                        {
-                            for (int j = 0; j < i; j++)
-                                locks[j].unlock();
+                        TableId tableId = idIterator.next();
+                        int lockKey = Objects.hash(mutation.key().getKey(), tableId);
+                        Lock lock = null;
 
-                            logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
-                            Tracing.trace("Could not acquire MV lock");
-                            return Completable.error(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
+                        if (TEST_FAIL_MV_LOCKS_COUNT == 0)
+                            lock = ViewManager.acquireLockFor(lockKey);
+                        else
+                            TEST_FAIL_MV_LOCKS_COUNT--;
+
+                        if (lock == null)
+                        {
+                            //throw WTE only if request is droppable
+                            if (isDroppable && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
+                            {
+                                for (int j = 0; j < i; j++)
+                                    locks[j].unlock();
+
+                                logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
+                                Tracing.trace("Could not acquire MV lock");
+                                return Completable.error(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
+                            }
+                            else
+                            {
+                                for (int j = 0; j < i; j++)
+                                    locks[j].unlock();
+
+                                // This view update can't happen right now, so schedule another attempt later.
+                                return Completable.defer(() -> applyInternal(mutation, writeCommitLog, true, isDroppable))
+                                        .observeOn(NettyRxScheduler.instance());
+                            }
                         }
                         else
                         {
-                            for (int j = 0; j < i; j++)
-                                locks[j].unlock();
-
-                            // This view update can't happen right now, so schedule another attempt later.
-                            return Completable.defer(() -> applyInternal(mutation, writeCommitLog, true, isDroppable))
-                                    .observeOn(NettyRxScheduler.instance());
+                            locks[i] = lock;
                         }
                     }
-                    else
+
+                    long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
+                    // Metrics are only collected for droppable write operations
+                    // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
+                    if (isDroppable)
                     {
-                        locks[i] = lock;
+                    for(TableId tableId : tableIds)
+                        columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
                     }
                 }
+                int nowInSec = FBUtilities.nowInSeconds();
 
-                long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart;
-                // Metrics are only collected for droppable write operations
-                // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
-                if (isDroppable)
+                // write the mutation to the commitlog
+                Single<CommitLogPosition> commitLogPositionObservable;
+                if (writeCommitLog)
                 {
-                for(TableId tableId : tableIds)
-                    columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
+                    Tracing.trace("Appending to commitlog");
+                    commitLogPositionObservable = CommitLog.instance.add(mutation);
+                }
+                else
+                {
+                    commitLogPositionObservable = Single.just(CommitLogPosition.NONE);
+                }
+
+                return Completable.using(
+                    () -> writeOrder.start(),
+
+                    (opGroup) -> commitLogPositionObservable
+                       .flatMapCompletable(commitLogPosition -> {
+
+                            List<Completable> memtablePutCompletables = new ArrayList<>(mutation.getPartitionUpdates().size());
+
+                            for (PartitionUpdate upd : mutation.getPartitionUpdates())
+                            {
+
+                                ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
+                                if (cfs == null)
+                                {
+                                    logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
+                                    continue;
+                                }
+
+                                // TODO this probably doesn't need to be atomic after TPC
+                                AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
+
+                                Completable viewUpdateCompletable = null;
+                                if (requiresViewUpdate)
+                                {
+                                    Tracing.trace("Creating materialized view mutations from base table replica");
+                                    viewUpdateCompletable = viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeCommitLog, baseComplete);
+                                    viewUpdateCompletable.doOnError(exc -> {
+                                            JVMStabilityInspector.inspectThrowable(exc);
+                                            logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s.%s",
+                                                    upd.metadata().keyspace, upd.metadata().name), exc);
+                                    });
+                                }
+
+                                Tracing.trace("Adding to {} memtable", upd.metadata().name);
+                                UpdateTransaction indexTransaction = updateIndexes
+                                                                     ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
+                                                                     : UpdateTransaction.NO_OP;
+
+                                CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
+                                Completable memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
+                                if (requiresViewUpdate)
+                                {
+                                    memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
+                                    memtablePutCompletables.add(viewUpdateCompletable);
+                                }
+                                memtablePutCompletables.add(memtableCompletable);
+                            }
+
+                            // avoid the expensive merge call if there's only 1 observable
+                            if (memtablePutCompletables.size() == 1)
+                                return memtablePutCompletables.get(0);
+                            else
+                                return Completable.merge(memtablePutCompletables);
+
+                       }),
+
+                    (opGroup) -> opGroup.close());
+            }),
+
+        (locks) ->
+            {
+                if (locks != null)
+                {
+                    for (Lock lock : locks)
+                        lock.unlock();
                 }
             }
-            int nowInSec = FBUtilities.nowInSeconds();
-
-            // write the mutation to the commitlog
-            Single<CommitLogPosition> commitLogPositionObservable;
-            if (writeCommitLog)
-            {
-                Tracing.trace("Appending to commitlog");
-                commitLogPositionObservable = CommitLog.instance.add(mutation);
-            }
-            else
-            {
-                commitLogPositionObservable = Single.just(CommitLogPosition.NONE);
-            }
-
-            TPCOpOrder.Group opGroup = writeOrder.start();
-
-            return commitLogPositionObservable
-                   .flatMapCompletable(commitLogPosition -> {
-
-                        List<Completable> memtablePutCompletables = new ArrayList<>(mutation.getPartitionUpdates().size());
-
-                        for (PartitionUpdate upd : mutation.getPartitionUpdates())
-                        {
-
-                            ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
-                            if (cfs == null)
-                            {
-                                logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
-                                continue;
-                            }
-
-                            // TODO this probably doesn't need to be atomic after TPC
-                            AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
-
-                            Completable viewUpdateCompletable = null;
-                            if (requiresViewUpdate)
-                            {
-                                Tracing.trace("Creating materialized view mutations from base table replica");
-                                viewUpdateCompletable = viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeCommitLog, baseComplete);
-                                viewUpdateCompletable.doOnError(exc -> {
-                                        JVMStabilityInspector.inspectThrowable(exc);
-                                        logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s.%s",
-                                                upd.metadata().keyspace, upd.metadata().name), exc);
-                                });
-                            }
-
-                            Tracing.trace("Adding to {} memtable", upd.metadata().name);
-                            UpdateTransaction indexTransaction = updateIndexes
-                                                                 ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
-                                                                 : UpdateTransaction.NO_OP;
-
-                            CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
-                            Completable memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
-                            if (requiresViewUpdate)
-                            {
-                                memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
-                                memtablePutCompletables.add(viewUpdateCompletable);
-                            }
-                            memtablePutCompletables.add(memtableCompletable);
-                        }
-
-                        // avoid the expensive merge call if there's only 1 observable
-                        if (memtablePutCompletables.size() == 1)
-                            return memtablePutCompletables.get(0);
-                        else
-                            return Completable.merge(memtablePutCompletables);
-
-                   }).doOnComplete(opGroup::close);
-        })
-        .doFinally(() -> {
-            if (locks != null)
-            {
-                for (Lock lock : locks)
-                    lock.unlock();
-            }
-
-            //Route the work to the correct core
-        }).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));
+        ).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false)); // route to the correct core
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

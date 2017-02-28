@@ -27,13 +27,10 @@ import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
-import io.reactivex.Observable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
@@ -146,13 +143,10 @@ public abstract class AbstractReadExecutor
             final long constructionTime = System.currentTimeMillis();
             MessagingService.Verb verb = MessagingService.Verb.READ;
 
-            ReadExecutionController executionController = command.executionController();
-            return command.executeLocally(executionController)
+            return command.executeLocally()
                           .map(iterator -> command.createResponse(iterator))
                           .flatMapCompletable(response ->
                                               {
-                                                  executionController.close();
-
                                                   if (command.complete())
                                                   {
                                                       handler.response(response);
@@ -169,8 +163,6 @@ public abstract class AbstractReadExecutor
                                               })
                           .onErrorResumeNext(t ->
                                              {
-                                                 executionController.close();
-
                                                  if (t instanceof TombstoneOverwhelmingException)
                                                  {
                                                      handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);

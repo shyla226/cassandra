@@ -1629,11 +1629,6 @@ public class StorageProxy implements StorageProxyMBean
     {
         assert consistencyLevel.isSingleNode();
 
-        // Not using the controller in a try-with-resource is a bit dodgy, but having to pass it all the way down
-        // the execution path when it's used only in this specific path is annoying, we've made it clear in the
-        // javadoc that the returned iterator must be closed, and we have a good track record of using
-        // PartitionIterator in try-with-resource.
-        ReadExecutionController controller = group.executionController();
         try
         {
             group.monitorLocal(ApproximateTime.currentTimeMillis());
@@ -1641,7 +1636,7 @@ public class StorageProxy implements StorageProxyMBean
             // We could simply use a close Transformation here. However, we want to make extra sure close() is
             // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
             // framework (which is non trivial code) making that not happen.
-            final PartitionIterator iter = group.executeInternal(controller).blockingGet();
+            final PartitionIterator iter = group.executeInternal().blockingGet();
             return Single.just(new PartitionIterator()
             {
                 public Flowable<RowIterator> asObservable()
@@ -1662,14 +1657,12 @@ public class StorageProxy implements StorageProxyMBean
                 public void close()
                 {
                     // Make sure we close this as the first thing so it's always called.
-                    controller.close();
                     group.complete();
                 }
             });
         }
         catch (Throwable e)
         {
-            controller.close();
             readMetrics.failures.mark();
             readMetricsMap.get(consistencyLevel).failures.mark();
             throw e;
@@ -1946,12 +1939,8 @@ public class StorageProxy implements StorageProxyMBean
             {
                 command.monitor(constructionTime, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout(), false);
 
-                ReadResponse response;
-                try (ReadExecutionController executionController = command.executionController())
-                {
-                    UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet();
-                    response = command.createResponse(iterator);
-                }
+                UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet();
+                ReadResponse response = command.createResponse(iterator);
 
                 if (command.complete())
                 {
@@ -2425,14 +2414,12 @@ public class StorageProxy implements StorageProxyMBean
 
         Tracing.trace("Querying local ranges");
 
-        // Same reasoning as in readLocalContinuous, see there for details.
-        ReadExecutionController controller = command.executionController();
         try
         {
             command.monitorLocal(ApproximateTime.currentTimeMillis());
 
             // Same reasoning as in readLocalContinuous, see there for details.
-            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(controller).blockingGet());
+            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal().blockingGet());
             return Single.just(new PartitionIterator()
             {
                 public Flowable<RowIterator> asObservable()
@@ -2452,15 +2439,12 @@ public class StorageProxy implements StorageProxyMBean
 
                 public void close()
                 {
-                    // Make sure we close this as the first thing so it's always called.
-                    controller.close();
                     command.complete();
                 }
             });
         }
         catch (Throwable e)
         {
-            controller.close();
             rangeMetrics.failures.mark();
             throw e;
         }

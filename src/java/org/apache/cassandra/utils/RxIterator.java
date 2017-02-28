@@ -18,25 +18,20 @@
 
 package org.apache.cassandra.utils;
 
-import java.io.Closeable;
-import java.util.Iterator;
+import java.util.concurrent.Callable;
 
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Flowable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.SingleSource;
-import io.reactivex.internal.schedulers.ImmediateThinScheduler;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.AsObservable;
 
-public interface RxIterator<T> extends Iterator<Single<T>>, AsObservable<T>, Closeable
+public interface RxIterator<T> extends CloseableIterator<Single<T>>, AsObservable<T>
 {
     public default Flowable<T> asObservable()
     {
-        return Flowable.using(() -> Iterables.transform(() -> this, s -> (SingleSource<T>) s),
-                              (r) -> Single.concat(r),
-                              (r) -> close());
+        Callable<Iterable<SingleSource<T>>> resourceSupplier = () -> Iterables.transform(() -> this, s -> (SingleSource<T>) s);
+        return Flowable.using(resourceSupplier, (r) -> Single.concat(r), (r) -> close());
     }
 }

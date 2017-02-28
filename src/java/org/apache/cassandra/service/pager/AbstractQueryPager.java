@@ -71,11 +71,6 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         this.remainingInPartition = limits.perPartitionCount();
     }
 
-    public ReadExecutionController executionController()
-    {
-        return command.executionController();
-    }
-
     @SuppressWarnings("resource")
     public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
     {
@@ -83,13 +78,13 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
     }
 
     @SuppressWarnings("resource")
-    public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Single<PartitionIterator> fetchPageInternal(int pageSize)
     {
-        return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal(executionController));
+        return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal());
     }
 
     @SuppressWarnings("resource")
-    public Single<UnfilteredPartitionIterator> fetchPageUnfiltered(int pageSize, ReadExecutionController executionController, TableMetadata metadata)
+    public Single<UnfilteredPartitionIterator> fetchPageUnfiltered(int pageSize, TableMetadata metadata)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
@@ -99,7 +94,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
         internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        Single<UnfilteredPartitionIterator> iter = pageCommand.executeLocally(executionController);
+        Single<UnfilteredPartitionIterator> iter = pageCommand.executeLocally();
         return iter.map(it -> Transformation.apply(it, internalPager));
     }
 

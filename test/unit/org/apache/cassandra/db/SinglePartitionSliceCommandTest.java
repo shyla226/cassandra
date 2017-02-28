@@ -126,7 +126,7 @@ public class SinglePartitionSliceCommandTest
                                                          sliceFilter);
 
         // check raw iterator for static cell
-        try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator pi = cmd.executeLocally().blockingGet())
         {
             checkForS(pi);
         }
@@ -137,7 +137,7 @@ public class SinglePartitionSliceCommandTest
         ReadResponse dst;
 
         // check (de)serialized iterator for memtable static cell
-        try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator pi = cmd.executeLocally().blockingGet())
         {
             response = ReadResponse.createDataResponse(pi, cmd);
         }
@@ -153,7 +153,7 @@ public class SinglePartitionSliceCommandTest
 
         // check (de)serialized iterator for sstable static cell
         Schema.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush();
-        try (ReadExecutionController executionController = cmd.executionController(); UnfilteredPartitionIterator pi = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator pi = cmd.executeLocally().blockingGet())
         {
             response = ReadResponse.createDataResponse(pi, cmd);
         }

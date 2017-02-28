@@ -367,9 +367,9 @@ public class SelectStatement implements CQLStatement
             this.pager = pager;
         }
 
-        public static Pager forInternalQuery(QueryPager pager, ReadExecutionController executionController)
+        public static Pager forInternalQuery(QueryPager pager)
         {
-            return new InternalPager(pager, executionController);
+            return new InternalPager(pager);
         }
 
         public static Pager forNormalQuery(QueryPager pager, ConsistencyLevel consistency, ClientState clientState, boolean forContinuousPaging)
@@ -422,17 +422,14 @@ public class SelectStatement implements CQLStatement
          */
         public static class InternalPager extends Pager
         {
-            private final ReadExecutionController executionController;
-
-            private InternalPager(QueryPager pager, ReadExecutionController executionController)
+            private InternalPager(QueryPager pager)
             {
                 super(pager);
-                this.executionController = executionController;
             }
 
             public Single<PartitionIterator> fetchPage(int pageSize, long queryStartNanoTime)
             {
-                return pager.fetchPageInternal(pageSize, executionController);
+                return pager.fetchPageInternal(pageSize);
             }
         }
     }
@@ -503,18 +500,15 @@ public class SelectStatement implements CQLStatement
         int pageSize = getPageSize(options);
         ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
 
-        try (ReadExecutionController executionController = query.executionController())
+        if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
         {
-            if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
-            {
-                Single<PartitionIterator> data = query.executeInternal(executionController);
-                return processResults(data, options, nowInSec, userLimit);
-            }
-            else
-            {
-                QueryPager pager = getPager(query, options);
-                return execute(Pager.forInternalQuery(pager, executionController), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
-            }
+            Single<PartitionIterator> data = query.executeInternal();
+            return processResults(data, options, nowInSec, userLimit);
+        }
+        else
+        {
+            QueryPager pager = getPager(query, options);
+            return execute(Pager.forInternalQuery(pager), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
         }
     }
 
@@ -728,7 +722,7 @@ public class SelectStatement implements CQLStatement
     {
         QueryPager pager = query.getPager(pagingState, protocolVersion);
 
-        if (aggregationSpec == null || query == ReadQuery.EMPTY)
+        if (aggregationSpec == null || query.isEmpty())
             return pager;
 
         return new AggregationQueryPager(pager, query.limits());
@@ -769,11 +763,11 @@ public class SelectStatement implements CQLStatement
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options);
         if (keys.isEmpty())
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options);
         if (filter == null)
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         RowFilter rowFilter = getRowFilter(options);
 
@@ -835,7 +829,7 @@ public class SelectStatement implements CQLStatement
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options);
         if (clusteringIndexFilter == null)
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         RowFilter rowFilter = getRowFilter(options);
 
@@ -843,7 +837,7 @@ public class SelectStatement implements CQLStatement
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
         AbstractBounds<PartitionPosition> keyBounds = restrictions.getPartitionKeyBounds(options);
         if (keyBounds == null)
-            return ReadQuery.EMPTY;
+            return new ReadQuery.EmptyQuery(table);
 
         PartitionRangeReadCommand command = new PartitionRangeReadCommand(table,
                                                                           nowInSec,

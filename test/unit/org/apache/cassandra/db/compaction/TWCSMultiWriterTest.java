@@ -80,8 +80,7 @@ public class TWCSMultiWriterTest extends CQLTester
                                                                      dr,
                                                                      Optional.empty());
         TWCSMultiWriter.BucketIndexer indexes = TWCSMultiWriter.createBucketIndexes(TimeUnit.MINUTES, 1);
-        try (ReadExecutionController executionController = rc.executionController();
-             UnfilteredPartitionIterator pi = rc.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator pi = rc.executeLocally().blockingGet())
         {
             while (pi.hasNext())
             {

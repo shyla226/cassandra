@@ -19,7 +19,6 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
 
-import io.reactivex.Observable;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;

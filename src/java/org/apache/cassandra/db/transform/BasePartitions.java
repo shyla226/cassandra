@@ -88,15 +88,21 @@ implements BasePartitionIterator<R>
             while (!stop.isSignalled && input.hasNext())
             {
                 next = (Single<BaseRowIterator<?>>)input.next();
-                for (int i = 0; next != null & i < len; i++)
-                {
-                    final int fi = i;
-                    next = next.map(n -> n == null ? n : fs[fi].applyToPartition(n));
-                }
+
+
+                if (next != null)
+                    next = next.map(n -> {
+                        for (int i = 0 ; n != null & i < len ; i++)
+                            n = fs[i].applyToPartition(n);
+                        return n;
+                    });
 
                 if (next != null)
                 {
                     this.next = next;
+                    // There is a problem here because if a transformation has returned null then we should
+                    // return false here whereas if we don't wait we are returning a Single of a null partition,
+                    // which is causing NPEs in the tests at least
                     return true;
                 }
             }

@@ -452,7 +452,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
             return toCache.flatMap(c ->
                                    {
-
                                        if (sentinelSuccess && !c.isEmpty())
                                        {
                                            Tracing.trace("Caching {} rows", c.rowCount());
@@ -484,7 +483,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                i.close();
                                                                throw e;
                                                            }
-                                                       });
+                                                       })
+                                                  .cast(UnfilteredRowIterator.class);
                                    }).onErrorResumeNext(t ->
                                                         {
                                                             if (sentinelSuccess && !sentinelReplaced.get())
@@ -1034,6 +1034,11 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).metadata();
         }
 
+        public boolean isEmpty()
+        {
+            return false;
+        }
+
         public ReadExecutionController executionController()
         {
             // Note that the only difference between the command in a group must be the partition key on which
@@ -1041,32 +1046,31 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).executionController();
         }
 
-        public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
+        public Single<PartitionIterator> executeInternal()
         {
-            return executeLocally(controller, false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
+            return executeLocally(false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
+        public Single<UnfilteredPartitionIterator> executeLocally()
         {
-            return executeLocally(executionController, true);
+            return executeLocally(true);
         }
 
         /**
-         * Implementation of {@link ReadQuery#executeLocally(ReadExecutionController)}.
+         * Implementation of {@link ReadQuery#executeLocally()}.
          *
-         * @param executionController - the {@code ReadExecutionController} protecting the read.
          * @param sort - whether to sort the inner commands by partition key, required for merging the iterator
-         *               later on. This will be false when called by {@link ReadQuery#executeInternal(ReadExecutionController)}
+         *               later on. This will be false when called by {@link ReadQuery#executeInternal()}
          *               because in this case it is safe to do so as there is no merging involved and we don't want to
          *               change the old behavior which was to not sort by partition.
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController, boolean sort)
+        private Single<UnfilteredPartitionIterator> executeLocally(boolean sort)
         {
             List<Pair<DecoratedKey, Single<UnfilteredPartitionIterator>>> partitions = new ArrayList<>(commands.size());
             for (SinglePartitionReadCommand cmd : commands)
-                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally(executionController)));
+                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally()));
 
             if (commands.size() == 1)
                 return partitions.get(0).getValue();

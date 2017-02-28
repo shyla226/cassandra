@@ -560,9 +560,8 @@ public class SecondaryIndexManager implements IndexRegistry
             SinglePartitionPager pager = new SinglePartitionPager(cmd, null, ProtocolVersion.CURRENT);
             while (!pager.isExhausted())
             {
-                try (ReadExecutionController controller = cmd.executionController();
-                     TPCOpOrder.Group writeGroup = Keyspace.writeOrder.start();
-                     UnfilteredPartitionIterator page = pager.fetchPageUnfiltered(pageSize, controller, baseCfs.metadata()).blockingGet())
+                try (TPCOpOrder.Group writeGroup = Keyspace.writeOrder.start();
+                     UnfilteredPartitionIterator page = pager.fetchPageUnfiltered(pageSize, baseCfs.metadata()).blockingGet())
                 {
                     if (!page.hasNext())
                         break;
@@ -1017,7 +1016,7 @@ public class SecondaryIndexManager implements IndexRegistry
                 rows = new Row[versions];
         }
 
-        public void onRowMerge(Row merged, Row...versions)
+        public void onRowMerge(Row merged, Row... versions)
         {
             // Diff listener constructs rows representing deltas between the merged and original versions
             // These delta rows are then passed to registered indexes for removal processing
@@ -1057,7 +1056,7 @@ public class SecondaryIndexManager implements IndexRegistry
 
             Rows.diff(diffListener, merged, versions);
 
-            for(int i = 0; i < builders.length; i++)
+            for (int i = 0; i < builders.length; i++)
                 if (builders[i] != null)
                     rows[i] = builders[i].build();
         }
@@ -1067,25 +1066,29 @@ public class SecondaryIndexManager implements IndexRegistry
             if (rows == null)
                 return Completable.complete();
 
+            return Completable.using(() -> Keyspace.writeOrder.start(), // resourceFactory
 
-            Completable r = Completable.complete();
-            TPCOpOrder.Group opGroup = Keyspace.writeOrder.start();
+                                     (opOrder) -> Completable.defer(() ->  // completableFactory
+                                          {
+                                              Completable r = Completable.complete();
+                                              for (Index index : indexes)
+                                              {
+                                                  Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opOrder, Type.COMPACTION);
+                                                  if (indexer == null)
+                                                      continue;
 
-            for (Index index : indexes)
-            {
-                Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opGroup, Type.COMPACTION);
-                if (indexer == null)
-                    continue;
+                                                  indexer.begin();
+                                                  for (Row row : rows)
+                                                      if (row != null)
+                                                          r = r.concatWith(indexer.removeRow(row));
 
-                indexer.begin();
-                for (Row row : rows)
-                    if (row != null)
-                        r = r.concatWith(indexer.removeRow(row));
+                                                  r = r.concatWith(indexer.finish());
+                                              }
 
-                r = r.concatWith(indexer.finish());
-            }
+                                              return r;
+                                          }),
 
-            return r.doOnTerminate(() -> opGroup.close());
+                                     (opOrder) -> opOrder.close());  // resourceDisposer
         }
     }
 
@@ -1135,27 +1138,32 @@ public class SecondaryIndexManager implements IndexRegistry
             if (row == null && partitionDelete == null)
                 return Completable.complete();
 
-            TPCOpOrder.Group opGroup = Keyspace.writeOrder.start();
-            Completable r = Completable.complete();
+            return Completable.using(() -> Keyspace.writeOrder.start(), // resourceFactory
 
-            for (Index index : indexes)
-            {
-                Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opGroup, Type.CLEANUP);
-                if (indexer == null)
-                    continue;
+                                     (opOrder) -> Completable.defer(() -> // completableFactory
+                                          {
+                                              Completable r = Completable.complete();
 
-                indexer.begin();
+                                              for (Index index : indexes)
+                                              {
+                                                  Index.Indexer indexer = index.indexerFor(key, columns, nowInSec, opOrder, Type.CLEANUP);
+                                                  if (indexer == null)
+                                                      continue;
 
-                if (partitionDelete != null)
-                    r = r.concatWith(indexer.partitionDelete(partitionDelete));
+                                                  indexer.begin();
 
-                if (row != null)
-                    r = r.concatWith(indexer.removeRow(row));
+                                                  if (partitionDelete != null)
+                                                      r = r.concatWith(indexer.partitionDelete(partitionDelete));
 
-                r = r.concatWith(indexer.finish());
-            }
+                                                  if (row != null)
+                                                      r = r.concatWith(indexer.removeRow(row));
 
-            return r.doOnTerminate(() -> opGroup.close());
+                                                  r = r.concatWith(indexer.finish());
+                                              }
+                                              return r;
+                                          }),
+
+                                     (opOrder) -> opOrder.close());  // resourceDisposer
         }
     }
 

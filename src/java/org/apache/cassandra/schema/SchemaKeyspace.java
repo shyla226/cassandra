@@ -28,7 +28,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.MapDifference;
 import com.google.common.collect.Maps;
 import io.reactivex.*;
-import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -319,8 +318,7 @@ public final class SchemaKeyspace
                 continue;
 
             ReadCommand cmd = getReadCommandForTableSchema(table);
-            try (ReadExecutionController executionController = cmd.executionController();
-                 PartitionIterator schema = cmd.executeInternal(executionController).blockingGet())
+            try (PartitionIterator schema = cmd.executeInternal().blockingGet())
             {
                 while (schema.hasNext())
                 {
@@ -370,10 +368,8 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        try (ReadExecutionController executionController = cmd.executionController())
+        try (UnfilteredPartitionIterator iter = cmd.executeLocally().blockingGet())
         {
-
-            UnfilteredPartitionIterator iter = cmd.executeLocally(executionController).blockingGet();
             while (iter.hasNext())
             {
                 try (UnfilteredRowIterator partition = iter.next().blockingGet())

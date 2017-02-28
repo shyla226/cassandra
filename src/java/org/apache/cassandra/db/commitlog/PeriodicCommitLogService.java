@@ -17,10 +17,10 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import java.util.concurrent.TimeUnit;
+
 import io.reactivex.Completable;
-import io.reactivex.Single;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.metrics.Timer;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
 {
@@ -34,12 +34,13 @@ class PeriodicCommitLogService extends AbstractCommitLogService
     protected Completable maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
         long expectedSyncTime = System.nanoTime() - blockWhenSyncLagsNanos;
-        Timer.Context timerContext = commitLog.metrics.waitingOnCommit.time();
         if (lastSyncedAt < expectedSyncTime)
         {
             pending.incrementAndGet();
+            long startTime = System.nanoTime();
+
             return awaitSyncAt(expectedSyncTime).doOnEvent((timestamp, exc) -> {
-                timerContext.stop();
+                commitLog.metrics.waitingOnCommit.update(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
                 pending.decrementAndGet();
             }).toCompletable();
         }

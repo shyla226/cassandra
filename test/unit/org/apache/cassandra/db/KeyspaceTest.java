@@ -155,8 +155,7 @@ public class KeyspaceTest extends CQLTester
         ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(slices, reversed);
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, key, filter, limit);
 
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
+        try (PartitionIterator iterator = command.executeInternal().blockingGet())
         {
             try (RowIterator rowIterator = iterator.next().blockingGet())
             {
@@ -229,8 +228,7 @@ public class KeyspaceTest extends CQLTester
             RegularAndStaticColumns columns = RegularAndStaticColumns.of(cfs.metadata().getColumn(new ColumnIdentifier("c", false)));
             ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(Slices.ALL, false);
             SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", filter, null);
-            try (ReadExecutionController executionController = command.executionController();
-                 PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
+            try (PartitionIterator iterator = command.executeInternal().blockingGet())
             {
                 try (RowIterator rowIterator = iterator.next().blockingGet())
                 {
@@ -244,8 +242,7 @@ public class KeyspaceTest extends CQLTester
 
     private static void assertRowsInResult(ColumnFamilyStore cfs, SinglePartitionReadCommand command, int ... columnValues)
     {
-        try (ReadExecutionController executionController = command.executionController();
-             PartitionIterator iterator = command.executeInternal(executionController).blockingGet())
+        try (PartitionIterator iterator = command.executeInternal().blockingGet())
         {
             if (columnValues.length == 0)
             {

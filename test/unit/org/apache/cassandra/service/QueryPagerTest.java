@@ -136,8 +136,7 @@ public class QueryPagerTest
         StringBuilder sb = new StringBuilder();
         List<FilteredPartition> partitionList = new ArrayList<>();
         int rows = 0;
-        try (ReadExecutionController executionController = pager.executionController();
-             PartitionIterator iterator = pager.fetchPageInternal(toQuery, executionController).blockingGet())
+        try (PartitionIterator iterator = pager.fetchPageInternal(toQuery).blockingGet())
         {
             while (iterator.hasNext())
             {
@@ -157,8 +156,7 @@ public class QueryPagerTest
     private static Map<DecoratedKey, List<Row>> fetchPage(QueryPager pager, int pageSize)
     {
         Map<DecoratedKey, List<Row>> ret = new HashMap<>();
-        try (ReadExecutionController executionController = pager.executionController();
-             PartitionIterator iterator = pager.fetchPageInternal(pageSize, executionController).blockingGet())
+        try (PartitionIterator iterator = pager.fetchPageInternal(pageSize).blockingGet())
         {
             while (iterator.hasNext())
             {
@@ -596,8 +594,7 @@ public class QueryPagerTest
 
         for (int i=0; i<5; i++)
         {
-            try (ReadExecutionController controller = pager.executionController();
-                 PartitionIterator partitions = pager.fetchPageInternal(1, controller).blockingGet())
+            try (PartitionIterator partitions = pager.fetchPageInternal(1).blockingGet())
             {
                 try (RowIterator partition = partitions.next().blockingGet())
                 {
@@ -617,8 +614,7 @@ public class QueryPagerTest
         }
 
         // After processing the 5 rows there should be no more rows to return
-        try ( ReadExecutionController controller = pager.executionController();
-              PartitionIterator partitions = pager.fetchPageInternal(1, controller).blockingGet())
+        try (PartitionIterator partitions = pager.fetchPageInternal(1).blockingGet())
         {
             assertFalse(partitions.hasNext());
         }
