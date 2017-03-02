@@ -344,6 +344,7 @@ public class NettyRxScheduler extends Scheduler
     @Override
     public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)
     {
+        //TODO - shouldn't the worker be disposed?
         return createWorker().scheduleDirect(run, delay, unit);
     }
 
@@ -470,6 +471,24 @@ public class NettyRxScheduler extends Scheduler
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
+
+        /**
+         * This handler wraps every scheduled task with a runnable that sets the thread local state to
+         * the same state as the thread requesting the task to be scheduled, that means every time
+         * a scheduler subscribe is called, and therefore indirectly every time observeOn or subscribeOn
+         * are called. Provided that the thread local of the calling thread is not changed after scheduling
+         * the task, we can be confident that the scheduler's thread will inherit the same thread state,
+         * see APOLLO-488 for more details.
+         */
+        RxJavaPlugins.setScheduleHandler((runnable) -> {
+            final ExecutorLocals locals = ExecutorLocals.create(); // store the thread local state of the calling thread
+            return () ->
+            {
+                ExecutorLocals.set(locals); // apply the thread local state of the calling thread
+                runnable.run();
+            };
+        });
+
         //RxSubscriptionDebugger.enable();
     }
 }

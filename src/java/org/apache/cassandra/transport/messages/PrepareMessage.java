@@ -85,19 +85,19 @@ public class PrepareMessage extends Message.Request
                 return observable;
 
             final UUID finalTracingId = tracingId;
-            return observable.map(prepared -> {
-                prepared.setTracingId(finalTracingId);
-                return prepared;
-            });
+            return observable.map(prepared ->
+                                  {
+                                      prepared.setTracingId(finalTracingId);
+                                      return prepared;
+                                  })
+                             .doFinally(() -> Tracing.instance.stopSession());
         }
         catch (Exception e)
         {
+            Tracing.instance.stopSession();
+
             JVMStabilityInspector.inspectThrowable(e);
             return Single.just(ErrorMessage.fromException(e));
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
         }
     }
 

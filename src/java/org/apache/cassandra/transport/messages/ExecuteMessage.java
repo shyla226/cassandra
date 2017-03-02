@@ -147,24 +147,24 @@ public class ExecuteMessage extends Message.Request
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
             Single<? extends ResultMessage> obs = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
             final UUID finalTracingId = tracingId;
-            return obs.map(response -> {
-                if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                    ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
+            return obs.map(response ->
+                           {
+                               if (options.skipMetadata() && response instanceof ResultMessage.Rows)
+                                   ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
-                if (finalTracingId != null)
-                    response.setTracingId(finalTracingId);
+                               if (finalTracingId != null)
+                                   response.setTracingId(finalTracingId);
 
-                return response;
-            });
+                               return response;
+                           })
+                      .doFinally(() -> Tracing.instance.stopSession());
         }
         catch (Exception e)
         {
+            Tracing.instance.stopSession();
+
             JVMStabilityInspector.inspectThrowable(e);
             return Single.just(ErrorMessage.fromException(e));
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
         }
     }
 

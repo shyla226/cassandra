@@ -88,14 +88,9 @@ public class QueryMessage extends Message.Request
     {
         try
         {
-            UUID tracingId = null;
-            if (isTracingRequested())
-            {
-                tracingId = UUIDGen.getTimeUUID();
+            final UUID tracingId = isTracingRequested() ? UUIDGen.getTimeUUID() : null;
+            if (tracingId != null)
                 state.prepareTracingSession(tracingId);
-            }
-
-            final UUID finalTracingId = tracingId;
 
             if (state.traceNextQuery())
             {
@@ -115,27 +110,26 @@ public class QueryMessage extends Message.Request
 
             return ClientState.getCQLQueryHandler()
                               .process(query, state, options, getCustomPayload(), queryStartNanoTime)
-                              .map( response -> {
+                              .map(response -> {
                                   if (options.skipMetadata() && response instanceof ResultMessage.Rows)
                                       ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
-                                  if (finalTracingId != null)
-                                      response.setTracingId(finalTracingId);
+                                  if (tracingId != null)
+                                      response.setTracingId(tracingId);
 
                                   return response;
-                              });
+                              })
+                              .doFinally(() -> Tracing.instance.stopSession());
 
         }
         catch (Exception e)
         {
+            Tracing.instance.stopSession();
+
             JVMStabilityInspector.inspectThrowable(e);
             if (!((e instanceof RequestValidationException) || (e instanceof RequestExecutionException)))
                 logger.error("Unexpected error during query", e);
             return Single.just(ErrorMessage.fromException(e));
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
         }
     }
 
