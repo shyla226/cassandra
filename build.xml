@@ -154,10 +154,12 @@
         <fileset dir="${build.lib}">
             <include name="**/*.jar" />
             <exclude name="**/*-sources.jar"/>
+            <exclude name="**/ant-*.jar"/>
         </fileset>
         <fileset dir="${build.dir.lib}">
             <include name="**/*.jar" />
             <exclude name="**/*-sources.jar"/>
+            <exclude name="**/ant-*.jar"/>
         </fileset>
     </path>
 
@@ -411,6 +413,7 @@
           <dependency groupId="org.jacoco" artifactId="org.jacoco.agent" version="${jacoco.version}"/>
           <dependency groupId="org.jacoco" artifactId="org.jacoco.ant" version="${jacoco.version}"/>
 
+          <dependency groupId="org.jboss.byteman" artifactId="byteman-install" version="${byteman.version}"/>
           <dependency groupId="org.jboss.byteman" artifactId="byteman" version="${byteman.version}"/>
           <dependency groupId="org.jboss.byteman" artifactId="byteman-submit" version="${byteman.version}"/>
           <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit" version="${byteman.version}"/>
@@ -700,6 +703,7 @@
                 version="${version}"/>
         <dependency groupId="org.jacoco" artifactId="org.jacoco.agent"/>
         <dependency groupId="org.jacoco" artifactId="org.jacoco.ant" />
+        <dependency groupId="org.jboss.byteman" artifactId="byteman-install"/>
         <dependency groupId="org.jboss.byteman" artifactId="byteman"/>
         <dependency groupId="org.jboss.byteman" artifactId="byteman-submit"/>
         <dependency groupId="org.jboss.byteman" artifactId="byteman-bmunit"/>
@@ -1221,7 +1225,7 @@
      debug="true"
      debuglevel="${debuglevel}"
      destdir="${test.classes}"
-     includeantruntime="false"
+     includeantruntime="true"
      source="${source.version}"
      target="${target.version}"
      encoding="utf-8">
