@@ -123,7 +123,7 @@ public class StreamTransferTaskTest
         StreamCoordinator streamCoordinator = new StreamCoordinator(1, true, false, null, false, null);
         StreamResultFuture future = StreamResultFuture.init(UUID.randomUUID(), "", Collections.<StreamEventHandler>emptyList(), streamCoordinator);
         StreamSession session = new StreamSession(peer, peer, null, 0, true, false, null);
-        session.init(future);
+        session.init(future, true);
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD);
 
         // create two sstables

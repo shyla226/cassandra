@@ -44,6 +44,7 @@ import org.apache.cassandra.streaming.StreamState;
 public class StreamingRepairTask implements Runnable, StreamEventHandler
 {
     private static final Logger logger = LoggerFactory.getLogger(StreamingRepairTask.class);
+    public static final String REPAIR_STREAM_PLAN_DESCRIPTION = "Repair";
 
     private final RepairJobDesc desc;
     private final SyncRequest request;
@@ -104,8 +105,8 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
         logger.info(String.format("[streaming task #%s] Performing streaming repair of %d ranges to and %d ranges from %s.",
                                   desc.sessionId, toTransfer.size(), toRequest.size(), request.dst));
 
-        return new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false, isConsistent ? desc.parentSessionId : null).listeners(this)
-                        .flushBeforeTransfer(!isIncremental) // sstables are isolated at the beginning of an incremental repair session, so flushing isn't neccessary
+        return new StreamPlan(REPAIR_STREAM_PLAN_DESCRIPTION, repairedAt, 1, false, isIncremental, false, isConsistent ? desc.parentSessionId : null).listeners(this)
+                        .flushBeforeTransfer(false)
                         .requestRanges(dest, preferred, desc.keyspace, toRequest, desc.columnFamily) // request ranges from the remote node
                         .transferRanges(dest, preferred, desc.keyspace, toTransfer, desc.columnFamily); // send ranges to the remote node
     }

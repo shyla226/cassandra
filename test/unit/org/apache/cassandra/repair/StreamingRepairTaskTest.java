@@ -83,7 +83,7 @@ public class StreamingRepairTaskTest extends AbstractRepairTest
         StreamingRepairTask task = new StreamingRepairTask(desc, request, prs.getRepairedAt(), prs.isIncremental);
 
         StreamPlan plan = task.createStreamPlan(request.src, request.dst, prs.isIncremental);
-        Assert.assertTrue(plan.getFlushBeforeTransfer());
+        Assert.assertFalse(plan.getFlushBeforeTransfer());
         Assert.assertEquals(ActiveRepairService.UNREPAIRED_SSTABLE, plan.getRepairedAt());
     }
 }
