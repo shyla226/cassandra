@@ -170,6 +170,31 @@ public final class StatementRestrictions
                                          newIndexRestrictions);
     }
 
+    /**
+     * Adds the following external restrictions (mostly custom and user index expressions) to the index restrictions.
+     *
+     * @param restrictions the restrictions to add to the index restrictions
+     * @return a new {@code StatementRestrictions} with the new index restrictions
+     */
+    public StatementRestrictions addExternalRestrictions(Iterable<ExternalRestriction> restrictions)
+    {
+        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder()
+                                                                  .add(filterRestrictions);
+
+        for (ExternalRestriction restriction : restrictions)
+            newIndexRestrictions.add(restriction);
+
+        return new StatementRestrictions(type,
+                                         cfm,
+                                         partitionKeyRestrictions,
+                                         clusteringColumnsRestrictions,
+                                         nonPrimaryKeyRestrictions,
+                                         notNullColumns,
+                                         usesSecondaryIndexing,
+                                         isKeyRange,
+                                         newIndexRestrictions.build());
+    }
+
     public StatementRestrictions(StatementType type,
                                  CFMetaData cfm,
                                  WhereClause whereClause,
@@ -674,7 +699,7 @@ public final class StatementRestrictions
         for (Restrictions restrictions : filterRestrictions.getRestrictions())
             restrictions.addRowFilterTo(filter, indexManager, options);
 
-        for (CustomIndexExpression expression : filterRestrictions.getCustomIndexExpressions())
+        for (ExternalRestriction expression : filterRestrictions.getExternalExpressions())
             expression.addToRowFilter(filter, cfm, options);
 
         return filter;
@@ -853,7 +878,7 @@ public final class StatementRestrictions
      */
     public boolean needFiltering()
     {
-        int numberOfRestrictions = filterRestrictions.getCustomIndexExpressions().size();
+        int numberOfRestrictions = filterRestrictions.getExternalExpressions().size();
         for (Restrictions restrictions : filterRestrictions.getRestrictions())
             numberOfRestrictions += restrictions.size();
 

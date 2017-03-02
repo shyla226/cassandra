@@ -23,7 +23,7 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 
-public class CustomIndexExpression
+public class CustomIndexExpression implements ExternalRestriction
 {
     private final ColumnIdentifier valueColId = new ColumnIdentifier("custom index expression", false);
 
