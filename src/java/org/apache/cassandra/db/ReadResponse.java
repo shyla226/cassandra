@@ -20,16 +20,9 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import io.reactivex.Single;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
@@ -46,10 +39,14 @@ public abstract class ReadResponse
 {
     // Serializer for single partition read response
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
-    private static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 
     protected ReadResponse()
     {
+    }
+
+    public static ReadResponse createLocalResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    {
+        return new LocalResponse(data, command);
     }
 
     public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
@@ -60,7 +57,7 @@ public abstract class ReadResponse
     @VisibleForTesting
     public static ReadResponse createRemoteDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
     {
-        return new RemoteDataResponse(RemoteDataResponse.build(data, command.columnFilter()), MessagingService.current_version);
+        return new RemoteDataResponse(LocalDataResponse.build(data, command.columnFilter()), MessagingService.current_version);
     }
 
     public static ReadResponse createDigestResponse(UnfilteredPartitionIterator data, ReadCommand command)
@@ -111,111 +108,137 @@ public abstract class ReadResponse
         }
     }
 
-    // built on the owning node responding to a query
-    private static class LocalDataResponse extends ReadResponse
+    /**
+     * A local response that wraps the local iterator. It relies on makeIterator() being called
+     * and the caller closing the iterator. This should really be fixed, either by creating a
+     * list of ImmutableBTreePartition (code commented out below) or by changing the abstraction in
+     * the read callback and response resolver.
+     */
+    private static class LocalResponse extends ReadResponse
     {
-//        private final List<Single<ImmutableBTreePartition>> partitions;
-        final UnfilteredPartitionIterator iter;
-        private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
+        private UnfilteredPartitionIterator iter;
+
+        private LocalResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
-            //super(build(iter, command.columnFilter()), MessagingService.current_version, SerializationHelper.Flag.LOCAL);
-            this.iter = iter; // build(iter, command);
+            super();
+            this.iter = iter;
         }
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
         {
-            return iter;
+            assert iter != null;
 
-/*            return new AbstractUnfilteredPartitionIterator()
-            {
-                private int idx;
-
-                public CFMetaData metadata()
-                {
-                    return command.metadata();
-                }
-
-                public boolean hasNext()
-                {
-                    return idx < partitions.size();
-                }
-
-                public Single<UnfilteredRowIterator> next()
-                {
-                    // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
-                    return partitions.get(idx++).map(p -> p.unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed()));
-                }
-
-                public void close()
-                {
-
-                }
-            };*/
-        }
-
-        private static List<Single<ImmutableBTreePartition>> build(UnfilteredPartitionIterator iterator, ReadCommand command)
-        {
-            if (!iterator.hasNext())
-                return Collections.emptyList();
-
-            try
-            {
-                if (command instanceof SinglePartitionReadCommand)
-                {
-                    Single<UnfilteredRowIterator> partition = iterator.next();
-                    return Collections.singletonList(partition.map(p ->
-                                                                   {
-                                                                       ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
-                                                                       p.close();
-                                                                       return b;
-                                                                   }));
-                }
-
-                List<Single<ImmutableBTreePartition>> partitions = new ArrayList<>();
-                while (iterator.hasNext())
-                {
-                    Single<UnfilteredRowIterator> partition = iterator.next();
-                    Single<ImmutableBTreePartition> r = partition.map(p -> {
-
-                        ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
-                        p.close();
-                        return b;
-                    });
-                    partitions.add(r);
-                }
-
-                return partitions;
-            }
-            finally
-            {
-                iterator.close();
-            }
-        }
-
-        public ByteBuffer digest(ReadCommand command)
-        {
-            return makeDigest(makeIterator(command), command);
+            UnfilteredPartitionIterator ret = iter;
+            iter = null; // Iter will be consumed and closed...
+            return ret;
         }
 
         public boolean isDigestResponse()
         {
             return false;
         }
+
+/*        // TODO - using the iterator directly is more optimized but poses some limitations and is very unsafe,
+          // we should perhaps consider creating an ImmutableBTreePartition in the constructor so that we have
+          // a valid iterator each time
+
+
+          public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+          {
+                return new AbstractUnfilteredPartitionIterator()
+                {
+                    private int idx;
+
+                    public CFMetaData metadata()
+                    {
+                        return command.metadata();
+                    }
+
+                    public boolean hasNext()
+                    {
+                        return idx < partitions.size();
+                    }
+
+                    public Single<UnfilteredRowIterator> next()
+                    {
+                        // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
+                        return partitions.get(idx++).map(p -> p.unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed()));
+                    }
+
+                    public void close()
+                    {
+
+                    }
+                 };
+            }
+
+            private static List<Single<ImmutableBTreePartition>> build(UnfilteredPartitionIterator iterator, ReadCommand command)
+            {
+                if (!iterator.hasNext())
+                    return Collections.emptyList();
+
+                try
+                {
+                    if (command instanceof SinglePartitionReadCommand)
+                    {
+                        Single<UnfilteredRowIterator> partition = iterator.next();
+                        return Collections.singletonList(partition.map(p ->
+                                                                       {
+                                                                           ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
+                                                                           p.close();
+                                                                           return b;
+                                                                       }));
+                    }
+
+                    List<Single<ImmutableBTreePartition>> partitions = new ArrayList<>();
+                    while (iterator.hasNext())
+                    {
+                        Single<UnfilteredRowIterator> partition = iterator.next();
+                        Single<ImmutableBTreePartition> r = partition.map(p -> {
+
+                            ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
+                            p.close();
+                            return b;
+                        });
+                        partitions.add(r);
+                    }
+
+                    return partitions;
+                }
+                finally
+                {
+                    iterator.close();
+                }
+            }
+*/
+
+        public ByteBuffer digest(ReadCommand command)
+        {
+            assert iter != null;
+            ByteBuffer ret = makeDigest(iter, command);
+            iter.close();
+            iter = null; // Now iter is consumed and closed...
+
+            return ret;
+        }
     }
 
-    // built on the coordinator node receiving a response
-    private static class RemoteDataResponse extends DataResponse
+    /**
+     * A local response that needs to be serialized, i.e. sent to another node. The iterator
+     * is serialized by the build method and can be closed as soon as this response has been created.
+     */
+    private static class LocalDataResponse extends DataResponse
     {
-        protected RemoteDataResponse(ByteBuffer data, int version)
+        private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
-            super(data, version, SerializationHelper.Flag.FROM_REMOTE);
+            super(build(iter, command.columnFilter()), MessagingService.current_version, SerializationHelper.Flag.LOCAL);
         }
 
         private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
         {
             try (DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version);
+                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version).blockingAwait();
                 return buffer.buffer();
             }
             catch (IOException e)
@@ -226,6 +249,21 @@ public abstract class ReadResponse
         }
     }
 
+    /**
+     * A reponse received from a remove node. We kee the response serialized in the byte buffer.
+     */
+    private static class RemoteDataResponse extends DataResponse
+    {
+        protected RemoteDataResponse(ByteBuffer data, int version)
+        {
+            super(data, version, SerializationHelper.Flag.FROM_REMOTE);
+        }
+    }
+
+    /**
+     * The command base class for local or remote responses that stay serialized in a byte buffer,
+     * the data.
+     */
     static abstract class DataResponse extends ReadResponse
     {
         // TODO: can the digest be calculated over the raw bytes now?

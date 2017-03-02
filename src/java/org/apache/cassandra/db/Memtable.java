@@ -412,6 +412,9 @@ public class Memtable implements Comparable<Memtable>
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
+        boolean startIsMin = keyRange.left.isMinimum();
+        boolean stopIsMin = keyRange.right.isMinimum();
+
         boolean isBound = keyRange instanceof Bounds;
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
@@ -419,14 +422,19 @@ public class Memtable implements Comparable<Memtable>
         // avoid iterating over the memtable if we purge all tombstones
         boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
         int minLocalDeletionTime = Integer.MAX_VALUE;
-        boolean allRange = keyRange.left.compareTo(keyRange.right) == 0;
 
         ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
         for (int i = 1; i < partitions.size(); i++)
         {
             TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
             SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
-            trimmedMemtableSubrange = allRange ? memtableSubrange : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
+
+            if (startIsMin)
+                trimmedMemtableSubrange = stopIsMin ? memtableSubrange : memtableSubrange.headMap(keyRange.right, includeStop);
+            else
+                trimmedMemtableSubrange = stopIsMin
+                         ? memtableSubrange.tailMap(keyRange.left, includeStart)
+                         : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
             if (findMinLocalDeletionTime)
             {

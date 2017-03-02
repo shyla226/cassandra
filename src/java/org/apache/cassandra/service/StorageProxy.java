@@ -1939,8 +1939,11 @@ public class StorageProxy implements StorageProxyMBean
             {
                 command.monitor(constructionTime, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout(), false);
 
-                UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet();
-                ReadResponse response = command.createResponse(iterator);
+                ReadResponse response;
+                try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
+                {
+                    response = command.createResponse(iterator);
+                }
 
                 if (command.complete())
                 {

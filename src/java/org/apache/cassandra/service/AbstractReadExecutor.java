@@ -144,7 +144,7 @@ public abstract class AbstractReadExecutor
             MessagingService.Verb verb = MessagingService.Verb.READ;
 
             return command.executeLocally()
-                          .map(iterator -> command.createResponse(iterator))
+                          .map(iterator -> ReadResponse.createLocalResponse(iterator, command))
                           .flatMapCompletable(response ->
                                               {
                                                   if (command.complete())
