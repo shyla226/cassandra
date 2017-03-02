@@ -158,6 +158,8 @@ public class StreamSession implements IEndpointStateChangeSubscriber
 
     public final ConnectionHandler handler;
 
+    // whether this session is allowed to flush
+    private boolean canFlush = true;
     private AtomicBoolean isAborted = new AtomicBoolean(false);
     private final boolean keepSSTableLevel;
     private final boolean isIncremental;
@@ -240,10 +242,12 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * perform pre-streaming initialization.
      *
      * @param streamResult result to report to
+     * @param canFlush whether this repair session is allowed to flush
      */
-    public void init(StreamResultFuture streamResult)
+    public void init(StreamResultFuture streamResult, boolean canFlush)
     {
         this.streamResult = streamResult;
+        this.canFlush = canFlush;
         StreamHook.instance.reportStreamFuture(this, streamResult);
 
         if (isKeepAliveSupported())
@@ -302,14 +306,14 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * @param keyspace Transfer keyspace
      * @param ranges Transfer ranges
      * @param columnFamilies Transfer ColumnFamilies
-     * @param flushTables flush tables?
+     * @param flushTables flush tables - only if this session is allowed to flush (see {@link this#canFlush})
      * @param repairedAt the time the repair started.
      */
     public synchronized void addTransferRanges(String keyspace, Collection<Range<Token>> ranges, Collection<String> columnFamilies, boolean flushTables, long repairedAt)
     {
         failIfFinished();
         Collection<ColumnFamilyStore> stores = getColumnFamilyStores(keyspace, columnFamilies);
-        if (flushTables)
+        if (canFlush && flushTables)
             flushSSTables(stores);
 
         List<Range<Token>> normalizedRanges = Range.normalize(ranges);
@@ -605,7 +609,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         // prepare tasks
         state(State.PREPARING);
         for (StreamRequest request : requests)
-            addTransferRanges(request.keyspace, request.ranges, request.columnFamilies, true, request.repairedAt); // always flush on stream request
+            addTransferRanges(request.keyspace, request.ranges, request.columnFamilies, true, request.repairedAt);
         for (StreamSummary summary : summaries)
             prepareReceiving(summary);
 
