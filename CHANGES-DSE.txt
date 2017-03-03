@@ -1,4 +1,5 @@
 DSE 5.0.7
+ * cqlsh SOURCE cmd shouldn't assume PlainTextAuthenticator (APOLLO-492)
  * Skip flush on repair streaming (APOLLO-466)
  * Minor optimization in GPFS, and related snitches (APOLLO-479)
  * Issue CQL native protocol warning that DTCS is deprecated (APOLLO-327)
