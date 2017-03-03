@@ -37,6 +37,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
@@ -149,7 +150,7 @@ public class SelectStatement implements CQLStatement
     /**
      * Adds the specified restrictions to the index restrictions.
      *
-     * @param indexRestriction the index restrictions to add
+     * @param indexRestrictions the index restrictions to add
      * @return a new {@code SelectStatement} instance with the added index restrictions
      */
     public SelectStatement addIndexRestrictions(Restrictions indexRestrictions)
@@ -159,6 +160,26 @@ public class SelectStatement implements CQLStatement
                                    parameters,
                                    selection,
                                    restrictions.addIndexRestrictions(indexRestrictions),
+                                   isReversed,
+                                   aggregationSpec,
+                                   orderingComparator,
+                                   limit,
+                                   perPartitionLimit);
+    }
+
+    /**
+     * Adds the specified external restrictions to the index restrictions.
+     *
+     * @param indexRestrictions the index restrictions to add
+     * @return a new {@code SelectStatement} instance with the added index restrictions
+     */
+    public SelectStatement addIndexRestrictions(Iterable<ExternalRestriction> indexRestrictions)
+    {
+        return new SelectStatement(table,
+                                   boundTerms,
+                                   parameters,
+                                   selection,
+                                   restrictions.addExternalRestrictions(indexRestrictions),
                                    isReversed,
                                    aggregationSpec,
                                    orderingComparator,

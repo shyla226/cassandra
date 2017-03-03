@@ -40,11 +40,11 @@ public final class IndexRestrictions
     public static final String MULTIPLE_EXPRESSIONS = "Multiple custom index expressions in a single query are not supported";
 
     private final ImmutableList<Restrictions> regularRestrictions;
-    private final ImmutableList<CustomIndexExpression> customExpressions;
+    private final ImmutableList<ExternalRestriction> externalRestrictions;
 
-    private IndexRestrictions(ImmutableList<Restrictions> regularRestrictions, ImmutableList<CustomIndexExpression> customExpressions){
+    private IndexRestrictions(ImmutableList<Restrictions> regularRestrictions, ImmutableList<ExternalRestriction> externalExpressions){
         this.regularRestrictions = regularRestrictions;
-        this.customExpressions = customExpressions;
+        this.externalRestrictions = externalExpressions;
     }
 
     /**
@@ -67,7 +67,7 @@ public final class IndexRestrictions
 
     public boolean isEmpty()
     {
-        return regularRestrictions.isEmpty() && customExpressions.isEmpty();
+        return regularRestrictions.isEmpty() && externalRestrictions.isEmpty();
     }
 
     /**
@@ -80,12 +80,12 @@ public final class IndexRestrictions
     }
 
     /**
-     * Returns the custom expressions.
-     * @return the custom expressions
+     * Returns the external restrictions.
+     * @return the external restrictions
      */
-    public ImmutableList<CustomIndexExpression> getCustomIndexExpressions()
+    public ImmutableList<ExternalRestriction> getExternalExpressions()
     {
-        return customExpressions;
+        return externalRestrictions;
     }
 
     static InvalidRequestException invalidIndex(IndexName indexName, TableMetadata table)
@@ -121,7 +121,7 @@ public final class IndexRestrictions
         /**
          * Builder for the custom expressions.
          */
-        private ImmutableList.Builder<CustomIndexExpression> customExpressions = ImmutableList.builder();
+        private ImmutableList.Builder<ExternalRestriction> externalRestrictions = ImmutableList.builder();
 
         private Builder() {}
 
@@ -146,19 +146,19 @@ public final class IndexRestrictions
         public Builder add(IndexRestrictions restrictions)
         {
             regularRestrictions.addAll(restrictions.regularRestrictions);
-            customExpressions.addAll(restrictions.customExpressions);
+            externalRestrictions.addAll(restrictions.externalRestrictions);
             return this;
         }
 
         /**
          * Adds the specified index expression.
          *
-         * @param expression the index expression to add
+         * @param restriction the index expression to add
          * @return this {@code Builder}
          */
-        public Builder add(CustomIndexExpression expression)
+        public Builder add(ExternalRestriction restriction)
         {
-            customExpressions.add(expression);
+            externalRestrictions.add(restriction);
             return this;
         }
 
@@ -168,7 +168,7 @@ public final class IndexRestrictions
          */
         public IndexRestrictions build()
         {
-            return new IndexRestrictions(regularRestrictions.build(), customExpressions.build());
+            return new IndexRestrictions(regularRestrictions.build(), externalRestrictions.build());
         }
     }
 }
