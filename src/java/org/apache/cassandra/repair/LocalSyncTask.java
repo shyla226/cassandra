@@ -42,6 +42,8 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.RangeHash;
 
+import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
+
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
  */
@@ -82,7 +84,8 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
         String message = String.format("Performing streaming repair of %d ranges to %s%s",
                                        transferToLeft.size(), transferToLeft.size() != transferToRight.size()?
                                                               String.format(" and %d ranges from", transferToRight.size()) : "",
-                                       dst);        logger.info("[repair #{}] {}", desc.sessionId, message);
+                                       dst);
+        logger.info("[repair #{}] {}", desc.sessionId, message);
         boolean isIncremental = false;
         if (desc.parentSessionId != null)
         {
@@ -90,10 +93,10 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
             isIncremental = prs.isIncremental;
         }
         Tracing.traceRepair(message);
-        StreamPlan plan = new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false, pendingRepair).listeners(this)
-                                            .flushBeforeTransfer(true)
-                                            // request ranges from the remote node
-                                            .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily);
+        StreamPlan plan = new StreamPlan(REPAIR_STREAM_PLAN_DESCRIPTION, repairedAt, 1, false, isIncremental, false, pendingRepair).listeners(this)
+                                .flushBeforeTransfer(false)
+                                // request ranges from the remote node
+                                .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily);
         if (!pullRepair)
         {
             // send ranges to the remote node if we are not performing a pull repair
