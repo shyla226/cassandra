@@ -1758,8 +1758,11 @@ class Shell(cmd.Cmd):
         except IOError, e:
             self.printerr('Could not open %r: %s' % (fname, e))
             return
-        username = self.auth_provider.username if self.auth_provider else None
-        password = self.auth_provider.password if self.auth_provider else None
+
+        # DSE-specific: auth_provider may be set by pylib.dselib to something other than PlaintextAuthProvider
+        # and it may not necessarily have the username or password attributes (Kerberos)
+        username = self.auth_provider.username if self.auth_provider and hasattr(self.auth_provider, 'username') else None
+        password = self.auth_provider.password if self.auth_provider and hasattr(self.auth_provider, 'password') else None
         subshell = Shell(self.hostname, self.port, color=self.color,
                          username=username, password=password,
                          encoding=self.encoding, stdin=f, tty=False, use_conn=self.conn,
