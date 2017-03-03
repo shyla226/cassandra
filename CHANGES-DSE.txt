@@ -1,10 +1,13 @@
-DSE 5.0.7
+DSE 5.0.8
  * cqlsh SOURCE cmd shouldn't assume PlainTextAuthenticator (APOLLO-492)
  * Skip flush on repair streaming (APOLLO-466)
  * Minor optimization in GPFS, and related snitches (APOLLO-479)
  * Issue CQL native protocol warning that DTCS is deprecated (APOLLO-327)
  * Log message when rebuild has finished (APOLLO-465)
  * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
+
+
+DSE 5.0.7
  * Connection refused should be logged less frequently (APOLLO-455)
  * Always log flush errors (APOLLO-227)
 
