@@ -20,6 +20,9 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -32,6 +35,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -109,28 +113,52 @@ public abstract class ReadResponse
     }
 
     /**
-     * A local response that wraps the local iterator. It relies on makeIterator() being called
-     * and the caller closing the iterator. This should really be fixed, either by creating a
-     * list of ImmutableBTreePartition (code commented out below) or by changing the abstraction in
-     * the read callback and response resolver.
+     * A local response that is not meant to be serialized. Currently we use an in-memory list of
+     * ImmutableBTreePartition because if more than one replica was queries it may have to return
+     * the iterator multiple times. We could wrap the incoming iterator and use it directly for
+     * added performance but only if the local host host is the only host queried.
      */
     private static class LocalResponse extends ReadResponse
     {
-        private UnfilteredPartitionIterator iter;
+        //private UnfilteredPartitionIterator iter;
+        private final List<ImmutableBTreePartition> partitions;
 
         private LocalResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
             super();
-            this.iter = iter;
+            //this.iter = iter; // this works only when the local host is the only host queried
+            this.partitions = build(iter, command);
         }
+
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
         {
-            assert iter != null;
+            return new AbstractUnfilteredPartitionIterator()
+            {
+                private int idx;
 
-            UnfilteredPartitionIterator ret = iter;
-            iter = null; // Iter will be consumed and closed...
-            return ret;
+                public TableMetadata metadata()
+                {
+                    return command.metadata();
+                }
+
+                public boolean hasNext()
+                {
+                    return idx < partitions.size();
+                }
+
+                public UnfilteredRowIterator next()
+                {
+                    // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
+                    return partitions.get(idx++).unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed());
+                }
+
+                public void close()
+                {
+
+                }
+            };
+
         }
 
         public boolean isDigestResponse()
@@ -138,88 +166,42 @@ public abstract class ReadResponse
             return false;
         }
 
-/*        // TODO - using the iterator directly is more optimized but poses some limitations and is very unsafe,
-          // we should perhaps consider creating an ImmutableBTreePartition in the constructor so that we have
-          // a valid iterator each time
+        private static List<ImmutableBTreePartition> build(UnfilteredPartitionIterator iterator, ReadCommand command)
+        {
+            if (!iterator.hasNext())
+                return Collections.emptyList();
 
-
-          public UnfilteredPartitionIterator makeIterator(ReadCommand command)
-          {
-                return new AbstractUnfilteredPartitionIterator()
-                {
-                    private int idx;
-
-                    public CFMetaData metadata()
-                    {
-                        return command.metadata();
-                    }
-
-                    public boolean hasNext()
-                    {
-                        return idx < partitions.size();
-                    }
-
-                    public Single<UnfilteredRowIterator> next()
-                    {
-                        // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
-                        return partitions.get(idx++).map(p -> p.unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed()));
-                    }
-
-                    public void close()
-                    {
-
-                    }
-                 };
-            }
-
-            private static List<Single<ImmutableBTreePartition>> build(UnfilteredPartitionIterator iterator, ReadCommand command)
+            try
             {
-                if (!iterator.hasNext())
-                    return Collections.emptyList();
-
-                try
+                if (command instanceof SinglePartitionReadCommand)
                 {
-                    if (command instanceof SinglePartitionReadCommand)
+                    try (UnfilteredRowIterator partition = iterator.next())
                     {
-                        Single<UnfilteredRowIterator> partition = iterator.next();
-                        return Collections.singletonList(partition.map(p ->
-                                                                       {
-                                                                           ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
-                                                                           p.close();
-                                                                           return b;
-                                                                       }));
+                        return Collections.singletonList(ImmutableBTreePartition.create(partition));
                     }
-
-                    List<Single<ImmutableBTreePartition>> partitions = new ArrayList<>();
-                    while (iterator.hasNext())
-                    {
-                        Single<UnfilteredRowIterator> partition = iterator.next();
-                        Single<ImmutableBTreePartition> r = partition.map(p -> {
-
-                            ImmutableBTreePartition b = ImmutableBTreePartition.create(p);
-                            p.close();
-                            return b;
-                        });
-                        partitions.add(r);
-                    }
-
-                    return partitions;
                 }
-                finally
+
+                List<ImmutableBTreePartition> partitions = new ArrayList<>();
+                while (iterator.hasNext())
                 {
-                    iterator.close();
+                    try(UnfilteredRowIterator partition = iterator.next())
+                    {
+                        partitions.add(ImmutableBTreePartition.create(partition));
+                    }
                 }
+
+                return partitions;
             }
-*/
+            finally
+            {
+                iterator.close();
+            }
+        }
+
 
         public ByteBuffer digest(ReadCommand command)
         {
-            assert iter != null;
-            ByteBuffer ret = makeDigest(iter, command);
-            iter.close();
-            iter = null; // Now iter is consumed and closed...
-
-            return ret;
+            return makeDigest(makeIterator(command), command);
         }
     }
 
