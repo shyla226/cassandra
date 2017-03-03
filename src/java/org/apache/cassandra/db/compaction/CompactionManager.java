@@ -1092,7 +1092,7 @@ public class CompactionManager implements CompactionManagerMBean
                 if (ci.isStopRequested())
                     throw new CompactionInterruptedException(ci.getCompactionInfo());
 
-                try (UnfilteredRowIterator partition = ci.next().blockingGet();
+                try (UnfilteredRowIterator partition = ci.next();
                      UnfilteredRowIterator notCleaned = cleanupStrategy.cleanup(partition))
                 {
                     if (notCleaned == null)
@@ -1354,7 +1354,7 @@ public class CompactionManager implements CompactionManagerMBean
                 {
                     if (ci.isStopRequested())
                         throw new CompactionInterruptedException(ci.getCompactionInfo());
-                    try (UnfilteredRowIterator partition = ci.next().blockingGet())
+                    try (UnfilteredRowIterator partition = ci.next())
                     {
                         validator.add(partition);
                     }
@@ -1538,7 +1538,7 @@ public class CompactionManager implements CompactionManagerMBean
             Range.OrderedRangeContainmentChecker containmentChecker = new Range.OrderedRangeContainmentChecker(ranges);
             while (ci.hasNext())
             {
-                try (UnfilteredRowIterator partition = ci.next().blockingGet())
+                try (UnfilteredRowIterator partition = ci.next())
                 {
                     // if current range from sstable is repaired, save it into the new repaired sstable
                     if (containmentChecker.contains(partition.partitionKey().getToken()))

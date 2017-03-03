@@ -180,15 +180,4 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return to;
     }
 
-    static <E extends RxBaseIterator> E add(E to, Transformation add)
-    {
-        to.add(add);
-        return to;
-    }
-    static <E extends RxBaseIterator> E add(E to, MoreContents add)
-    {
-        to.add(add);
-        return to;
-    }
-
 }

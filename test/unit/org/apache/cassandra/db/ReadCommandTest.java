@@ -304,7 +304,7 @@ public class ReadCommandTest
             while (partitionIterator.hasNext())
             {
                 numPartitions++;
-                try(RowIterator rowIterator = partitionIterator.next().blockingGet())
+                try(RowIterator rowIterator = partitionIterator.next())
                 {
                     while (rowIterator.hasNext())
                     {

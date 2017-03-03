@@ -87,11 +87,6 @@ public abstract class WrappingUnfilteredRowIterator extends UnmodifiableIterator
         return wrapped.next();
     }
 
-    public Flowable<Unfiltered> asObservable()
-    {
-        return wrapped.asObservable();
-    }
-
     public void close()
     {
         wrapped.close();

@@ -161,7 +161,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "c1");
@@ -194,7 +194,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "c1", "c2");
@@ -231,7 +231,7 @@ public class DataResolverTest
 
         try (PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = data.next().blockingGet())
+            try (RowIterator rows = data.next())
             {
                 // We expect the resolved superset to contain both rows
                 Row row = rows.next();
@@ -299,7 +299,7 @@ public class DataResolverTest
         resolver.preprocess(readResponseMessage(peer4, iter4));
         try (PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = data.next().blockingGet())
+            try (RowIterator rows = data.next())
             {
                 Row row = rows.next();
                 assertClustering(cfm, row, "0");
@@ -357,7 +357,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "c2");
@@ -439,7 +439,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "two");
@@ -686,7 +686,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "m");
@@ -781,7 +781,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "m");
@@ -834,7 +834,7 @@ public class DataResolverTest
 
         try(PartitionIterator data = resolver.resolve())
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data).blockingGet())
+            try (RowIterator rows = Iterators.getOnlyElement(data))
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "m");

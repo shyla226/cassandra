@@ -322,7 +322,7 @@ public final class SchemaKeyspace
             {
                 while (schema.hasNext())
                 {
-                    try (RowIterator partition = schema.next().blockingGet())
+                    try (RowIterator partition = schema.next())
                     {
                         if (partition == null)
                             continue;
@@ -372,7 +372,7 @@ public final class SchemaKeyspace
         {
             while (iter.hasNext())
             {
-                try (UnfilteredRowIterator partition = iter.next().blockingGet())
+                try (UnfilteredRowIterator partition = iter.next())
                 {
                     if (isSystemKeyspaceSchemaPartition(partition.partitionKey()))
                         continue;

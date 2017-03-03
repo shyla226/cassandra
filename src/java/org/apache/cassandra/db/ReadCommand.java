@@ -427,7 +427,7 @@ public abstract class ReadCommand implements ReadQuery
                                                       return res.hasNext();
                                                   }
 
-                                                  public Single<UnfilteredRowIterator> next()
+                                                  public UnfilteredRowIterator next()
                                                   {
                                                       return res.next();
                                                   }

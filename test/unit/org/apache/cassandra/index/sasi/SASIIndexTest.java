@@ -2339,7 +2339,7 @@ public class SASIIndexTest
 
             while (currentPage.hasNext())
             {
-                try (UnfilteredRowIterator row = currentPage.next().blockingGet())
+                try (UnfilteredRowIterator row = currentPage.next())
                 {
                     uniqueKeys.add(row.partitionKey());
                     lastKey = row.partitionKey();
@@ -2399,7 +2399,7 @@ public class SASIIndexTest
             {{
                 while (rows.hasNext())
                 {
-                    try (UnfilteredRowIterator row = rows.next().blockingGet())
+                    try (UnfilteredRowIterator row = rows.next())
                     {
                         if (!row.isEmpty())
                             add(AsciiType.instance.compose(row.partitionKey().getKey()));

@@ -371,7 +371,7 @@ public abstract class UnfilteredRowIterators
                   mergeStaticRows(iterators, columns.statics, nowInSec, listener, partitionDeletion),
                   reversed,
                   mergeStats(iterators));
-            this.mergeIterator = MergeIterator.get(iterators.stream().map(i -> i.asRxIterator()).collect(Collectors.toList()),
+            this.mergeIterator = MergeIterator.get(iterators,
                                                    reversed ? metadata.comparator.reversed() : metadata.comparator,
                                                    new MergeReducer(iterators.size(), reversed, nowInSec, listener));
             this.listener = listener;
@@ -553,15 +553,15 @@ public abstract class UnfilteredRowIterators
                 return listener == null;
             }
 
-            public void reduce(int idx, Single<Unfiltered> current)
+            public void reduce(int idx, Unfiltered current)
             {
-                nextKind = current.blockingGet().kind();
+                nextKind = current.kind();
                 if (nextKind == Unfiltered.Kind.ROW)
-                    rowMerger.add(idx, (Row) current.blockingGet());
+                    rowMerger.add(idx, (Row) current);
                 else
                 {
                     maybeInitMarkerMerger();
-                    markerMerger.add(idx, (RangeTombstoneMarker) current.blockingGet());
+                    markerMerger.add(idx, (RangeTombstoneMarker) current);
                 }
             }
 

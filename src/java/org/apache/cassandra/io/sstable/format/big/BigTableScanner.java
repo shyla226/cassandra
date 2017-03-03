@@ -251,11 +251,11 @@ public class BigTableScanner implements ISSTableScanner
         return iterator.hasNext();
     }
 
-    public Single<UnfilteredRowIterator> next()
+    public UnfilteredRowIterator next()
     {
         if (iterator == null)
             iterator = createIterator();
-        return Single.just(iterator.next());
+        return iterator.next();
     }
 
     public void remove()
@@ -442,7 +442,7 @@ public class BigTableScanner implements ISSTableScanner
             return false;
         }
 
-        public Single<UnfilteredRowIterator> next()
+        public UnfilteredRowIterator next()
         {
             return null;
         }

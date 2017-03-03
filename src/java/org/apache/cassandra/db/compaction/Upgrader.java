@@ -93,7 +93,7 @@ public class Upgrader
             StatsMetadata metadata = sstable.getSSTableMetadata();
             writer.switchWriter(createCompactionWriter(metadata.repairedAt, metadata.pendingRepair));
             while (iter.hasNext())
-                writer.append(iter.next().blockingGet());
+                writer.append(iter.next());
 
             writer.finish();
             outputHandler.output("Upgrade of " + sstable + " complete.");

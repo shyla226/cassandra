@@ -47,7 +47,7 @@ public class EmptyIterators
             return false;
         }
 
-        public Single<R> next()
+        public R next()
         {
             throw new NoSuchElementException();
         }
@@ -74,11 +74,6 @@ public class EmptyIterators
         private EmptyPartitionIterator()
         {
             super();
-        }
-
-        public Flowable<RowIterator> asObservable()
-        {
-            return Flowable.empty();
         }
     }
 

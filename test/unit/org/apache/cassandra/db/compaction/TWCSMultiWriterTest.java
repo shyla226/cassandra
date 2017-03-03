@@ -33,7 +33,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -84,7 +83,7 @@ public class TWCSMultiWriterTest extends CQLTester
         {
             while (pi.hasNext())
             {
-                try (UnfilteredRowIterator ri = pi.next().blockingGet())
+                try (UnfilteredRowIterator ri = pi.next())
                 {
                     int count = 0;
                     UnfilteredRowIterator [] iterators = TWCSMultiWriter.splitPartitionOnTime(ri, indexes, new TWCSMultiWriter.TWCSConfig(TimeUnit.MINUTES, 1, TimeUnit.MILLISECONDS));
@@ -136,7 +135,7 @@ public class TWCSMultiWriterTest extends CQLTester
             {
                 while (scanner.hasNext())
                 {
-                    try (UnfilteredRowIterator rows = scanner.next().blockingGet())
+                    try (UnfilteredRowIterator rows = scanner.next())
                     {
                         Row staticRow = rows.staticRow();
                         for (Cell c : staticRow.cells())
@@ -188,7 +187,7 @@ public class TWCSMultiWriterTest extends CQLTester
             {
                 while (scanner.hasNext())
                 {
-                    try (UnfilteredRowIterator rows = scanner.next().blockingGet())
+                    try (UnfilteredRowIterator rows = scanner.next())
                     {
 
                         while (rows.hasNext())
@@ -241,7 +240,7 @@ public class TWCSMultiWriterTest extends CQLTester
             {
                 while (scanner.hasNext())
                 {
-                    try (UnfilteredRowIterator rows = scanner.next().blockingGet())
+                    try (UnfilteredRowIterator rows = scanner.next())
                     {
                         if (!rows.partitionLevelDeletion().isLive())
                         {

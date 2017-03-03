@@ -238,7 +238,7 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         return compacted.hasNext();
     }
 
-    public Single<UnfilteredRowIterator> next()
+    public UnfilteredRowIterator next()
     {
         return compacted.next();
     }

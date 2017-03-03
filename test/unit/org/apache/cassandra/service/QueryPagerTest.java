@@ -140,7 +140,7 @@ public class QueryPagerTest
         {
             while (iterator.hasNext())
             {
-                try (RowIterator rowIter = iterator.next().blockingGet())
+                try (RowIterator rowIter = iterator.next())
                 {
                     FilteredPartition partition = FilteredPartition.create(rowIter);
                     sb.append(partition);
@@ -160,7 +160,7 @@ public class QueryPagerTest
         {
             while (iterator.hasNext())
             {
-                try (RowIterator partition = iterator.next().blockingGet())
+                try (RowIterator partition = iterator.next())
                 {
                     List<Row> rows = new ArrayList<>();
                     Row staticRow = partition.staticRow();
@@ -596,7 +596,7 @@ public class QueryPagerTest
         {
             try (PartitionIterator partitions = pager.fetchPageInternal(1).blockingGet())
             {
-                try (RowIterator partition = partitions.next().blockingGet())
+                try (RowIterator partition = partitions.next())
                 {
                     assertCell(partition.staticRow(), staticColumn, 4);
 

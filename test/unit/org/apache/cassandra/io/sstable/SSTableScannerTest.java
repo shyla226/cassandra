@@ -185,7 +185,7 @@ public class SSTableScannerTest
             {
                 for (int b = 0; b < boundaries.length; b += 2)
                     for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
-                        assertEquals(toKey(i), new String(scanner.next().blockingGet().partitionKey().getKey().array()));
+                        assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
                 assertFalse(scanner.hasNext());
             }
             catch (Exception e)
@@ -220,7 +220,7 @@ public class SSTableScannerTest
         // full range scan
         ISSTableScanner scanner = sstable.getScanner();
         for (int i = 2; i < 10; i++)
-            assertEquals(toKey(i), new String(scanner.next().blockingGet().partitionKey().getKey().array()));
+            assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
 
         scanner.close();
 
@@ -298,7 +298,7 @@ public class SSTableScannerTest
             for (int expected = rangeStart; expected <= rangeEnd; expected++)
             {
                 assertTrue(String.format("Expected to see key %03d", expected), scanner.hasNext());
-                assertEquals(toKey(expected), new String(scanner.next().blockingGet().partitionKey().getKey().array()));
+                assertEquals(toKey(expected), new String(scanner.next().partitionKey().getKey().array()));
             }
         }
         assertFalse(scanner.hasNext());

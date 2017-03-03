@@ -265,7 +265,7 @@ public class CompactionIteratorTest
         {
             List<Unfiltered> result = new ArrayList<>();
             assertTrue(iter.hasNext());
-            try (UnfilteredRowIterator partition = iter.next().blockingGet())
+            try (UnfilteredRowIterator partition = iter.next())
             {
                 Iterators.addAll(result, partition);
             }
@@ -351,9 +351,9 @@ public class CompactionIteratorTest
         }
 
         @Override
-        public Single<UnfilteredRowIterator> next()
+        public UnfilteredRowIterator next()
         {
-            return Single.just(iter.next());
+            return iter.next();
         }
 
         @Override

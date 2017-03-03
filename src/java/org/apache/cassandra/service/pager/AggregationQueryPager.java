@@ -247,7 +247,7 @@ public final class AggregationQueryPager implements QueryPager
                 partitionIterator = fetchSubPage(computeSubPageSize(pageSize, counted));
             }
 
-            next = partitionIterator.next().blockingGet();
+            next = partitionIterator.next();
         }
 
         protected boolean isDone(int pageSize, int counted)
@@ -302,7 +302,7 @@ public final class AggregationQueryPager implements QueryPager
                  : subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).blockingGet();
         }
 
-        public final Single<RowIterator> next()
+        public final RowIterator next()
         {
             if (!hasNext())
                 throw new NoSuchElementException();
@@ -310,7 +310,7 @@ public final class AggregationQueryPager implements QueryPager
             RowIterator iterator = new GroupByRowIterator(next);
             lastPartitionKey = iterator.partitionKey().getKey();
             next = null;
-            return Single.just(iterator);
+            return iterator;
         }
 
         private class GroupByRowIterator implements RowIterator

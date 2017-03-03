@@ -149,21 +149,21 @@ public abstract class Rows
                 diffListener.onDeletion(i, clustering, mergedDeletion, inputDeletion);
         }
 
-        List<Iterator<Single<ColumnData>>> inputIterators = new ArrayList<>(1 + inputs.length);
-        inputIterators.add(merged.rxiterator());
+        List<Iterator<ColumnData>> inputIterators = new ArrayList<>(1 + inputs.length);
+        inputIterators.add(merged.iterator());
         for (Row row : inputs)
-            inputIterators.add(row == null ? Collections.emptyIterator() : row.rxiterator());
+            inputIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
 
         Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new MergeIterator.Reducer<ColumnData, Object>()
         {
             ColumnData mergedData;
             ColumnData[] inputDatas = new ColumnData[inputs.length];
-            public void reduce(int idx, Single<ColumnData> current)
+            public void reduce(int idx, ColumnData current)
             {
                 if (idx == 0)
-                    mergedData = current.blockingGet();
+                    mergedData = current;
                 else
-                    inputDatas[idx - 1] = current.blockingGet();
+                    inputDatas[idx - 1] = current;
             }
 
             protected Object getReduced()

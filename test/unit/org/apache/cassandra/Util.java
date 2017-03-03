@@ -288,7 +288,7 @@ public class Util
         {
             if (iterator.hasNext())
             {
-                try (UnfilteredRowIterator partition = iterator.next().blockingGet())
+                try (UnfilteredRowIterator partition = iterator.next())
                 {
                     throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
                 }
@@ -302,7 +302,7 @@ public class Util
         {
             if (iterator.hasNext())
             {
-                try (RowIterator partition = iterator.next().blockingGet())
+                try (RowIterator partition = iterator.next())
                 {
                     throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
                 }
@@ -317,7 +317,7 @@ public class Util
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator partition = iterator.next().blockingGet())
+                try (UnfilteredRowIterator partition = iterator.next())
                 {
                     results.add(ImmutableBTreePartition.create(partition));
                 }
@@ -333,7 +333,7 @@ public class Util
         {
             while (iterator.hasNext())
             {
-                try (RowIterator partition = iterator.next().blockingGet())
+                try (RowIterator partition = iterator.next())
                 {
                     results.add(FilteredPartition.create(partition));
                 }
@@ -347,7 +347,7 @@ public class Util
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
-            try (UnfilteredRowIterator partition = iterator.next().blockingGet())
+            try (UnfilteredRowIterator partition = iterator.next())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
 
@@ -364,7 +364,7 @@ public class Util
         try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
-            try (RowIterator partition = iterator.next().blockingGet())
+            try (RowIterator partition = iterator.next())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
                 assert partition.hasNext() : "Expecting one row in one partition but got an empty partition";
@@ -380,7 +380,7 @@ public class Util
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
-            try (UnfilteredRowIterator partition = iterator.next().blockingGet())
+            try (UnfilteredRowIterator partition = iterator.next())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
                 return ImmutableBTreePartition.create(partition);
@@ -393,7 +393,7 @@ public class Util
         try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
-            try (RowIterator partition = iterator.next().blockingGet())
+            try (RowIterator partition = iterator.next())
             {
                 assert !iterator.hasNext() : "Expecting a single partition but got more";
                 return FilteredPartition.create(partition);
@@ -442,7 +442,7 @@ public class Util
         while (iter.hasNext())
         {
             ++size;
-            iter.next().blockingGet().close();
+            iter.next().close();
         }
         return size;
     }

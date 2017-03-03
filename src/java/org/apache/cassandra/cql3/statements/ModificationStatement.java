@@ -427,7 +427,7 @@ public abstract class ModificationStatement implements CQLStatement
         Map<DecoratedKey, Partition> map = new HashMap<>();
         while (iterator.hasNext())
         {
-            try (RowIterator partition = iterator.next().blockingGet())
+            try (RowIterator partition = iterator.next())
             {
                 map.put(partition.partitionKey(), FilteredPartition.create(partition));
             }
@@ -644,7 +644,7 @@ public abstract class ModificationStatement implements CQLStatement
         FilteredPartition current;
         try (PartitionIterator iter = readCommand.executeInternal().blockingGet())
         {
-            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand).blockingGet());
+            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
         }
 
         if (!request.appliesTo(current))

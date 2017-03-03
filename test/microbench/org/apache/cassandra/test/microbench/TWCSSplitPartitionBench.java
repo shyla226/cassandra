@@ -145,7 +145,7 @@ public class TWCSSplitPartitionBench extends CQLTester
     @Setup(Level.Invocation)
     public void setupIter()
     {
-        rowToSplit = cachedPartition.iterator().next().blockingGet();
+        rowToSplit = cachedPartition.iterator().next();
     }
 
     @Benchmark
@@ -186,7 +186,7 @@ public class TWCSSplitPartitionBench extends CQLTester
             this.iter = iter;
             while (iter.hasNext())
             {
-                try (UnfilteredRowIterator row = iter.next().blockingGet())
+                try (UnfilteredRowIterator row = iter.next())
                 {
                     List<Unfiltered> content = new ArrayList<>();
                     while (row.hasNext())
@@ -202,7 +202,7 @@ public class TWCSSplitPartitionBench extends CQLTester
             return new MBROnHeapUnfilteredPartitionIterator(metadata, iter, rows);
         }
 
-        private static class MBROnHeapUnfilteredPartitionIterator extends AbstractIterator<Single<UnfilteredRowIterator>> implements UnfilteredPartitionIterator
+        private static class MBROnHeapUnfilteredPartitionIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
         {
             private final TableMetadata metadata;
             private final Iterator<MBRUnfilteredRowHolder> it;
@@ -222,10 +222,10 @@ public class TWCSSplitPartitionBench extends CQLTester
             {
             }
 
-            protected Single<UnfilteredRowIterator> computeNext()
+            protected UnfilteredRowIterator computeNext()
             {
                 if (it.hasNext())
-                    return Single.just(it.next().iterator());
+                    return it.next().iterator();
                 return endOfData();
             }
         }

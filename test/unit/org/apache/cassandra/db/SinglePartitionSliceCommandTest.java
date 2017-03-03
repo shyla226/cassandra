@@ -96,7 +96,7 @@ public class SinglePartitionSliceCommandTest
     private void checkForS(UnfilteredPartitionIterator pi)
     {
         Assert.assertTrue(pi.toString(), pi.hasNext());
-        UnfilteredRowIterator ri = pi.next().blockingGet();
+        UnfilteredRowIterator ri = pi.next();
         Assert.assertTrue(ri.columns().contains(s));
         Row staticRow = ri.staticRow();
         Iterator<Cell> cellIterator = staticRow.cells().iterator();

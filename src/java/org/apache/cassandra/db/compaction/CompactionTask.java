@@ -198,7 +198,7 @@ public class CompactionTask extends AbstractCompactionTask
                         if (ci.isStopRequested())
                             throw new CompactionInterruptedException(ci.getCompactionInfo());
 
-                        if (writer.append(ci.next().blockingGet()))
+                        if (writer.append(ci.next()))
                             totalKeysWritten++;
 
 

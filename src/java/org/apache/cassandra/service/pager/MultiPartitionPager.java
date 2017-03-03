@@ -151,7 +151,7 @@ public class MultiPartitionPager implements QueryPager
         return Single.just(new PagersIterator(toQuery, null, null, System.nanoTime(), false));
     }
 
-    private class PagersIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
+    private class PagersIterator extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final int pageSize;
         private PartitionIterator result;
@@ -181,7 +181,7 @@ public class MultiPartitionPager implements QueryPager
             this.forContinuousPaging = forContinuousPaging;
         }
 
-        protected Single<RowIterator> computeNext()
+        protected RowIterator computeNext()
         {
             while (result == null || !result.hasNext())
             {

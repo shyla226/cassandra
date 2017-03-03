@@ -176,7 +176,7 @@ public class CompactionAwareWriterTest extends CQLTester
         {
             while (ci.hasNext())
             {
-                if (writer.append(ci.next().blockingGet()))
+                if (writer.append(ci.next()))
                     rowsWritten++;
             }
         }

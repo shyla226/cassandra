@@ -34,7 +34,6 @@ import com.google.common.base.MoreObjects;
 
 import io.reactivex.Completable;
 import io.reactivex.Flowable;
-import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +42,7 @@ import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -663,7 +662,7 @@ public class SelectStatement implements CQLStatement
 
             page.map(pi ->
                      {
-                         Flowable<RowIterator> it = pi.asObservable();
+                         Flowable<RowIterator> it = PartitionIterators.toFlowable(pi);
 
                          it.takeWhile((p) -> !builder.isCompleted())
                            .map(p -> {
@@ -1069,7 +1068,7 @@ public class SelectStatement implements CQLStatement
     {
         ResultSet.Builder result = ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection);
 
-        return Single.concatArray(partitions).concatMap(p -> p.asObservable())
+        return Single.concatArray(partitions).concatMap(p -> PartitionIterators.toFlowable(p))
                      .map(r -> processPartition(r, options, result, nowInSec))
                      .last(Completable.complete())
                      .map(v ->

@@ -214,7 +214,7 @@ public class LongLeveledCompactionStrategyTest
                         DecoratedKey lastKey = null;
                         while (scanner.hasNext())
                         {
-                            UnfilteredRowIterator row = scanner.next().blockingGet();
+                            UnfilteredRowIterator row = scanner.next();
                             if (lastKey != null)
                             {
                                 assertTrue("row " + row.partitionKey() + " received out of order wrt " + lastKey, row.partitionKey().compareTo(lastKey) >= 0);

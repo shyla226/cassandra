@@ -20,14 +20,16 @@
  */
 package org.apache.cassandra.db.transform;
 
-import io.reactivex.Single;
+import java.util.Collections;
+
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.merge;
 
 public abstract class BasePartitions<R extends BaseRowIterator<?>, I extends BasePartitionIterator<? extends BaseRowIterator<?>>>
-extends RxBaseIterator<BaseRowIterator<?>, I, R>
+extends BaseIterator<BaseRowIterator<?>, I, R>
 implements BasePartitionIterator<R>
 {
 
@@ -45,9 +47,9 @@ implements BasePartitionIterator<R>
     // *********************************
 
 
-    protected Single<BaseRowIterator<?>> applyOne(Single<? extends BaseRowIterator<?>> value, Transformation transformation)
+    protected BaseRowIterator<?> applyOne(BaseRowIterator<?> value, Transformation transformation)
     {
-        return value == null ? null : value.map(v -> transformation.applyToPartition(v));
+        return value == null ? null : transformation.applyToPartition(value);
     }
 
     void add(Transformation transformation)
@@ -77,40 +79,41 @@ implements BasePartitionIterator<R>
 
     public final boolean hasNext()
     {
-        Single<BaseRowIterator<?>> next;
-
-        BaseIterator.Stop stop = this.stop;
-        while (this.next == null)
+        BaseRowIterator<?> next = null;
+        try
         {
-            Transformation[] fs = stack;
-            int len = length;
 
-            while (!stop.isSignalled && input.hasNext())
+            Stop stop = this.stop;
+            while (this.next == null)
             {
-                next = (Single<BaseRowIterator<?>>)input.next();
+                Transformation[] fs = stack;
+                int len = length;
 
-
-                if (next != null)
-                    next = next.map(n -> {
-                        for (int i = 0 ; n != null & i < len ; i++)
-                            n = fs[i].applyToPartition(n);
-                        return n;
-                    });
-
-                if (next != null)
+                while (!stop.isSignalled && input.hasNext())
                 {
-                    this.next = next;
-                    // There is a problem here because if a transformation has returned null then we should
-                    // return false here whereas if we don't wait we are returning a Single of a null partition,
-                    // which is causing NPEs in the tests at least
-                    return true;
-                }
-            }
+                    next = input.next();
+                    for (int i = 0 ; next != null & i < len ; i++)
+                        next = fs[i].applyToPartition(next);
 
-            if (stop.isSignalled || !hasMoreContents())
-                return false;
+                    if (next != null)
+                    {
+                        this.next = next;
+                        return true;
+                    }
+                }
+
+                if (stop.isSignalled || !hasMoreContents())
+                    return false;
+            }
+            return true;
+
         }
-        return true;
+        catch (Throwable t)
+        {
+            if (next != null)
+                Throwables.close(t, Collections.singleton(next));
+            throw t;
+        }
     }
 
 }

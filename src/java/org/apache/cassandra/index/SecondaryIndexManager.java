@@ -566,7 +566,7 @@ public class SecondaryIndexManager implements IndexRegistry
                     if (!page.hasNext())
                         break;
 
-                    try (UnfilteredRowIterator partition = page.next().blockingGet()) {
+                    try (UnfilteredRowIterator partition = page.next()) {
                         Set<Index.Indexer> indexers = indexes.stream()
                                                              .map(index -> index.indexerFor(key,
                                                                                             partition.columns(),

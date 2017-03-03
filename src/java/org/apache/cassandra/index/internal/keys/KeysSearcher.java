@@ -19,9 +19,6 @@ package org.apache.cassandra.index.internal.keys;
 
 import java.nio.ByteBuffer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.db.*;
@@ -33,12 +30,9 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class KeysSearcher extends CassandraIndexSearcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(KeysSearcher.class);
-
     public KeysSearcher(ReadCommand command,
                         RowFilter.Expression expression,
                         CassandraIndex indexer)
@@ -55,7 +49,7 @@ public class KeysSearcher extends CassandraIndexSearcher
 
         UnfilteredPartitionIterator iter = new UnfilteredPartitionIterator()
         {
-            private Single<UnfilteredRowIterator> next;
+            private UnfilteredRowIterator next;
 
             public TableMetadata metadata()
             {
@@ -67,12 +61,12 @@ public class KeysSearcher extends CassandraIndexSearcher
                 return prepareNext();
             }
 
-            public Single<UnfilteredRowIterator> next()
+            public UnfilteredRowIterator next()
             {
                 if (next == null)
                     prepareNext();
 
-                Single<UnfilteredRowIterator> toReturn = next;
+                UnfilteredRowIterator toReturn = next;
                 next = null;
                 return toReturn;
             }
@@ -106,7 +100,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                                                                 command.nowInSec()));
 
                     if (dataIter != null)
-                        next = dataIter;
+                        next = dataIter.blockingGet();
                 }
 
                 return next != null;

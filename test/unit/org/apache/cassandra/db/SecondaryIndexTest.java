@@ -122,7 +122,7 @@ public class SecondaryIndexTest
              UnfilteredPartitionIterator pi = searcher.search(executionController).blockingGet())
         {
             assertTrue(pi.hasNext());
-            pi.next().blockingGet().close();
+            pi.next().close();
         }
 
         // Verify gt on idx scan

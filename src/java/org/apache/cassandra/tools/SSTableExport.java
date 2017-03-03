@@ -27,7 +27,6 @@ import java.util.stream.StreamSupport;
 
 import org.apache.commons.cli.*;
 
-import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -122,16 +121,10 @@ public class SSTableExport
         return builder.build();
     }
 
-    private static <T> Stream<Single<T>> rxiterToStream(Iterator<Single<T>> iter)
+    private static <T> Stream<T> iterToStream(Iterator<T> iter)
     {
-        Spliterator<Single<T>> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
+        Spliterator<T> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
         return StreamSupport.stream(splititer, false);
-    }
-
-    private static <T> Stream<T> iterToStream(Iterator<Single<T>> iter)
-    {
-        Spliterator<Single<T>> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
-        return StreamSupport.stream(splititer, false).map(s -> s.blockingGet());
     }
 
     /**
@@ -209,31 +202,30 @@ public class SSTableExport
                 {
                     currentScanner = sstable.getScanner();
                 }
-                Stream<Single<UnfilteredRowIterator>> partitions = rxiterToStream(currentScanner).filter(i ->
-                    excludes.isEmpty() || !excludes.contains(metadata.partitionKeyType.getString(i.blockingGet().partitionKey().getKey()))
+                Stream<UnfilteredRowIterator> partitions = iterToStream(currentScanner).filter(i ->
+                    excludes.isEmpty() || !excludes.contains(metadata.partitionKeyType.getString(i.partitionKey().getKey()))
                 );
                 if (cmd.hasOption(DEBUG_OUTPUT_OPTION))
                 {
                     AtomicLong position = new AtomicLong();
                     partitions.forEach(partition ->
                     {
-                        UnfilteredRowIterator p = partition.blockingGet();
                         position.set(currentScanner.getCurrentPosition());
 
-                        if (!p.partitionLevelDeletion().isLive())
+                        if (!partition.partitionLevelDeletion().isLive())
                         {
-                            System.out.println("[" + metadata.partitionKeyType.getString(p.partitionKey().getKey()) + "]@" +
-                                               position.get() + " " + p.partitionLevelDeletion());
+                            System.out.println("[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@" +
+                                               position.get() + " " + partition.partitionLevelDeletion());
                         }
-                        if (!p.staticRow().isEmpty())
+                        if (!partition.staticRow().isEmpty())
                         {
-                            System.out.println("[" + metadata.partitionKeyType.getString(p.partitionKey().getKey()) + "]@" +
-                                               position.get() + " " + p.staticRow().toString(metadata, true));
+                            System.out.println("[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@" +
+                                               position.get() + " " + partition.staticRow().toString(metadata, true));
                         }
-                        p.forEachRemaining(row ->
+                        partition.forEachRemaining(row ->
                         {
                             System.out.println(
-                            "[" + metadata.partitionKeyType.getString(p.partitionKey().getKey()) + "]@"
+                                    "[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@"
                             + position.get() + " " + row.toString(metadata, false, true));
                             position.set(currentScanner.getCurrentPosition());
                         });
@@ -241,7 +233,7 @@ public class SSTableExport
                 }
                 else
                 {
-                    JsonTransformer.toJson(currentScanner, partitions.map(s -> s.blockingGet()), cmd.hasOption(RAW_TIMESTAMPS), metadata, System.out);
+                    JsonTransformer.toJson(currentScanner, partitions, cmd.hasOption(RAW_TIMESTAMPS), metadata, System.out);
                 }
             }
         }

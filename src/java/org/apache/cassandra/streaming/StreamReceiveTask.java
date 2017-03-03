@@ -37,6 +37,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
@@ -193,19 +194,17 @@ public class StreamReceiveTask extends StreamTask
                             {
                                 while (scanner.hasNext())
                                 {
-                                    Completable mutation = scanner.next().flatMapCompletable(i ->
+                                    try (UnfilteredRowIterator rowIterator = scanner.next())
                                     {
-                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(i, ColumnFilter.all(metadata)));
+                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(metadata)));
 
                                         // MV *can* be applied unsafe if there's no CDC on the CFS as we flush below
                                         // before transaction is done.
                                         //
                                         // If the CFS has CDC, however, these updates need to be written to the CommitLog
                                         // so they get archived into the cdc_raw folder
-                                        return ks.apply(m, hasCDC.get(), true, false);
-                                    });
-
-                                    writes.add(mutation);
+                                        writes.add(ks.apply(m, hasCDC.get(), true, false));
+                                    }
                                 }
                             }
                         }

@@ -668,7 +668,7 @@ public class Memtable implements Comparable<Memtable>
             return iter.hasNext();
         }
 
-        public Single<UnfilteredRowIterator> next()
+        public UnfilteredRowIterator next()
         {
             PartitionPosition position = iter.next();
             // Actual stored key should be true DecoratedKey
@@ -676,7 +676,7 @@ public class Memtable implements Comparable<Memtable>
             DecoratedKey key = (DecoratedKey)position;
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return Single.just(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)));
+            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position));
         }
 
         public void close()

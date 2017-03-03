@@ -182,7 +182,7 @@ public class RepairedDataTombstonesTest extends CQLTester
             while (iterator.hasNext())
             {
                 partitionsFound++;
-                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
+                try (UnfilteredRowIterator rowIter = iterator.next())
                 {
                     int val = ByteBufferUtil.toInt(rowIter.partitionKey().getKey());
                     assertTrue("val=" + val, val >= 10 && val < 20);
@@ -246,7 +246,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
+                try (UnfilteredRowIterator rowIter = iterator.next())
                 {
                     if (!rowIter.partitionKey().equals(Util.dk(ByteBufferUtil.bytes(999)))) // partition key 999 is 'live' and used to avoid sstables from being dropped
                     {
@@ -289,7 +289,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
+                try (UnfilteredRowIterator rowIter = iterator.next())
                 {
                     while (rowIter.hasNext())
                     {

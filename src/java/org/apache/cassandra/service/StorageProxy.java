@@ -1559,7 +1559,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command).blockingGet();
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command);
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
@@ -1609,7 +1609,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Read data locally, but for an external request. This implements an optimized local read path for data that
      * is available locally and that has been requested at a consistency level of ONE/LOCAL_ONE. We
-     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * wrap the functionality of {@link ReadCommand#executeInternal()}  with additional
      * functionality that is required for client requests, such as metrics recording and local query monitoring,
      * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
      * are not reported as failed, rather the caller will take care of restarting them.
@@ -1639,17 +1639,12 @@ public class StorageProxy implements StorageProxyMBean
             final PartitionIterator iter = group.executeInternal().blockingGet();
             return Single.just(new PartitionIterator()
             {
-                public Flowable<RowIterator> asObservable()
-                {
-                    return iter.asObservable();
-                }
-
                 public boolean hasNext()
                 {
                     return iter.hasNext();
                 }
 
-                public Single<RowIterator> next()
+                public RowIterator next()
                 {
                     return iter.next();
                 }
@@ -2121,7 +2116,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class SingleRangeResponse extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
+    private static class SingleRangeResponse extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final ReadCallback handler;
         private PartitionIterator result;
@@ -2139,7 +2134,7 @@ public class StorageProxy implements StorageProxyMBean
             result = handler.get().blockingGet();
         }
 
-        protected Single<RowIterator> computeNext()
+        protected RowIterator computeNext()
         {
             waitForResponse();
             return result.hasNext() ? result.next() : endOfData();
@@ -2152,7 +2147,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class RangeCommandIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
+    private static class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final Iterator<RangeForQuery> ranges;
         private final int totalRangeCount;
@@ -2191,7 +2186,7 @@ public class StorageProxy implements StorageProxyMBean
             this.forContinuousPaging = forContinuousPaging;
         }
 
-        public Single<RowIterator> computeNext()
+        public RowIterator computeNext()
         {
             try
             {
@@ -2394,7 +2389,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Read a range slice locally, but for an external request. This implements an optimized local read path for data that
      * is available locally and that has been requested at a consistency level of ONE or LOCAL_ONE. We
-     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * wrap the functionality of {@link ReadCommand#executeInternal()}  with additional
      * functionality that is required for client requests, such as metrics recording and local query monitoring,
      * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
      * are not reported as failed, rather the caller will take care of restarting them.
@@ -2425,17 +2420,12 @@ public class StorageProxy implements StorageProxyMBean
             final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal().blockingGet());
             return Single.just(new PartitionIterator()
             {
-                public Flowable<RowIterator> asObservable()
-                {
-                    return Flowable.using(() -> iter, i -> i.asObservable(), i -> close());
-                }
-
                 public boolean hasNext()
                 {
                     return iter.hasNext();
                 }
 
-                public Single<RowIterator> next()
+                public RowIterator next()
                 {
                     return iter.next();
                 }

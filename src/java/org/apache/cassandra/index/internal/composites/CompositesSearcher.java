@@ -19,16 +19,10 @@ package org.apache.cassandra.index.internal.composites;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.google.common.collect.Lists;
-
 import io.reactivex.Completable;
-import io.reactivex.Observable;
-import io.reactivex.ObservableEmitter;
-import io.reactivex.ObservableOnSubscribe;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.schema.TableMetadata;
@@ -44,7 +38,6 @@ import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.index.internal.IndexEntry;
 import org.apache.cassandra.utils.btree.BTreeSet;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 
 public class CompositesSearcher extends CassandraIndexSearcher
@@ -78,7 +71,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
         {
             private IndexEntry nextEntry;
 
-            private Single<UnfilteredRowIterator> next;
+            private UnfilteredRowIterator next;
 
             public TableMetadata metadata()
             {
@@ -90,12 +83,12 @@ public class CompositesSearcher extends CassandraIndexSearcher
                 return prepareNext();
             }
 
-            public Single<UnfilteredRowIterator> next()
+            public UnfilteredRowIterator next()
             {
                 if (next == null)
                     prepareNext();
 
-                Single<UnfilteredRowIterator> toReturn = next;
+                UnfilteredRowIterator toReturn = next;
                 next = null;
                 return toReturn;
             }
@@ -176,7 +169,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                                                      command.nowInSec()));
 
                     if (dataIter != null)
-                        next = dataIter;
+                        next = dataIter.blockingGet();
                 }
             }
 

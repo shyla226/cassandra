@@ -593,7 +593,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
     public static class Merger
     {
         private final Row[] rows;
-        private final List<Iterator<Single<ColumnData>>> columnDataIterators;
+        private final List<Iterator<ColumnData>> columnDataIterators;
 
         private Clustering clustering;
         private int rowsToMerge;
@@ -663,7 +663,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 rowInfo = LivenessInfo.EMPTY;
 
             for (Row row : rows)
-                columnDataIterators.add(row == null ? Collections.emptyIterator() : row.rxiterator());
+                columnDataIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
 
             columnDataReducer.setActiveDeletion(activeDeletion);
             Iterator<ColumnData> merged = MergeIterator.get(columnDataIterators, ColumnData.comparator, columnDataReducer);
@@ -700,7 +700,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
             private DeletionTime activeDeletion;
 
             private final ComplexColumnData.Builder complexBuilder;
-            private final List<Iterator<Single<Cell>>> complexCells;
+            private final List<Iterator<Cell>> complexCells;
             private final CellReducer cellReducer;
 
             public ColumnDataReducer(int size, int nowInSec, boolean hasComplex)
@@ -717,11 +717,10 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 this.activeDeletion = activeDeletion;
             }
 
-            public void reduce(int idx, Single<ColumnData> data)
+            public void reduce(int idx, ColumnData data)
             {
-                ColumnData columnData = data.blockingGet();
-                column = columnData.column();
-                versions.add(columnData);
+                column = data.column();
+                versions.add(data);
             }
 
             protected ColumnData getReduced()
@@ -747,7 +746,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                         ComplexColumnData cd = (ComplexColumnData)data;
                         if (cd.complexDeletion().supersedes(complexDeletion))
                             complexDeletion = cd.complexDeletion();
-                        complexCells.add(cd.rxiterator());
+                        complexCells.add(cd.iterator());
                     }
 
                     if (complexDeletion.supersedes(activeDeletion))
@@ -795,12 +794,10 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 onKeyChange();
             }
 
-            public void reduce(int idx, Single<Cell> cell)
+            public void reduce(int idx, Cell cell)
             {
-                Cell c = cell.blockingGet();
-
-                if (!activeDeletion.deletes(c))
-                    merged = merged == null ? c : Cells.reconcile(merged, c, nowInSec);
+                if (!activeDeletion.deletes(cell))
+                    merged = merged == null ? cell : Cells.reconcile(merged, cell, nowInSec);
             }
 
             protected Cell getReduced()

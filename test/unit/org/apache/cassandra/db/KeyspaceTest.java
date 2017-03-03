@@ -157,7 +157,7 @@ public class KeyspaceTest extends CQLTester
 
         try (PartitionIterator iterator = command.executeInternal().blockingGet())
         {
-            try (RowIterator rowIterator = iterator.next().blockingGet())
+            try (RowIterator rowIterator = iterator.next())
             {
                 if (reversed)
                 {
@@ -230,7 +230,7 @@ public class KeyspaceTest extends CQLTester
             SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", filter, null);
             try (PartitionIterator iterator = command.executeInternal().blockingGet())
             {
-                try (RowIterator rowIterator = iterator.next().blockingGet())
+                try (RowIterator rowIterator = iterator.next())
                 {
                     Row row = rowIterator.next();
                     Cell cell = row.getCell(cfs.metadata().getColumn(new ColumnIdentifier("c", false)));
@@ -247,11 +247,11 @@ public class KeyspaceTest extends CQLTester
             if (columnValues.length == 0)
             {
                 if (iterator.hasNext())
-                    fail("Didn't expect any results, but got rows starting with: " + iterator.next().blockingGet().next().toString(cfs.metadata()));
+                    fail("Didn't expect any results, but got rows starting with: " + iterator.next().next().toString(cfs.metadata()));
                 return;
             }
 
-            try (RowIterator rowIterator = iterator.next().blockingGet())
+            try (RowIterator rowIterator = iterator.next())
             {
                 for (int expected : columnValues)
                 {
