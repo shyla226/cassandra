@@ -513,7 +513,10 @@ public class Keyspace
                             if (isDroppable && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
                             {
                                 for (int j = 0; j < i; j++)
+                                {
                                     locks[j].unlock();
+                                    locks[j] = null;
+                                }
 
                                 logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
                                 Tracing.trace("Could not acquire MV lock");
@@ -522,7 +525,10 @@ public class Keyspace
                             else
                             {
                                 for (int j = 0; j < i; j++)
+                                {
                                     locks[j].unlock();
+                                    locks[j] = null;
+                                }
 
                                 // This view update can't happen right now, so schedule another attempt later.
                                 return Completable.defer(() -> applyInternal(mutation, writeCommitLog, true, isDroppable))
@@ -540,10 +546,11 @@ public class Keyspace
                     // Bulk non-droppable operations (e.g. commitlog replay, hint delivery) are not measured
                     if (isDroppable)
                     {
-                    for(TableId tableId : tableIds)
-                        columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
+                        for(TableId tableId : tableIds)
+                            columnFamilyStores.get(tableId).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
                     }
                 }
+
                 int nowInSec = FBUtilities.nowInSeconds();
 
                 // write the mutation to the commitlog
@@ -568,7 +575,6 @@ public class Keyspace
 
                             for (PartitionUpdate upd : mutation.getPartitionUpdates())
                             {
-
                                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
                                 if (cfs == null)
                                 {
@@ -583,6 +589,10 @@ public class Keyspace
                                 if (requiresViewUpdate)
                                 {
                                     Tracing.trace("Creating materialized view mutations from base table replica");
+                                    // TODO - pushViewReplicaUpdates will change the rx core, resulting in an
+                                    // IllegalMonitorStateException when releasing the locks, try for example ViewFilteringTest
+                                    // I'm not really sure what the view lock management should be changed to, and if it still
+                                    // makes sense at all
                                     viewUpdateCompletable = viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeCommitLog, baseComplete);
                                     viewUpdateCompletable.doOnError(exc -> {
                                             JVMStabilityInspector.inspectThrowable(exc);
@@ -597,7 +607,7 @@ public class Keyspace
                                                                      : UpdateTransaction.NO_OP;
 
                                 CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
-                                Completable memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
+                                Completable memtableCompletable = cfs.applyInternal(upd, indexTransaction, opGroup, pos);
                                 if (requiresViewUpdate)
                                 {
                                     memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
@@ -622,7 +632,10 @@ public class Keyspace
                 if (locks != null)
                 {
                     for (Lock lock : locks)
-                        lock.unlock();
+                    {
+                        if (lock != null)
+                            lock.unlock();
+                    }
                 }
             }
         ).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false)); // route to the correct core

@@ -209,7 +209,7 @@ public class TableMetrics
     /**
      * Stores all metric names created that can be used when unregistering, optionally mapped to an alias name.
      */
-    public final static Map<String, String> all = Maps.newHashMap();
+    public final static ConcurrentMap<String, String> all = Maps.newConcurrentMap();
 
     private interface GetHistogram
     {

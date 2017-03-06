@@ -376,8 +376,14 @@ public abstract class CQLTester
     public static void requireNetwork(boolean initClientClusters) throws ConfigurationException
     {
         if (server != null)
+        {
+            if (initClientClusters && sessions.isEmpty())
+            {
+                for (ProtocolVersion version : PROTOCOL_VERSIONS)
+                    initClientCluster(version, NettyOptions.DEFAULT_INSTANCE);
+            }
             return;
-
+        }
         assert workerGroup != null;
 
         SystemKeyspace.finishStartup();

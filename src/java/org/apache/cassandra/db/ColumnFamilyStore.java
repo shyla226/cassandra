@@ -1372,7 +1372,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                    .subscribeOn(NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey(), true));
     }
 
-    private Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         long start = System.nanoTime();
         Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);

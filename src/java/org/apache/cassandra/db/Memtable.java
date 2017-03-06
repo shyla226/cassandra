@@ -424,9 +424,9 @@ public class Memtable implements Comparable<Memtable>
         int minLocalDeletionTime = Integer.MAX_VALUE;
 
         ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
-        for (int i = 1; i < partitions.size(); i++)
+        for (int i = 0; i < partitions.size(); i++)
         {
-            TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i - 1);
+            TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i);
             SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
 
             if (startIsMin)
