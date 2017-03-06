@@ -24,8 +24,10 @@ import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -38,12 +40,13 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     private DeletionTime partitionLevelDeletion;
     private final FileDataInput dfile;
     private final String filename;
+    private boolean shouldClose;
 
     protected final SSTableSimpleIterator iterator;
     private Row staticRow;
 
     public SSTableIdentityIterator(SSTableReader sstable, DecoratedKey key, DeletionTime partitionLevelDeletion,
-                                   FileDataInput dfile, SSTableSimpleIterator iterator) throws IOException
+                                   FileDataInput dfile, boolean shouldClose, SSTableSimpleIterator iterator) throws IOException
     {
         super();
         this.sstable = sstable;
@@ -53,16 +56,40 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         this.filename = dfile.getPath();
         this.iterator = iterator;
         this.staticRow = iterator.readStaticRow();
+        this.shouldClose = shouldClose;
+    }
+
+    public static SSTableIdentityIterator create(SSTableReader sstable, long partitionStartPosition, DecoratedKey key)
+    {
+        FileDataInput file = sstable.getFileDataInput(partitionStartPosition);
+        try
+        {
+            if (key != null)
+                ByteBufferUtil.skipShortLength(file); // we already know the key, skip creating unnecessary copy
+            else
+                key = sstable.decorateKey(ByteBufferUtil.readWithShortLength(file));
+        }
+        catch (IOException e)
+        {
+            sstable.markSuspect();
+            throw new CorruptSSTableException(e, file.getPath());
+        }
+        return create(sstable, file, key, true);
     }
 
     public static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput file, DecoratedKey key)
+    {
+        return create(sstable, file, key, false);
+    }
+
+    static SSTableIdentityIterator create(SSTableReader sstable, FileDataInput file, DecoratedKey key, boolean shouldClose)
     {
         try
         {
             DeletionTime partitionLevelDeletion = DeletionTime.serializer.deserialize(file);
             SerializationHelper helper = new SerializationHelper(sstable.metadata, sstable.descriptor.version.correspondingMessagingVersion(), SerializationHelper.Flag.LOCAL);
             SSTableSimpleIterator iterator = SSTableSimpleIterator.create(sstable.metadata, file, sstable.header, helper, partitionLevelDeletion);
-            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, file, iterator);
+            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, file, shouldClose, iterator);
         }
         catch (IOException e)
         {
@@ -82,40 +109,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
             SSTableSimpleIterator iterator = tombstoneOnly
                                              ? SSTableSimpleIterator.createTombstoneOnly(sstable.metadata, dfile, sstable.header, helper, partitionLevelDeletion)
                                              : SSTableSimpleIterator.create(sstable.metadata, dfile, sstable.header, helper, partitionLevelDeletion);
-            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, dfile, iterator);
-        }
-        catch (IOException e)
-        {
-            sstable.markSuspect();
-            throw new CorruptSSTableException(e, dfile.getPath());
-        }
-    }
-
-    /**
-     * Allows reuse of this iterator by moving to the next Key in the iteration.
-     * <p>
-     * Since we walk the datafile start to finish we can just update the
-     * data from the next partition in the file and iterate.  We can also
-     * use the index to jump to the start of a particular partition.
-     * <p>
-     * It's required the caller must have set the datafile position to
-     * the start of the passed partition key and have skipped over the
-     * partition key.
-     */
-    public SSTableIdentityIterator reuse(DecoratedKey key) throws IOException
-    {
-        try
-        {
-            //This method doesn't work for old formats
-            if (sstable.descriptor.version.correspondingMessagingVersion() < MessagingService.VERSION_30)
-                return create(sstable, this.dfile, key);
-
-            this.partitionLevelDeletion = DeletionTime.serializer.deserialize(dfile);
-            this.key = key;
-            this.iterator.setDefaultState();
-            this.staticRow = iterator.readStaticRow();
-
-            return this;
+            return new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, dfile, false, iterator);
         }
         catch (IOException e)
         {
@@ -211,7 +205,11 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
 
     public void close()
     {
-        // creator is responsible for closing file when finished
+        if (shouldClose)
+        {
+            FileUtils.closeQuietly(dfile);
+            shouldClose = false;
+        }
     }
 
     public String getPath()

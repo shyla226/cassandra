@@ -118,6 +118,10 @@ public class SimpleQueryTest extends CQLTester
             row("value2")
         );
 
+        assertRows(execute("SELECT v2 FROM %s WHERE k = ?", "third"),
+                   row("value3")
+        );
+
         assertRows(execute("SELECT * FROM %s"),
             row("third",  3, "value3"),
             row("second", 2, "value2"),

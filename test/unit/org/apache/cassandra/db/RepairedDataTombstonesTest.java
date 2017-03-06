@@ -28,6 +28,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractRow;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.rx.RxSubscriptionDebugger;
@@ -242,7 +243,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         int foundRows = 0;
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
-             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController).blockingGet() :
+             includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
                                 cmd.executeLocally(executionController).blockingGet())
         {
             while (iterator.hasNext())
@@ -285,7 +286,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         int foundRows = 0;
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
-             includePurgeable ? cmd.queryStorage(getCurrentColumnFamilyStore(), executionController).blockingGet() :
+             includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
                                 cmd.executeLocally(executionController).blockingGet())
         {
             while (iterator.hasNext())

@@ -164,10 +164,7 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
             for (int i = 0; i < iters.size(); i++)
             {
                 Candidate<In> candidate = new Candidate<In>(this, i, iters.get(i), comp);
-//                if (!candidate.done)
-                    heap[size++] = candidate;
-//                else
-//                    assert candidate.item == null; // make sure it didn't also get an item
+                heap[size++] = candidate;
             }
             needingAdvance = size;
 
@@ -296,7 +293,12 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
                 needingAdvance = i;
     
                 boolean hadRequests = requested > 0;
-                subscriber.onNext(reducer.getReduced());    // usually requests; make sure we don't double-advance or miss a request
+
+                Out item = reducer.getReduced();
+                if (item != null)
+                    subscriber.onNext(item);    // usually requests; make sure we don't double-advance or miss a request
+                else
+                    request(1);           // reducer rejected its input; get another set
     
                 if (hadRequests)
                     advance();

@@ -273,7 +273,6 @@ public class BigTableScanner implements ISSTableScanner
         private RowIndexEntry nextEntry;
         private DecoratedKey currentKey;
         private RowIndexEntry currentEntry;
-        private SSTableIdentityIterator reuseableIterator = null;
 
         protected UnfilteredRowIterator computeNext()
         {
@@ -339,38 +338,18 @@ public class BigTableScanner implements ISSTableScanner
                         if (startScan != -1)
                             bytesScanned += dfile.getFilePointer() - startScan;
 
-                        try
+                        if (dataRange == null)
                         {
-                            if (dataRange == null)
-                            {
-                                dfile.seek(currentEntry.position);
-                                startScan = dfile.getFilePointer();
-                                ByteBufferUtil.skipShortLength(dfile); // key
-
-                                if (reuseableIterator == null)
-                                {
-                                    reuseableIterator = SSTableIdentityIterator.create(sstable, dfile, partitionKey());
-                                }
-                                else
-                                {
-                                    reuseableIterator = reuseableIterator.reuse(partitionKey());
-                                }
-
-                                return reuseableIterator;
-                            }
-                            else
-                            {
-                                startScan = dfile.getFilePointer();
-                            }
-
-                            ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                            return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(BigTableScanner.this.metadata()), columns, filter.isReversed());
+                            startScan = currentEntry.position;
+                            return SSTableIdentityIterator.create(sstable, startScan, partitionKey());
                         }
-                        catch (CorruptSSTableException | IOException e)
+                        else
                         {
-                            sstable.markSuspect();
-                            throw new CorruptSSTableException(e, sstable.getFilename());
+                            startScan = dfile.getFilePointer();
                         }
+
+                        ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
+                        return sstable.iterator(null, partitionKey(), currentEntry, filter.getSlices(BigTableScanner.this.metadata()), columns, filter.isReversed());
                     }
                 };
             }

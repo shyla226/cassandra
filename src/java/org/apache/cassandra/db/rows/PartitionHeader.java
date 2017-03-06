@@ -1,12 +1,17 @@
 package org.apache.cassandra.db.rows;
 
 import java.security.MessageDigest;
+import java.util.Iterator;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators.MergeListener;
 
-public class PartitionHeader implements Unfiltered
+/**
+ * A header for flowable partition containers. Contains partition-level data that isn't expected to change with
+ * transformations, to avoid having to copy/repeat it every time a transformation is applied to the partition content.
+ */
+public class PartitionHeader
 {
     /**
      * The metadata for the table this iterator on.
@@ -42,8 +47,6 @@ public class PartitionHeader implements Unfiltered
      */
     public EncodingStats stats;
 
-    // static row is in stream
-
     public PartitionHeader(CFMetaData metadata, DecoratedKey partitionKey, DeletionTime partitionLevelDeletion,
             PartitionColumns columns, boolean isReverseOrder, EncodingStats stats)
     {
@@ -57,51 +60,26 @@ public class PartitionHeader implements Unfiltered
     }
 
     @Override
-    public ClusteringPrefix clustering()
+    public String toString()
     {
-        return Clustering.HEADER_CLUSTERING;
+        String cfs = String.format("table %s.%s", metadata.ksName, metadata.cfName);
+        return String.format("partition key %s deletion %s %s", partitionKey, partitionLevelDeletion, cfs);
     }
 
-    @Override
-    public Kind kind()
+    public PartitionHeader mergeWith(Iterator<PartitionHeader> sources)
     {
-        return Kind.HEADER;
+        if (!sources.hasNext())
+            return this;
+
+        Merger merger = new Merger(0, metadata, partitionKey, isReverseOrder, null);
+        merger.add(0, this);
+
+        while (sources.hasNext())
+            merger.add(0, sources.next());
+
+        return merger.merge();
     }
 
-    @Override
-    public void digest(MessageDigest digest)
-    {
-        // Not used in digest
-    }
-
-    @Override
-    public void validateData(CFMetaData metadata)
-    {
-        // TODO: No validation fine?
-    }
-
-    @Override
-    public String toString(CFMetaData metadata)
-    {
-        return toString(metadata, false, false);
-    }
-
-    @Override
-    public String toString(CFMetaData metadata, boolean fullDetails)
-    {
-        return toString(metadata, false, fullDetails);
-    }
-
-    @Override
-    public String toString(CFMetaData metadata, boolean includeClusterKeys, boolean fullDetails)
-    {
-        String cfs = "";
-        if (fullDetails)
-            cfs = String.format("table %s.%s", metadata.ksName, metadata.cfName);
-        return String.format("partition %skey %s deletion %s", cfs, partitionKey, partitionLevelDeletion);
-    }
-
-    
     static class Merger
     {
         /**
@@ -138,7 +116,7 @@ public class PartitionHeader implements Unfiltered
          * expect those to be exact.
          */
         public EncodingStats.Merger statsMerger;
-        
+
         final MergeListener listener;
 
         public Merger(int size, CFMetaData metadata, DecoratedKey partitionKey, boolean reversed, MergeListener listener)
@@ -153,7 +131,7 @@ public class PartitionHeader implements Unfiltered
             if (listener != null)
                 delTimeVersions = new DeletionTime[size];
         }
-        
+
         public Merger(int size, int idx, PartitionHeader header, MergeListener listener)
         {
             this(size, header.metadata, header.partitionKey, header.isReverseOrder, listener);

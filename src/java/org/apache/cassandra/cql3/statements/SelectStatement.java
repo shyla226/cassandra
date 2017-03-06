@@ -75,6 +75,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
@@ -1041,18 +1042,21 @@ public class SelectStatement implements CQLStatement
                                       int nowInSec,
                                       int userLimit) throws InvalidRequestException
     {
-        ResultSet.Builder result = ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection);
-
-        return Single.concatArray(partitions).concatMap(p -> p.asObservable())
-                     .map(r -> processPartition(r, options, result, nowInSec))
-                     .last(Completable.complete())
-                     .map(v ->
-                          {
-                              ResultSet cqlRows = result.build();
-                              orderResults(cqlRows);
-                              cqlRows.trim(userLimit);
-                              return cqlRows;
-                          });
+        return partitions.flatMap(p -> p.asObservable()
+                                        .reduce(ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection),
+                                                (res, r) ->
+                                                {
+                                                    processPartition(r, options, res, nowInSec);
+                                                    return res;
+                                                })
+                                        .map(res ->
+                                             {
+                                                 ResultSet cqlRows = res.build();
+                                                 orderResults(cqlRows);
+                                                 cqlRows.trim(userLimit);
+                                                 return cqlRows;
+                                             })
+        );
     }
 
     public static ByteBuffer[] getComponents(CFMetaData cfm, DecoratedKey dk)
@@ -1081,13 +1085,13 @@ public class SelectStatement implements CQLStatement
     }
 
     // Used by ModificationStatement for CAS operations
-    Completable processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
+    void processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
     throws InvalidRequestException
     {
         try
         {
             if (partition == null)
-                return Completable.complete();
+                return;
 
             ProtocolVersion protocolVersion = options.getProtocolVersion();
 
@@ -1115,11 +1119,11 @@ public class SelectStatement implements CQLStatement
                         }
                     }
                 }
-                return Completable.complete();
+                return;
             }
 
             if (result.isCompleted())
-                return Completable.complete();
+                return;
 
             while (partition.hasNext())
             {
@@ -1155,7 +1159,7 @@ public class SelectStatement implements CQLStatement
                 partition.close();
         }
 
-        return Completable.complete();
+        return;
     }
 
     private static void addValue(ResultBuilder result, ColumnDefinition def, Row row, int nowInSec, ProtocolVersion protocolVersion)

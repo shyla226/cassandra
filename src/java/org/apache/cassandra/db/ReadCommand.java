@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Flowable;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
@@ -42,10 +43,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.index.Index;
@@ -284,7 +282,7 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract ReadCommand copy();
 
-    protected abstract Single<UnfilteredPartitionIterator> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    protected abstract Flowable<FlowableUnfilteredPartition> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
 
@@ -385,7 +383,7 @@ public abstract class ReadCommand implements ReadQuery
 
             Index.Searcher searcher = pickSearcher;
             Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                                                                 ? queryStorage(cfs, executionController)
+                                                                 ? Single.just(FlowablePartitions.toPartitions(queryStorage(cfs, executionController), cfs.metadata))
                                                                  : searcher.search(executionController);
 
             return resultIterator.map(

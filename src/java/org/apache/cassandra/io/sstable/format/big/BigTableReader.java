@@ -37,10 +37,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
+import io.reactivex.Single;
+import io.reactivex.SingleSource;
+import io.reactivex.schedulers.Schedulers;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.Callable;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -61,14 +65,9 @@ public class BigTableReader extends SSTableReader
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
-    public Flowable<Unfiltered> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public FlowableUnfilteredPartition flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
-        return FlowableUnfilteredRows.fromIterator(iterator(key, slices, selectedColumns, reversed));
-//        if (reversed)
-//            return FlowableUnfilteredRows.fromIterator(iterator(key, slices, selectedColumns, reversed));
-//
-//        RowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ);
-//        return flowable(null, key, rie, slices, selectedColumns, reversed);
+        return FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed), Schedulers.io());
     }
 
     public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)

@@ -230,12 +230,6 @@ public abstract class UnfilteredPartitionIterators
         };
     }
 
-    public static UnfilteredPartitionIterator mergeLazily(final List<? extends UnfilteredPartitionIterator> iterators, final int nowInSec)
-    {
-        // Merge is already lazy (in the sense we only do it if the Single is requested).
-        return merge(iterators, nowInSec, MergeListener.NONE);
-    }
-
     /**
      * Digests the the provided iterator.
      *

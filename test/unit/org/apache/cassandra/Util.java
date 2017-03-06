@@ -693,7 +693,7 @@ public class Util
         private Single<UnfilteredPartitionIterator> queryStorageInternal(ColumnFamilyStore cfs,
                                                                          ReadExecutionController controller)
         {
-            return queryStorage(cfs, controller);
+            return Single.just(FlowablePartitions.toPartitions(queryStorage(cfs, controller), cfs.metadata));
         }
     }
 

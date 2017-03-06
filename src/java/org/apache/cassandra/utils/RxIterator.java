@@ -31,12 +31,29 @@ import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.AsObservable;
 
-public interface RxIterator<T> extends Iterator<Single<T>>, AsObservable<T>, Closeable
+public interface RxIterator<T> extends CloseableIterator<Single<T>>, AsObservable<T>
 {
     public default Flowable<T> asObservable()
     {
-        return Flowable.using(() -> Iterables.transform(() -> this, s -> (SingleSource<T>) s),
-                              (r) -> Single.concat(r),
-                              (r) -> close());
+        return Single.concat(new SingleUseIterable<Single<T>>(this))
+                     .doFinally(this::close);
+    }
+
+    static class SingleUseIterable<T> implements Iterable<T>
+    {
+        Iterator<T> iter;
+
+        public SingleUseIterable(Iterator<T> iter)
+        {
+            this.iter = iter;
+        }
+
+        public Iterator<T> iterator()
+        {
+            assert iter != null : "Duplicate use of single-use iterator.";
+            Iterator<T> toReturn = iter;
+            iter = null;
+            return toReturn;
+        }
     }
 }

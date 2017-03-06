@@ -118,7 +118,7 @@ public abstract class PartitionIterators
     private static class SingletonPartitionIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
     {
         private final RowIterator iterator;
-        private boolean returned;
+        private boolean returned = false;
 
         private SingletonPartitionIterator(RowIterator iterator)
         {
@@ -131,17 +131,20 @@ public abstract class PartitionIterators
                 return endOfData();
 
             returned = true;
-            return Single.using(() -> iterator, (i) -> Single.just(i), (i) -> i.close());
+            return Single.just(iterator);
         }
 
         public Flowable<RowIterator> asObservable()
         {
-            return Flowable.using(() -> iterator, i -> Flowable.just(i), (i) -> i.close());
+            assert !returned;
+            returned = true;
+            return Flowable.just(iterator);
         }
 
         public void close()
         {
-            iterator.close();
+            if (!returned)
+                iterator.close();
         }
     }
 }

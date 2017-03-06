@@ -24,7 +24,9 @@ import java.util.Optional;
 
 import com.google.common.collect.Iterables;
 
+import io.reactivex.Flowable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.*;
@@ -35,6 +37,8 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -236,49 +240,33 @@ public class PartitionRangeReadCommand extends ReadCommand
         metric.rangeLatency.addNano(latencyNanos);
     }
 
-    protected Single<UnfilteredPartitionIterator> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    protected Flowable<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));
         Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), dataRange().keyRange().getString(metadata().getKeyValidator()));
 
         // fetch data from current memtable, historical memtables, and SSTables in the correct order.
-        final List<UnfilteredPartitionIterator> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
+        final List<Flowable<FlowableUnfilteredPartition>> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
 
-        try
+        for (Memtable memtable : view.memtables)
         {
-            for (Memtable memtable : view.memtables)
-            {
-                @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-                Memtable.MemtableUnfilteredPartitionIterator iter = memtable.makePartitionIterator(columnFilter(), dataRange());
-                oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, iter.getMinLocalDeletionTime());
-                iterators.add(iter);
-            }
-
-            for (SSTableReader sstable : view.sstables)
-            {
-                @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-                UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange());
-                iterators.add(iter);
-                if (!sstable.isRepaired())
-                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
-            }
-            // iterators can be empty for offline tools
-            return Single.just(iterators.isEmpty() ? EmptyIterators.unfilteredPartition(metadata())
-                                       : checkCacheFilter(UnfilteredPartitionIterators.mergeLazily(iterators, nowInSec()), cfs));
+            @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
+            Memtable.MemtableUnfilteredPartitionIterator iter = memtable.makePartitionIterator(columnFilter(), dataRange());
+            oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, iter.getMinLocalDeletionTime());
+            iterators.add(FlowablePartitions.fromPartitions(iter, null));
         }
-        catch (RuntimeException | Error e)
+
+        for (SSTableReader sstable : view.sstables)
         {
-            try
-            {
-                FBUtilities.closeAll(iterators);
-            }
-            catch (Exception suppressed)
-            {
-                e.addSuppressed(suppressed);
-            }
-
-            throw e;
+            @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
+            UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange());
+            iterators.add(FlowablePartitions.fromPartitions(iter, Schedulers.io()));
+            if (!sstable.isRepaired())
+                oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
         }
+        // iterators can be empty for offline tools
+        // TODO: open and close when subscribed -- make sure no resource allocated on create
+        return FlowablePartitions.mergePartitions(iterators, nowInSec());
     }
 
     @Override
