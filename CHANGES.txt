@@ -1,4 +1,5 @@
 4.0
+ * Reduce lock contention for collection types and serializers (CASSANDRA-13271)
  * Make it possible to override MessagingService.Verb ids (CASSANDRA-13283)
  * Avoid synchronized on prepareForRepair in ActiveRepairService (CASSANDRA-9292)
  * Adds the ability to use uncompressed chunks in compressed files (CASSANDRA-10520)
@@ -45,7 +46,9 @@
  * Fix primary index calculation for SASI (CASSANDRA-12910)
  * More fixes to the TokenAllocator (CASSANDRA-12990)
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
+ * Address message coalescing regression (CASSANDRA-12676)
 Merged from 3.0:
+ * Improve testing on macOS by eliminating sigar logging (CASSANDRA-13233)
  * Cqlsh copy-from should error out when csv contains invalid data for collections (CASSANDRA-13071)
  * Update c.yaml doc for offheap memtables (CASSANDRA-13179)
  * Faster StreamingHistogram (CASSANDRA-13038)
