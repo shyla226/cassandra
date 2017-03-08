@@ -30,6 +30,7 @@ Merged from 3.0:
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
 Merged from 2.2:
+ * Fix GRANT/REVOKE when keyspace isn't specified (CASSANDRA-13053)
  * Avoid race on receiver by starting streaming sender thread after sending init message (CASSANDRA-12886)
  * Fix "multiple versions of ant detected..." when running ant test (CASSANDRA-13232)
  * Coalescing strategy sleeps too much (CASSANDRA-13090)
@@ -45,6 +46,7 @@ Merged from 2.1:
  * Use portable stderr for java error in startup (CASSANDRA-13211)
  * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
  * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
+
 
 3.10
  * Fix secondary index queries regression (CASSANDRA-13013)
