@@ -1608,8 +1608,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         return null;
     }
 
-    public static void waitToSettle()
+    public static void waitToSettle(String waitingFor)
     {
+        if (FBUtilities.getBroadcastAddress().equals(InetAddress.getLoopbackAddress()))
+            return;
+
         int forceAfter = Integer.getInteger("cassandra.skip_wait_for_gossip_to_settle", -1);
         if (forceAfter == 0)
         {
@@ -1619,7 +1622,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         final int GOSSIP_SETTLE_POLL_INTERVAL_MS = 1000;
         final int GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED = 3;
 
-        logger.info("Waiting for gossip to settle...");
+        logger.info("Waiting for gossip to settle before {}...", waitingFor);
         Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_MIN_WAIT_MS, TimeUnit.MILLISECONDS);
         int totalPolls = 0;
         int numOkay = 0;
