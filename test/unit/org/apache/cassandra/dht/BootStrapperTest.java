@@ -153,11 +153,11 @@ public class BootStrapperTest
             List<Token> tokens = Lists.newArrayListWithCapacity(numVNodes);
             for (int j = 0; j < numVNodes; ++j)
                 tokens.add(p.getRandomToken());
-            
+
             tmd.updateNormalTokens(tokens, addr);
         }
     }
-    
+
     @Test
     public void testAllocateTokens() throws UnknownHostException
     {
@@ -224,7 +224,7 @@ public class BootStrapperTest
     private void allocateTokensForNode(int vn, String ks, TokenMetadata tm, InetAddress addr)
     {
         SummaryStatistics os = TokenAllocation.replicatedOwnershipStats(tm.cloneOnlyTokenMap(), Keyspace.open(ks).getReplicationStrategy(), addr);
-        Collection<Token> tokens = BootStrapper.allocateTokens(tm, addr, ks, vn);
+        Collection<Token> tokens = BootStrapper.allocateTokens(tm, addr, ks, null, vn, 0);
         assertEquals(vn, tokens.size());
         tm.updateNormalTokens(tokens, addr);
         SummaryStatistics ns = TokenAllocation.replicatedOwnershipStats(tm.cloneOnlyTokenMap(), Keyspace.open(ks).getReplicationStrategy(), addr);
@@ -239,7 +239,6 @@ public class BootStrapperTest
         }
     }
 
-    
     @Test
     public void testAllocateTokensMultipleKeyspaces() throws UnknownHostException
     {
@@ -250,7 +249,7 @@ public class BootStrapperTest
 
         TokenMetadata tm = new TokenMetadata();
         generateFakeEndpoints(tm, 10, vn);
-        
+
         InetAddress dcaddr = FBUtilities.getBroadcastAddress();
         SummaryStatistics os3 = TokenAllocation.replicatedOwnershipStats(tm, Keyspace.open(ks3).getReplicationStrategy(), dcaddr);
         SummaryStatistics os2 = TokenAllocation.replicatedOwnershipStats(tm, Keyspace.open(ks2).getReplicationStrategy(), dcaddr);
@@ -261,7 +260,7 @@ public class BootStrapperTest
             allocateTokensForNode(vn, cks, tm, InetAddress.getByName("127.0.0." + (i + 1)));
             String t = cks; cks = nks; nks = t;
         }
-        
+
         SummaryStatistics ns3 = TokenAllocation.replicatedOwnershipStats(tm, Keyspace.open(ks3).getReplicationStrategy(), dcaddr);
         SummaryStatistics ns2 = TokenAllocation.replicatedOwnershipStats(tm, Keyspace.open(ks2).getReplicationStrategy(), dcaddr);
         verifyImprovement(os3, ns3);

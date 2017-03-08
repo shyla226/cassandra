@@ -27,6 +27,7 @@ import java.util.TreeMap;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 
@@ -53,9 +54,6 @@ public class TokenAllocation
                                                    final InetAddress endpoint,
                                                    int numTokens)
     {
-        if (!FBUtilities.getBroadcastAddress().equals(InetAddress.getLoopbackAddress()))
-            Gossiper.waitToSettle();
-
         TokenMetadata tokenMetadataCopy = tokenMetadata.cloneOnlyTokenMap();
         StrategyAdapter strategy = getStrategy(tokenMetadataCopy, rs, endpoint);
         Collection<Token> tokens = create(tokenMetadata, strategy).addUnit(endpoint, numTokens);
@@ -63,12 +61,12 @@ public class TokenAllocation
 
         if (logger.isWarnEnabled())
         {
-            logger.warn("Selected tokens {}", tokens);
+            logger.info("Selected tokens {}", tokens);
             SummaryStatistics os = replicatedOwnershipStats(tokenMetadataCopy, rs, endpoint);
             tokenMetadataCopy.updateNormalTokens(tokens, endpoint);
             SummaryStatistics ns = replicatedOwnershipStats(tokenMetadataCopy, rs, endpoint);
-            logger.warn("Replicated node load in datacentre before allocation {}", statToString(os));
-            logger.warn("Replicated node load in datacentre after allocation {}", statToString(ns));
+            logger.info("Replicated node load in datacentre before allocation {}", statToString(os));
+            logger.info("Replicated node load in datacentre after allocation {}", statToString(ns));
 
             // TODO: Is it worth doing the replicated ownership calculation always to be able to raise this alarm?
             if (ns.getStandardDeviation() > os.getStandardDeviation())
@@ -77,8 +75,21 @@ public class TokenAllocation
         return tokens;
     }
 
+    public static Collection<Token> allocateTokens(final TokenMetadata tokenMetadata,
+            int localReplicationFactor, IEndpointSnitch snitch, final InetAddress endpoint, int numTokens)
+    {
+        TokenMetadata tokenMetadataCopy = tokenMetadata.cloneOnlyTokenMap();
+        String dc = snitch.getDatacenter(endpoint);
+        StrategyAdapter strategy = getStrategy(tokenMetadataCopy, dc, localReplicationFactor, snitch, endpoint);
+        Collection<Token> tokens = create(tokenMetadata, strategy).addUnit(endpoint, numTokens);
+        tokens = adjustForCrossDatacenterClashes(tokenMetadata, strategy, tokens);
+        logger.info("Selected tokens {}", tokens);
+        return tokens;
+    }
+
     private static Collection<Token> adjustForCrossDatacenterClashes(final TokenMetadata tokenMetadata,
-                                                                     StrategyAdapter strategy, Collection<Token> tokens)
+                                                                     StrategyAdapter strategy,
+                                                                     Collection<Token> tokens)
     {
         List<Token> filtered = Lists.newArrayListWithCapacity(tokens.size());
 
@@ -166,16 +177,18 @@ public class TokenAllocation
     static StrategyAdapter getStrategy(final TokenMetadata tokenMetadata, final AbstractReplicationStrategy rs, final InetAddress endpoint)
     {
         if (rs instanceof NetworkTopologyStrategy)
-            return getStrategy(tokenMetadata, (NetworkTopologyStrategy) rs, rs.snitch, endpoint);
+        {
+            IEndpointSnitch snitch = rs.snitch;
+            final String dc = snitch.getDatacenter(endpoint);
+            return getStrategy(tokenMetadata, dc, ((NetworkTopologyStrategy) rs).getReplicationFactor(dc), snitch, endpoint);
+        }
         if (rs instanceof SimpleStrategy)
-            return getStrategy(tokenMetadata, (SimpleStrategy) rs, endpoint);
+            return getStrategy(tokenMetadata, rs.getReplicationFactor(), endpoint);
         throw new ConfigurationException("Token allocation does not support replication strategy " + rs.getClass().getSimpleName());
     }
 
-    static StrategyAdapter getStrategy(final TokenMetadata tokenMetadata, final SimpleStrategy rs, final InetAddress endpoint)
+    static StrategyAdapter getStrategy(final TokenMetadata tokenMetadata, final int replicas, final InetAddress endpoint)
     {
-        final int replicas = rs.getReplicationFactor();
-
         return new StrategyAdapter()
         {
             @Override
@@ -198,12 +211,9 @@ public class TokenAllocation
         };
     }
 
-    static StrategyAdapter getStrategy(final TokenMetadata tokenMetadata, final NetworkTopologyStrategy rs, final IEndpointSnitch snitch, final InetAddress endpoint)
+    static StrategyAdapter getStrategy(final TokenMetadata tokenMetadata, String dc, final int localReplicas, final IEndpointSnitch snitch, final InetAddress endpoint)
     {
-        final String dc = snitch.getDatacenter(endpoint);
-        final int replicas = rs.getReplicationFactor(dc);
-
-        if (replicas == 0 || replicas == 1)
+        if (localReplicas == 0 || localReplicas == 1)
         {
             // No replication, each node is treated as separate.
             return new StrategyAdapter()
@@ -229,16 +239,17 @@ public class TokenAllocation
         }
 
         Topology topology = tokenMetadata.getTopology();
-        int racks = topology.getDatacenterRacks().get(dc).asMap().size();
+        Multimap<String, InetAddress> localRacks = topology.getDatacenterRacks().get(dc);
+        int racks = localRacks != null ? localRacks.asMap().size() : 1;
 
-        if (racks >= replicas)
+        if (racks >= localReplicas)
         {
             return new StrategyAdapter()
             {
                 @Override
                 public int replicas()
                 {
-                    return replicas;
+                    return localReplicas;
                 }
 
                 @Override
@@ -254,15 +265,17 @@ public class TokenAllocation
                 }
             };
         }
-        else if (racks == 1)
+        else if (racks == 1 || topology.getDatacenterEndpoints().get(dc).size() < localReplicas)
         {
             // One rack, each node treated as separate.
+            // This is also used as a fallback when number of nodes is lower than the replication factor
+            // (where allocation is done randomly).
             return new StrategyAdapter()
             {
                 @Override
                 public int replicas()
                 {
-                    return replicas;
+                    return localReplicas;
                 }
 
                 @Override
@@ -280,8 +293,9 @@ public class TokenAllocation
         }
         else
             throw new ConfigurationException(
-                    String.format("Token allocation failed: the number of racks %d in datacenter %s is lower than its replication factor %d.",
-                                  racks, dc, replicas));
+                    String.format("Token allocation failed: the number of racks %d in datacenter %s is lower than its replication factor %d.\n" +
+                                  "If you are starting a new datacenter, please make sure that the first %d nodes to start are from different racks.",
+                                  racks, dc, localReplicas, localReplicas));
     }
 }
 
