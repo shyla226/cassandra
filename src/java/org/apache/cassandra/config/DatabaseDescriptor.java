@@ -979,6 +979,14 @@ public class DatabaseDescriptor
         return System.getProperty("cassandra.allocate_tokens_for_keyspace", conf.allocate_tokens_for_keyspace);
     }
 
+    public static Integer getAllocateTokensForLocalReplicationFactor()
+    {
+        String propValue = System.getProperty(Config.PROPERTY_PREFIX + "allocate_tokens_for_local_replication_factor");
+        if (propValue != null)
+            return Integer.parseInt(propValue);
+        return conf.allocate_tokens_for_local_replication_factor;
+    }
+
     public static Collection<String> tokensFromString(String tokenString)
     {
         List<String> tokens = new ArrayList<String>();

@@ -1,4 +1,7 @@
 DSE 5.0.8
+ * Add allocate_tokens_for_local_replication_factor flag (APOLLO-34)
+ * Backport CASSANDRA-13080: Use new token allocation for non bootstrap case as well (APOLLO-34)
+ * Backport CASSANDRA-12990: More fixes to the TokenAllocator (APOLLO-34)
  * cqlsh SOURCE cmd shouldn't assume PlainTextAuthenticator (APOLLO-492)
  * Skip flush on repair streaming (APOLLO-466)
  * Minor optimization in GPFS, and related snitches (APOLLO-479)

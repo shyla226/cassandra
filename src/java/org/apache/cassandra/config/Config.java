@@ -81,6 +81,8 @@ public class Config
     public Integer num_tokens = 1;
     /** Triggers automatic allocation of tokens if set, using the replication strategy of the referenced keyspace */
     public String allocate_tokens_for_keyspace = null;
+    /** Alternative direct specification of the local replication factor to use */
+    public Integer allocate_tokens_for_local_replication_factor = null;
 
     public volatile Long request_timeout_in_ms = 10000L;
 
