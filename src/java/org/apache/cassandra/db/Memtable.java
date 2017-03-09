@@ -29,6 +29,8 @@ import com.google.common.base.Throwables;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.db.rows.MergeReducer;
+import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +60,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
@@ -448,28 +451,28 @@ public class Memtable implements Comparable<Memtable>
         return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), minLocalDeletionTime, columnFilter, dataRange);
     }
 
-    private Pair<List<Set<PartitionPosition>>, List<Collection<AtomicBTreePartition>>> getAllSortedPartitions()
+    private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getAllSortedPartitions()
     {
         List<Set<PartitionPosition>> keySetList = new ArrayList<>(partitions.size());
-        List<Collection<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
+        List<Iterator<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
         for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
         {
             keySetList.add(partitionSubrange.navigableKeySet());
-            partitionSetList.add(partitionSubrange.values());
+            partitionSetList.add(partitionSubrange.values().iterator());
         }
         return Pair.create(keySetList, partitionSetList);
     }
 
-    private Pair<List<Set<PartitionPosition>>, List<Collection<AtomicBTreePartition>>> getSortedSubrange(PartitionPosition from, PartitionPosition to)
+    private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getSortedSubrange(PartitionPosition from, PartitionPosition to)
     {
         List<Set<PartitionPosition>> keySetList = new ArrayList<>(partitions.size());
-        List<Collection<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
+        List<Iterator<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
         for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
         {
             SortedMap<PartitionPosition, AtomicBTreePartition> submap = partitionSubrange.subMap(from, to);
             // TreeMap returns these in normal sorted order
             keySetList.add(submap.keySet());
-            partitionSetList.add(submap.values());
+            partitionSetList.add(submap.values().iterator());
         }
         return Pair.create(keySetList, partitionSetList);
     }
@@ -497,7 +500,7 @@ public class Memtable implements Comparable<Memtable>
     {
         private final long estimatedSize;
         private final List<Set<PartitionPosition>> keysToFlush;
-        private final List<Collection<AtomicBTreePartition>> partitionsToFlush;
+        private final List<Iterator<AtomicBTreePartition>> partitionsToFlush;
 
         private final boolean isBatchLogTable;
         private final SSTableMultiWriter writer;
@@ -516,7 +519,7 @@ public class Memtable implements Comparable<Memtable>
             this(getAllSortedPartitions(), null, null, null, txn);
         }
 
-        private FlushRunnable(Pair<List<Set<PartitionPosition>>, List<Collection<AtomicBTreePartition>>> toFlush,
+        private FlushRunnable(Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> toFlush,
                               Directories.DataDirectory flushLocation, PartitionPosition from, PartitionPosition to, LifecycleTransaction txn)
         {
             this.keysToFlush = toFlush.left;
@@ -558,12 +561,43 @@ public class Memtable implements Comparable<Memtable>
         {
             logger.debug("Writing {}, flushed range = ({}, {}]", Memtable.this.toString(), from, to);
 
+            List<Iterator<AtomicBTreePartition>> partitions = partitionsToFlush;
+
+            // TPC: For OrderPreservingPartitioners we must merge across the memtable ranges
+            // To ensure the partitions are written in the correct order.
+            // As the ranges in TPC are based on long token and not the ordered token
+            if (cfs.metadata().partitioner.preservesOrder() && partitionsToFlush.size() > 1)
+            {
+                partitions = Collections.singletonList(MergeIterator.get(partitionsToFlush, Comparator.comparing(AtomicBTreePartition::partitionKey), new Reducer<AtomicBTreePartition, AtomicBTreePartition>()
+                {
+                    AtomicBTreePartition reduced = null;
+
+                    @Override
+                    public boolean trivialReduceIsTrivial()
+                    {
+                        return true;
+                    }
+
+                    public void reduce(int idx, AtomicBTreePartition current)
+                    {
+                        reduced = current;
+                    }
+
+                    protected AtomicBTreePartition getReduced()
+                    {
+                        return reduced;
+                    }
+                }));
+            }
+
             // (we can't clear out the map as-we-go to free up memory,
             //  since the memtable is being used for queries in the "pending flush" category)
-            for (Collection<AtomicBTreePartition> partitionSet : partitionsToFlush)
+            for (Iterator<AtomicBTreePartition> partitionSet : partitions)
             {
-                for (AtomicBTreePartition partition : partitionSet)
+                while (partitionSet.hasNext())
                 {
+                    AtomicBTreePartition partition  = partitionSet.next();
+
                     // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
                     // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
                     // we don't need to preserve tombstones for repair. So if both operation are in this

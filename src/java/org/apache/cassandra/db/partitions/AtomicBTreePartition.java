@@ -120,7 +120,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         }
         finally
         {
-            return indexer.commit().andThen(Single.just(new long[]{updater.dataSize, updater.colUpdateTimeDelta}));
+            return indexer.commit().toSingleDefault(new long[]{updater.dataSize, updater.colUpdateTimeDelta});
         }
     }
 
