@@ -29,9 +29,14 @@ import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Flowable;
-import io.reactivex.Maybe;
 import io.reactivex.Scheduler;
-import org.apache.cassandra.db.*;
+import io.reactivex.Single;
+import org.apache.cassandra.db.Clusterable;
+import org.apache.cassandra.db.Columns;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
@@ -49,7 +54,7 @@ public class FlowablePartitions
 {
     public static UnfilteredRowIterator toIterator(FlowableUnfilteredPartition source)
     {
-        IteratorSubscription subscr = new IteratorSubscription(source.header, source.staticRow.blockingGet(Rows.EMPTY_STATIC_ROW));
+        IteratorSubscription subscr = new IteratorSubscription(source.header, source.staticRow.blockingGet());
         source.content.subscribe(subscr);
         return subscr;
     }
@@ -122,14 +127,14 @@ public class FlowablePartitions
             data = data.subscribeOn(callOn);
         Row staticRow = iter.staticRow();
         return new FlowableUnfilteredPartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), iter.partitionLevelDeletion(), iter.columns(), iter.isReverseOrder(), iter.stats()),
-                                               staticRow.isEmpty() ? Maybe.empty() : Maybe.just(staticRow),
+                                               staticRow.isEmpty() ? Rows.EMPTY_STATIC_ROW_SINGLE : Single.just(staticRow),
                                                data);
     }
 
     public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
     {
         return new FlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS),
-                                               Maybe.empty(),
+                                               Rows.EMPTY_STATIC_ROW_SINGLE,
                                                Flowable.empty());
     }
 
@@ -145,12 +150,12 @@ public class FlowablePartitions
         PartitionHeader header = first.header.mergeWith(flowables.stream().skip(1).map(x -> x.header).iterator());
         MergeReducer reducer = new MergeReducer(flowables.size(), nowInSec, header, null);
 
-        Maybe<Row> staticRow;
+        Single<Row> staticRow;
         if (!header.columns.statics.isEmpty())
-            staticRow = Maybe.zip(ImmutableList.copyOf(Lists.transform(flowables, x -> x.staticRow)),
-                                  list -> mergeStaticRows(list, header.partitionLevelDeletion, header.columns.statics, nowInSec));
+            staticRow = Single.zip(ImmutableList.copyOf(Lists.transform(flowables, x -> x.staticRow)),
+                                   list -> mergeStaticRows(list, header.partitionLevelDeletion, header.columns.statics, nowInSec));
         else
-            staticRow = Maybe.empty();
+            staticRow = Rows.EMPTY_STATIC_ROW_SINGLE;
 
         Comparator<Clusterable> comparator = header.metadata.comparator;
         if (header.isReverseOrder)

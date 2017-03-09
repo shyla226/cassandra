@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.Flowable;
-import io.reactivex.Maybe;
 import io.reactivex.Single;
 
 /**
@@ -44,7 +43,7 @@ import io.reactivex.Single;
  */
 public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered, PartitionHeader>
 {
-    public FlowableUnfilteredPartition(PartitionHeader header, Maybe<Row> staticRow, Flowable<Unfiltered> content)
+    public FlowableUnfilteredPartition(PartitionHeader header, Single<Row> staticRow, Flowable<Unfiltered> content)
     {
         super(header, staticRow, content);
     }

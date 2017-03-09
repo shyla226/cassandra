@@ -18,7 +18,7 @@
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.Flowable;
-import io.reactivex.Maybe;
+import io.reactivex.Single;
 
 /**
  * Base class for the flowable versions of partitions.
@@ -34,7 +34,7 @@ public abstract class FlowablePartitionBase<T, Header>
     /**
      * The static part corresponding to this partition.
      */
-    public final Maybe<Row> staticRow;
+    public final Single<Row> staticRow;
 
     /**
      * The partition's contents as a Flowable. This must be subscribed to exactly once, and will close all
@@ -43,7 +43,7 @@ public abstract class FlowablePartitionBase<T, Header>
     public final Flowable<T> content;
 
     public FlowablePartitionBase(Header header,
-                                 Maybe<Row> staticRow,
+                                 Single<Row> staticRow,
                                  Flowable<T> content)
     {
         this.header = header;

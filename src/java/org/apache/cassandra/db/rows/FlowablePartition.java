@@ -18,7 +18,7 @@
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.Flowable;
-import io.reactivex.Maybe;
+import io.reactivex.Single;
 
 /**
  * A partition container providing access to the rows of the partition together with deletion informations.
@@ -34,7 +34,7 @@ import io.reactivex.Maybe;
 public class FlowablePartition extends FlowablePartitionBase<Row, PartitionHeader>
 {
 
-    public FlowablePartition(PartitionHeader header, Maybe<Row> staticRow, Flowable<Row> content)
+    public FlowablePartition(PartitionHeader header, Single<Row> staticRow, Flowable<Row> content)
     {
         super(header, staticRow, content);
     }

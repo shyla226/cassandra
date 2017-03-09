@@ -39,6 +39,7 @@ public abstract class Rows
     private Rows() {}
 
     public static final Row EMPTY_STATIC_ROW = BTreeRow.emptyRow(Clustering.STATIC_CLUSTERING);
+    public static final Single<Row> EMPTY_STATIC_ROW_SINGLE = Single.just(EMPTY_STATIC_ROW);
 
     public static Row.Builder copy(Row row, Row.Builder builder)
     {
