@@ -22,7 +22,13 @@ package org.apache.cassandra.index.sasi;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.UUID;
+
+import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -49,12 +55,12 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     private final ColumnFamilyStore cfs;
     private final UUID compactionId = UUIDGen.getTimeUUID();
 
-    private final SortedMap<SSTableReader, Map<ColumnDefinition, ColumnIndex>> sstables;
+    private final SortedMap<SSTableReader, Multimap<ColumnDefinition, ColumnIndex>> sstables;
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
 
-    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Map<ColumnDefinition, ColumnIndex>> sstables)
+    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Multimap<ColumnDefinition, ColumnIndex>> sstables)
     {
         long totalIndexBytes = 0;
         for (SSTableReader sstable : sstables.keySet())
@@ -68,10 +74,10 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     public void build()
     {
         AbstractType<?> keyValidator = cfs.metadata.getKeyValidator();
-        for (Map.Entry<SSTableReader, Map<ColumnDefinition, ColumnIndex>> e : sstables.entrySet())
+        for (Map.Entry<SSTableReader, Multimap<ColumnDefinition, ColumnIndex>> e : sstables.entrySet())
         {
             SSTableReader sstable = e.getKey();
-            Map<ColumnDefinition, ColumnIndex> indexes = e.getValue();
+            Multimap<ColumnDefinition, ColumnIndex> indexes = e.getValue();
 
             try (RandomAccessReader dataFile = sstable.openDataReader())
             {

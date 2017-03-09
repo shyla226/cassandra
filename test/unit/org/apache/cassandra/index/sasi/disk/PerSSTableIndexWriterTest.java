@@ -116,7 +116,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
                 indexWriter.nextUnfilteredCluster(key.getValue());
             }
 
-            PerSSTableIndexWriter.Index index = indexWriter.getIndex(column);
+            PerSSTableIndexWriter.Index index = getFirstIndex(indexWriter, column);
 
             OnDiskIndex segment = index.scheduleSegmentFlush(false).call();
             index.segments.add(Futures.immediateFuture(segment));
@@ -126,7 +126,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         for (String segment : segments)
             Assert.assertTrue(new File(segment).exists());
 
-        String indexFile = indexWriter.indexes.get(column).filename(true);
+        String indexFile = getFirstIndex(indexWriter, column).filename(true);
 
         // final flush
         indexWriter.complete();
@@ -172,29 +172,31 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
         ColumnDefinition column = cfs.metadata.getColumnDefinition(UTF8Type.instance.decompose(columnName));
 
-        SASIIndex sasi = (SASIIndex) cfs.indexManager.getIndexByName(columnName);
+        SASIIndex timestampIndex = (SASIIndex) cfs.indexManager.getIndexByName(columnName);
 
         File directory = cfs.getDirectories().getDirectoryForNewSSTables();
         Descriptor descriptor = Descriptor.fromFilename(cfs.getSSTablePath(directory));
-        PerSSTableIndexWriter indexWriter = (PerSSTableIndexWriter) sasi.getFlushObserver(descriptor, OperationType.FLUSH);
+        PerSSTableIndexWriter indexWriter = (PerSSTableIndexWriter) timestampIndex.getFlushObserver(descriptor, OperationType.FLUSH);
 
         final long now = System.currentTimeMillis();
 
         indexWriter.begin();
-        indexWriter.indexes.put(column, indexWriter.newIndex(sasi.getIndex()));
 
-        populateSegment(cfs.metadata, indexWriter.getIndex(column), new HashMap<Long, Set<Integer>>()
+        Assert.assertEquals(indexWriter.getIndexes(column).size(), 1);
+        populateSegment(cfs.metadata, getFirstIndex(indexWriter, column), new HashMap<Long, Set<Integer>>()
         {{
             put(now,     new HashSet<>(Arrays.asList(0, 1)));
             put(now + 1, new HashSet<>(Arrays.asList(2, 3)));
             put(now + 2, new HashSet<>(Arrays.asList(4, 5, 6, 7, 8, 9)));
         }});
 
-        Callable<OnDiskIndex> segmentBuilder = indexWriter.getIndex(column).scheduleSegmentFlush(false);
+        Assert.assertEquals(indexWriter.getIndexes(column).size(), 1);
+        Callable<OnDiskIndex> segmentBuilder = getFirstIndex(indexWriter, column).scheduleSegmentFlush(false);
 
         Assert.assertNull(segmentBuilder.call());
 
-        PerSSTableIndexWriter.Index index = indexWriter.getIndex(column);
+        Assert.assertEquals(indexWriter.getIndexes(column).size(), 1);
+        PerSSTableIndexWriter.Index index = getFirstIndex(indexWriter, column);
         Random random = ThreadLocalRandom.current();
 
         Set<String> segments = new HashSet<>();
@@ -247,5 +249,10 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
                 index.add(term, metadata.partitioner.decorateKey(key), ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE - 1));
             }
         }
+    }
+
+    private static PerSSTableIndexWriter.Index getFirstIndex(PerSSTableIndexWriter writer, ColumnDefinition column)
+    {
+        return writer.getIndexes(column).get(0);
     }
 }

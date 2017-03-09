@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.Operator;
@@ -58,6 +59,7 @@ public class ColumnIndex
     private final AbstractType<?> keyValidator;
 
     private final ColumnDefinition column;
+    // Config can be null if the column index is "fake", created for the filtering expression.
     private final Optional<IndexMetadata> config;
 
     private final AtomicReference<IndexMemtable> memtable;
@@ -255,5 +257,30 @@ public class ColumnIndex
             default:
                 return null;
         }
+    }
+
+    public String toString()
+    {
+        return "ColumnIndex(column = " + getColumnName() + ", name = " + getIndexName() + ")";
+    }
+
+    public boolean equals(Object obj)
+    {
+        if (obj == this)
+            return true;
+
+        if (!(obj instanceof ColumnIndex))
+            return false;
+
+        ColumnIndex other = (ColumnIndex) obj;
+
+        return Objects.equal(column, other.column) &&
+               Objects.equal(config, other.config) &&
+               Objects.equal(keyValidator, other.keyValidator);
+    }
+
+    public int hashCode()
+    {
+        return Objects.hashCode(column, config, keyValidator);
     }
 }

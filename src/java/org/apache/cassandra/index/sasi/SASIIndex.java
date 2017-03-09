@@ -21,6 +21,9 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.Multimap;
+
 import com.googlecode.concurrenttrees.common.Iterables;
 
 import org.apache.cassandra.config.*;
@@ -67,7 +70,7 @@ public class SASIIndex implements Index, INotificationConsumer
                                                        Set<Index> indexes,
                                                        Collection<SSTableReader> sstablesToRebuild)
         {
-            NavigableMap<SSTableReader, Map<ColumnDefinition, ColumnIndex>> sstables = new TreeMap<>((a, b) -> {
+            NavigableMap<SSTableReader, Multimap<ColumnDefinition, ColumnIndex>>sstables = new TreeMap<>((a, b) -> {
                 return Integer.compare(a.descriptor.generation, b.descriptor.generation);
             });
 
@@ -79,9 +82,9 @@ public class SASIIndex implements Index, INotificationConsumer
                        sstablesToRebuild.stream()
                                         .filter((sstable) -> !sasi.index.hasSSTable(sstable))
                                         .forEach((sstable) -> {
-                                            Map<ColumnDefinition, ColumnIndex> toBuild = sstables.get(sstable);
+                                            Multimap<ColumnDefinition, ColumnIndex> toBuild = sstables.get(sstable);
                                             if (toBuild == null)
-                                                sstables.put(sstable, (toBuild = new HashMap<>()));
+                                                sstables.put(sstable, (toBuild = HashMultimap.create()));
 
                                             toBuild.put(sasi.index.getDefinition(), sasi.index);
                                         });
@@ -108,14 +111,14 @@ public class SASIIndex implements Index, INotificationConsumer
         Tracker tracker = baseCfs.getTracker();
         tracker.subscribe(this);
 
-        SortedMap<SSTableReader, Map<ColumnDefinition, ColumnIndex>> toRebuild = new TreeMap<>((a, b)
+        SortedMap<SSTableReader, Multimap<ColumnDefinition, ColumnIndex>> toRebuild = new TreeMap<>((a, b)
                                                 -> Integer.compare(a.descriptor.generation, b.descriptor.generation));
 
         for (SSTableReader sstable : index.init(tracker.getView().liveSSTables()))
         {
-            Map<ColumnDefinition, ColumnIndex> perSSTable = toRebuild.get(sstable);
+            Multimap<ColumnDefinition, ColumnIndex> perSSTable = toRebuild.get(sstable);
             if (perSSTable == null)
-                toRebuild.put(sstable, (perSSTable = new HashMap<>()));
+                toRebuild.put(sstable, (perSSTable = HashMultimap.create()));
 
             perSSTable.put(index.getDefinition(), index);
         }
@@ -294,7 +297,9 @@ public class SASIIndex implements Index, INotificationConsumer
 
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, OperationType opType)
     {
-        return newWriter(baseCfs.metadata.getKeyValidator(), descriptor, Collections.singletonMap(index.getDefinition(), index), opType);
+        Multimap<ColumnDefinition, ColumnIndex> indexes = HashMultimap.create();
+        indexes.put(index.getDefinition(), index);
+        return newWriter(baseCfs.metadata.getKeyValidator(), descriptor, indexes, opType);
     }
 
     public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
@@ -341,7 +346,7 @@ public class SASIIndex implements Index, INotificationConsumer
 
     protected static PerSSTableIndexWriter newWriter(AbstractType<?> keyValidator,
                                                      Descriptor descriptor,
-                                                     Map<ColumnDefinition, ColumnIndex> indexes,
+                                                     Multimap<ColumnDefinition, ColumnIndex> indexes,
                                                      OperationType opType)
     {
         return new PerSSTableIndexWriter(keyValidator, descriptor, opType, indexes);
