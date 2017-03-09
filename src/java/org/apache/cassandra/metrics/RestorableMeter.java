@@ -41,10 +41,11 @@ public class RestorableMeter
     private final RestorableEWMA m15Rate;
     private final RestorableEWMA m120Rate;
 
-    private final AtomicLong count = new AtomicLong();
+    private final Counter count = Counter.make(false);
     private final long startTime;
     private final AtomicLong lastTick;
-    private final Clock clock = Clock.defaultClock();
+    private final Clock clock = ApproximateClock.defaultClock();
+    private final AtomicLong lastCounted = new AtomicLong();
 
     /**
      * Creates a new, uninitialized RestorableMeter.
@@ -86,11 +87,19 @@ public class RestorableMeter
                 final long requiredTicks = age / TICK_INTERVAL;
                 for (long i = 0; i < requiredTicks; i++)
                 {
-                    m15Rate.tick();
-                    m120Rate.tick();
+                    final long count = getUncounted();
+                    m15Rate.tick(count);
+                    m120Rate.tick(count);
                 }
             }
         }
+    }
+
+    private long getUncounted()
+    {
+        long current = count();
+        long previous = lastCounted.getAndSet(current);
+        return current - previous;
     }
 
     /**
@@ -109,9 +118,7 @@ public class RestorableMeter
     public void mark(long n)
     {
         tickIfNecessary();
-        count.addAndGet(n);
-        m15Rate.update(n);
-        m120Rate.update(n);
+        count.inc(n);
     }
 
     /**
@@ -138,7 +145,7 @@ public class RestorableMeter
      */
     public long count()
     {
-        return count.get();
+        return count.getCount();
     }
 
     /**
@@ -162,7 +169,6 @@ public class RestorableMeter
         private volatile boolean initialized = false;
         private volatile double rate = 0.0; // average rate in terms of events per nanosecond
 
-        private final AtomicLong uncounted = new AtomicLong();
         private final double alpha, interval;
 
         /**
@@ -189,26 +195,14 @@ public class RestorableMeter
         }
 
         /**
-         * Update the moving average with a new value.
-         */
-        public void update(long n)
-        {
-            uncounted.addAndGet(n);
-        }
-
-        /**
          * Mark the passage of time and decay the current rate accordingly.
          */
-        public void tick()
+        public void tick(long count)
         {
-            final long count = uncounted.getAndSet(0);
             final double instantRate = count / interval;
-            if (initialized)
-            {
+            if (initialized) {
                 rate += (alpha * (instantRate - rate));
-            }
-            else
-            {
+            } else {
                 rate = instantRate;
                 initialized = true;
             }

@@ -24,10 +24,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
-
-import com.google.common.util.concurrent.Uninterruptibles;
 
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSetFuture;
@@ -38,7 +35,6 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.service.StorageService;
@@ -46,7 +42,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.profile.LinuxPerfAsmProfiler;
-import org.openjdk.jmh.profile.StackProfiler;
 import org.openjdk.jmh.results.Result;
 import org.openjdk.jmh.results.RunResult;
 import org.openjdk.jmh.runner.Runner;

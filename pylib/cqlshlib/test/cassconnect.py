@@ -25,7 +25,7 @@ from .run_cqlsh import run_cqlsh, call_cqlsh
 test_keyspace_init = os.path.join(rundir, 'test_keyspace_init.cql')
 
 def get_cassandra_connection(cql_version=None):
-    conn = cql((TEST_HOST,), TEST_PORT, cql_version=cql_version, load_balancing_policy=policy)
+    conn = cql((TEST_HOST,), TEST_PORT, cql_version=cql_version)
     # until the cql lib does this for us
     conn.cql_version = cql_version
     return conn

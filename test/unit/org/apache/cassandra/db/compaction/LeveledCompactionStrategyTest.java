@@ -76,7 +76,11 @@ public class LeveledCompactionStrategyTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        // Disable tombstone histogram rounding for tests
+        System.setProperty("cassandra.streaminghistogram.roundseconds", "1");
+
         SchemaLoader.prepareServer();
+
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARDDLEVELED)
@@ -117,7 +121,7 @@ public class LeveledCompactionStrategyTest
         // Adds enough data to trigger multiple sstable per level
         for (int r = 0; r < rows; r++)
         {
-            UpdateBuilder update = UpdateBuilder.create(cfs.metadata, String.valueOf(r));
+            UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), String.valueOf(r));
             for (int c = 0; c < columns; c++)
                 update.newRow("column" + c).add("val", value);
             update.applyUnsafe();
@@ -173,7 +177,7 @@ public class LeveledCompactionStrategyTest
         // Adds enough data to trigger multiple sstable per level
         for (int r = 0; r < rows; r++)
         {
-            UpdateBuilder update = UpdateBuilder.create(cfs.metadata, String.valueOf(r));
+            UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), String.valueOf(r));
             for (int c = 0; c < columns; c++)
                 update.newRow("column" + c).add("val", value);
             update.applyUnsafe();
@@ -189,7 +193,7 @@ public class LeveledCompactionStrategyTest
         Range<Token> range = new Range<>(Util.token(""), Util.token(""));
         int gcBefore = keyspace.getColumnFamilyStore(CF_STANDARDDLEVELED).gcBefore(FBUtilities.nowInSeconds());
         UUID parentRepSession = UUID.randomUUID();
-        ActiveRepairService.instance.registerParentRepairSession(parentRepSession, FBUtilities.getBroadcastAddress(), Arrays.asList(cfs), Arrays.asList(range), false, System.currentTimeMillis(), true);
+        ActiveRepairService.instance.registerParentRepairSession(parentRepSession, FBUtilities.getBroadcastAddress(), Arrays.asList(cfs), Arrays.asList(range), false, ActiveRepairService.UNREPAIRED_SSTABLE, true);
         RepairJobDesc desc = new RepairJobDesc(parentRepSession, UUID.randomUUID(), KEYSPACE1, CF_STANDARDDLEVELED, Arrays.asList(range));
         Validator validator = new Validator(desc, FBUtilities.getBroadcastAddress(), gcBefore);
         CompactionManager.instance.submitValidation(cfs, validator).get();
@@ -239,7 +243,7 @@ public class LeveledCompactionStrategyTest
         int columns = 10;
         for (int r = 0; r < rows; r++)
         {
-            UpdateBuilder update = UpdateBuilder.create(cfs.metadata, String.valueOf(r));
+            UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), String.valueOf(r));
             for (int c = 0; c < columns; c++)
                 update.newRow("column" + c).add("val", value);
             update.applyUnsafe();
@@ -276,7 +280,7 @@ public class LeveledCompactionStrategyTest
         // Adds enough data to trigger multiple sstable per level
         for (int r = 0; r < rows; r++)
         {
-            UpdateBuilder update = UpdateBuilder.create(cfs.metadata, String.valueOf(r));
+            UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), String.valueOf(r));
             for (int c = 0; c < columns; c++)
                 update.newRow("column" + c).add("val", value);
             update.applyUnsafe();
@@ -317,7 +321,7 @@ public class LeveledCompactionStrategyTest
         // Adds enough data to trigger multiple sstable per level
         for (int r = 0; r < rows; r++)
         {
-            UpdateBuilder update = UpdateBuilder.create(cfs.metadata, String.valueOf(r));
+            UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), String.valueOf(r));
             for (int c = 0; c < columns; c++)
                 update.newRow("column" + c).add("val", value);
             update.applyUnsafe();
@@ -350,7 +354,7 @@ public class LeveledCompactionStrategyTest
         SSTableReader sstable1 = unrepaired.manifest.generations[2].get(0);
         SSTableReader sstable2 = unrepaired.manifest.generations[1].get(0);
 
-        sstable1.descriptor.getMetadataSerializer().mutateRepairedAt(sstable1.descriptor, System.currentTimeMillis());
+        sstable1.descriptor.getMetadataSerializer().mutateRepaired(sstable1.descriptor, System.currentTimeMillis(), null);
         sstable1.reloadSSTableMetadata();
         assertTrue(sstable1.isRepaired());
 
@@ -395,7 +399,7 @@ public class LeveledCompactionStrategyTest
         // create 10 sstables that contain data for both key1 and key2
         for (int i = 0; i < numIterations; i++) {
             for (DecoratedKey key : keys) {
-                UpdateBuilder update = UpdateBuilder.create(cfs.metadata, key);
+                UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), key);
                 for (int c = 0; c < columns; c++)
                     update.newRow("column" + c).add("val", value);
                 update.applyUnsafe();
@@ -406,7 +410,7 @@ public class LeveledCompactionStrategyTest
         // create 20 more sstables with 10 containing data for key1 and other 10 containing data for key2
         for (int i = 0; i < numIterations; i++) {
             for (DecoratedKey key : keys) {
-                UpdateBuilder update = UpdateBuilder.create(cfs.metadata, key);
+                UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), key);
                 for (int c = 0; c < columns; c++)
                     update.newRow("column" + c).add("val", value);
                 update.applyUnsafe();

@@ -20,14 +20,17 @@ package org.apache.cassandra.cql3.statements;
 import io.reactivex.Maybe;
 import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event;
 
 public class DropTypeStatement extends SchemaAlteringStatement
@@ -55,7 +58,7 @@ public class DropTypeStatement extends SchemaAlteringStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
-        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(name.getKeyspace());
         if (ksm == null)
         {
             if (ifExists)
@@ -93,10 +96,10 @@ public class DropTypeStatement extends SchemaAlteringStatement
             if (!ut.name.equals(name.getUserTypeName()) && ut.referencesUserType(name.getStringTypeName()))
                 throw new InvalidRequestException(String.format("Cannot drop user type %s as it is still used by user type %s", name, ut.getNameAsString()));
 
-        for (CFMetaData cfm : ksm.tablesAndViews())
-            for (ColumnDefinition def : cfm.allColumns())
+        for (TableMetadata table : ksm.tablesAndViews())
+            for (ColumnMetadata def : table.columns())
                 if (def.type.referencesUserType(name.getStringTypeName()))
-                    throw new InvalidRequestException(String.format("Cannot drop user type %s as it is still used by table %s.%s", name, cfm.ksName, cfm.cfName));
+                    throw new InvalidRequestException(String.format("Cannot drop user type %s as it is still used by table %s", name, table.toString()));
     }
 
     @Override
@@ -105,9 +108,9 @@ public class DropTypeStatement extends SchemaAlteringStatement
         return name.getKeyspace();
     }
 
-    public Maybe<Event.SchemaChange> announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
+    public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws InvalidRequestException, ConfigurationException
     {
-        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(name.getKeyspace());
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(name.getKeyspace());
         if (ksm == null)
             return Maybe.empty(); // do not assert (otherwise IF EXISTS case fails)
 

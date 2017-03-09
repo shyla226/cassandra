@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
-import io.reactivex.Single;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -41,7 +40,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
     {
         iters = new ArrayList<>(sstables.size());
         for (SSTableReader sstable : sstables)
-            iters.add(new KeyIterator(sstable.descriptor, sstable.metadata));
+            iters.add(new KeyIterator(sstable.descriptor, sstable.metadata()));
     }
 
     private void maybeInit()

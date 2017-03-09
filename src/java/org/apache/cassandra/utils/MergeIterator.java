@@ -19,8 +19,6 @@ package org.apache.cassandra.utils;
 
 import java.util.*;
 
-import io.reactivex.Single;
-
 /** Merges sorted input iterators which individually contain unique items. */
 public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implements IMergeIterator<In, Out>
 {
@@ -147,7 +145,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
 
             for (int i = 0; i < iters.size(); i++)
             {
-                Candidate<In> candidate = new Candidate<In>(i, iters.get(i), comp);
+                Candidate<In> candidate = new Candidate<>(i, iters.get(i), comp);
                 heap[size++] = candidate;
             }
             needingAdvance = size;
@@ -408,7 +406,7 @@ public abstract class MergeIterator<In,Out> extends AbstractIterator<Out> implem
             }
             else
             {
-                reducer.reduce(idx, (item));
+                reducer.reduce(idx, item);
                 item = null;
             }
         }

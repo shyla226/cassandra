@@ -30,6 +30,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.net.IncomingStreamingConnection;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
+
 /**
  * A future on the result ({@link StreamState}) of a streaming plan.
  *
@@ -71,10 +73,9 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
             set(getCurrentState());
     }
 
-    private StreamResultFuture(UUID planId, String description, boolean keepSSTableLevels, boolean isIncremental)
+    private StreamResultFuture(UUID planId, String description, boolean keepSSTableLevels, boolean isIncremental, UUID pendingRepair)
     {
-        this(planId, description, new StreamCoordinator(0, keepSSTableLevels, isIncremental,
-                                                        new DefaultConnectionFactory(), false));
+        this(planId, description, new StreamCoordinator(0, keepSSTableLevels, isIncremental, new DefaultConnectionFactory(), false, pendingRepair));
     }
 
     static StreamResultFuture init(UUID planId, String description, Collection<StreamEventHandler> listeners,
@@ -92,7 +93,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
         // Initialize and start all sessions
         for (final StreamSession session : coordinator.getAllStreamSessions())
         {
-            session.init(future);
+            session.init(future, !future.isRepairSession());
         }
 
         coordinator.connect(future);
@@ -108,7 +109,8 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
                                                                     boolean isForOutgoing,
                                                                     int version,
                                                                     boolean keepSSTableLevel,
-                                                                    boolean isIncremental) throws IOException
+                                                                    boolean isIncremental,
+                                                                    UUID pendingRepair) throws IOException
     {
         StreamResultFuture future = StreamManager.instance.getReceivingStream(planId);
         if (future == null)
@@ -116,7 +118,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
             logger.info("[Stream #{} ID#{}] Creating new streaming plan for {}", planId, sessionIndex, description);
 
             // The main reason we create a StreamResultFuture on the receiving side is for JMX exposure.
-            future = new StreamResultFuture(planId, description, keepSSTableLevel, isIncremental);
+            future = new StreamResultFuture(planId, description, keepSSTableLevel, isIncremental, pendingRepair);
             StreamManager.instance.registerReceiving(future);
         }
         future.attachConnection(from, sessionIndex, connection, isForOutgoing, version);
@@ -134,8 +136,13 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
     private void attachConnection(InetAddress from, int sessionIndex, IncomingStreamingConnection connection, boolean isForOutgoing, int version) throws IOException
     {
         StreamSession session = coordinator.getOrCreateSessionById(from, sessionIndex, connection.socket.getInetAddress());
-        session.init(this);
+        session.init(this, !isRepairSession()); //Avoid flush storm during repair (APOLLO-466)
         session.handler.initiateOnReceivingSide(connection, isForOutgoing, version);
+    }
+
+    private boolean isRepairSession()
+    {
+        return REPAIR_STREAM_PLAN_DESCRIPTION.equals(description);
     }
 
     public void addEventListener(StreamEventHandler listener)

@@ -41,6 +41,31 @@ public class GcCompactionTest extends CQLTester
     static final int KEY_COUNT = 10;
     static final int CLUSTERING_COUNT = 20;
 
+    // Test needs synchronous table drop to avoid flushes causing flaky failures
+
+    @Override
+    public String createTable(String query)
+    {
+        return super.createTable(KEYSPACE_PER_TEST, query);
+    }
+
+    @Override
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
+    {
+        return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
+    }
+
+    @Override
+    public ColumnFamilyStore getCurrentColumnFamilyStore()
+    {
+        return super.getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
+    }
+
+    public void flush()
+    {
+        flush(KEYSPACE_PER_TEST);
+    }
+
     @Test
     public void testGcCompactionPartitions() throws Throwable
     {
@@ -348,7 +373,7 @@ public class GcCompactionTest extends CQLTester
         {
             while (partitions.hasNext())
             {
-                try (UnfilteredRowIterator iter = partitions.next().blockingGet())
+                try (UnfilteredRowIterator iter = partitions.next())
                 {
                     instances += partitionPredicate.apply(iter);
                     while (iter.hasNext())

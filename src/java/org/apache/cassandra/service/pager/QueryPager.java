@@ -19,7 +19,6 @@ package org.apache.cassandra.service.pager;
 
 import io.reactivex.Single;
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -50,17 +49,12 @@ public interface QueryPager
 {
     QueryPager EMPTY = new QueryPager()
     {
-        public ReadExecutionController executionController()
-        {
-            return ReadExecutionController.empty();
-        }
-
         public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
         {
             return Single.just(EmptyIterators.partition());
         }
 
-        public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController) throws RequestValidationException, RequestExecutionException
+        public Single<PartitionIterator> fetchPageInternal(int pageSize) throws RequestValidationException, RequestExecutionException
         {
             return Single.just(EmptyIterators.partition());
         }
@@ -94,7 +88,8 @@ public interface QueryPager
      * @param clientState the {@code ClientState} for the query. In practice, this can be null unless
      * {@code consistency} is a serial consistency.
      * @param forContinuousPaging this serves the same purpose (and is delegated to) than the similarly
-     * named argument to {@link ReadQuery#execute}. Most importantly, please not that if this is used
+     * named argument to {@link org.apache.cassandra.db.ReadQuery#execute(ConsistencyLevel, ClientState, long, boolean)}.
+     * Most importantly, please not that if this is used
      * and the query is local, then the returned iterator will hold an {@code ExecutionController} open
      * until closed, so you must guarantee that iterator is closed on all path (but in general, the
      * return of this method should always be used in a try-with-resources).
@@ -108,25 +103,12 @@ public interface QueryPager
     throws RequestValidationException, RequestExecutionException;
 
     /**
-     * Starts a new read operation.
-     * <p>
-     * This must be called before {@link QueryPager#fetchPageInternal(int, ReadExecutionController)} and passed
-     * to these methods in order to protect the read.
-     * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
-     * use it in a try-with-ressource construction.
-     *
-     * @return a newly started order group for this {@code QueryPager}.
-     */
-    public ReadExecutionController executionController();
-
-    /**
      * Fetches the next page internally (in other words, this does a local query).
      *
      * @param pageSize the maximum number of elements to return in the next page.
-     * @param executionController the {@code ReadExecutionController} protecting the read.
      * @return the page of result.
      */
-    public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Single<PartitionIterator> fetchPageInternal(int pageSize)
     throws RequestValidationException, RequestExecutionException;
 
     /**

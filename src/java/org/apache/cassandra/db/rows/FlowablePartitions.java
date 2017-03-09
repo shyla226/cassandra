@@ -32,15 +32,12 @@ import io.reactivex.Flowable;
 import io.reactivex.Maybe;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.Clusterable;
-import org.apache.cassandra.db.Columns;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionPurger;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.PartitionColumns;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.MergeFlowable;
 import org.apache.cassandra.utils.Reducer;
@@ -132,9 +129,9 @@ public class FlowablePartitions
                                                data);
     }
 
-    public static FlowableUnfilteredPartition empty(CFMetaData metadata, DecoratedKey partitionKey, boolean reversed)
+    public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
     {
-        return new FlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, PartitionColumns.NONE, reversed, EncodingStats.NO_STATS),
+        return new FlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS),
                                                Maybe.empty(),
                                                Flowable.empty());
     }
@@ -211,10 +208,10 @@ public class FlowablePartitions
 
     public static Flowable<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
     {
-        return iter.asObservable().map(i -> fromIterator(i, scheduler));
+        return FlowableUtils.fromCloseableIterator(iter).map(i -> fromIterator(i, scheduler));
     }
 
-    public static UnfilteredPartitionIterator toPartitions(Flowable<FlowableUnfilteredPartition> source, CFMetaData metadata)
+    public static UnfilteredPartitionIterator toPartitions(Flowable<FlowableUnfilteredPartition> source, TableMetadata metadata)
     {
         UPartitionsSubscription subscr = new UPartitionsSubscription(metadata);
         source.subscribe(subscr);
@@ -229,9 +226,9 @@ public class FlowablePartitions
         BlockingQueue<FlowableUnfilteredPartition> queue = new ArrayBlockingQueue<>(3);  // onComplete comes with next() sometimes, leave one more for onError
         Throwable error = null;
         FlowableUnfilteredPartition next = null;
-        CFMetaData metadata = null;
+        TableMetadata metadata = null;
 
-        UPartitionsSubscription(CFMetaData metadata)
+        UPartitionsSubscription(TableMetadata metadata)
         {
             this.metadata = metadata;
         }
@@ -287,7 +284,7 @@ public class FlowablePartitions
         }
 
         @Override
-        public CFMetaData metadata()
+        public TableMetadata metadata()
         {
             return metadata;
         }
@@ -299,13 +296,13 @@ public class FlowablePartitions
         }
 
         @Override
-        public Single<UnfilteredRowIterator> next()
+        public UnfilteredRowIterator next()
         {
             boolean has = hasNext();
             assert has;
             FlowableUnfilteredPartition toReturn = next;
             next = null;
-            return Single.just(toIterator(toReturn));
+            return toIterator(toReturn);
         }
     }
 

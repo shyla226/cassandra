@@ -270,9 +270,9 @@ class TestCqlshOutput(BaseTestCase):
         # same query should show up as empty in cql 3
         self.assertQueriesGiveColoredOutput((
             (q, """
-             num | asciicol | bigintcol | blobcol | booleancol | decimalcol | doublecol | floatcol | intcol | smallintcol | textcol | timestampcol | tinyintcol | uuidcol | varcharcol | varintcol
-             RRR   MMMMMMMM   MMMMMMMMM   MMMMMMM   MMMMMMMMMM   MMMMMMMMMM   MMMMMMMMM   MMMMMMMM   MMMMMM   MMMMMMMMMMM   MMMMMMM   MMMMMMMMMMMM   MMMMMMMMMM   MMMMMMM   MMMMMMMMMM   MMMMMMMMM
-            -----+----------+-----------+---------+------------+------------+-----------+----------+--------+-------------+---------+--------------+------------+---------+------------+-----------
+             num | asciicol | bigintcol | blobcol | booleancol | decimalcol | doublecol | durationcol | floatcol | intcol | smallintcol | textcol | timestampcol | tinyintcol | uuidcol | varcharcol | varintcol
+             RRR   MMMMMMMM   MMMMMMMMM   MMMMMMM   MMMMMMMMMM   MMMMMMMMMM   MMMMMMMMM   MMMMMMMMMMM   MMMMMMMM   MMMMMM   MMMMMMMMMMM   MMMMMMM   MMMMMMMMMMMM   MMMMMMMMMM   MMMMMMM   MMMMMMMMMM   MMMMMMMMM
+            -----+----------+-----------+---------+------------+------------+-----------+-------------+----------+--------+-------------+---------+--------------+------------+---------+------------+-----------
 
 
             (0 rows)
@@ -519,6 +519,26 @@ class TestCqlshOutput(BaseTestCase):
             """),
         ))
 
+    def test_duration_output(self):
+        self.assertQueriesGiveColoredOutput((
+            ("select num, durationcol from has_all_types where num in (0, 1, 3);", r"""
+             num | durationcol
+             RRR   MMMMMMMMMMM
+            -----+-------------
+
+               0 |          1m
+               G            GG
+               1 |        2m2s
+               G          GGGG
+               3 |         -5m
+               G           GGG
+
+
+            (3 rows)
+            nnnnnnnn
+            """),
+        ))
+
     def test_prompt(self):
         with testrun_cqlsh(tty=True, keyspace=None) as c:
             self.assertTrue(c.output_header.splitlines()[-1].endswith('cqlsh> '))
@@ -601,6 +621,7 @@ class TestCqlshOutput(BaseTestCase):
                 booleancol boolean,
                 decimalcol decimal,
                 doublecol double,
+                durationcol duration,
                 floatcol float,
                 intcol int,
                 smallintcol smallint,
@@ -615,7 +636,7 @@ class TestCqlshOutput(BaseTestCase):
                 AND cdc = false
                 AND comment = ''
                 AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
-                AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+                AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor', 'min_compress_ratio': '1.1'}
                 AND crc_check_chance = 1.0
                 AND dclocal_read_repair_chance = 0.1
                 AND default_time_to_live = 0

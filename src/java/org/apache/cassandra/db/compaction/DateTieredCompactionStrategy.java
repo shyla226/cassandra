@@ -32,6 +32,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.Pair;
 import org.codehaus.jackson.JsonNode;
 import org.codehaus.jackson.node.JsonNodeFactory;
@@ -46,6 +47,8 @@ import static com.google.common.collect.Iterables.filter;
 public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
 {
     private static final Logger logger = LoggerFactory.getLogger(DateTieredCompactionStrategy.class);
+    private final static String DEPRECATED_WARNING = "DateTieredCompactionStrategy was enabled for '%s.%s' but it is deprecated " +
+                                                     " and its use is discouraged. It is recommended to use TimeWindowCompactionStrategy instead.";
 
     private final DateTieredCompactionStrategyOptions options;
     protected volatile int estimatedRemainingTasks;
@@ -67,6 +70,20 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
             logger.trace("Enabling tombstone compactions for DTCS");
 
         this.stcsOptions = new SizeTieredCompactionStrategyOptions(options);
+    }
+
+    /**
+     * Log a deprecated warning and add the same warning to the client warnings, when a table
+     * or view are configured to use DateTieredCompactionStrategy.
+     *
+     * @param keyspace - the name of the keyspace, this will be included in the warning.
+     * @param viewOrTable - the name of the table or view, this will be included in the warning.
+     */
+    public static void deprecatedWarning(String keyspace, String viewOrTable)
+    {
+        String warning = String.format(DEPRECATED_WARNING, keyspace, viewOrTable);
+        logger.warn(warning);
+        ClientWarn.instance.warn(warning);
     }
 
     @Override
@@ -219,6 +236,12 @@ public class DateTieredCompactionStrategy extends AbstractCompactionStrategy
     public void removeSSTable(SSTableReader sstable)
     {
         sstables.remove(sstable);
+    }
+
+    @Override
+    protected Set<SSTableReader> getSSTables()
+    {
+        return ImmutableSet.copyOf(sstables);
     }
 
     /**

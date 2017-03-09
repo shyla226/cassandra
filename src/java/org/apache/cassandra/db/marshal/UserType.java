@@ -85,12 +85,7 @@ public class UserType extends TupleType
     {
         return true;
     }
-
-    public boolean isTuple()
-    {
-        return false;
-    }
-
+    
     @Override
     public boolean isMultiCell()
     {
@@ -424,5 +419,10 @@ public class UserType extends TupleType
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();
+    }
+
+    public String toCQLString()
+    {
+        return String.format("%s.%s", ColumnIdentifier.maybeQuote(keyspace), ColumnIdentifier.maybeQuote(getNameAsString()));
     }
 }

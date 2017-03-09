@@ -17,27 +17,41 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Arrays;
+
+import com.google.common.collect.Lists;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.Throwables;
 
 public class ReadExecutionController implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadExecutionController.class);
+
     // For every reads
-    private final CFMetaData baseMetadata; // kept to sanity check that we have take the op order on the right table
+    private final TPCOpOrder.Group baseOp;
+    private final TableMetadata baseMetadata; // kept to sanity check that we have take the op order on the right table
 
     // For index reads
     private final ReadExecutionController indexController;
     private final TPCOpOrder.Group writeOp;
+    private boolean closed;
 
-    private ReadExecutionController(CFMetaData baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
+    private ReadExecutionController(TPCOpOrder.Group baseOp, TableMetadata baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
+        assert (baseOp == null) == (baseMetadata == null);
+        this.baseOp = baseOp;
         this.baseMetadata = baseMetadata;
         this.indexController = indexController;
         this.writeOp = writeOp;
+        this.closed = false;
     }
 
     public ReadExecutionController indexReadController()
@@ -52,12 +66,12 @@ public class ReadExecutionController implements AutoCloseable
 
     public boolean validForReadOn(ColumnFamilyStore cfs)
     {
-        return cfs.metadata.cfId.equals(baseMetadata.cfId);
+        return !closed && baseOp != null && cfs.metadata.id.equals(baseMetadata.id);
     }
 
     public static ReadExecutionController empty()
     {
-        return new ReadExecutionController(null, null, null);
+        return new ReadExecutionController(null, null, null, null);
     }
 
     /**
@@ -77,29 +91,36 @@ public class ReadExecutionController implements AutoCloseable
 
         if (indexCfs == null)
         {
-            return new ReadExecutionController(baseCfs.metadata, null, null);
+            return new ReadExecutionController(baseCfs.readOrdering.start(), baseCfs.metadata(), null, null);
         }
         else
         {
-            TPCOpOrder.Group writeOp = null;
+            TPCOpOrder.Group baseOp = null, writeOp = null;
             ReadExecutionController indexController = null;
             // OpOrder.start() shouldn't fail, but better safe than sorry.
             try
             {
-                indexController = new ReadExecutionController(indexCfs.metadata, null, null);
+                baseOp = baseCfs.readOrdering.start();
+                indexController = new ReadExecutionController(indexCfs.readOrdering.start(), indexCfs.metadata(), null, null);
                 // TODO: this should perhaps not open and maintain a writeOp for the full duration, but instead only *try* to delete stale entries, without blocking if there's no room
                 // as it stands, we open a writeOp and keep it open for the duration to ensure that should this CF get flushed to make room we don't block the reclamation of any room being made
                 writeOp = Keyspace.writeOrder.start();
-                return new ReadExecutionController(baseCfs.metadata, indexController, writeOp);
+                return new ReadExecutionController(baseOp, baseCfs.metadata(), indexController, writeOp);
             }
             catch (RuntimeException e)
             {
                 // Note that must have writeOp == null since ReadOrderGroup ctor can't fail
                 assert writeOp == null;
-
-                if (indexController != null)
-                    indexController.close();
-
+                try
+                {
+                    if (baseOp != null)
+                        baseOp.close();
+                }
+                finally
+                {
+                    if (indexController != null)
+                        indexController.close();
+                }
                 throw e;
             }
         }
@@ -111,23 +132,26 @@ public class ReadExecutionController implements AutoCloseable
         return index == null ? null : index.getBackingTable().orElse(null);
     }
 
-    public CFMetaData metaData()
+    public TableMetadata metadata()
     {
         return baseMetadata;
     }
 
     public void close()
     {
-        if (indexController != null)
+        if (closed)
+            return; // this should be idempotent
+
+        Throwable fail = Throwables.perform((Throwable)null,
+                                            () -> {if (baseOp != null) baseOp.close();},
+                                            () -> {if (indexController != null) indexController.close();},
+                                            () -> {if (writeOp != null) writeOp.close();});
+        closed = true;
+
+        if (fail != null)
         {
-            try
-            {
-                indexController.close();
-            }
-            finally
-            {
-                writeOp.close();
-            }
+            JVMStabilityInspector.inspectThrowable(fail);
+            logger.error("Failed to close ReadExecutionController: {}", fail);
         }
     }
 }

@@ -565,6 +565,13 @@ public class DatabaseDescriptor
         if (conf.concurrent_compactors <= 0)
             throw new ConfigurationException("concurrent_compactors should be strictly greater than 0, but was " + conf.concurrent_compactors, false);
 
+        if (conf.sstable_preemptive_open_interval_in_mb > 0 && conf.sstable_preemptive_open_interval_in_mb < 4)
+        {
+            logger.warn("Setting sstable_preemptive_open_interval_in_mb to a very low value ({}) will increase GC pressure " +
+                        "significantly during compactions, and will likely have an adverse effect on performance.",
+                        conf.sstable_preemptive_open_interval_in_mb);
+        }
+
         if (conf.num_tokens > MAX_NUM_TOKENS)
             throw new ConfigurationException(String.format("A maximum number of %d tokens per node is supported", MAX_NUM_TOKENS), false);
 
@@ -689,6 +696,12 @@ public class DatabaseDescriptor
         {
             throw new ConfigurationException("Error configuring back-pressure strategy: " + conf.back_pressure_strategy, ex);
         }
+
+        if (conf.otc_coalescing_enough_coalesced_messages > 128)
+            throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be smaller than 128", false);
+
+        if (conf.otc_coalescing_enough_coalesced_messages <= 0)
+            throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be positive", false);
     }
 
     private static String storagedirFor(String type)
@@ -1357,7 +1370,7 @@ public class DatabaseDescriptor
 
     public static int getContinuousPagingThreads()
     {
-        return conf.continuous_paging.getNumThreads();
+        return conf.continuous_paging.max_threads;
     }
 
     public static int getConcurrentWriters()
@@ -2032,7 +2045,7 @@ public class DatabaseDescriptor
     }
 
     /**
-     * @deprecated use {@link this#getStreamingKeepAlivePeriod()} instead
+     * @deprecated use {@link #getStreamingKeepAlivePeriod()} instead
      * @return streaming_socket_timeout_in_ms property
      */
     @Deprecated
@@ -2044,6 +2057,11 @@ public class DatabaseDescriptor
     public static int getStreamingKeepAlivePeriod()
     {
         return conf.streaming_keep_alive_period_in_secs;
+    }
+
+    public static int getStreamingConnectionsPerHost()
+    {
+        return conf.streaming_connections_per_host;
     }
 
     public static String getLocalDataCenter()
@@ -2125,6 +2143,16 @@ public class DatabaseDescriptor
     public static int getOtcCoalescingWindow()
     {
         return conf.otc_coalescing_window_us;
+    }
+
+    public static int getOtcCoalescingEnoughCoalescedMessages()
+    {
+        return conf.otc_coalescing_enough_coalesced_messages;
+    }
+
+    public static void setOtcCoalescingEnoughCoalescedMessages(int otc_coalescing_enough_coalesced_messages)
+    {
+        conf.otc_coalescing_enough_coalesced_messages = otc_coalescing_enough_coalesced_messages;
     }
 
     public static int getWindowsTimerInterval()
@@ -2268,5 +2296,16 @@ public class DatabaseDescriptor
     public static ContinuousPagingConfig getContinuousPaging()
     {
         return conf.continuous_paging;
+    }
+
+    public static int getMetricsHistogramUpdateTimeMillis()
+    {
+        return conf.metrics_histogram_update_interval_millis;
+    }
+
+    @VisibleForTesting
+    public static void setMetricsHistogramUpdateTimeMillis(int interval)
+    {
+        conf.metrics_histogram_update_interval_millis = interval;
     }
 }

@@ -21,6 +21,7 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.PeekingIterator;
@@ -34,7 +35,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 
 /**
  * A MerkleTree implemented as a binary tree.
@@ -227,10 +227,15 @@ public class MerkleTree implements Serializable
      */
     public static List<TreeRange> difference(MerkleTree ltree, MerkleTree rtree)
     {
+        return diff(ltree, rtree).stream().map(TreeRange.class::cast).collect(Collectors.toList());
+    }
+
+    public static List<TreeDifference> diff(MerkleTree ltree, MerkleTree rtree)
+    {
         if (!ltree.fullRange.equals(rtree.fullRange))
             throw new IllegalArgumentException("Difference only make sense on tree covering the same range (but " + ltree.fullRange + " != " + rtree.fullRange + ")");
 
-        List<TreeRange> diff = new ArrayList<>();
+        List<TreeDifference> diff = new ArrayList<>();
         TreeDifference active = new TreeDifference(ltree.fullRange.left, ltree.fullRange.right, (byte)0);
 
         Hashable lnode = ltree.find(active);
@@ -256,7 +261,7 @@ public class MerkleTree implements Serializable
      * Takes two trees and a range for which they have hashes, but are inconsistent.
      * @return FULLY_INCONSISTENT if active is inconsistent, PARTIALLY_INCONSISTENT if only a subrange is inconsistent.
      */
-    static int differenceHelper(MerkleTree ltree, MerkleTree rtree, List<TreeRange> diff, TreeRange active)
+    static int differenceHelper(MerkleTree ltree, MerkleTree rtree, List<TreeDifference> diff, TreeRange active)
     {
         if (active.depth == Byte.MAX_VALUE)
             return CONSISTENT;
@@ -274,6 +279,7 @@ public class MerkleTree implements Serializable
         rhash = rnode.hash();
         left.setSize(lnode.sizeOfRange(), rnode.sizeOfRange());
         left.setRows(lnode.rowsInRange(), rnode.rowsInRange());
+        left.setHashes(lnode.hash, rnode.hash);
 
         int ldiff = CONSISTENT;
         boolean lreso = lhash != null && rhash != null;
@@ -289,6 +295,7 @@ public class MerkleTree implements Serializable
         rhash = rnode.hash();
         right.setSize(lnode.sizeOfRange(), rnode.sizeOfRange());
         right.setRows(lnode.rowsInRange(), rnode.rowsInRange());
+        left.setHashes(lnode.hash, rnode.hash);
 
         int rdiff = CONSISTENT;
         boolean rreso = lhash != null && rhash != null;
@@ -563,6 +570,8 @@ public class MerkleTree implements Serializable
         private long sizeOnRight;
         private long rowsOnLeft;
         private long rowsOnRight;
+        private byte[] leftHash;
+        private byte[] rightHash;
 
         void setSize(long sizeOnLeft, long sizeOnRight)
         {
@@ -574,6 +583,12 @@ public class MerkleTree implements Serializable
         {
             this.rowsOnLeft = rowsOnLeft;
             this.rowsOnRight = rowsOnRight;
+        }
+
+        void setHashes(byte[] leftHash, byte[] rightHash)
+        {
+            this.leftHash = leftHash;
+            this.rightHash = rightHash;
         }
 
         public long sizeOnLeft()
@@ -606,6 +621,15 @@ public class MerkleTree implements Serializable
             return rowsOnLeft + rowsOnRight;
         }
 
+        public RangeHash getLeftRangeHash()
+        {
+            return new RangeHash(this, leftHash);
+        }
+
+        public RangeHash getRightRangeHash()
+        {
+            return new RangeHash(this, rightHash);
+        }
     }
 
     /**
@@ -619,7 +643,7 @@ public class MerkleTree implements Serializable
     public static class TreeRange extends Range<Token>
     {
         public static final long serialVersionUID = 1L;
-        private final MerkleTree tree;
+        protected final MerkleTree tree;
         public final byte depth;
         private final Hashable hashable;
 

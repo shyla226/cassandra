@@ -25,8 +25,8 @@ import java.util.concurrent.CountDownLatch;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -111,9 +111,9 @@ public class SecondaryIndexTest extends CQLTester
 
         // IF NOT EXISTS should apply in cases where the new index differs from an existing one in name only
         String otherIndexName = "index_" + System.nanoTime();
-        assertEquals(1, getCurrentColumnFamilyStore().metadata.getIndexes().size());
+        assertEquals(1, getCurrentColumnFamilyStore().metadata().indexes.size());
         createIndex("CREATE INDEX IF NOT EXISTS " + otherIndexName + " ON %s(b)");
-        assertEquals(1, getCurrentColumnFamilyStore().metadata.getIndexes().size());
+        assertEquals(1, getCurrentColumnFamilyStore().metadata().indexes.size());
         assertInvalidMessage(String.format("Index %s is a duplicate of existing index %s",
                                            removeQuotes(otherIndexName.toLowerCase(Locale.US)),
                                            removeQuotes(indexName.toLowerCase(Locale.US))),
@@ -845,11 +845,11 @@ public class SecondaryIndexTest extends CQLTester
         createIndex(String.format("CREATE CUSTOM INDEX c_idx_2 ON %%s(c) USING '%s' WITH OPTIONS = {'foo':'b'}", indexClassName));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        CFMetaData cfm = cfs.metadata;
-        StubIndex index1 = (StubIndex)cfs.indexManager.getIndex(cfm.getIndexes()
+        TableMetadata cfm = cfs.metadata();
+        StubIndex index1 = (StubIndex)cfs.indexManager.getIndex(cfm.indexes
                                                                    .get("c_idx_1")
                                                                    .orElseThrow(throwAssert("index not found")));
-        StubIndex index2 = (StubIndex)cfs.indexManager.getIndex(cfm.getIndexes()
+        StubIndex index2 = (StubIndex)cfs.indexManager.getIndex(cfm.indexes
                                                                    .get("c_idx_2")
                                                                    .orElseThrow(throwAssert("index not found")));
         Object[] row1a = row(0, 0, 0);
@@ -887,8 +887,8 @@ public class SecondaryIndexTest extends CQLTester
         createIndex(String.format("CREATE CUSTOM INDEX c_idx ON %%s(c) USING '%s'", indexClassName));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        CFMetaData cfm = cfs.metadata;
-        StubIndex index1 = (StubIndex) cfs.indexManager.getIndex(cfm.getIndexes()
+        TableMetadata cfm = cfs.metadata();
+        StubIndex index1 = (StubIndex) cfs.indexManager.getIndex(cfm.indexes
                 .get("c_idx")
                 .orElseThrow(throwAssert("index not found")));
 
@@ -943,8 +943,8 @@ public class SecondaryIndexTest extends CQLTester
         createIndex(String.format("CREATE CUSTOM INDEX test_index ON %%s() USING '%s'", StubIndex.class.getName()));
         execute("INSERT INTO %s (k, c, v1, v2) VALUES (0, 0, 0, 0) USING TIMESTAMP 0");
 
-        ColumnDefinition v1 = getCurrentColumnFamilyStore().metadata.getColumnDefinition(new ColumnIdentifier("v1", true));
-        ColumnDefinition v2 = getCurrentColumnFamilyStore().metadata.getColumnDefinition(new ColumnIdentifier("v2", true));
+        ColumnMetadata v1 = getCurrentColumnFamilyStore().metadata().getColumn(new ColumnIdentifier("v1", true));
+        ColumnMetadata v2 = getCurrentColumnFamilyStore().metadata().getColumn(new ColumnIdentifier("v2", true));
 
         StubIndex index = (StubIndex)getCurrentColumnFamilyStore().indexManager.getIndexByName("test_index");
         assertEquals(1, index.rowsInserted.size());
@@ -1286,22 +1286,92 @@ public class SecondaryIndexTest extends CQLTester
         });
     }
 
+    @Test
+    public void testIndexOnStaticColumnWithPartitionWithoutRows() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY(pk, c))");
+        createIndex("CREATE INDEX ON %s (s)");
+
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (?, ?, ?, ?)", 1, 1, 9, 1);
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (?, ?, ?, ?)", 1, 2, 9, 2);
+        execute("INSERT INTO %s (pk, s) VALUES (?, ?)", 2, 9);
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (?, ?, ?, ?)", 3, 1, 9, 1);
+        flush();
+
+        assertRows(execute("SELECT * FROM %s WHERE s = ?", 9),
+                   row(1, 1, 9, 1),
+                   row(1, 2, 9, 2),
+                   row(2, null, 9, null),
+                   row(3, 1, 9, 1));
+
+        execute("DELETE FROM %s WHERE pk = ?", 3);
+
+        assertRows(execute("SELECT * FROM %s WHERE s = ?", 9),
+                   row(1, 1, 9, 1),
+                   row(1, 2, 9, 2),
+                   row(2, null, 9, null));
+    }
+
+    @Test
+    public void testIndexOnRegularColumnWithPartitionWithoutRows() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, c int, s int static, v int, PRIMARY KEY(pk, c))");
+        createIndex("CREATE INDEX ON %s (v)");
+
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (?, ?, ?, ?)", 1, 1, 9, 1);
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (?, ?, ?, ?)", 1, 2, 9, 2);
+        execute("INSERT INTO %s (pk, s) VALUES (?, ?)", 2, 9);
+        execute("INSERT INTO %s (pk, c, s, v) VALUES (?, ?, ?, ?)", 3, 1, 9, 1);
+        flush();
+
+        execute("DELETE FROM %s WHERE pk = ? and c = ?", 3, 1);
+
+        assertRows(execute("SELECT * FROM %s WHERE v = ?", 1),
+                   row(1, 1, 9, 1));
+    }
+
+    @Test
+    public void testIndexOnDurationColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, d duration)");
+        assertInvalidMessage("Secondary indexes are not supported on duration columns",
+                             "CREATE INDEX ON %s (d)");
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, l list<duration>)");
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             "CREATE INDEX ON %s (l)");
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, m map<int, duration>)");
+        assertInvalidMessage("Secondary indexes are not supported on collections containing durations",
+                             "CREATE INDEX ON %s (m)");
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, t tuple<int, duration>)");
+        assertInvalidMessage("Secondary indexes are not supported on tuples containing durations",
+                             "CREATE INDEX ON %s (t)");
+
+        String udt = createType("CREATE TYPE %s (i int, d duration)");
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, t " + udt + ")");
+        assertInvalidMessage("Secondary indexes are not supported on UDTs containing durations",
+                             "CREATE INDEX ON %s (t)");
+    }
+
     private ResultMessage.Prepared prepareStatement(String cql)
     {
         return QueryProcessor.prepare(String.format(cql, KEYSPACE, currentTable()),
                                       ClientState.forInternalCalls()).blockingGet();
     }
 
-    private void validateCell(Cell cell, ColumnDefinition def, ByteBuffer val, long timestamp)
+    private void validateCell(Cell cell, ColumnMetadata def, ByteBuffer val, long timestamp)
     {
         assertNotNull(cell);
         assertEquals(0, def.type.compare(cell.value(), val));
         assertEquals(timestamp, cell.timestamp());
     }
 
-    private static void assertColumnValue(int expected, String name, Row row, CFMetaData cfm)
+    private static void assertColumnValue(int expected, String name, Row row, TableMetadata cfm)
     {
-        ColumnDefinition col = cfm.getColumnDefinition(new ColumnIdentifier(name, true));
+        ColumnMetadata col = cfm.getColumn(new ColumnIdentifier(name, true));
         AbstractType<?> type = col.type;
         assertEquals(expected, type.compose(row.getCell(col).value()));
     }

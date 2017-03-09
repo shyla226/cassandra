@@ -22,7 +22,7 @@ package org.apache.cassandra.db.transform;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.PartitionColumns;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
@@ -116,7 +116,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * NOTE: same remark than for applyToDeletion: it is only applied to the first iterator in a sequence of iterators
      * filled by MoreContents.
      */
-    protected PartitionColumns applyToPartitionColumns(PartitionColumns columns)
+    protected RegularAndStaticColumns applyToPartitionColumns(RegularAndStaticColumns columns)
     {
         return columns;
     }
@@ -175,17 +175,6 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return to;
     }
     static <E extends BaseIterator> E add(E to, MoreContents add)
-    {
-        to.add(add);
-        return to;
-    }
-
-    static <E extends RxBaseIterator> E add(E to, Transformation add)
-    {
-        to.add(add);
-        return to;
-    }
-    static <E extends RxBaseIterator> E add(E to, MoreContents add)
     {
         to.add(add);
         return to;

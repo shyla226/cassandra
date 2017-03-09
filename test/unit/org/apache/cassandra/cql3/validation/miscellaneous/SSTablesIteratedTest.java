@@ -20,6 +20,8 @@
  */
 package org.apache.cassandra.cql3.validation.miscellaneous;
 
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -27,7 +29,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.metrics.ClearableHistogram;
 
 /**
  * Tests for checking how many sstables we access during cql queries with LIMIT specified,
@@ -35,19 +36,36 @@ import org.apache.cassandra.metrics.ClearableHistogram;
  */
 public class SSTablesIteratedTest extends CQLTester
 {
+    private static int defaultMetricsHistogramUpdateInterval;
+
     private void executeAndCheck(String query, int numSSTables, Object[]... rows) throws Throwable
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
 
-        ((ClearableHistogram) cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
+        cfs.metric.sstablesPerReadHistogram.clear(); // resets counts
 
         assertRows(execute(query), rows);
 
-        long numSSTablesIterated = cfs.metric.sstablesPerReadHistogram.cf.getSnapshot().getMax(); // max sstables read
+        long numSSTablesIterated = cfs.metric.sstablesPerReadHistogram.getSnapshot().getMax(); // max sstables read
         assertEquals(String.format("Expected %d sstables iterated but got %d instead, with %d live sstables",
                                    numSSTables, numSSTablesIterated, cfs.getLiveSSTables().size()),
                      numSSTables,
                      numSSTablesIterated);
+    }
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        DatabaseDescriptor.daemonInitialization();
+
+        defaultMetricsHistogramUpdateInterval = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0); // this guarantees metrics histograms are updated on read
+    }
+
+    @AfterClass
+    public static void afterClass()
+    {
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateInterval);
     }
 
     @Override

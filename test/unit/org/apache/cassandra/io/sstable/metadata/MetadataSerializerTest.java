@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.io.sstable.metadata;
 
 import java.io.File;
@@ -29,7 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -45,6 +44,8 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class MetadataSerializerTest
 {
@@ -91,13 +92,13 @@ public class MetadataSerializerTest
         CommitLogPosition club = new CommitLogPosition(11L, 12);
         CommitLogPosition cllb = new CommitLogPosition(9L, 12);
 
-        CFMetaData cfm = SchemaLoader.standardCFMD("ks1", "cf1");
+        TableMetadata cfm = SchemaLoader.standardCFMD("ks1", "cf1").build();
         MetadataCollector collector = new MetadataCollector(cfm.comparator)
                                           .commitLogIntervals(new IntervalSet<>(cllb, club));
 
         String partitioner = RandomPartitioner.class.getCanonicalName();
         double bfFpChance = 0.1;
-        Map<MetadataType, MetadataComponent> originalMetadata = collector.finalizeMetadata(partitioner, bfFpChance, 0, SerializationHeader.make(cfm, Collections.emptyList()));
+        Map<MetadataType, MetadataComponent> originalMetadata = collector.finalizeMetadata(partitioner, bfFpChance, 0, null, SerializationHeader.make(cfm, Collections.emptyList()));
         return originalMetadata;
     }
 
@@ -117,6 +118,12 @@ public class MetadataSerializerTest
     public void testMbReadMc() throws IOException
     {
         testOldReadsNew("mb", "mc");
+    }
+
+    @Test
+    public void testMdReadMc() throws IOException
+    {
+        testOldReadsNew("mc", "md");
     }
 
     public void testOldReadsNew(String oldV, String newV) throws IOException
@@ -146,5 +153,14 @@ public class MetadataSerializerTest
                 }
             }
         }
+    }
+
+    @Test
+    public void pendingRepairCompatibility()
+    {
+        Version mc = BigFormat.instance.getVersion("mc");
+        assertFalse(mc.hasPendingRepair());
+        Version md = BigFormat.instance.getVersion("md");
+        assertTrue(md.hasPendingRepair());
     }
 }

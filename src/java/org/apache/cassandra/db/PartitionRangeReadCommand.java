@@ -27,15 +27,12 @@ import com.google.common.collect.Iterables;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.monitoring.Monitorable;
-import org.apache.cassandra.db.partitions.CachedPartition;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.FlowablePartitions;
@@ -71,7 +68,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public PartitionRangeReadCommand(boolean isDigest,
                                      int digestVersion,
-                                     CFMetaData metadata,
+                                     TableMetadata metadata,
                                      int nowInSec,
                                      ColumnFilter columnFilter,
                                      RowFilter rowFilter,
@@ -83,22 +80,22 @@ public class PartitionRangeReadCommand extends ReadCommand
     }
 
     public PartitionRangeReadCommand(boolean isDigest,
-                                      int digestVersion,
-                                      CFMetaData metadata,
-                                      int nowInSec,
-                                      ColumnFilter columnFilter,
-                                      RowFilter rowFilter,
-                                      DataLimits limits,
-                                      DataRange dataRange,
-                                      Optional<IndexMetadata> index,
-                                      Monitorable optionalMonitor)
+                                     int digestVersion,
+                                     TableMetadata metadata,
+                                     int nowInSec,
+                                     ColumnFilter columnFilter,
+                                     RowFilter rowFilter,
+                                     DataLimits limits,
+                                     DataRange dataRange,
+                                     Optional<IndexMetadata> index,
+                                     Monitorable optionalMonitor)
     {
         super(Kind.PARTITION_RANGE, isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, optionalMonitor);
         this.dataRange = dataRange;
         this.index = index;
     }
 
-    public PartitionRangeReadCommand(CFMetaData metadata,
+    public PartitionRangeReadCommand(TableMetadata metadata,
                                      int nowInSec,
                                      ColumnFilter columnFilter,
                                      RowFilter rowFilter,
@@ -109,7 +106,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         this(false, 0, metadata, nowInSec, columnFilter, rowFilter, limits, dataRange, index, null);
     }
 
-    public PartitionRangeReadCommand(CFMetaData metadata,
+    public PartitionRangeReadCommand(TableMetadata metadata,
                                      int nowInSec,
                                      ColumnFilter columnFilter,
                                      RowFilter rowFilter,
@@ -129,7 +126,7 @@ public class PartitionRangeReadCommand extends ReadCommand
      *
      * @return a newly created read command that queries everything in the table.
      */
-    public static PartitionRangeReadCommand allDataRead(CFMetaData metadata, int nowInSec)
+    public static PartitionRangeReadCommand allDataRead(TableMetadata metadata, int nowInSec)
     {
         return new PartitionRangeReadCommand(metadata,
                                              nowInSec,
@@ -212,7 +209,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         if (!dataRange().contains(key))
             return false;
 
-        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
+        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().partitionKeyType);
     }
 
     public boolean selectsClustering(DecoratedKey key, Clustering clustering)
@@ -243,7 +240,7 @@ public class PartitionRangeReadCommand extends ReadCommand
     protected Flowable<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));
-        Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), dataRange().keyRange().getString(metadata().getKeyValidator()));
+        Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), dataRange().keyRange().getString(metadata().partitionKeyType));
 
         // fetch data from current memtable, historical memtables, and SSTables in the correct order.
         final List<Flowable<FlowableUnfilteredPartition>> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
@@ -339,22 +336,21 @@ public class PartitionRangeReadCommand extends ReadCommand
      */
     public PartitionIterator postReconciliationProcessing(PartitionIterator result)
     {
-        ColumnFamilyStore cfs = Keyspace.open(metadata().ksName).getColumnFamilyStore(metadata().cfName);
+        ColumnFamilyStore cfs = Keyspace.open(metadata().keyspace).getColumnFamilyStore(metadata().name);
         Index index = getIndex(cfs);
         return index == null ? result : index.postProcessorFor(this).apply(result, this);
     }
 
     public boolean queriesOnlyLocalData()
     {
-        return StorageProxy.isLocalRange(metadata().ksName, dataRange.keyRange());
+        return StorageProxy.isLocalRange(metadata().keyspace, dataRange.keyRange());
     }
 
     @Override
     public String toString()
     {
-        return String.format("Read(%s.%s columns=%s rowfilter=%s limits=%s %s)",
-                             metadata().ksName,
-                             metadata().cfName,
+        return String.format("Read(%s columns=%s rowfilter=%s limits=%s %s)",
+                             metadata().toString(),
                              columnFilter(),
                              rowFilter(),
                              limits(),
@@ -373,7 +369,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     private static class Deserializer extends SelectionDeserializer
     {
-        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
+        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
         throws IOException
         {
             DataRange range = DataRange.serializer.deserialize(in, version, metadata);

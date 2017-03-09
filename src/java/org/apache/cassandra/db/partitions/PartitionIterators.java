@@ -18,14 +18,16 @@
 package org.apache.cassandra.db.partitions;
 
 import java.util.*;
+import java.util.concurrent.Callable;
+
+import com.google.common.collect.Iterables;
 
 import io.reactivex.Flowable;
-import io.reactivex.Observable;
 import io.reactivex.Single;
-import io.reactivex.internal.schedulers.ImmediateThinScheduler;
-import io.reactivex.schedulers.Schedulers;
+import io.reactivex.SingleSource;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.RowIterators;
 import org.apache.cassandra.db.transform.MorePartitions;
@@ -38,9 +40,15 @@ public abstract class PartitionIterators
     private PartitionIterators() {}
 
     @SuppressWarnings("resource") // The created resources are returned right away
-    public static Single<RowIterator> getOnlyElement(final PartitionIterator iter, SinglePartitionReadCommand command)
+    public static RowIterator getOnlyElement(final PartitionIterator iter, SinglePartitionReadCommand command)
     {
-        Single<RowIterator> toReturn = iter.next();
+        // If the query has no results, we'll get an empty iterator, but we still
+        // want a RowIterator out of this method, so we return an empty one.
+        RowIterator toReturn = iter.hasNext()
+                             ? iter.next()
+                             : EmptyIterators.row(command.metadata(),
+                                                  command.partitionKey(),
+                                                  command.clusteringIndexFilter().isReversed());
 
         // Note that in general, we should wrap the result so that it's close method actually
         // close the whole PartitionIterator.
@@ -55,21 +63,7 @@ public abstract class PartitionIterators
                 assert !hadNext;
             }
         }
-        return toReturn.map(t ->
-                            {
-                                // If the query has no results, we'll get an empty iterator, but we still
-                                // want a RowIterator out of this method, so we return an empty one.
-                                if (t == null)
-                                {
-                                    return EmptyIterators.row(command.metadata(),
-                                                              command.partitionKey(),
-                                                              command.clusteringIndexFilter().isReversed());
-                                }
-                                else
-                                {
-                                    return Transformation.apply(t, new Close());
-                                }
-                            });
+        return Transformation.apply(toReturn, new Close());
     }
 
     @SuppressWarnings("resource") // The created resources are returned right away
@@ -96,6 +90,18 @@ public abstract class PartitionIterators
         return new SingletonPartitionIterator(iterator);
     }
 
+    public static void consume(PartitionIterator iterator)
+    {
+        while (iterator.hasNext())
+        {
+            try (RowIterator partition = iterator.next())
+            {
+                while (partition.hasNext())
+                    partition.next();
+            }
+        }
+    }
+
     /**
      * Wraps the provided iterator so it logs the returned rows for debugging purposes.
      * <p>
@@ -115,7 +121,7 @@ public abstract class PartitionIterators
         return Transformation.apply(iterator, new Logger());
     }
 
-    private static class SingletonPartitionIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
+    private static class SingletonPartitionIterator extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final RowIterator iterator;
         private boolean returned = false;
@@ -125,20 +131,13 @@ public abstract class PartitionIterators
             this.iterator = iterator;
         }
 
-        protected Single<RowIterator> computeNext()
+        protected RowIterator computeNext()
         {
             if (returned)
                 return endOfData();
 
             returned = true;
-            return Single.just(iterator);
-        }
-
-        public Flowable<RowIterator> asObservable()
-        {
-            assert !returned;
-            returned = true;
-            return Flowable.just(iterator);
+            return iterator;
         }
 
         public void close()
@@ -146,5 +145,18 @@ public abstract class PartitionIterators
             if (!returned)
                 iterator.close();
         }
+    }
+
+    /**
+     * Convert the iterator to a flowable and closes it when the flowable subscription is cancelled or the
+     * flowable has completed.
+     *
+     * @param iterator - the iterator to convert, it will be consumed and closed
+     *
+     * @return a flowable for the iterator passed in created via FLowable.fromIterable()
+     */
+    public static Flowable<RowIterator> toFlowable(PartitionIterator iterator)
+    {
+        return Flowable.using(() -> iterator, (iter) -> Flowable.fromIterable(() -> iter), (iter) -> iter.close());
     }
 }

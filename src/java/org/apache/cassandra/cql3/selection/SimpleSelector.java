@@ -19,7 +19,7 @@ package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -34,7 +34,7 @@ public final class SimpleSelector extends Selector
     private ByteBuffer current;
     private boolean isSet;
 
-    public static Factory newFactory(final ColumnDefinition def, final int idx)
+    public static Factory newFactory(final ColumnMetadata def, final int idx)
     {
         return new Factory()
         {

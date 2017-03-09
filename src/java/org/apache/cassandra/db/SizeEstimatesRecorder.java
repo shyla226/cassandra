@@ -30,8 +30,8 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.service.MigrationListener;
-import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.concurrent.Refs;
  *
  * See CASSANDRA-7688.
  */
-public class SizeEstimatesRecorder extends MigrationListener implements Runnable
+public class SizeEstimatesRecorder extends SchemaChangeListener implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(SizeEstimatesRecorder.class);
 
@@ -54,7 +54,7 @@ public class SizeEstimatesRecorder extends MigrationListener implements Runnable
 
     private SizeEstimatesRecorder()
     {
-        MigrationManager.instance.register(this);
+        Schema.instance.registerListener(this);
     }
 
     public void run()
@@ -68,12 +68,10 @@ public class SizeEstimatesRecorder extends MigrationListener implements Runnable
 
         logger.trace("Recording size estimates");
 
-        // find primary token ranges for the local node.
-        Collection<Token> localTokens = StorageService.instance.getLocalTokens();
-        Collection<Range<Token>> localRanges = metadata.getPrimaryRangesFor(localTokens);
-
         for (Keyspace keyspace : Keyspace.nonLocalStrategy())
         {
+            Collection<Range<Token>> localRanges = StorageService.instance.getPrimaryRangesForEndpoint(keyspace.getName(),
+                    FBUtilities.getBroadcastAddress());
             for (ColumnFamilyStore table : keyspace.getColumnFamilyStores())
             {
                 long start = System.nanoTime();
@@ -81,8 +79,8 @@ public class SizeEstimatesRecorder extends MigrationListener implements Runnable
                 long passed = System.nanoTime() - start;
                 logger.trace("Spent {} milliseconds on estimating {}.{} size",
                              TimeUnit.NANOSECONDS.toMillis(passed),
-                             table.metadata.ksName,
-                             table.metadata.cfName);
+                             table.metadata.keyspace,
+                             table.metadata.name);
             }
         }
     }
@@ -90,41 +88,43 @@ public class SizeEstimatesRecorder extends MigrationListener implements Runnable
     @SuppressWarnings("resource")
     private void recordSizeEstimates(ColumnFamilyStore table, Collection<Range<Token>> localRanges)
     {
-        List<Range<Token>> unwrappedRanges = Range.normalize(localRanges);
         // for each local primary range, estimate (crudely) mean partition size and partitions count.
         Map<Range<Token>, Pair<Long, Long>> estimates = new HashMap<>(localRanges.size());
-        for (Range<Token> range : unwrappedRanges)
+        for (Range<Token> localRange : localRanges)
         {
-            // filter sstables that have partitions in this range.
-            Refs<SSTableReader> refs = null;
-            long partitionsCount, meanPartitionSize;
-
-            try
+            for (Range<Token> unwrappedRange : localRange.unwrap())
             {
-                while (refs == null)
+                // filter sstables that have partitions in this range.
+                Refs<SSTableReader> refs = null;
+                long partitionsCount, meanPartitionSize;
+
+                try
                 {
-                    Iterable<SSTableReader> sstables = table.getTracker().getView().select(SSTableSet.CANONICAL);
-                    SSTableIntervalTree tree = SSTableIntervalTree.build(sstables);
-                    Range<PartitionPosition> r = Range.makeRowRange(range);
-                    Iterable<SSTableReader> canonicalSSTables = View.sstablesInBounds(r.left, r.right, tree);
-                    refs = Refs.tryRef(canonicalSSTables);
+                    while (refs == null)
+                    {
+                        Iterable<SSTableReader> sstables = table.getTracker().getView().select(SSTableSet.CANONICAL);
+                        SSTableIntervalTree tree = SSTableIntervalTree.build(sstables);
+                        Range<PartitionPosition> r = Range.makeRowRange(unwrappedRange);
+                        Iterable<SSTableReader> canonicalSSTables = View.sstablesInBounds(r.left, r.right, tree);
+                        refs = Refs.tryRef(canonicalSSTables);
+                    }
+
+                    // calculate the estimates.
+                    partitionsCount = estimatePartitionsCount(refs, unwrappedRange);
+                    meanPartitionSize = estimateMeanPartitionSize(refs);
+                }
+                finally
+                {
+                    if (refs != null)
+                        refs.release();
                 }
 
-                // calculate the estimates.
-                partitionsCount = estimatePartitionsCount(refs, range);
-                meanPartitionSize = estimateMeanPartitionSize(refs);
+                estimates.put(unwrappedRange, Pair.create(partitionsCount, meanPartitionSize));
             }
-            finally
-            {
-                if (refs != null)
-                    refs.release();
-            }
-
-            estimates.put(range, Pair.create(partitionsCount, meanPartitionSize));
         }
 
         // atomically update the estimates.
-        SystemKeyspace.updateSizeEstimates(table.metadata.ksName, table.metadata.cfName, estimates);
+        SystemKeyspace.updateSizeEstimates(table.metadata.keyspace, table.metadata.name, estimates);
     }
 
     private long estimatePartitionsCount(Collection<SSTableReader> sstables, Range<Token> range)
@@ -148,7 +148,7 @@ public class SizeEstimatesRecorder extends MigrationListener implements Runnable
     }
 
     @Override
-    public void onDropColumnFamily(String keyspace, String table)
+    public void onDropTable(String keyspace, String table)
     {
         SystemKeyspace.clearSizeEstimates(keyspace, table);
     }

@@ -58,7 +58,11 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        // Disable tombstone histogram rounding for tests
+        System.setProperty("cassandra.streaminghistogram.roundseconds", "1");
+
         SchemaLoader.prepareServer();
+
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
@@ -148,7 +152,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         for (int r = 0; r < 3; r++)
         {
             DecoratedKey key = Util.dk(String.valueOf(r));
-            new RowUpdateBuilder(cfs.metadata, r, key.getKey())
+            new RowUpdateBuilder(cfs.metadata(), r, key.getKey())
                 .clustering("column")
                 .add("val", value).build().applyUnsafe();
 
@@ -159,7 +163,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         {
             // And add progressively more cells into each sstable
             DecoratedKey key = Util.dk(String.valueOf(r));
-            new RowUpdateBuilder(cfs.metadata, r, key.getKey())
+            new RowUpdateBuilder(cfs.metadata(), r, key.getKey())
                 .clustering("column")
                 .add("val", value).build().applyUnsafe();
             cfs.forceBlockingFlush();
@@ -200,7 +204,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
             DecoratedKey key = Util.dk(String.valueOf(r));
             for(int i = 0 ; i < r ; i++)
             {
-                new RowUpdateBuilder(cfs.metadata, tstamp + r, key.getKey())
+                new RowUpdateBuilder(cfs.metadata(), tstamp + r, key.getKey())
                     .clustering("column")
                     .add("val", value).build().applyUnsafe();
             }
@@ -232,7 +236,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
 
         // create 2 sstables
         DecoratedKey key = Util.dk(String.valueOf("expired"));
-        new RowUpdateBuilder(cfs.metadata, System.currentTimeMillis(), 1, key.getKey())
+        new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), 1, key.getKey())
             .clustering("column")
             .add("val", value).build().applyUnsafe();
 
@@ -241,7 +245,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         Thread.sleep(10);
 
         key = Util.dk(String.valueOf("nonexpired"));
-        new RowUpdateBuilder(cfs.metadata, System.currentTimeMillis(), key.getKey())
+        new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), key.getKey())
             .clustering("column")
             .add("val", value).build().applyUnsafe();
 

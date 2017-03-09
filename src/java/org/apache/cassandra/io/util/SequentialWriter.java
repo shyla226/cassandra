@@ -162,7 +162,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         syncInternal();
     }
 
-    protected void syncDataOnlyInternal()
+    private void syncDataOnlyInternal()
     {
         try
         {
@@ -181,24 +181,32 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     protected void syncInternal()
     {
-        doFlush(0);
-        syncDataOnlyInternal();
+        doFlush(true);
     }
 
     @Override
     protected void doFlush(int count)
     {
+        doFlush(false);
+    }
+
+    private void doFlush(boolean forceSync)
+    {
         flushData();
 
+        boolean synced = false;
         if (option.trickleFsync())
         {
             bytesSinceTrickleFsync += buffer.position();
             if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
             {
                 syncDataOnlyInternal();
+                synced = true;
                 bytesSinceTrickleFsync = 0;
             }
         }
+        if (!synced && forceSync)
+            syncDataOnlyInternal();
 
         // Remember that we wrote, so we don't write it again on next flush().
         resetBuffer();

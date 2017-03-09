@@ -73,10 +73,7 @@ import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
@@ -93,22 +90,13 @@ import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.AbstractReplicationStrategy;
-import org.apache.cassandra.locator.IEndpointSnitch;
-import org.apache.cassandra.locator.LocalStrategy;
-import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.metrics.CASClientRequestMetrics;
-import org.apache.cassandra.metrics.ClientRequestMetrics;
-import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.metrics.StorageMetrics;
-import org.apache.cassandra.metrics.ViewWriteMetrics;
-import org.apache.cassandra.net.CompactEndpointSerializationHelper;
-import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.locator.*;
+import org.apache.cassandra.metrics.*;
+import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.MessagingService.Verb;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareCallback;
@@ -229,7 +217,7 @@ public class StorageProxy implements StorageProxyMBean
             consistencyForPaxos.validateForCas();
             consistencyForCommit.validateForCasCommit(keyspaceName);
 
-            CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
+            TableMetadata metadata = Schema.instance.getTableMetadata(keyspaceName, cfName);
 
             long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getCasContentionTimeout());
             while (System.nanoTime() - queryStartNanoTime < timeout)
@@ -341,11 +329,11 @@ public class StorageProxy implements StorageProxyMBean
         };
     }
 
-    private static Pair<List<InetAddress>, Integer> getPaxosParticipants(CFMetaData cfm, DecoratedKey key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
+    private static Pair<List<InetAddress>, Integer> getPaxosParticipants(TableMetadata metadata, DecoratedKey key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
     {
         Token tk = key.getToken();
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(cfm.ksName, tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, cfm.ksName);
+        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(metadata.keyspace, tk);
+        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, metadata.keyspace);
         if (consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL)
         {
             // Restrict naturalEndpoints and pendingEndpoints to node in the local DC only
@@ -380,7 +368,7 @@ public class StorageProxy implements StorageProxyMBean
      */
     private static Pair<UUID, Integer> beginAndRepairPaxos(long queryStartNanoTime,
                                                            DecoratedKey key,
-                                                           CFMetaData metadata,
+                                                           TableMetadata metadata,
                                                            List<InetAddress> liveEndpoints,
                                                            int requiredParticipants,
                                                            ConsistencyLevel consistencyForPaxos,
@@ -475,7 +463,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         recordCasContention(contentions);
-        throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(metadata.ksName)));
+        throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(metadata.keyspace)));
     }
 
     /**
@@ -521,7 +509,7 @@ public class StorageProxy implements StorageProxyMBean
     private static void commitPaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean shouldHint, long queryStartNanoTime) throws WriteTimeoutException
     {
         boolean shouldBlock = consistencyLevel != ConsistencyLevel.ANY;
-        Keyspace keyspace = Keyspace.open(proposal.update.metadata().ksName);
+        Keyspace keyspace = Keyspace.open(proposal.update.metadata().keyspace);
 
         Token tk = proposal.update.partitionKey().getToken();
         List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspace.getName(), tk);
@@ -1557,7 +1545,7 @@ public class StorageProxy implements StorageProxyMBean
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)
     {
         for (ReadCommand cmd : cmds)
-            if (!SchemaConstants.isSystemKeyspace(cmd.metadata().ksName))
+            if (!SchemaConstants.isSystemKeyspace(cmd.metadata().keyspace))
                 return false;
         return true;
     }
@@ -1571,7 +1559,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command).blockingGet();
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command);
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
@@ -1621,7 +1609,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Read data locally, but for an external request. This implements an optimized local read path for data that
      * is available locally and that has been requested at a consistency level of ONE/LOCAL_ONE. We
-     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * wrap the functionality of {@link ReadCommand#executeInternal()}  with additional
      * functionality that is required for client requests, such as metrics recording and local query monitoring,
      * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
      * are not reported as failed, rather the caller will take care of restarting them.
@@ -1641,11 +1629,6 @@ public class StorageProxy implements StorageProxyMBean
     {
         assert consistencyLevel.isSingleNode();
 
-        // Not using the controller in a try-with-resource is a bit dodgy, but having to pass it all the way down
-        // the execution path when it's used only in this specific path is annoying, we've made it clear in the
-        // javadoc that the returned iterator must be closed, and we have a good track record of using
-        // PartitionIterator in try-with-resource.
-        ReadExecutionController controller = group.executionController();
         try
         {
             group.monitorLocal(ApproximateTime.currentTimeMillis());
@@ -1653,20 +1636,15 @@ public class StorageProxy implements StorageProxyMBean
             // We could simply use a close Transformation here. However, we want to make extra sure close() is
             // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
             // framework (which is non trivial code) making that not happen.
-            final PartitionIterator iter = group.executeInternal(controller).blockingGet();
+            final PartitionIterator iter = group.executeInternal().blockingGet();
             return Single.just(new PartitionIterator()
             {
-                public Flowable<RowIterator> asObservable()
-                {
-                    return iter.asObservable();
-                }
-
                 public boolean hasNext()
                 {
                     return iter.hasNext();
                 }
 
-                public Single<RowIterator> next()
+                public RowIterator next()
                 {
                     return iter.next();
                 }
@@ -1674,14 +1652,12 @@ public class StorageProxy implements StorageProxyMBean
                 public void close()
                 {
                     // Make sure we close this as the first thing so it's always called.
-                    controller.close();
                     group.complete();
                 }
             });
         }
         catch (Throwable e)
         {
-            controller.close();
             readMetrics.failures.mark();
             readMetricsMap.get(consistencyLevel).failures.mark();
             throw e;
@@ -1697,7 +1673,7 @@ public class StorageProxy implements StorageProxyMBean
 
         long start = System.nanoTime();
         SinglePartitionReadCommand command = group.commands.get(0);
-        CFMetaData metadata = command.metadata();
+        TableMetadata metadata = command.metadata();
         DecoratedKey key = command.partitionKey();
 
         PartitionIterator result = null;
@@ -1721,7 +1697,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (WriteTimeoutException e)
             {
-                throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.ksName)), false);
+                throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false);
             }
             catch (WriteFailureException e)
             {
@@ -1907,7 +1883,7 @@ public class StorageProxy implements StorageProxyMBean
             ReadRepairMetrics.repairedBlocking.mark();
 
             // Do a full data read to resolve the correct response (and repair node that need be)
-            Keyspace keyspace = Keyspace.open(command.metadata().ksName);
+            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
             DataResolver resolver = new DataResolver(keyspace, command, ConsistencyLevel.ALL, executor.handler.endpoints.size(), queryStartNanoTime);
             repairHandler = new ReadCallback(resolver,
                                              ConsistencyLevel.ALL,
@@ -1959,9 +1935,8 @@ public class StorageProxy implements StorageProxyMBean
                 command.monitor(constructionTime, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout(), false);
 
                 ReadResponse response;
-                try (ReadExecutionController executionController = command.executionController())
+                try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
                 {
-                    UnfilteredPartitionIterator iterator = command.executeLocally(executionController).blockingGet();
                     response = command.createResponse(iterator);
                 }
 
@@ -2025,7 +2000,7 @@ public class StorageProxy implements StorageProxyMBean
      */
     private static float estimateResultsPerRange(PartitionRangeReadCommand command, Keyspace keyspace)
     {
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().cfId);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
         Index index = command.getIndex(cfs);
         float maxExpectedResults = index == null
                                  ? command.limits().estimateTotalResults(cfs)
@@ -2141,7 +2116,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class SingleRangeResponse extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
+    private static class SingleRangeResponse extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final ReadCallback handler;
         private PartitionIterator result;
@@ -2159,7 +2134,7 @@ public class StorageProxy implements StorageProxyMBean
             result = handler.get().blockingGet();
         }
 
-        protected Single<RowIterator> computeNext()
+        protected RowIterator computeNext()
         {
             waitForResponse();
             return result.hasNext() ? result.next() : endOfData();
@@ -2172,7 +2147,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static class RangeCommandIterator extends AbstractIterator<Single<RowIterator>> implements PartitionIterator
+    private static class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
     {
         private final Iterator<RangeForQuery> ranges;
         private final int totalRangeCount;
@@ -2211,7 +2186,7 @@ public class StorageProxy implements StorageProxyMBean
             this.forContinuousPaging = forContinuousPaging;
         }
 
-        public Single<RowIterator> computeNext()
+        public RowIterator computeNext()
         {
             try
             {
@@ -2388,7 +2363,7 @@ public class StorageProxy implements StorageProxyMBean
         Callable<PartitionIterator> c = () ->
         {
 
-            Keyspace keyspace = Keyspace.open(command.metadata().ksName);
+            Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
             RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
 
             // our estimate of how many result rows there will be per-range
@@ -2414,7 +2389,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Read a range slice locally, but for an external request. This implements an optimized local read path for data that
      * is available locally and that has been requested at a consistency level of ONE or LOCAL_ONE. We
-     * wrap the functionality of {@link ReadCommand#executeInternal(ReadExecutionController)}  with additional
+     * wrap the functionality of {@link ReadCommand#executeInternal()}  with additional
      * functionality that is required for client requests, such as metrics recording and local query monitoring,
      * to ensure {@link ReadExecutionController} is not kept for too long. If local queries are aborted, they
      * are not reported as failed, rather the caller will take care of restarting them.
@@ -2437,42 +2412,32 @@ public class StorageProxy implements StorageProxyMBean
 
         Tracing.trace("Querying local ranges");
 
-        // Same reasoning as in readLocalContinuous, see there for details.
-        ReadExecutionController controller = command.executionController();
         try
         {
             command.monitorLocal(ApproximateTime.currentTimeMillis());
 
             // Same reasoning as in readLocalContinuous, see there for details.
-            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(controller).blockingGet());
+            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal().blockingGet());
             return Single.just(new PartitionIterator()
             {
-                public Flowable<RowIterator> asObservable()
-                {
-                    return Flowable.using(() -> iter, i -> i.asObservable(), i -> close());
-                }
-
                 public boolean hasNext()
                 {
                     return iter.hasNext();
                 }
 
-                public Single<RowIterator> next()
+                public RowIterator next()
                 {
                     return iter.next();
                 }
 
                 public void close()
                 {
-                    // Make sure we close this as the first thing so it's always called.
-                    controller.close();
                     command.complete();
                 }
             });
         }
         catch (Throwable e)
         {
-            controller.close();
             rangeMetrics.failures.mark();
             throw e;
         }
@@ -2510,7 +2475,7 @@ public class StorageProxy implements StorageProxyMBean
                 return false;
             }
         };
-        // an empty message acts as a request to the SchemaCheckVerbHandler.
+        // an empty message acts as a request to the SchemaVersionVerbHandler.
         MessageOut message = new MessageOut(MessagingService.Verb.SCHEMA_CHECK);
         for (InetAddress endpoint : liveHosts)
             MessagingService.instance().sendRR(message, endpoint, cb);

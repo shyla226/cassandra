@@ -1,11 +1,10 @@
 package org.apache.cassandra.db.rows;
 
-import java.security.MessageDigest;
 import java.util.Iterator;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators.MergeListener;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * A header for flowable partition containers. Contains partition-level data that isn't expected to change with
@@ -16,7 +15,7 @@ public class PartitionHeader
     /**
      * The metadata for the table this iterator on.
      */
-    public final CFMetaData metadata;
+    public final TableMetadata metadata;
 
     /**
      * Whether or not the rows returned by this iterator are in reversed
@@ -28,7 +27,7 @@ public class PartitionHeader
      * A subset of the columns for the (static and regular) rows returned by this iterator.
      * Every row returned by this iterator must guarantee that it has only those columns.
      */
-    public final PartitionColumns columns;
+    public final RegularAndStaticColumns columns;
 
     /**
      * The partition key of the partition this in an iterator over.
@@ -47,8 +46,8 @@ public class PartitionHeader
      */
     public EncodingStats stats;
 
-    public PartitionHeader(CFMetaData metadata, DecoratedKey partitionKey, DeletionTime partitionLevelDeletion,
-            PartitionColumns columns, boolean isReverseOrder, EncodingStats stats)
+    public PartitionHeader(TableMetadata metadata, DecoratedKey partitionKey, DeletionTime partitionLevelDeletion,
+                           RegularAndStaticColumns columns, boolean isReverseOrder, EncodingStats stats)
     {
         super();
         this.metadata = metadata;
@@ -62,7 +61,7 @@ public class PartitionHeader
     @Override
     public String toString()
     {
-        String cfs = String.format("table %s.%s", metadata.ksName, metadata.cfName);
+        String cfs = String.format("table %s.%s", metadata.keyspace, metadata.name);
         return String.format("partition key %s deletion %s %s", partitionKey, partitionLevelDeletion, cfs);
     }
 
@@ -85,7 +84,7 @@ public class PartitionHeader
         /**
          * The metadata for the table this iterator on.
          */
-        public final CFMetaData metadata;
+        public final TableMetadata metadata;
 
         /**
          * The partition key of the partition this in an iterator over.
@@ -119,7 +118,7 @@ public class PartitionHeader
 
         final MergeListener listener;
 
-        public Merger(int size, CFMetaData metadata, DecoratedKey partitionKey, boolean reversed, MergeListener listener)
+        public Merger(int size, TableMetadata metadata, DecoratedKey partitionKey, boolean reversed, MergeListener listener)
         {
             this.metadata = metadata;
             this.partitionKey = partitionKey;
@@ -170,7 +169,7 @@ public class PartitionHeader
             }
 
             return new PartitionHeader(metadata, partitionKey, delTime,
-                                       new PartitionColumns(statics, regulars), isReverseOrder,
+                                       new RegularAndStaticColumns(statics, regulars), isReverseOrder,
                                        statsMerger != null ? statsMerger.get() : EncodingStats.NO_STATS);
         }
     }

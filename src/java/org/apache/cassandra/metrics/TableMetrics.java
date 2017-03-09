@@ -26,8 +26,6 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Maps;
 
 import com.codahale.metrics.*;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Memtable;
@@ -36,6 +34,8 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.TopKSampler;
 
@@ -74,7 +74,7 @@ public class TableMetrics
     /** Histogram of estimated number of columns. */
     public final Gauge<long[]> estimatedColumnCountHistogram;
     /** Histogram of the number of sstable data files accessed per read */
-    public final TableHistogram sstablesPerReadHistogram;
+    public final Histogram sstablesPerReadHistogram;
     /** (Local) read metrics */
     public final LatencyMetrics readLatency;
     /** (Local) range slice metrics */
@@ -120,15 +120,15 @@ public class TableMetrics
     /** Key cache hit rate  for this CF */
     public final Gauge<Double> keyCacheHitRate;
     /** Tombstones scanned in queries on this CF */
-    public final TableHistogram tombstoneScannedHistogram;
+    public final Histogram tombstoneScannedHistogram;
     /** Live cells scanned in queries on this CF */
-    public final TableHistogram liveScannedHistogram;
+    public final Histogram liveScannedHistogram;
     /** Column update time delta on this CF */
-    public final TableHistogram colUpdateTimeDeltaHistogram;
+    public final Histogram colUpdateTimeDeltaHistogram;
     /** time taken acquiring the partition lock for materialized view updates for this table */
-    public final TableTimer viewLockAcquireTime;
+    public final Timer viewLockAcquireTime;
     /** time taken during the local read of a materialized view update */
-    public final TableTimer viewReadTime;
+    public final Timer viewReadTime;
     /** Disk space used by snapshot files which */
     public final Gauge<Long> trueSnapshotsSize;
     /** Row cache hits, but result out of range */
@@ -162,9 +162,9 @@ public class TableMetrics
 
     public final Counter speculativeRetries;
 
-    public final static LatencyMetrics globalReadLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Read");
-    public final static LatencyMetrics globalWriteLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Write");
-    public final static LatencyMetrics globalRangeLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Range");
+    public final static LatencyMetrics globalReadLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Read", true);
+    public final static LatencyMetrics globalWriteLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Write", true);
+    public final static LatencyMetrics globalRangeLatency = new LatencyMetrics(globalFactory, globalAliasFactory, "Range", true);
 
     public final static Gauge<Double> globalPercentRepaired = Metrics.register(globalFactory.createMetricName("PercentRepaired"),
             new Gauge<Double>()
@@ -209,7 +209,7 @@ public class TableMetrics
     /**
      * Stores all metric names created that can be used when unregistering, optionally mapped to an alias name.
      */
-    public final static Map<String, String> all = Maps.newHashMap();
+    public final static ConcurrentMap<String, String> all = Maps.newConcurrentMap();
 
     private interface GetHistogram
     {
@@ -261,7 +261,7 @@ public class TableMetrics
         factory = new TableMetricNameFactory(cfs, "Table");
         aliasFactory = new TableMetricNameFactory(cfs, "ColumnFamily");
 
-        samplers = Maps.newHashMap();
+        samplers = new EnumMap<>(Sampler.class);
         for (Sampler sampler : Sampler.values())
         {
             samplers.put(sampler, new TopKSampler<>());
@@ -368,7 +368,7 @@ public class TableMetrics
                                                                  });
             }
         });
-        sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram", cfs.keyspace.metric.sstablesPerReadHistogram, true);
+        sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram", cfs.keyspace.metric.sstablesPerReadHistogram);
         compressionRatio = createTableGauge("CompressionRatio", new Gauge<Double>()
         {
             public Double getValue()
@@ -401,9 +401,9 @@ public class TableMetrics
                 return total > 0 ? (repaired / total) * 100 : 100.0;
             }
         });
-        readLatency = new LatencyMetrics(factory, "Read", cfs.keyspace.metric.readLatency, globalReadLatency);
-        writeLatency = new LatencyMetrics(factory, "Write", cfs.keyspace.metric.writeLatency, globalWriteLatency);
-        rangeLatency = new LatencyMetrics(factory, "Range", cfs.keyspace.metric.rangeLatency, globalRangeLatency);
+        readLatency = new LatencyMetrics(factory, aliasFactory, "Read", cfs.keyspace.metric.readLatency, globalReadLatency);
+        writeLatency = new LatencyMetrics(factory, aliasFactory, "Write", cfs.keyspace.metric.writeLatency, globalWriteLatency);
+        rangeLatency = new LatencyMetrics(factory, aliasFactory, "Range", cfs.keyspace.metric.rangeLatency, globalRangeLatency);
         pendingFlushes = createTableCounter("PendingFlushes");
         bytesFlushed = createTableCounter("BytesFlushed");
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
@@ -658,16 +658,16 @@ public class TableMetrics
                 return Math.max(requests, 1); // to avoid NaN.
             }
         });
-        tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.keyspace.metric.tombstoneScannedHistogram, false);
-        liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.keyspace.metric.liveScannedHistogram, false);
-        colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.keyspace.metric.colUpdateTimeDeltaHistogram, false);
+        tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.keyspace.metric.tombstoneScannedHistogram);
+        liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.keyspace.metric.liveScannedHistogram);
+        colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.keyspace.metric.colUpdateTimeDeltaHistogram);
         coordinatorReadLatency = Metrics.timer(factory.createMetricName("CoordinatorReadLatency"));
         coordinatorScanLatency = Metrics.timer(factory.createMetricName("CoordinatorScanLatency"));
         waitingOnFreeMemtableSpace = Metrics.histogram(factory.createMetricName("WaitingOnFreeMemtableSpace"), false);
 
         // We do not want to capture view mutation specific metrics for a view
         // They only makes sense to capture on the base table
-        if (cfs.metadata.isView())
+        if (cfs.metadata().isView())
         {
             viewLockAcquireTime = null;
             viewReadTime = null;
@@ -690,9 +690,9 @@ public class TableMetrics
         rowCacheMiss = createTableCounter("RowCacheMiss");
         droppedMutations = createTableCounter("DroppedMutations");
 
-        casPrepare = new LatencyMetrics(factory, "CasPrepare", cfs.keyspace.metric.casPrepare);
-        casPropose = new LatencyMetrics(factory, "CasPropose", cfs.keyspace.metric.casPropose);
-        casCommit = new LatencyMetrics(factory, "CasCommit", cfs.keyspace.metric.casCommit);
+        casPrepare = new LatencyMetrics(factory, aliasFactory, "CasPrepare", cfs.keyspace.metric.casPrepare);
+        casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);
+        casCommit = new LatencyMetrics(factory, aliasFactory, "CasCommit", cfs.keyspace.metric.casCommit);
     }
 
     public void updateSSTableIterated(int count)
@@ -775,7 +775,7 @@ public class TableMetrics
 
     protected Counter createTableCounter(final String name, final String alias)
     {
-        Counter cfCounter = Metrics.counter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        Counter cfCounter = Metrics.counter(factory.createMetricName(name), aliasFactory.createMetricName(alias), false);
         if (register(name, alias, cfCounter))
         {
             Metrics.register(globalFactory.createMetricName(name),
@@ -826,35 +826,51 @@ public class TableMetrics
      * Create a histogram-like interface that will register both a CF, keyspace and global level
      * histogram and forward any updates to both
      */
-    protected TableHistogram createTableHistogram(String name, Histogram keyspaceHistogram, boolean considerZeroes)
+    protected Histogram createTableHistogram(String name, Histogram keyspaceHistogram)
     {
-        return createTableHistogram(name, name, keyspaceHistogram, considerZeroes);
+        return createTableHistogram(name, name, keyspaceHistogram);
     }
 
-    protected TableHistogram createTableHistogram(String name, String alias, Histogram keyspaceHistogram, boolean considerZeroes)
+    protected Histogram createTableHistogram(String name, String alias, Histogram keyspaceHistogram)
     {
-        Histogram cfHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
-        register(name, alias, cfHistogram);
-        return new TableHistogram(cfHistogram,
-                                  keyspaceHistogram,
-                                  Metrics.histogram(globalFactory.createMetricName(name),
-                                                    globalAliasFactory.createMetricName(alias),
-                                                    considerZeroes));
+        boolean considerZeroes = keyspaceHistogram.considerZeroes();
+
+        Histogram tableHistogram = Metrics.histogram(factory.createMetricName(name),
+                                                     aliasFactory.createMetricName(alias),
+                                                     considerZeroes,
+                                                     false);
+        register(name, alias, tableHistogram);
+
+        // This is very confusing but, the global histogram is only created the first time. If it already exists,
+        // then the existing instance is returned instead
+        Histogram globalHistogram = Metrics.histogram(globalFactory.createMetricName(name),
+                                                      globalAliasFactory.createMetricName(alias),
+                                                      considerZeroes,
+                                                      true);
+
+        // add the new table histogram to both keyspace and global histograms, these histograms are not updated in real
+        // time, they are aggregated views of the table histograms.
+        keyspaceHistogram.compose(tableHistogram);
+        globalHistogram.compose(tableHistogram);
+        return tableHistogram;
     }
 
-    protected TableTimer createTableTimer(String name, Timer keyspaceTimer)
+    protected Timer createTableTimer(String name, Timer keyspaceTimer)
     {
         return createTableTimer(name, name, keyspaceTimer);
     }
 
-    protected TableTimer createTableTimer(String name, String alias, Timer keyspaceTimer)
+    protected Timer createTableTimer(String name, String alias, Timer keyspaceTimer)
     {
-        Timer cfTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        Timer cfTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(alias), false);
         register(name, alias, cfTimer);
-        return new TableTimer(cfTimer,
-                              keyspaceTimer,
-                              Metrics.timer(globalFactory.createMetricName(name),
-                                            globalAliasFactory.createMetricName(alias)));
+
+        // Note that if a global timer already exists then the existing timer will be returned, no new timer will be created
+        Timer globalTimer = Metrics.timer(globalFactory.createMetricName(name), globalAliasFactory.createMetricName(alias), true);
+
+        keyspaceTimer.compose(cfTimer);
+        globalTimer.compose(cfTimer);
+        return cfTimer;
     }
 
     /**
@@ -867,44 +883,6 @@ public class TableMetrics
         allTableMetrics.get(name).add(metric);
         all.put(name, alias);
         return ret;
-    }
-
-    public static class TableHistogram
-    {
-        public final Histogram[] all;
-        public final Histogram cf;
-        private TableHistogram(Histogram cf, Histogram keyspace, Histogram global)
-        {
-            this.cf = cf;
-            this.all = new Histogram[]{cf, keyspace, global};
-        }
-
-        public void update(long i)
-        {
-            for(Histogram histo : all)
-            {
-                histo.update(i);
-            }
-        }
-    }
-
-    public static class TableTimer
-    {
-        public final Timer[] all;
-        public final Timer cf;
-        private TableTimer(Timer cf, Timer keyspace, Timer global)
-        {
-            this.cf = cf;
-            this.all = new Timer[]{cf, keyspace, global};
-        }
-
-        public void update(long i, TimeUnit unit)
-        {
-            for(Timer timer : all)
-            {
-                timer.update(i, unit);
-            }
-        }
     }
 
     static class TableMetricNameFactory implements MetricNameFactory

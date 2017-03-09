@@ -25,7 +25,7 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -45,18 +45,17 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.reactivex.Scheduler;
-import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
+import io.netty.channel.EventLoop;
+import io.netty.channel.EventLoopGroup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.*;
@@ -72,6 +71,8 @@ import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
+
+import static org.apache.cassandra.concurrent.NettyRxScheduler.NUM_NETTY_THREADS;
 
 /**
  * The <code>CassandraDaemon</code> is an abstraction for a Cassandra daemon
@@ -155,6 +156,9 @@ public class CassandraDaemon
 
     static final CassandraDaemon instance = new CassandraDaemon();
 
+    /** The Netty worker group for TPC threads*/
+    private EventLoopGroup workerGroup;
+
     private NativeTransportService nativeTransportService;
     private JMXConnectorServer jmxServer;
 
@@ -172,6 +176,15 @@ public class CassandraDaemon
         this.runManaged = runManaged;
         this.startupChecks = new StartupChecks().withDefaultTests();
         this.setupCompleted = false;
+    }
+
+    /**
+     * Initialize the thread-per-core workers.
+     */
+    public void initializeTPC()
+    {
+        workerGroup = NativeTransportService.makeWorkerGroup();
+        NettyRxScheduler.register(workerGroup);
     }
 
     /**
@@ -217,7 +230,7 @@ public class CassandraDaemon
             public void uncaughtException(Thread t, Throwable e)
             {
                 StorageMetrics.exceptions.inc();
-                logger.error("Exception in thread {}", t, e);
+                logger.error("Exception in thread " + t, e);
                 Tracing.trace("Exception in thread {}", t, e);
                 for (Throwable e2 = e; e2 != null; e2 = e2.getCause())
                 {
@@ -226,7 +239,7 @@ public class CassandraDaemon
                     if (e2 instanceof FSError)
                     {
                         if (e2 != e) // make sure FSError gets logged exactly once.
-                            logger.error("Exception in thread {}", t, e2);
+                            logger.error("Exception in thread " + t, e2);
                         FileUtils.handleFSError((FSError) e2);
                     }
 
@@ -253,7 +266,7 @@ public class CassandraDaemon
             if (keyspaceName.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 continue;
 
-            for (CFMetaData cfm : Schema.instance.getTablesAndViews(keyspaceName))
+            for (TableMetadata cfm : Schema.instance.getTablesAndViews(keyspaceName))
             {
                 try
                 {
@@ -331,6 +344,7 @@ public class CassandraDaemon
         }
 
         SystemKeyspace.finishStartup();
+        ActiveRepairService.instance.start();
 
         // Prepared statements
         QueryProcessor.preloadPreparedStatement();
@@ -542,6 +556,8 @@ public class CassandraDaemon
         // Do not put any references to DatabaseDescriptor above the forceStaticInitialization call.
         try
         {
+            initializeTPC();
+
             applyConfig();
 
             try
@@ -615,7 +631,7 @@ public class CassandraDaemon
         if (nativeTransportService == null)
             throw new IllegalStateException("setup() must be called first for CassandraDaemon");
         else
-            nativeTransportService.start();
+            nativeTransportService.start(workerGroup);
     }
 
     public void stopNativeTransport()

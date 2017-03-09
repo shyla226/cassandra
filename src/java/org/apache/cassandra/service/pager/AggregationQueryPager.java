@@ -22,17 +22,15 @@ import java.util.NoSuchElementException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import io.reactivex.Observable;
 import io.reactivex.Single;
-import org.reactivestreams.Subscription;
 
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -41,7 +39,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * <p>
  * For aggregation/group by queries, the user page size is in number of groups. But each group could be composed of very
  * many rows so to avoid running into OOMs, this pager will page internal queries into sub-pages. So each call to
- * {@link QueryPager#fetchPage(int, ConsistencyLevel, ClientState, long)} may (transparently) yield multiple internal queries (sub-pages).
+ * {@link QueryPager#fetchPage(int, ConsistencyLevel, ClientState, long, boolean)}  may (transparently) yield multiple
+ * internal queries (sub-pages).
  */
 public final class AggregationQueryPager implements QueryPager
 {
@@ -72,18 +71,12 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public ReadExecutionController executionController()
-    {
-        return subPager.executionController();
-    }
-
-    @Override
-    public Single<PartitionIterator> fetchPageInternal(int pageSize, ReadExecutionController executionController)
+    public Single<PartitionIterator> fetchPageInternal(int pageSize)
     {
         if (limits.isGroupByLimit())
-            return Single.just(new GroupByPartitionIterator(pageSize, null, executionController, System.nanoTime()));
+            return Single.just(new GroupByPartitionIterator(pageSize, null, System.nanoTime()));
 
-        return Single.just(new AggregationPartitionIterator(pageSize, null, executionController, System.nanoTime()));
+        return Single.just(new AggregationPartitionIterator(pageSize, null, System.nanoTime()));
     }
 
     @Override
@@ -127,9 +120,6 @@ public final class AggregationQueryPager implements QueryPager
         // For distributed queries, null for local and distributed queries
         private final ClientState clientState;
 
-        // For internal or local queries, null for distributed queries
-        private final ReadExecutionController executionController;
-
         /**
          * The <code>PartitionIterator</code> over the last page retrieved.
          */
@@ -171,32 +161,20 @@ public final class AggregationQueryPager implements QueryPager
 
         GroupByPartitionIterator(int pageSize,
                                  ConsistencyLevel consistency,
-                                 ClientState clientState,
-                                 long queryStartNanoTime,
-                                 boolean forContinuousPaging)
-        {
-            this(pageSize, consistency, clientState, null, queryStartNanoTime, forContinuousPaging);
-        }
-
-        GroupByPartitionIterator(int pageSize,
-                                 ConsistencyLevel consistency,
-                                 ReadExecutionController executionController,
                                  long queryStartNanoTime)
        {
-           this(pageSize, consistency, null, executionController, queryStartNanoTime, false);
+           this(pageSize, consistency, null, queryStartNanoTime, false);
        }
 
         private GroupByPartitionIterator(int pageSize,
                                          ConsistencyLevel consistency,
                                          ClientState clientState,
-                                         ReadExecutionController executionController,
                                          long queryStartNanoTime,
                                          boolean forContinuousPaging)
         {
             this.pageSize = handlePagingOff(pageSize);
             this.consistency = consistency;
             this.clientState = clientState;
-            this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
             this.forContinuousPaging = forContinuousPaging;
         }
@@ -269,7 +247,7 @@ public final class AggregationQueryPager implements QueryPager
                 partitionIterator = fetchSubPage(computeSubPageSize(pageSize, counted));
             }
 
-            next = partitionIterator.next().blockingGet();
+            next = partitionIterator.next();
         }
 
         protected boolean isDone(int pageSize, int counted)
@@ -317,14 +295,14 @@ public final class AggregationQueryPager implements QueryPager
         private PartitionIterator fetchSubPage(int subPageSize)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Fetching sub-page with consitency {} and exec. controller {}", consistency, executionController);
+                logger.trace("Fetching sub-page with consitency {}", consistency);
 
             return consistency == null
-                 ? subPager.fetchPageInternal(subPageSize, executionController).blockingGet()
+                 ? subPager.fetchPageInternal(subPageSize).blockingGet()
                  : subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).blockingGet();
         }
 
-        public final Single<RowIterator> next()
+        public final RowIterator next()
         {
             if (!hasNext())
                 throw new NoSuchElementException();
@@ -332,7 +310,7 @@ public final class AggregationQueryPager implements QueryPager
             RowIterator iterator = new GroupByRowIterator(next);
             lastPartitionKey = iterator.partitionKey().getKey();
             next = null;
-            return Single.just(iterator);
+            return iterator;
         }
 
         private class GroupByRowIterator implements RowIterator
@@ -352,7 +330,7 @@ public final class AggregationQueryPager implements QueryPager
                 this.rowIterator = delegate;
             }
 
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return rowIterator.metadata();
             }
@@ -362,7 +340,7 @@ public final class AggregationQueryPager implements QueryPager
                 return rowIterator.isReverseOrder();
             }
 
-            public PartitionColumns columns()
+            public RegularAndStaticColumns columns()
             {
                 return rowIterator.columns();
             }
@@ -442,10 +420,9 @@ public final class AggregationQueryPager implements QueryPager
 
         AggregationPartitionIterator(int pageSize,
                                      ConsistencyLevel consistency,
-                                     ReadExecutionController executionController,
                                      long queryStartNanoTime)
         {
-            super(pageSize, consistency, executionController, queryStartNanoTime);
+            super(pageSize, consistency, queryStartNanoTime);
         }
 
         @Override

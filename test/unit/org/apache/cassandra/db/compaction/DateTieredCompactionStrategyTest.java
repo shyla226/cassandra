@@ -53,7 +53,11 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        // Disable tombstone histogram rounding for tests
+        System.setProperty("cassandra.streaminghistogram.roundseconds", "1");
+
         SchemaLoader.prepareServer();
+
         SchemaLoader.createKeyspace(KEYSPACE1,
                 KeyspaceParams.simple(1),
                 SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
@@ -223,7 +227,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         for (int r = 0; r < numSSTables; r++)
         {
             DecoratedKey key = Util.dk(String.valueOf(r));
-            new RowUpdateBuilder(cfs.metadata, r, key.getKey())
+            new RowUpdateBuilder(cfs.metadata(), r, key.getKey())
                 .clustering("column")
                 .add("val", value).build().applyUnsafe();
 
@@ -259,7 +263,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         for (int r = 0; r < numSSTables; r++)
         {
             DecoratedKey key = Util.dk(String.valueOf(r));
-            new RowUpdateBuilder(cfs.metadata, r, key.getKey())
+            new RowUpdateBuilder(cfs.metadata(), r, key.getKey())
                 .clustering("column")
                 .add("val", value).build().applyUnsafe();
 
@@ -296,7 +300,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
 
         // create 2 sstables
         DecoratedKey key = Util.dk(String.valueOf("expired"));
-        new RowUpdateBuilder(cfs.metadata, System.currentTimeMillis(), 1, key.getKey())
+        new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), 1, key.getKey())
             .clustering("column")
             .add("val", value).build().applyUnsafe();
 
@@ -305,7 +309,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         Thread.sleep(10);
 
         key = Util.dk(String.valueOf("nonexpired"));
-        new RowUpdateBuilder(cfs.metadata, System.currentTimeMillis(), key.getKey())
+        new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), key.getKey())
             .clustering("column")
             .add("val", value).build().applyUnsafe();
 
@@ -349,7 +353,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
             for (int i = 0; i < 10; i++)
             {
                 DecoratedKey key = Util.dk(String.valueOf(r));
-                new RowUpdateBuilder(cfs.metadata, timestamp, key.getKey())
+                new RowUpdateBuilder(cfs.metadata(), timestamp, key.getKey())
                     .clustering("column")
                     .add("val", bigValue).build().applyUnsafe();
             }
@@ -359,7 +363,7 @@ public class DateTieredCompactionStrategyTest extends SchemaLoader
         for (int r = 0; r < numSSTables / 2; r++)
         {
             DecoratedKey key = Util.dk(String.valueOf(r));
-            new RowUpdateBuilder(cfs.metadata, timestamp, key.getKey())
+            new RowUpdateBuilder(cfs.metadata(), timestamp, key.getKey())
                 .clustering("column")
                 .add("val", value).build().applyUnsafe();
             cfs.forceBlockingFlush();

@@ -186,12 +186,8 @@ public class OpOrder
 
             for (int i = 0; i < tpcBarriers.length; i++)
             {
-                // during startup, schedulers on cores other than zero will be null, in this case
-                // there is no need to perform any operation on these cores
-                final NettyRxScheduler scheduler = NettyRxScheduler.maybeGetForCore(i);
-
-                if (scheduler != null)
-                    scheduler.scheduleDirect(() -> {
+                final NettyRxScheduler scheduler = NettyRxScheduler.getForCore(i);
+                scheduler.scheduleDirect(() -> {
                         try
                         {
                             function.accept(scheduler);
@@ -206,8 +202,6 @@ public class OpOrder
                             latch.countDown();
                         }
                     });
-                else
-                    latch.countDown();
             }
 
             return latch;
@@ -234,7 +228,10 @@ public class OpOrder
         public void markBlocking()
         {
             assert !NettyRxScheduler.isTPCThread() : "This method should never be issued from a TPC thread";
-            final CountDownLatch latch = dispatchToTPCTheads(scheduler -> tpcBarriers[scheduler.cpuId].markBlocking());
+            final CountDownLatch latch = dispatchToTPCTheads(scheduler -> {
+                if (tpcBarriers[scheduler.cpuId] != null)
+                    tpcBarriers[scheduler.cpuId].markBlocking();
+            });
 
             Uninterruptibles.awaitUninterruptibly(latch);
         }
@@ -246,8 +243,10 @@ public class OpOrder
             final boolean allPriorFinished[] = new boolean[tpcBarriers.length];
             //initialize to true in case some TPC threads are not yet running
             Arrays.fill(allPriorFinished, true);
-            final CountDownLatch latch = dispatchToTPCTheads(scheduler ->
-                                                             allPriorFinished[scheduler.cpuId] = tpcBarriers[scheduler.cpuId].allPriorOpsAreFinished());
+            final CountDownLatch latch = dispatchToTPCTheads(scheduler -> allPriorFinished[scheduler.cpuId] =
+                                                                          tpcBarriers[scheduler.cpuId] == null
+                                                                          ? true
+                                                                          : tpcBarriers[scheduler.cpuId].allPriorOpsAreFinished());
 
             Uninterruptibles.awaitUninterruptibly(latch);
 
@@ -270,6 +269,9 @@ public class OpOrder
 
             final CountDownLatch latch = dispatchToTPCTheads(scheduler ->
                                                              {
+                                                                 if (tpcBarriers[scheduler.cpuId] == null)
+                                                                     return; // the barrier was issued just before the TPC thread was initialized,
+
                                                                  Optional<WaitQueue.Signal> signal = tpcBarriers[scheduler.cpuId].await(caller);
                                                                  if (signal.isPresent())
                                                                      signals[scheduler.cpuId] = signal.get();

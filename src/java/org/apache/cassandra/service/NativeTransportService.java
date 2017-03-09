@@ -19,21 +19,16 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.nio.NioEventLoopGroup;
 
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
@@ -49,12 +44,10 @@ public class NativeTransportService
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
 
     private List<Server> servers = Collections.emptyList();
-    private EventLoopGroup workerGroup;
 
     private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
 
     private boolean initialized = false;
-    private boolean tpcInitialized = false;
 
     private final InetAddress nativeAddr;
     private final int nativePort;
@@ -72,25 +65,34 @@ public class NativeTransportService
         this.nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 
+    public static EventLoopGroup makeWorkerGroup()
+    {
+        if (useEpoll())
+        {
+            MonitoredEpollEventLoopGroup ret = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
+            logger.info("Using native Epoll event loops");
+            return ret;
+        }
+        else
+        {
+            NioEventLoopGroup ret = new NioEventLoopGroup(NUM_NETTY_THREADS);
+            ret.setIoRatio(pIO);
+
+            logger.info("Using Java NIO event loops");
+            logger.info("Netting ioWork ratio to {}", pIO);
+            return ret;
+        }
+    }
+
     /**
      * Creates netty thread pools and event loops.
      */
     @VisibleForTesting
-    synchronized void initialize()
+    synchronized void initialize(EventLoopGroup workerGroup)
     {
         if (initialized)
             return;
 
-        if (useEpoll())
-        {
-            workerGroup = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
-            logger.info("Netty using native Epoll event loops");
-        }
-        else
-        {
-            workerGroup = new NioEventLoopGroup(NUM_NETTY_THREADS);
-            logger.info("Netty using Java NIO event loops");
-        }
         int nativePortSSL = DatabaseDescriptor.getNativeTransportPortSSL();
 
         if (!DatabaseDescriptor.getClientEncryptionOptions().enabled)
@@ -143,41 +145,13 @@ public class NativeTransportService
         initialized = true;
     }
 
-    private void initializeTPC()
-    {
-        if (tpcInitialized)
-            return;
-
-        logger.info("Netting ioWork ratio to {}", pIO);
-        CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
-
-        for (int i = 0; i < NUM_NETTY_THREADS; i++)
-        {
-            final int cpuId = i;
-            if (!useEpoll())
-                ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
-
-            EventLoop loop = workerGroup.next();
-            loop.schedule(() -> {
-                NettyRxScheduler.register(loop, cpuId);
-                logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
-
-                ready.countDown();
-            }, 0, TimeUnit.SECONDS);
-        }
-
-        Uninterruptibles.awaitUninterruptibly(ready);
-
-        tpcInitialized = true;
-    }
 
     /**
      * Starts native transport servers.
      */
-    public void start()
+    public void start(EventLoopGroup workerGroup)
     {
-        initialize();
-        initializeTPC();
+        initialize(workerGroup);
 
         servers.forEach(Server::start);
     }
@@ -197,9 +171,6 @@ public class NativeTransportService
     {
         stop();
         servers = Collections.emptyList();
-
-        // shutdown executors used by netty for native transport server
-        workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
     }
 
     /**
@@ -219,12 +190,6 @@ public class NativeTransportService
         for (Server server : servers)
             if (server.isRunning()) return true;
         return false;
-    }
-
-    @VisibleForTesting
-    EventLoopGroup getWorkerGroup()
-    {
-        return workerGroup;
     }
 
     @VisibleForTesting

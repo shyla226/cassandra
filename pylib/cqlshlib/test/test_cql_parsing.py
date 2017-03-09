@@ -21,9 +21,14 @@ from unittest import TestCase
 from operator import itemgetter
 
 from ..cql3handling import CqlRuleSet
+from ..cqlshhandling import cqlsh_extra_syntax_rules
 
 
 class TestCqlParsing(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        CqlRuleSet.append_rules(cqlsh_extra_syntax_rules)
+
     def test_parse_string_literals(self):
         for n in ["'eggs'", "'Sausage 1'", "'spam\nspam\n\tsausage'", "''"]:
             self.assertSequenceEqual(tokens_with_types(CqlRuleSet.lex(n)),

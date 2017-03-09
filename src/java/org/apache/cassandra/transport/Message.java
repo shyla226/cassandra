@@ -39,35 +39,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.EventLoop;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.messages.AuthChallenge;
-import org.apache.cassandra.transport.messages.AuthResponse;
-import org.apache.cassandra.transport.messages.AuthSuccess;
-import org.apache.cassandra.transport.messages.AuthenticateMessage;
-import org.apache.cassandra.transport.messages.BatchMessage;
-import org.apache.cassandra.transport.messages.CancelMessage;
-import org.apache.cassandra.transport.messages.CredentialsMessage;
-import org.apache.cassandra.transport.messages.ErrorMessage;
-import org.apache.cassandra.transport.messages.EventMessage;
-import org.apache.cassandra.transport.messages.ExecuteMessage;
-import org.apache.cassandra.transport.messages.OptionsMessage;
-import org.apache.cassandra.transport.messages.PrepareMessage;
-import org.apache.cassandra.transport.messages.QueryMessage;
-import org.apache.cassandra.transport.messages.ReadyMessage;
-import org.apache.cassandra.transport.messages.RegisterMessage;
-import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.transport.messages.StartupMessage;
-import org.apache.cassandra.transport.messages.SupportedMessage;
+import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -596,6 +574,10 @@ public abstract class Message
 
             assert request.connection() instanceof ServerConnection;
             connection = (ServerConnection) request.connection();
+
+            // This resets any Tracing or ClientWarn thread local state
+            ExecutorLocals.set(null);
+
             if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
                 ClientWarn.instance.captureWarnings();
 
@@ -610,14 +592,13 @@ public abstract class Message
                    .subscribe(
                     // onSuccess
                     response -> {
-                        response.setStreamId(request.getStreamId());
 
                         if (!response.sendToClient)
                         {
                             request.getSourceFrame().release();
                             return;
                         }
-
+                        response.setStreamId(request.getStreamId());
                         response.setWarnings(ClientWarn.instance.getWarnings());
                         response.attach(connection);
                         connection.applyStateTransition(request.type, response.type);
@@ -638,7 +619,8 @@ public abstract class Message
             );
         }
 
-        /** Aggregates writes from this event loop to be flushed at once
+        /**
+         * Aggregates writes from this event loop to be flushed at once
          * This method will only be called from the eventloop itself so is threadsafe
          * @param item
          */
@@ -662,10 +644,12 @@ public abstract class Message
         public void exceptionCaught(final ChannelHandlerContext ctx, Throwable cause)
         throws Exception
         {
+            // Provide error message to client in case channel is still open
+            UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), false);
+            ErrorMessage errorMessage = ErrorMessage.fromException(cause, handler);
             if (ctx.channel().isOpen())
             {
-                UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), false);
-                ChannelFuture future = ctx.writeAndFlush(ErrorMessage.fromException(cause, handler));
+                ChannelFuture future = ctx.writeAndFlush(errorMessage);
                 // On protocol exception, close the channel as soon as the message have been sent
                 if (cause instanceof ProtocolException)
                 {

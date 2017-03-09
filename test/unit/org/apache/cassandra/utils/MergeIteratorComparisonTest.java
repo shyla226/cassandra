@@ -23,8 +23,6 @@ import java.util.*;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-
-import io.reactivex.Single;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
@@ -503,12 +501,12 @@ public class MergeIteratorComparisonTest
         System.out.format("%15s time %5dms; comparisons: %d\n", type, time, comparator.count);
     }
 
-    public <T> List<CLI<T>> closeableIterators(List<List<T>> iterators)
+    public <T> List<CloseableIterator<T>> closeableIterators(List<List<T>> iterators)
     {
-        return Lists.transform(iterators, new Function<List<T>, CLI<T>>() {
+        return Lists.transform(iterators, new Function<List<T>, CloseableIterator<T>>() {
 
             @Override
-            public CLI<T> apply(List<T> arg)
+            public CloseableIterator<T> apply(List<T> arg)
             {
                 return new CLI<T>(arg.iterator());
             }

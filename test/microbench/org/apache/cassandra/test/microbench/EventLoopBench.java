@@ -80,7 +80,7 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loops = new EpollEventLoopGroup(2);
+            loops = new EpollEventLoopGroup(2, new NettyRxScheduler.NettyRxThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
             if (!Epoll.isAvailable())
                 throw new RuntimeException("Epoll Not available");
 

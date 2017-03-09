@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3;
 import static junit.framework.Assert.fail;
 
 import java.io.Closeable;
-import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Assert;
@@ -31,9 +30,13 @@ import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogSegment;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 
@@ -53,7 +56,33 @@ public class OutOfSpaceTest extends CQLTester
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.die);
-            flushAndExpectError();
+            flushAndExpectError(FSWriteError.class);
+            Assert.assertTrue(killerForTests.wasKilled());
+            Assert.assertFalse(killerForTests.wasKilledQuietly()); //only killed quietly on startup failure
+        }
+        finally
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(oldPolicy);
+            JVMStabilityInspector.replaceKiller(originalKiller);
+        }
+    }
+
+    @Test
+    public void testFlushAssertionErrorDie() throws Throwable
+    {
+        makeTable();
+
+        KillerForTests killerForTests = new KillerForTests();
+        JVMStabilityInspector.Killer originalKiller = JVMStabilityInspector.replaceKiller(killerForTests);
+        DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        try
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.ignore);  // we should always die on assertion errors
+            Mutation m = new Mutation(PartitionUpdate.singleRowUpdate(currentTableMetadata(),
+                                                                      Util.dk("broken"),
+                                                                      BTreeRow.emptyRow(Util.clustering(currentTableMetadata().comparator, "col"))));
+            m.applyUnsafe();
+            flushAndExpectError(AssertionError.class);
             Assert.assertTrue(killerForTests.wasKilled());
             Assert.assertFalse(killerForTests.wasKilledQuietly()); //only killed quietly on startup failure
         }
@@ -73,7 +102,7 @@ public class OutOfSpaceTest extends CQLTester
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.stop);
-            flushAndExpectError();
+            flushAndExpectError(FSWriteError.class);
             Assert.assertFalse(Gossiper.instance.isEnabled());
         }
         finally
@@ -91,7 +120,7 @@ public class OutOfSpaceTest extends CQLTester
         try (Closeable c = Util.markDirectoriesUnwriteable(getCurrentColumnFamilyStore()))
         {
             DatabaseDescriptor.setDiskFailurePolicy(DiskFailurePolicy.ignore);
-            flushAndExpectError();
+            flushAndExpectError(FSWriteError.class);
         }
         finally
         {
@@ -111,26 +140,29 @@ public class OutOfSpaceTest extends CQLTester
             execute("INSERT INTO %s (a, b, c) VALUES ('key', 'column" + i + "', null);");
     }
 
-    public void flushAndExpectError() throws InterruptedException, ExecutionException
+    public void flushAndExpectError(Class<? extends Throwable> errorClass) throws InterruptedException, ExecutionException
     {
         // TODO fix this test, disabled for TPC prototype
         /*
         try
         {
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().blockingFirst();
-            fail("FSWriteError expected.");
+            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().get();
+            fail(errorClass.getSimpleName() + " expected.");
         }
         catch (ExecutionException e)
         {
             // Correct path.
-            Assert.assertTrue(e.getCause() instanceof FSWriteError);
+            Throwable t = e.getCause();
+            while (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class)
+                t = t.getCause();
+            Assert.assertTrue(errorClass.isInstance(t));
         }
         */
 
         // Make sure commit log wasn't discarded.
-        UUID cfid = currentTableMetadata().cfId;
+        TableId tableId = currentTableMetadata().id;
         for (CommitLogSegment segment : CommitLog.instance.segmentManager.getActiveSegments())
-            if (segment.getDirtyCFIDs().contains(cfid))
+            if (segment.getDirtyTableIds().contains(tableId))
                 return;
         fail("Expected commit log to remain dirty for the affected table.");
     }

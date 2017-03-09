@@ -35,14 +35,12 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.locator.TokenMetadata.Topology;
-import org.apache.cassandra.utils.FBUtilities;
 
 public class TokenAllocation
 {
@@ -53,9 +51,6 @@ public class TokenAllocation
                                                    final InetAddress endpoint,
                                                    int numTokens)
     {
-        if (!FBUtilities.getBroadcastAddress().equals(InetAddress.getLoopbackAddress()))
-            Gossiper.waitToSettle();
-
         TokenMetadata tokenMetadataCopy = tokenMetadata.cloneOnlyTokenMap();
         StrategyAdapter strategy = getStrategy(tokenMetadataCopy, rs, endpoint);
         Collection<Token> tokens = create(tokenMetadata, strategy).addUnit(endpoint, numTokens);

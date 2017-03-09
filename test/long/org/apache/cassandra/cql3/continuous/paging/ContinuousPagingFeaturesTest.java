@@ -606,4 +606,24 @@ public class ContinuousPagingFeaturesTest extends CQLTester
                 helper.testContinuousPaging(1, pageSize, ContinuousPagingOptions.PageUnit.ROWS);
         }
     }
+
+    @Test
+    public void testCount() throws Throwable
+    {
+        try(TestHelper helper = new TestBuilder(this).schemaSupplier(b ->
+                                                                     new GroupBySchema("SELECT COUNT(*) FROM %s",
+                                                                                       new Object[][]
+                                                                                       {
+                                                                                       new Object[]{ 7L }
+                                                                                       }))
+                                                     .checkRows(true)
+                                                     .build())
+        {
+            for (int pageSize = 2; pageSize <= 10; pageSize++)
+            {
+                helper.testContinuousPaging(1, pageSize, ContinuousPagingOptions.PageUnit.ROWS);
+                helper.testContinuousPaging(1, pageSize, ContinuousPagingOptions.PageUnit.BYTES);
+            }
+        }
+    }
 }

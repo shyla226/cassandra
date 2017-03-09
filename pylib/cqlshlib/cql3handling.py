@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from .cqlhandling import CqlParsingRuleSet, Hint
-from cassandra.metadata import maybe_escape_name
+from dse.metadata import maybe_escape_name
 
 
 simple_cql_types = set(('ascii', 'bigint', 'blob', 'boolean', 'counter', 'date', 'decimal', 'double', 'duration', 'float',
@@ -254,6 +254,7 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                   | <schemaChangeStatement>
                   | <authenticationStatement>
                   | <authorizationStatement>
+                  | <thirdPartyStatement>
                   ;
 
 <dataChangeStatement> ::= <insertStatement>
@@ -1376,8 +1377,7 @@ syntax_rules += r'''
 <alterTableStatement> ::= "ALTER" wat=( "COLUMNFAMILY" | "TABLE" ) cf=<columnFamilyName>
                                <alterInstructions>
                         ;
-<alterInstructions> ::= "ALTER" existcol=<cident> "TYPE" <storageType>
-                      | "ADD" newcol=<cident> <storageType> ("static")?
+<alterInstructions> ::= "ADD" newcol=<cident> <storageType> ("static")?
                       | "DROP" existcol=<cident>
                       | "WITH" <cfamProperty> ( "AND" <cfamProperty> )*
                       | "RENAME" existcol=<cident> "TO" newcol=<cident>
@@ -1387,8 +1387,7 @@ syntax_rules += r'''
 <alterUserTypeStatement> ::= "ALTER" "TYPE" ut=<userTypeName>
                                <alterTypeInstructions>
                              ;
-<alterTypeInstructions> ::= "ALTER" existcol=<cident> "TYPE" <storageType>
-                           | "ADD" newcol=<cident> <storageType>
+<alterTypeInstructions> ::= "ADD" newcol=<cident> <storageType>
                            | "RENAME" existcol=<cident> "TO" newcol=<cident>
                               ( "AND" existcol=<cident> "TO" newcol=<cident> )*
                            ;
@@ -1484,15 +1483,19 @@ syntax_rules += r'''
                                     ( "ON" <resource> )? ( "OF" <rolename> )? "NORECURSIVE"?
                              ;
 
-<permission> ::= "AUTHORIZE"
-               | "CREATE"
-               | "ALTER"
-               | "DROP"
-               | "SELECT"
-               | "MODIFY"
-               | "DESCRIBE"
-               | "EXECUTE"
+<permission> ::= <corePermission>
+               | <thirdPartyPermission>
                ;
+
+<corePermission> ::= "AUTHORIZE"
+                   | "CREATE"
+                   | "ALTER"
+                   | "DROP"
+                   | "SELECT"
+                   | "MODIFY"
+                   | "DESCRIBE"
+                   | "EXECUTE"
+                   ;
 
 <permissionExpr> ::= ( <permission> "PERMISSION"? )
                    | ( "ALL" "PERMISSIONS"? )
@@ -1504,6 +1507,7 @@ syntax_rules += r'''
              | <roleResource>
              | <functionResource>
              | <jmxResource>
+             | <thirdPartyResource>
              ;
 
 <dataResource> ::= ( "ALL" "KEYSPACES" )

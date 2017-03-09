@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sasi.plan;
 import java.util.*;
 
 import io.reactivex.Single;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -30,6 +29,7 @@ import org.apache.cassandra.index.sasi.disk.Token;
 import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 
 public class QueryPlan
@@ -70,7 +70,7 @@ public class QueryPlan
         return Single.just(new ResultIterator(analyze(), controller, executionController));
     }
 
-    private static class ResultIterator extends AbstractIterator<Single<UnfilteredRowIterator>> implements UnfilteredPartitionIterator
+    private static class ResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final AbstractBounds<PartitionPosition> keyRange;
         private final Operation operationTree;
@@ -89,7 +89,7 @@ public class QueryPlan
                 operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
         }
 
-        protected Single<UnfilteredRowIterator> computeNext()
+        protected UnfilteredRowIterator computeNext()
         {
             if (operationTree == null)
                 return endOfData();
@@ -112,25 +112,21 @@ public class QueryPlan
                     if (!keyRange.right.isMinimum() && keyRange.right.compareTo(key) < 0)
                         return endOfData();
 
-                    Single<UnfilteredRowIterator> partition = controller.getPartition(key, executionController);
-
-                    //TPC TODO: Not sure how to avoid returning empty iterators
-                    return partition.map(p -> {
-                        Row staticRow = p.staticRow();
+                    try (UnfilteredRowIterator partition = controller.getPartition(key, executionController).blockingGet())
+                    {
+                        Row staticRow = partition.staticRow();
                         List<Unfiltered> clusters = new ArrayList<>();
 
-                        while (p.hasNext())
+                        while (partition.hasNext())
                         {
-                            Unfiltered row = p.next();
+                            Unfiltered row = partition.next();
                             if (operationTree.satisfiedBy(row, staticRow, true))
                                 clusters.add(row);
                         }
 
                         if (!clusters.isEmpty())
-                            return new PartitionIterator(p, clusters);
-
-                        return EmptyIterators.unfilteredRow(p.metadata(), p.partitionKey(), false);
-                    });
+                            return new PartitionIterator(partition, clusters);
+                    }
                 }
             }
         }
@@ -159,7 +155,7 @@ public class QueryPlan
             }
         }
 
-        public CFMetaData metadata()
+        public TableMetadata metadata()
         {
             return controller.metadata();
         }

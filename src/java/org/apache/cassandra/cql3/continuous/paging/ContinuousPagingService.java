@@ -182,7 +182,10 @@ public class ContinuousPagingService
      */
     public static long liveSessions()
     {
-        return sessions.size();
+        synchronized (sessions)
+        {
+            return sessions.size();
+        }
     }
 
     /**
@@ -190,7 +193,10 @@ public class ContinuousPagingService
      */
     public static long pendingPages()
     {
-        return sessions.values().stream().map(PageBuilder::pendingPages).reduce(Integer::sum).orElseGet(() -> 0);
+        synchronized (sessions)
+        {
+            return sessions.values().stream().map(PageBuilder::pendingPages).reduce(Integer::sum).orElseGet(() -> 0);
+        }
     }
 
     /**
@@ -533,7 +539,7 @@ public class ContinuousPagingService
             this.pageWriter = new ContinuousPageWriter(state.getConnection(),
                                                        pagingOptions.maxPagesPerSecond(),
                                                        config);
-            this.avgRowSize = ResultSet.estimatedRowSize(statement.cfm, selection.getColumns());
+            this.avgRowSize = ResultSet.estimatedRowSize(statement.table, selection.getColumnMapping());
 
             allocatePage(1);
         }

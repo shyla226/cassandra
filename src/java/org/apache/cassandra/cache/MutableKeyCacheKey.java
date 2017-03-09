@@ -15,13 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * A mutable version of the KeyCacheKey to be used by read only cache checks
@@ -29,9 +28,9 @@ import org.apache.cassandra.utils.Pair;
  */
 public class MutableKeyCacheKey extends KeyCacheKey
 {
-    public MutableKeyCacheKey(Pair<String, String> ksAndCFName, Descriptor desc, ByteBuffer key)
+    public MutableKeyCacheKey(TableMetadata metadata, Descriptor desc, ByteBuffer key)
     {
-        super(ksAndCFName, desc, key, false);
+        super(metadata, desc, key, false);
     }
 
     public void mutate(Descriptor desc, ByteBuffer key)

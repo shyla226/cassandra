@@ -19,7 +19,6 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.util.regex.Pattern;
 
-import org.apache.cassandra.utils.ChecksumType;
 
 /**
  * A set of feature flags associated with a SSTable format
@@ -51,6 +50,10 @@ public abstract class Version
     public abstract boolean hasCommitLogLowerBound();
 
     public abstract boolean hasCommitLogIntervals();
+
+    public abstract boolean hasMaxCompressedLength();
+
+    public abstract boolean hasPendingRepair();
 
     public String getVersion()
     {

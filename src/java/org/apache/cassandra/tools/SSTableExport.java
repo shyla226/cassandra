@@ -27,8 +27,7 @@ import java.util.stream.StreamSupport;
 
 import org.apache.commons.cli.*;
 
-import io.reactivex.Single;
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.DecoratedKey;
@@ -44,6 +43,7 @@ import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -89,10 +89,10 @@ public class SSTableExport
      * Construct table schema from info stored in SSTable's Stats.db
      *
      * @param desc SSTable's descriptor
-     * @return Restored CFMetaData
+     * @return Restored TableMetadata
      * @throws IOException when Stats.db cannot be read
      */
-    public static CFMetaData metadataFromSSTable(Descriptor desc) throws IOException
+    public static TableMetadata metadataFromSSTable(Descriptor desc) throws IOException
     {
         if (!desc.version.isCompatible())
             throw new IOException("Cannot process old and unsupported SSTable version.");
@@ -102,7 +102,7 @@ public class SSTableExport
         SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
         IPartitioner partitioner = FBUtilities.newPartitioner(desc);
 
-        CFMetaData.Builder builder = CFMetaData.Builder.create("keyspace", "table").withPartitioner(partitioner);
+        TableMetadata.Builder builder = TableMetadata.builder("keyspace", "table").partitioner(partitioner);
         header.getStaticColumns().entrySet().stream()
                 .forEach(entry -> {
                     ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
@@ -113,18 +113,12 @@ public class SSTableExport
                     ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
                     builder.addRegularColumn(ident, entry.getValue());
                 });
-        builder.addPartitionKey("PartitionKey", header.getKeyType());
+        builder.addPartitionKeyColumn("PartitionKey", header.getKeyType());
         for (int i = 0; i < header.getClusteringTypes().size(); i++)
         {
             builder.addClusteringColumn("clustering" + (i > 0 ? i : ""), header.getClusteringTypes().get(i));
         }
         return builder.build();
-    }
-
-    private static <T> Stream<Single<T>> rxiterToStream(Iterator<Single<T>> iter)
-    {
-        Spliterator<Single<T>> splititer = Spliterators.spliteratorUnknownSize(iter, Spliterator.IMMUTABLE);
-        return StreamSupport.stream(splititer, false);
     }
 
     private static <T> Stream<T> iterToStream(Iterator<T> iter)
@@ -177,7 +171,7 @@ public class SSTableExport
         Descriptor desc = Descriptor.fromFilename(ssTableFileName);
         try
         {
-            CFMetaData metadata = metadataFromSSTable(desc);
+            TableMetadata metadata = metadataFromSSTable(desc);
             if (cmd.hasOption(ENUMERATE_KEYS_OPTION))
             {
                 try (KeyIterator iter = new KeyIterator(desc, metadata))
@@ -190,14 +184,14 @@ public class SSTableExport
             }
             else
             {
-                SSTableReader sstable = SSTableReader.openNoValidation(desc, metadata);
+                SSTableReader sstable = SSTableReader.openNoValidation(desc, TableMetadataRef.forOfflineTools(metadata));
                 IPartitioner partitioner = sstable.getPartitioner();
                 final ISSTableScanner currentScanner;
                 if ((keys != null) && (keys.length > 0))
                 {
                     List<AbstractBounds<PartitionPosition>> bounds = Arrays.stream(keys)
                             .filter(key -> !excludes.contains(key))
-                            .map(metadata.getKeyValidator()::fromString)
+                            .map(metadata.partitionKeyType::fromString)
                             .map(partitioner::decorateKey)
                             .sorted()
                             .map(DecoratedKey::getToken)
@@ -208,39 +202,38 @@ public class SSTableExport
                 {
                     currentScanner = sstable.getScanner();
                 }
-                Stream<Single<UnfilteredRowIterator>> partitions = rxiterToStream(currentScanner).filter(i ->
-                    excludes.isEmpty() || !excludes.contains(metadata.getKeyValidator().getString(i.blockingGet().partitionKey().getKey()))
+                Stream<UnfilteredRowIterator> partitions = iterToStream(currentScanner).filter(i ->
+                    excludes.isEmpty() || !excludes.contains(metadata.partitionKeyType.getString(i.partitionKey().getKey()))
                 );
                 if (cmd.hasOption(DEBUG_OUTPUT_OPTION))
                 {
                     AtomicLong position = new AtomicLong();
                     partitions.forEach(partition ->
                     {
-                        UnfilteredRowIterator p = partition.blockingGet();
                         position.set(currentScanner.getCurrentPosition());
 
-                        if (!p.partitionLevelDeletion().isLive())
+                        if (!partition.partitionLevelDeletion().isLive())
                         {
-                            System.out.println("[" + metadata.getKeyValidator().getString(p.partitionKey().getKey()) + "]@" +
-                                               position.get() + " " + p.partitionLevelDeletion());
+                            System.out.println("[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@" +
+                                               position.get() + " " + partition.partitionLevelDeletion());
                         }
-                        if (!p.staticRow().isEmpty())
+                        if (!partition.staticRow().isEmpty())
                         {
-                            System.out.println("[" + metadata.getKeyValidator().getString(p.partitionKey().getKey()) + "]@" +
-                                               position.get() + " " + p.staticRow().toString(metadata, true));
+                            System.out.println("[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@" +
+                                               position.get() + " " + partition.staticRow().toString(metadata, true));
                         }
-                        p.forEachRemaining(row ->
+                        partition.forEachRemaining(row ->
                         {
                             System.out.println(
-                                    "[" + metadata.getKeyValidator().getString(p.partitionKey().getKey()) + "]@"
-                                            + position.get() + " " + row.toString(metadata, false, true));
+                                    "[" + metadata.partitionKeyType.getString(partition.partitionKey().getKey()) + "]@"
+                            + position.get() + " " + row.toString(metadata, false, true));
                             position.set(currentScanner.getCurrentPosition());
                         });
                     });
                 }
                 else
                 {
-                    JsonTransformer.toJson(currentScanner, partitions.map(s -> s.blockingGet()), cmd.hasOption(RAW_TIMESTAMPS), metadata, System.out);
+                    JsonTransformer.toJson(currentScanner, partitions, cmd.hasOption(RAW_TIMESTAMPS), metadata, System.out);
                 }
             }
         }

@@ -17,19 +17,8 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.concurrent.Callable;
-
 import io.reactivex.Flowable;
 import io.reactivex.Maybe;
-import io.reactivex.Observable;
-import io.reactivex.Single;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.AsObservable;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.PartitionColumns;
-import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.RxIterator;
 
 /**
  * A partition container providing access to the rows of the partition together with deletion informations.

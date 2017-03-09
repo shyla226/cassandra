@@ -96,11 +96,12 @@ public class Config
     public volatile long truncate_request_timeout_in_ms = 60000L;
 
     /**
-     * @deprecated use {@link this#streaming_keep_alive_period_in_secs} instead
+     * @deprecated use {@link #streaming_keep_alive_period_in_secs} instead
      */
     @Deprecated
     public int streaming_socket_timeout_in_ms = 86400000; //24 hours
 
+    public Integer streaming_connections_per_host = 1;
     public Integer streaming_keep_alive_period_in_secs = 300; //5 minutes
 
     public boolean cross_node_timeout = false;
@@ -205,7 +206,7 @@ public class Config
 
     public String endpoint_snitch;
     public boolean dynamic_snitch = true;
-    public int dynamic_snitch_update_interval_in_ms = 100;
+    public int dynamic_snitch_update_interval_in_ms = 500;
     public int dynamic_snitch_reset_interval_in_ms = 600000;
     public double dynamic_snitch_badness_threshold = 0.1;
 
@@ -278,16 +279,17 @@ public class Config
      * Can be fixed, movingaverage, timehorizon, disabled. Setting is case and leading/trailing
      * whitespace insensitive. You can also specify a subclass of CoalescingStrategies.CoalescingStrategy by name.
      */
-    public String otc_coalescing_strategy = "TIMEHORIZON";
+    public String otc_coalescing_strategy = "DISABLED";
 
     /*
      * How many microseconds to wait for coalescing. For fixed strategy this is the amount of time after the first
-     * messgae is received before it will be sent with any accompanying messages. For moving average this is the
+     * message is received before it will be sent with any accompanying messages. For moving average this is the
      * maximum amount of time that will be waited as well as the interval at which messages must arrive on average
      * for coalescing to be enabled.
      */
     public static final int otc_coalescing_window_us_default = 200;
     public int otc_coalescing_window_us = otc_coalescing_window_us_default;
+    public int otc_coalescing_enough_coalesced_messages = 8;
 
     public int windows_timer_interval = 0;
 
@@ -332,10 +334,12 @@ public class Config
 
     public volatile boolean back_pressure_enabled = false;
     public volatile ParameterizedClass back_pressure_strategy;
-	
-	/** The configuration for continuous paging */
+
+    /** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
 
+    /** How often histograms used by JMX metrics are updated, in milliseconds */
+    public int metrics_histogram_update_interval_millis = 1000;
 
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}

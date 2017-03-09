@@ -17,13 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
-import io.reactivex.Flowable;
-import io.reactivex.Observable;
-import io.reactivex.Single;
-import org.apache.cassandra.db.AsObservable;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.RxIterator;
 
 /**
  * An iterator over the rows of a given partition that also includes deletion informations.
@@ -49,7 +43,7 @@ import org.apache.cassandra.utils.RxIterator;
  * the returned objects for longer than the iteration, it must make a copy of
  * it explicitly.
  */
-public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>, AsObservable<Unfiltered>
+public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>
 {
     /**
      * The partition level deletion for the partition this iterate over.
@@ -71,34 +65,5 @@ public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>, AsOb
         return partitionLevelDeletion().isLive()
             && staticRow().isEmpty()
             && !hasNext();
-    }
-
-    public default RxIterator<Unfiltered> asRxIterator()
-    {
-        UnfilteredRowIterator delegate = this;
-
-        return new RxIterator<Unfiltered>()
-        {
-            public void close()
-            {
-                delegate.close();
-            }
-
-            public boolean hasNext()
-            {
-                return delegate.hasNext();
-            }
-
-            public Single<Unfiltered> next()
-            {
-                return Single.just(delegate.next());
-            }
-        };
-    }
-
-
-    public default Flowable<Unfiltered> asObservable()
-    {
-        return Flowable.using(() -> (Iterable<Unfiltered>) this, (u) -> Flowable.fromIterable(u), (u) -> close());
     }
 }

@@ -21,6 +21,8 @@ import java.lang.reflect.Field;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 
 import com.sun.jna.Native;
 
@@ -33,7 +35,7 @@ public abstract class MemoryUtil
 {
     private static final long UNSAFE_COPY_THRESHOLD = 1024 * 1024L; // copied from java.nio.Bits
 
-    private static final Unsafe unsafe;
+    public static final Unsafe unsafe;
     private static final Class<?> DIRECT_BYTE_BUFFER_CLASS, RO_DIRECT_BYTE_BUFFER_CLASS;
     private static final long DIRECT_BYTE_BUFFER_ADDRESS_OFFSET;
     private static final long DIRECT_BYTE_BUFFER_CAPACITY_OFFSET;
@@ -53,9 +55,31 @@ public abstract class MemoryUtil
     {
         try
         {
-            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            unsafe = (sun.misc.Unsafe) field.get(null);
+            unsafe = (Unsafe) AccessController.doPrivileged(
+                new PrivilegedAction<Object>()
+                {
+                    @Override
+                    public Object run()
+                    {
+                        try
+                        {
+                            Field f = Unsafe.class.getDeclaredField("theUnsafe");
+                            f.setAccessible(true);
+                            return f.get(null);
+                        }
+                        catch (NoSuchFieldException e)
+                        {
+                            // It doesn't matter what we throw;
+                            // it's swallowed in getBest().
+                            throw new Error();
+                        }
+                        catch (IllegalAccessException e)
+                        {
+                            throw new Error();
+                        }
+                    }
+                });
+
             Class<?> clazz = ByteBuffer.allocateDirect(0).getClass();
             DIRECT_BYTE_BUFFER_ADDRESS_OFFSET = unsafe.objectFieldOffset(Buffer.class.getDeclaredField("address"));
             DIRECT_BYTE_BUFFER_CAPACITY_OFFSET = unsafe.objectFieldOffset(Buffer.class.getDeclaredField("capacity"));

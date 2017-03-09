@@ -43,13 +43,13 @@ from select import select
 from uuid import UUID
 from util import profile_on, profile_off
 
-from cassandra import OperationTimedOut
-from cassandra.cluster import Cluster, DefaultConnection
-from cassandra.cqltypes import ReversedType, UserType
-from cassandra.metadata import protect_name, protect_names, protect_value
-from cassandra.policies import RetryPolicy, WhiteListRoundRobinPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
-from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory, UNSET_VALUE
-from cassandra.util import Date, Time
+from dse import OperationTimedOut
+from dse.cluster import Cluster, DefaultConnection, ExecutionProfile, EXEC_PROFILE_DEFAULT
+from dse.cqltypes import ReversedType, UserType
+from dse.metadata import protect_name, protect_names, protect_value
+from dse.policies import RetryPolicy, WhiteListRoundRobinPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
+from dse.query import BatchStatement, BatchType, SimpleStatement, tuple_factory, UNSET_VALUE
+from dse.util import Date, Time
 
 from cql3handling import CqlRuleSet
 from displaying import NO_COLOR_MAP
@@ -82,6 +82,11 @@ def printmsg(msg, eol='\n', encoding='utf8'):
     sys.stdout.write(msg.encode(encoding))
     sys.stdout.write(eol)
     sys.stdout.flush()
+
+
+# Keep arguments in sync with printmsg
+def swallowmsg(msg, eol='', encoding=''):
+    None
 
 
 class OneWayPipe(object):
@@ -242,7 +247,7 @@ class CopyTask(object):
 
         # do not display messages when exporting to STDOUT unless --debug is set
         self.printmsg = printmsg if self.fname is not None or direction == 'from' or DEBUG \
-            else lambda _, eol='\n': None
+            else swallowmsg
         self.options = self.parse_options(opts, direction)
 
         self.num_processes = self.options.copy['numprocesses']
@@ -1494,12 +1499,11 @@ class ExportSession(object):
     """
     def __init__(self, cluster, export_process):
         session = cluster.connect(export_process.ks)
-        session.row_factory = tuple_factory
         session.default_fetch_size = export_process.options.copy['pagesize']
-        session.default_timeout = export_process.options.copy['pagetimeout']
 
         printdebugmsg("Created connection to %s with page size %d and timeout %d seconds per page"
-                      % (cluster.contact_points, session.default_fetch_size, session.default_timeout))
+                      % (cluster.contact_points, session.default_fetch_size,
+                         cluster.profile_manager.default.request_timeout))
 
         self.cluster = cluster
         self.session = session
@@ -1641,6 +1645,12 @@ class ExportProcess(ChildProcess):
             session.add_request()
             return session
 
+        execution_profiles = {EXEC_PROFILE_DEFAULT:
+                              ExecutionProfile(load_balancing_policy=WhiteListRoundRobinPolicy([host]),
+                                               retry_policy=ExpBackoffRetryPolicy(self),
+                                               row_factory=tuple_factory,
+                                               consistency_level=self.consistency_level,
+                                               request_timeout=self.options.copy['pagetimeout'])}
         new_cluster = Cluster(
             contact_points=(host,),
             port=self.port,
@@ -1648,12 +1658,11 @@ class ExportProcess(ChildProcess):
             protocol_version=self.protocol_version,
             auth_provider=self.auth_provider,
             ssl_options=ssl_settings(host, self.config_file) if self.ssl else None,
-            load_balancing_policy=WhiteListRoundRobinPolicy([host]),
-            default_retry_policy=ExpBackoffRetryPolicy(self),
             compression=None,
             control_connection_timeout=self.connect_timeout,
             connect_timeout=self.connect_timeout,
-            idle_heartbeat_interval=0)
+            idle_heartbeat_interval=0,
+            execution_profiles=execution_profiles)
         session = ExportSession(new_cluster, self)
         self.hosts_to_sessions[host] = session
         return session
@@ -1848,7 +1857,7 @@ class ImportConversion(object):
     def _get_converter(self, cql_type):
         """
         Return a function that converts a string into a value the can be passed
-        into BoundStatement.bind() for the given cql type. See cassandra.cqltypes
+        into BoundStatement.bind() for the given cql type. See dse.cqltypes
         for more details.
         """
         unprotect = self.unprotect
@@ -1901,11 +1910,30 @@ class ImportConversion(object):
 
         def split(val, sep=','):
             """
-            Split into a list of values whenever we encounter a separator but
+            Split "val" into a list of values whenever the separator "sep" is found, but
             ignore separators inside parentheses or single quotes, except for the two
-            outermost parentheses, which will be ignored. We expect val to be at least
-            2 characters long (the two outer parentheses).
+            outermost parentheses, which will be ignored. This method is called when parsing composite
+            types, "val" should be at least 2 characters long, the first char should be an
+            open parenthesis and the last char should be a matching closing parenthesis. We could also
+            check exactly which parenthesis type depending on the caller, but I don't want to enforce
+            too many checks that don't necessarily provide any additional benefits, and risk breaking
+            data that could previously be imported, even if strictly speaking it is incorrect CQL.
+            For example, right now we accept sets that start with '[' and ']', I don't want to break this
+            by enforcing '{' and '}' in a minor release.
             """
+            def is_open_paren(cc):
+                return cc == '{' or cc == '[' or cc == '('
+
+            def is_close_paren(cc):
+                return cc == '}' or cc == ']' or cc == ')'
+
+            def paren_match(c1, c2):
+                return (c1 == '{' and c2 == '}') or (c1 == '[' and c2 == ']') or (c1 == '(' and c2 == ')')
+
+            if len(val) < 2 or not paren_match(val[0], val[-1]):
+                raise ParseError('Invalid composite string, it should start and end with matching parentheses: {}'
+                                 .format(val))
+
             ret = []
             last = 1
             level = 0
@@ -1914,9 +1942,9 @@ class ImportConversion(object):
                 if c == '\'':
                     quote = not quote
                 elif not quote:
-                    if c == '{' or c == '[' or c == '(':
+                    if is_open_paren(c):
                         level += 1
-                    elif c == '}' or c == ']' or c == ')':
+                    elif is_close_paren(c):
                         level -= 1
                     elif c == sep and level == 1:
                         ret.append(val[last:i])
@@ -2088,6 +2116,13 @@ class ImportConversion(object):
             try:
                 return c(v) if v != self.nullval else self.get_null_val()
             except Exception, e:
+                # if we could not convert an empty string, then self.nullval has been set to a marker
+                # because the user needs to import empty strings, except that the converters for some types
+                # will fail to convert an empty string, in this case the null value should be inserted
+                # see CASSANDRA-12794
+                if v == '':
+                    return self.get_null_val()
+
                 if self.debug:
                     traceback.print_exc()
                 raise ParseError("Failed to parse %s : %s" % (val, e.message))
@@ -2271,23 +2306,27 @@ class ImportProcess(ChildProcess):
     @property
     def session(self):
         if not self._session:
+            execution_profiles = {EXEC_PROFILE_DEFAULT:
+                                  ExecutionProfile(load_balancing_policy=FastTokenAwarePolicy(self),
+                                                   # we throw on timeouts and retry in the error callback
+                                                   retry_policy=FallthroughRetryPolicy(),
+                                                   consistency_level=self.consistency_level,
+                                                   request_timeout=self.request_timeout)}
             cluster = Cluster(
                 contact_points=(self.hostname,),
                 port=self.port,
                 cql_version=self.cql_version,
                 protocol_version=self.protocol_version,
                 auth_provider=self.auth_provider,
-                load_balancing_policy=FastTokenAwarePolicy(self),
                 ssl_options=ssl_settings(self.hostname, self.config_file) if self.ssl else None,
-                default_retry_policy=FallthroughRetryPolicy(),  # we throw on timeouts and retry in the error callback
                 compression=None,
                 control_connection_timeout=self.connect_timeout,
                 connect_timeout=self.connect_timeout,
                 idle_heartbeat_interval=0,
-                connection_class=ConnectionWrapper)
+                connection_class=ConnectionWrapper,
+                execution_profiles=execution_profiles)
 
             self._session = cluster.connect(self.ks)
-            self._session.default_timeout = self.request_timeout
         return self._session
 
     def run(self):

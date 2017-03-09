@@ -20,12 +20,17 @@
  */
 package org.apache.cassandra.db.transform;
 
-import io.reactivex.Observable;
+import java.util.concurrent.Callable;
+
+import com.google.common.collect.Iterables;
+
+import io.reactivex.Flowable;
+import io.reactivex.Single;
+import io.reactivex.SingleSource;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.reactivestreams.Subscription;
 
 public final class FilteredPartitions extends BasePartitions<RowIterator, BasePartitionIterator<?>> implements PartitionIterator
 {

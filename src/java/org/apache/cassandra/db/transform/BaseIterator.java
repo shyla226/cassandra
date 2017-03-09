@@ -23,10 +23,8 @@ package org.apache.cassandra.db.transform;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import io.reactivex.Single;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.RxIterator;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;

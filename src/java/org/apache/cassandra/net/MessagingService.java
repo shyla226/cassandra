@@ -45,6 +45,8 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.hppc.IntObjectMap;
+import com.carrotsearch.hppc.IntObjectOpenHashMap;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
@@ -74,6 +76,8 @@ import org.apache.cassandra.metrics.ConnectionMetrics;
 import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.repair.messages.RepairMessage;
+import org.apache.cassandra.schema.MigrationManager;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.paxos.Commit;
@@ -89,7 +93,8 @@ public final class MessagingService implements MessagingServiceMBean
 
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
-    public static final int current_version = VERSION_30;
+    public static final int VERSION_40 = 11;
+    public static final int current_version = VERSION_40;
 
     public static final String FAILURE_CALLBACK_PARAM = "CAL_BAC";
     public static final byte[] ONE_BYTE = new byte[1];
@@ -229,13 +234,42 @@ public final class MessagingService implements MessagingServiceMBean
         UNUSED_5,
         ;
 
+        private int id;
+        Verb()
+        {
+            id = ordinal();
+        }
+
+        /**
+         * Unused, but it is an extension point for adding custom verbs
+         * @param id
+         */
+        Verb(int id)
+        {
+            this.id = id;
+        }
+
         public long getTimeout()
         {
             return DatabaseDescriptor.getRpcTimeout();
         }
-    }
 
-    public static final Verb[] verbValues = Verb.values();
+        public int getId()
+        {
+            return id;
+        }
+        private static final IntObjectMap<Verb> idToVerbMap = new IntObjectOpenHashMap<>(values().length);
+        static
+        {
+            for (Verb v : values())
+                idToVerbMap.put(v.getId(), v);
+        }
+
+        public static Verb fromId(int id)
+        {
+            return idToVerbMap.get(id);
+        }
+    }
 
     public static final EnumMap<MessagingService.Verb, Stage> verbStages = new EnumMap<MessagingService.Verb, Stage>(MessagingService.Verb.class)
     {{
@@ -1118,9 +1152,9 @@ public final class MessagingService implements MessagingServiceMBean
     {
         assert mutation != null : "Mutation should not be null when updating dropped mutations count";
 
-        for (UUID columnFamilyId : mutation.getColumnFamilyIds())
+        for (TableId tableId : mutation.getTableIds())
         {
-            ColumnFamilyStore cfs = Keyspace.open(mutation.getKeyspaceName()).getColumnFamilyStore(columnFamilyId);
+            ColumnFamilyStore cfs = Keyspace.open(mutation.getKeyspaceName()).getColumnFamilyStore(tableId);
             if (cfs != null)
             {
                 cfs.metric.droppedMutations.inc();

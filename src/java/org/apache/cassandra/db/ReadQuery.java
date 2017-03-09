@@ -23,6 +23,7 @@ import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -38,10 +39,15 @@ import org.apache.cassandra.service.pager.QueryPager;
  */
 public interface ReadQuery
 {
-    ReadQuery EMPTY = new EmptyQuery();
-
     final static class EmptyQuery implements ReadQuery
     {
+        private final TableMetadata metadata;
+
+        public EmptyQuery(TableMetadata metadata)
+        {
+            this.metadata = metadata;
+        }
+
         public ReadExecutionController executionController()
         {
             return ReadExecutionController.empty();
@@ -55,14 +61,14 @@ public interface ReadQuery
             return Single.just(EmptyIterators.partition());
         }
 
-        public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
+        public Single<PartitionIterator> executeInternal()
         {
             return Single.just(EmptyIterators.partition());
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
+        public Single<UnfilteredPartitionIterator> executeLocally()
         {
-            return Single.just(EmptyIterators.unfilteredPartition(executionController.metaData()));
+            return Single.just(EmptyIterators.unfilteredPartition(metadata));
         }
 
         public DataLimits limits()
@@ -106,12 +112,22 @@ public interface ReadQuery
         {
             return true;
         }
+
+        public TableMetadata metadata()
+        {
+            return metadata;
+        }
+
+        public boolean isEmpty()
+        {
+            return true;
+        }
     }
 
     /**
      * Starts a new read operation.
      * <p>
-     * This must be called before {@link this#executeInternal(ReadExecutionController)} and passed to it to protect the read.
+     * This must be called before {@link this#executeInternal()} and passed to it to protect the read.
      * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
      * use it in a try-with-ressource construction.
      *
@@ -146,23 +162,21 @@ public interface ReadQuery
      *
      * This return an iterator that directly query the local underlying storage.
      *
-     * @param controller the {@code ReadExecutionController} protecting the read.
      * @return the result of the query.
      */
-    public Single<PartitionIterator> executeInternal(ReadExecutionController controller);
+    public Single<PartitionIterator> executeInternal();
 
     /**
      * Execute the query locally. This is where the reading actually happens, typically this method
      * would be invoked by the read verb handlers, {@link org.apache.cassandra.service.StorageProxy.LocalReadRunnable}
-     * and {@link ReadQuery#executeInternal(ReadExecutionController)}, or whenever we need to read local data
+     * and {@link ReadQuery#executeInternal()}, or whenever we need to read local data
      * and we need an unfiltered partition iterator, rather than a filtered one. The main difference with
-     * {@link ReadQuery#executeInternal(ReadExecutionController)} is the filtering, only unfiltered iterators can
+     * {@link ReadQuery#executeInternal()} is the filtering, only unfiltered iterators can
      * be merged later on.
      *
-     * @param controller the {@code ReadExecutionController} protecting the read.
      * @return the result of the read query.
      */
-    public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController controller);
+    public Single<UnfilteredPartitionIterator> executeLocally();
 
     /**
      * Returns a pager for the query.
@@ -243,4 +257,19 @@ public interface ReadQuery
      * @return true if we can perform this query only with local data, false otherwise.
      */
     public boolean queriesOnlyLocalData();
+
+    /**
+     * Return the table metadata of this query.
+     *
+     * @return - the table metadata
+     */
+    public TableMetadata metadata();
+
+    /**
+     * Return true if the query is empty.
+     *
+     * @return - true if the query is empty, false otherwise.
+     */
+    public boolean isEmpty();
+
 }

@@ -19,8 +19,10 @@ package org.apache.cassandra.io.sstable.format.big;
 
 import java.util.Collection;
 import java.util.Set;
+import java.util.UUID;
 
-import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -71,7 +73,7 @@ public class BigFormat implements SSTableFormat
     }
 
     @Override
-    public RowIndexEntry.IndexSerializer getIndexSerializer(CFMetaData metadata, Version version, SerializationHeader header)
+    public RowIndexEntry.IndexSerializer getIndexSerializer(TableMetadata metadata, Version version, SerializationHeader header)
     {
         return new RowIndexEntry.Serializer(version, header);
     }
@@ -82,20 +84,21 @@ public class BigFormat implements SSTableFormat
         public SSTableWriter open(Descriptor descriptor,
                                   long keyCount,
                                   long repairedAt,
-                                  CFMetaData metadata,
+                                  UUID pendingRepair,
+                                  TableMetadataRef metadata,
                                   MetadataCollector metadataCollector,
                                   SerializationHeader header,
                                   Collection<SSTableFlushObserver> observers,
                                   LifecycleTransaction txn)
         {
-            return new BigTableWriter(descriptor, keyCount, repairedAt, metadata, metadataCollector, header, observers, txn);
+            return new BigTableWriter(descriptor, keyCount, repairedAt, pendingRepair, metadata, metadataCollector, header, observers, txn);
         }
     }
 
     static class ReaderFactory extends SSTableReader.Factory
     {
         @Override
-        public SSTableReader open(Descriptor descriptor, Set<Component> components, CFMetaData metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
+        public SSTableReader open(Descriptor descriptor, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, SSTableReader.OpenReason openReason, SerializationHeader header)
         {
             return new BigTableReader(descriptor, components, metadata, maxDataAge, sstableMetadata, openReason, header);
         }
@@ -109,13 +112,16 @@ public class BigFormat implements SSTableFormat
     // we always incremented the major version.
     static class BigVersion extends Version
     {
-        public static final String current_version = "mc";
+        public static final String current_version = "na";
         public static final String earliest_supported_version = "ma";
 
         // ma (3.0.0): swap bf hash order
         //             store rows natively
         // mb (3.0.7, 3.7): commit log lower bound included
         // mc (3.0.8, 3.9): commit log intervals included
+        // md (3.0.9, 3.10): pending repair session included
+
+        // na (4.0.0): uncompressed chunks
         //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
@@ -123,6 +129,8 @@ public class BigFormat implements SSTableFormat
         public final int correspondingMessagingVersion;
         private final boolean hasCommitLogLowerBound;
         private final boolean hasCommitLogIntervals;
+        public final boolean hasMaxCompressedLength;
+        private final boolean hasPendingRepair;
 
         BigVersion(String version)
         {
@@ -133,6 +141,8 @@ public class BigFormat implements SSTableFormat
 
             hasCommitLogLowerBound = version.compareTo("mb") >= 0;
             hasCommitLogIntervals = version.compareTo("mc") >= 0;
+            hasMaxCompressedLength = version.compareTo("na") >= 0;
+            hasPendingRepair = version.compareTo("md") >= 0;
         }
 
         @Override
@@ -153,6 +163,11 @@ public class BigFormat implements SSTableFormat
             return hasCommitLogIntervals;
         }
 
+        public boolean hasPendingRepair()
+        {
+            return hasPendingRepair;
+        }
+
         @Override
         public int correspondingMessagingVersion()
         {
@@ -169,6 +184,12 @@ public class BigFormat implements SSTableFormat
         public boolean isCompatibleForStreaming()
         {
             return isCompatible() && version.charAt(0) == current_version.charAt(0);
+        }
+
+        @Override
+        public boolean hasMaxCompressedLength()
+        {
+            return hasMaxCompressedLength;
         }
     }
 }

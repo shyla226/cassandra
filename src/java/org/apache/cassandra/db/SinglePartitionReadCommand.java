@@ -36,19 +36,10 @@ import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.filter.ClusteringIndexFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
-import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
-import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
@@ -61,7 +52,9 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
@@ -87,7 +80,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public SinglePartitionReadCommand(boolean isDigest,
                                       int digestVersion,
-                                      CFMetaData metadata,
+                                      TableMetadata metadata,
                                       int nowInSec,
                                       ColumnFilter columnFilter,
                                       RowFilter rowFilter,
@@ -100,7 +93,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public SinglePartitionReadCommand(boolean isDigest,
                                       int digestVersion,
-                                      CFMetaData metadata,
+                                      TableMetadata metadata,
                                       int nowInSec,
                                       ColumnFilter columnFilter,
                                       RowFilter rowFilter,
@@ -128,7 +121,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      *
      * @return a newly created read command.
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata,
+    public static SinglePartitionReadCommand create(TableMetadata metadata,
                                                     int nowInSec,
                                                     ColumnFilter columnFilter,
                                                     RowFilter rowFilter,
@@ -150,7 +143,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      *
      * @return a newly created read command. The returned command will use no row filter and have no limits.
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata, int nowInSec, DecoratedKey key, ColumnFilter columnFilter, ClusteringIndexFilter filter)
+    public static SinglePartitionReadCommand create(TableMetadata metadata, int nowInSec, DecoratedKey key, ColumnFilter columnFilter, ClusteringIndexFilter filter)
     {
         return create(metadata, nowInSec, columnFilter, RowFilter.NONE, DataLimits.NONE, key, filter);
     }
@@ -164,7 +157,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      *
      * @return a newly created read command that queries all the rows of {@code key}.
      */
-    public static SinglePartitionReadCommand fullPartitionRead(CFMetaData metadata, int nowInSec, DecoratedKey key)
+    public static SinglePartitionReadCommand fullPartitionRead(TableMetadata metadata, int nowInSec, DecoratedKey key)
     {
         return SinglePartitionReadCommand.create(metadata, nowInSec, key, Slices.ALL);
     }
@@ -178,9 +171,9 @@ public class SinglePartitionReadCommand extends ReadCommand
      *
      * @return a newly created read command that queries all the rows of {@code key}.
      */
-    public static SinglePartitionReadCommand fullPartitionRead(CFMetaData metadata, int nowInSec, ByteBuffer key)
+    public static SinglePartitionReadCommand fullPartitionRead(TableMetadata metadata, int nowInSec, ByteBuffer key)
     {
-        return SinglePartitionReadCommand.create(metadata, nowInSec, metadata.decorateKey(key), Slices.ALL);
+        return SinglePartitionReadCommand.create(metadata, nowInSec, metadata.partitioner.decorateKey(key), Slices.ALL);
     }
 
     /**
@@ -194,7 +187,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @return a newly created read command that queries {@code slice} in {@code key}. The returned query will
      * query every columns for the table (without limit or row filtering) and be in forward order.
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata, int nowInSec, DecoratedKey key, Slice slice)
+    public static SinglePartitionReadCommand create(TableMetadata metadata, int nowInSec, DecoratedKey key, Slice slice)
     {
         return create(metadata, nowInSec, key, Slices.with(metadata.comparator, slice));
     }
@@ -210,7 +203,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @return a newly created read command that queries the {@code slices} in {@code key}. The returned query will
      * query every columns for the table (without limit or row filtering) and be in forward order.
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata, int nowInSec, DecoratedKey key, Slices slices)
+    public static SinglePartitionReadCommand create(TableMetadata metadata, int nowInSec, DecoratedKey key, Slices slices)
     {
         ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(slices, false);
         return SinglePartitionReadCommand.create(metadata, nowInSec, ColumnFilter.all(metadata), RowFilter.NONE, DataLimits.NONE, key, filter);
@@ -227,9 +220,9 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @return a newly created read command that queries the {@code slices} in {@code key}. The returned query will
      * query every columns for the table (without limit or row filtering) and be in forward order.
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata, int nowInSec, ByteBuffer key, Slices slices)
+    public static SinglePartitionReadCommand create(TableMetadata metadata, int nowInSec, ByteBuffer key, Slices slices)
     {
-        return create(metadata, nowInSec, metadata.decorateKey(key), slices);
+        return create(metadata, nowInSec, metadata.partitioner.decorateKey(key), slices);
     }
 
     /**
@@ -243,7 +236,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @return a newly created read command that queries the {@code names} in {@code key}. The returned query will
      * query every columns (without limit or row filtering) and be in forward order.
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata, int nowInSec, DecoratedKey key, NavigableSet<Clustering> names)
+    public static SinglePartitionReadCommand create(TableMetadata metadata, int nowInSec, DecoratedKey key, NavigableSet<Clustering> names)
     {
         ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(names, false);
         return SinglePartitionReadCommand.create(metadata, nowInSec, ColumnFilter.all(metadata), RowFilter.NONE, DataLimits.NONE, key, filter);
@@ -260,7 +253,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * @return a newly created read command that queries {@code name} in {@code key}. The returned query will
      * query every columns (without limit or row filtering).
      */
-    public static SinglePartitionReadCommand create(CFMetaData metadata, int nowInSec, DecoratedKey key, Clustering name)
+    public static SinglePartitionReadCommand create(TableMetadata metadata, int nowInSec, DecoratedKey key, Clustering name)
     {
         return create(metadata, nowInSec, key, FBUtilities.singleton(name, metadata.comparator));
     }
@@ -300,7 +293,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         if (!this.partitionKey().equals(key))
             return false;
 
-        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
+        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().partitionKeyType);
     }
 
     public boolean selectsClustering(DecoratedKey key, Clustering clustering)
@@ -402,7 +395,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert !cfs.isIndex(); // CASSANDRA-5732
         assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
 
-        RowCacheKey key = new RowCacheKey(metadata().ksAndCFName, partitionKey());
+        RowCacheKey key = new RowCacheKey(metadata(), partitionKey());
 
         // Attempt a sentinel-read-cache sequence.  if a write invalidates our sentinel, we'll return our
         // (now potentially obsolete) data, but won't cache it. see CASSANDRA-3862
@@ -555,7 +548,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata))
+        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
             return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
 
         Tracing.trace("Acquiring sstable references");
@@ -653,10 +646,10 @@ public class SinglePartitionReadCommand extends ReadCommand
                               nonIntersectingSSTables, view.sstables.size(), includedDueToTombstones);
 
             if (iterators.isEmpty())
-                return FlowablePartitions.empty(cfs.metadata, partitionKey(), filter.isReversed());
+                return FlowablePartitions.empty(cfs.metadata(), partitionKey(), filter.isReversed());
 
 
-            StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
+            StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
             FlowableUnfilteredPartition result = withSSTablesIterated(iterators, cfs.metric);
 
             return result;
@@ -704,8 +697,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
 //        if(!merged.isEmpty())
 //        {
-//            //DecoratedKey key = merged.partitionKey();
-//            //metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+//            DecoratedKey key = merged.partitionKey();
+//            metrics.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
 //        }
 
 //        merged.content = merged.content.doOnComplete(() ->
@@ -721,12 +714,12 @@ public class SinglePartitionReadCommand extends ReadCommand
         return merged;
     }
 
-    private boolean queriesMulticellType(CFMetaData cfm)
+    private boolean queriesMulticellType(TableMetadata table)
     {
-        if (!cfm.hasMulticellOrCounterColumn)
+        if (!table.hasMulticellOrCounterColumn)
             return false;
 
-        for (ColumnDefinition column : columnFilter().fetchedColumns())
+        for (ColumnMetadata column : columnFilter().fetchedColumns())
         {
             if (column.type.isMultiCell() || column.type.isCounter())
                 return true;
@@ -795,7 +788,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     continue; // no tombstone at all, we can skip that sstable
 
                 // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-                //sstable.incrementReadCount();
+                sstable.incrementReadCount();
                 try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), Slices.ALL, columnFilter(), filter.isReversed()))
                 {
                     if (!iter.partitionLevelDeletion().isLive())
@@ -808,7 +801,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
 
             Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
-           // sstable.incrementReadCount();
+            sstable.incrementReadCount();
             try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed()))
             {
                 if (iter.isEmpty())
@@ -821,14 +814,14 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        //cfs.metric.updateSSTableIterated(sstablesIterated);
+        cfs.metric.updateSSTableIterated(sstablesIterated);
 
         if (result == null || result.isEmpty())
             return FlowablePartitions.empty(metadata(), partitionKey(), false);
 
         DecoratedKey key = result.partitionKey();
-        //cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
-        StorageHook.instance.reportRead(cfs.metadata.cfId, partitionKey());
+        cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
+        StorageHook.instance.reportRead(cfs.metadata.id, partitionKey());
 
         // "hoist up" the requested data into a more recent sstable
         if (sstablesIterated > cfs.getMinimumCompactionThreshold()
@@ -874,7 +867,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         SearchIterator<Clustering, Row> searchIter = result.searchIterator(columnFilter(), false);
 
-        PartitionColumns columns = columnFilter().fetchedColumns();
+        RegularAndStaticColumns columns = columnFilter().fetchedColumns();
         NavigableSet<Clustering> clusterings = filter.requestedRows();
 
         // We want to remove rows for which we have values for all requested columns. We have to deal with both static and regular rows.
@@ -929,7 +922,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         if (row.primaryKeyLivenessInfo().isEmpty() || row.primaryKeyLivenessInfo().timestamp() <= sstableTimestamp)
             return false;
 
-        for (ColumnDefinition column : requestedColumns)
+        for (ColumnMetadata column : requestedColumns)
         {
             Cell cell = row.getCell(column);
             if (cell == null || cell.timestamp() <= sstableTimestamp)
@@ -940,19 +933,18 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public boolean queriesOnlyLocalData()
     {
-        return StorageProxy.isLocalToken(metadata().ksName, partitionKey.getToken());
+        return StorageProxy.isLocalToken(metadata().keyspace, partitionKey.getToken());
     }
 
     @Override
     public String toString()
     {
-        return String.format("Read(%s.%s columns=%s rowFilter=%s limits=%s key=%s filter=%s, nowInSec=%d)",
-                             metadata().ksName,
-                             metadata().cfName,
+        return String.format("Read(%s columns=%s rowFilter=%s limits=%s key=%s filter=%s, nowInSec=%d)",
+                             metadata().toString(),
                              columnFilter(),
                              rowFilter(),
                              limits(),
-                             metadata().getKeyValidator().getString(partitionKey().getKey()),
+                             metadata().partitionKeyType.getString(partitionKey().getKey()),
                              clusteringIndexFilter.toString(metadata()),
                              nowInSec());
     }
@@ -966,8 +958,8 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         sb.append(" WHERE ");
 
-        sb.append(ColumnDefinition.toCQLString(metadata().partitionKeyColumns())).append(" = ");
-        DataRange.appendKeyString(sb, metadata().getKeyValidator(), partitionKey().getKey());
+        sb.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
+        DataRange.appendKeyString(sb, metadata().partitionKeyType, partitionKey().getKey());
 
         // We put the row filter first because the clustering index filter can end by "ORDER BY"
         if (!rowFilter().isEmpty())
@@ -980,13 +972,13 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     protected void serializeSelection(DataOutputPlus out, int version) throws IOException
     {
-        metadata().getKeyValidator().writeValue(partitionKey().getKey(), out);
+        metadata().partitionKeyType.writeValue(partitionKey().getKey(), out);
         ClusteringIndexFilter.serializer.serialize(clusteringIndexFilter(), out, version);
     }
 
     protected long selectionSerializedSize(int version)
     {
-        return metadata().getKeyValidator().writtenLength(partitionKey().getKey())
+        return metadata().partitionKeyType.writtenLength(partitionKey().getKey())
              + ClusteringIndexFilter.serializer.serializedSize(clusteringIndexFilter(), version);
     }
 
@@ -1032,9 +1024,14 @@ public class SinglePartitionReadCommand extends ReadCommand
             return limits;
         }
 
-        public CFMetaData metadata()
+        public TableMetadata metadata()
         {
             return commands.get(0).metadata();
+        }
+
+        public boolean isEmpty()
+        {
+            return false;
         }
 
         public ReadExecutionController executionController()
@@ -1044,32 +1041,31 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).executionController();
         }
 
-        public Single<PartitionIterator> executeInternal(ReadExecutionController controller)
+        public Single<PartitionIterator> executeInternal()
         {
-            return executeLocally(controller, false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
+            return executeLocally(false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController)
+        public Single<UnfilteredPartitionIterator> executeLocally()
         {
-            return executeLocally(executionController, true);
+            return executeLocally(true);
         }
 
         /**
-         * Implementation of {@link ReadQuery#executeLocally(ReadExecutionController)}.
+         * Implementation of {@link ReadQuery#executeLocally()}.
          *
-         * @param executionController - the {@code ReadExecutionController} protecting the read.
          * @param sort - whether to sort the inner commands by partition key, required for merging the iterator
-         *               later on. This will be false when called by {@link ReadQuery#executeInternal(ReadExecutionController)}
+         *               later on. This will be false when called by {@link ReadQuery#executeInternal()}
          *               because in this case it is safe to do so as there is no merging involved and we don't want to
          *               change the old behavior which was to not sort by partition.
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private Single<UnfilteredPartitionIterator> executeLocally(ReadExecutionController executionController, boolean sort)
+        private Single<UnfilteredPartitionIterator> executeLocally(boolean sort)
         {
             List<Pair<DecoratedKey, Single<UnfilteredPartitionIterator>>> partitions = new ArrayList<>(commands.size());
             for (SinglePartitionReadCommand cmd : commands)
-                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally(executionController)));
+                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally()));
 
             if (commands.size() == 1)
                 return partitions.get(0).getValue();
@@ -1151,10 +1147,10 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     private static class Deserializer extends SelectionDeserializer
     {
-        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, CFMetaData metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
+        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
         throws IOException
         {
-            DecoratedKey key = metadata.decorateKey(metadata.getKeyValidator().readValue(in, DatabaseDescriptor.getMaxValueSize()));
+            DecoratedKey key = metadata.partitioner.decorateKey(metadata.partitionKeyType.readValue(in, DatabaseDescriptor.getMaxValueSize()));
             ClusteringIndexFilter filter = ClusteringIndexFilter.serializer.deserialize(in, version, metadata);
             return new SinglePartitionReadCommand(isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter);
         }

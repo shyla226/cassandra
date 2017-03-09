@@ -19,7 +19,6 @@ package org.apache.cassandra.service;
 
 import java.util.Arrays;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -28,6 +27,7 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.netty.channel.EventLoopGroup;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
@@ -38,10 +38,13 @@ import static org.junit.Assert.assertTrue;
 
 public class NativeTransportServiceTest
 {
+    private static EventLoopGroup workerGroup;
+
     @BeforeClass
-    public static void setupDD()
+    public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
+        workerGroup = NativeTransportService.makeWorkerGroup();
     }
 
     @After
@@ -64,9 +67,9 @@ public class NativeTransportServiceTest
     public void testIgnoresStartOnAlreadyStarted()
     {
         withService((NativeTransportService service) -> {
-            service.start();
-            service.start();
-            service.start();
+            service.start(workerGroup);
+            service.start(workerGroup);
+            service.start(workerGroup);
         });
     }
 
@@ -84,17 +87,16 @@ public class NativeTransportServiceTest
     public void testDestroy()
     {
         withService((NativeTransportService service) -> {
-            Supplier<Boolean> allTerminated = () -> service.getWorkerGroup().isShutdown() && service.getWorkerGroup().isTerminated();
-            assertFalse(allTerminated.get());
+            assertFalse(service.getServers().isEmpty());
             service.destroy();
-            assertTrue(allTerminated.get());
+            assertTrue(service.getServers().isEmpty());
         });
     }
 
     @Test
     public void testConcurrentStarts()
     {
-        withService(NativeTransportService::start, false, 20);
+        withService(service -> service.start(workerGroup), false, 20);
     }
 
     @Test
@@ -131,7 +133,7 @@ public class NativeTransportServiceTest
 
         withService((NativeTransportService service) ->
                     {
-                        service.initialize();
+                        service.initialize(workerGroup);
                         assertEquals(1, service.getServers().size());
                         Server server = service.getServers().iterator().next();
                         assertTrue(server.useSSL);
@@ -148,7 +150,7 @@ public class NativeTransportServiceTest
 
         withService((NativeTransportService service) ->
                     {
-                        service.initialize();
+                        service.initialize(workerGroup);
                         assertEquals(1, service.getServers().size());
                         Server server = service.getServers().iterator().next();
                         assertTrue(server.useSSL);
@@ -165,7 +167,7 @@ public class NativeTransportServiceTest
 
         withService((NativeTransportService service) ->
                     {
-                        service.initialize();
+                        service.initialize(workerGroup);
                         assertEquals(2, service.getServers().size());
                         assertEquals(
                                     Sets.newHashSet(Arrays.asList(
@@ -190,7 +192,7 @@ public class NativeTransportServiceTest
         assertFalse(service.isRunning());
         if (start)
         {
-            service.start();
+            service.start(workerGroup);
             assertTrue(service.isRunning());
         }
         try

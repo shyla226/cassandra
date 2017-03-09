@@ -122,10 +122,10 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 
     private static long calculateOpenInterval(boolean shouldOpenEarly)
     {
-        long interval = DatabaseDescriptor.getSSTablePreempiveOpenIntervalInMB() * (1L << 20);
-        if (disableEarlyOpeningForTests || !shouldOpenEarly || interval < 0)
-            interval = Long.MAX_VALUE;
-        return interval;
+        long interval = DatabaseDescriptor.getSSTablePreempiveOpenIntervalInMB();
+        if (disableEarlyOpeningForTests || !shouldOpenEarly || interval <= 0)
+            return Long.MAX_VALUE;
+        return interval * (1L << 20); // convert from MB to bytes
     }
 
     public SSTableWriter currentWriter()
@@ -150,7 +150,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
                     continue;
 
                 if (tmpKey == null)
-                    tmpKey = new MutableKeyCacheKey(reader.metadata.ksAndCFName, reader.descriptor, key.getKey());
+                    tmpKey = new MutableKeyCacheKey(reader.metadata(), reader.descriptor, key.getKey());
                 else
                     tmpKey.mutate(reader.descriptor, key.getKey());
 

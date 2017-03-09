@@ -58,7 +58,7 @@ if platform.python_implementation().startswith('Jython'):
 UTF8 = 'utf-8'
 CP65001 = 'cp65001'  # Win utf-8 variant
 
-description = "CQL Shell for Apache Cassandra"
+description = "CQL Shell for Datastax Enterprise"
 version = "5.0.1"
 
 readline = None
@@ -71,10 +71,10 @@ try:
 except ImportError:
     pass
 
-CQL_LIB_PREFIX = 'cassandra-driver-internal-only-'
+CQL_LIB_PREFIX = 'dse-driver-internal-only-'
 
 CASSANDRA_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..')
-CASSANDRA_CQL_HTML_FALLBACK = 'https://cassandra.apache.org/doc/cql3/CQL-3.2.html'
+CASSANDRA_CQL_HTML_FALLBACK = 'https://docs.datastax.com/en/cql/3.3/index.html'
 
 # default location of local CQL.html
 if os.path.exists(CASSANDRA_PATH + '/doc/cql3/CQL.html'):
@@ -130,7 +130,7 @@ def find_zip(libprefix):
 cql_zip = find_zip(CQL_LIB_PREFIX)
 if cql_zip:
     ver = os.path.splitext(os.path.basename(cql_zip))[0][len(CQL_LIB_PREFIX):]
-    sys.path.insert(0, os.path.join(cql_zip, 'cassandra-driver-' + ver))
+    sys.path.insert(0, os.path.join(cql_zip, 'dse-driver-' + ver))
 
 third_parties = ('futures-', 'six-')
 
@@ -139,25 +139,31 @@ for lib in third_parties:
     if lib_zip:
         sys.path.insert(0, lib_zip)
 
+GEOMET_PREFIX = "geomet-"
+geomet_zip = find_zip(GEOMET_PREFIX)
+if geomet_zip:
+    ver = os.path.splitext(os.path.basename(geomet_zip))[0][len(GEOMET_PREFIX):]
+    sys.path.insert(0, os.path.join(geomet_zip, GEOMET_PREFIX + ver))
+
 warnings.filterwarnings("ignore", r".*blist.*")
 try:
-    import cassandra
+    import dse
 except ImportError, e:
-    sys.exit("\nPython Cassandra driver not installed, or not on PYTHONPATH.\n"
-             'You might try "pip install cassandra-driver".\n\n'
+    sys.exit("\nDataStax Enterprise Python Driver not installed, or not on PYTHONPATH.\n"
+             'You might try "pip install dse-driver".\n\n'
              'Python: %s\n'
              'Module load path: %r\n\n'
              'Error: %s\n' % (sys.executable, sys.path, e))
 
-from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster
-from cassandra.cqltypes import cql_typename
-from cassandra.marshal import int64_unpack
-from cassandra.metadata import (ColumnMetadata, KeyspaceMetadata,
-                                TableMetadata, protect_name, protect_names)
-from cassandra.policies import WhiteListRoundRobinPolicy
-from cassandra.query import SimpleStatement, ordered_dict_factory, TraceUnavailable
-from cassandra.util import datetime_from_timestamp
+from dse.auth import PlainTextAuthProvider
+from dse.cluster import Cluster, ExecutionProfile, EXEC_PROFILE_DEFAULT
+from dse.cqltypes import cql_typename
+from dse.marshal import int64_unpack
+from dse.metadata import (ColumnMetadata, KeyspaceMetadata,
+                          TableMetadata, protect_name, protect_names)
+from dse.policies import WhiteListRoundRobinPolicy
+from dse.query import SimpleStatement, ordered_dict_factory, TraceUnavailable
+from dse.util import datetime_from_timestamp
 
 # cqlsh should run correctly when run out of a Cassandra source tree,
 # out of an unpacked Cassandra tarball, and after a proper package install.
@@ -268,11 +274,11 @@ if os.path.exists(OLD_HISTORY):
 # END history/config definition
 
 CQL_ERRORS = (
-    cassandra.AlreadyExists, cassandra.AuthenticationFailed, cassandra.CoordinationFailure,
-    cassandra.InvalidRequest, cassandra.Timeout, cassandra.Unauthorized, cassandra.OperationTimedOut,
-    cassandra.cluster.NoHostAvailable,
-    cassandra.connection.ConnectionBusy, cassandra.connection.ProtocolError, cassandra.connection.ConnectionException,
-    cassandra.protocol.ErrorMessage, cassandra.protocol.InternalError, cassandra.query.TraceUnavailable
+    dse.AlreadyExists, dse.AuthenticationFailed, dse.CoordinationFailure,
+    dse.InvalidRequest, dse.Timeout, dse.Unauthorized, dse.OperationTimedOut,
+    dse.cluster.NoHostAvailable,
+    dse.connection.ConnectionBusy, dse.connection.ProtocolError, dse.connection.ConnectionException,
+    dse.protocol.ErrorMessage, dse.protocol.InternalError, dse.query.TraceUnavailable
 )
 
 debug_completion = bool(os.environ.get('CQLSH_DEBUG_COMPLETION', '') == 'YES')
@@ -390,16 +396,16 @@ def insert_driver_hooks():
                                               "Timestamps are displayed in milliseconds from epoch."))
             return timestamp_ms
 
-    cassandra.cqltypes.DateType.deserialize = staticmethod(deserialize_date_fallback_int)
+    dse.cqltypes.DateType.deserialize = staticmethod(deserialize_date_fallback_int)
 
-    if hasattr(cassandra, 'deserializers'):
-        del cassandra.deserializers.DesDateType
+    if hasattr(dse, 'deserializers'):
+        del dse.deserializers.DesDateType
 
-    # Return cassandra.cqltypes.EMPTY instead of None for empty values
-    cassandra.cqltypes.CassandraType.support_empty_values = True
+    # Return dse.cqltypes.EMPTY instead of None for empty values
+    dse.cqltypes.CassandraType.support_empty_values = True
 
 
-class FrozenType(cassandra.cqltypes._ParameterizedType):
+class FrozenType(dse.cqltypes._ParameterizedType):
     """
     Needed until the bundled python driver adds FrozenType.
     """
@@ -465,16 +471,25 @@ class Shell(cmd.Cmd):
         self.tracing_enabled = tracing_enabled
         self.page_size = self.default_page_size
         self.expand_enabled = expand_enabled
+        self.consistency_level = dse.ConsistencyLevel.ONE
+        self.serial_consistency_level = dse.ConsistencyLevel.SERIAL
+
         if use_conn:
             self.conn = use_conn
         else:
+            self.execution_profiles = {EXEC_PROFILE_DEFAULT:
+                                       ExecutionProfile(load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
+                                                        row_factory=ordered_dict_factory,
+                                                        request_timeout=request_timeout,
+                                                        consistency_level=self.consistency_level,
+                                                        serial_consistency_level=self.serial_consistency_level)}
             self.conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=cqlver,
                                 protocol_version=protocol_version,
                                 auth_provider=self.auth_provider,
                                 ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,
-                                load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
                                 control_connection_timeout=connect_timeout,
-                                connect_timeout=connect_timeout)
+                                connect_timeout=connect_timeout,
+                                execution_profiles=self.execution_profiles)
         self.owns_connection = not use_conn
 
         if keyspace:
@@ -496,9 +511,6 @@ class Shell(cmd.Cmd):
 
         self.display_timezone = display_timezone
 
-        self.session.default_timeout = request_timeout
-        self.session.row_factory = ordered_dict_factory
-        self.session.default_consistency_level = cassandra.ConsistencyLevel.ONE
         self.get_connection_versions()
         self.set_expanded_cql_version(self.connection_versions['cql'])
 
@@ -529,8 +541,6 @@ class Shell(cmd.Cmd):
             self.show_line_nums = True
         self.stdin = stdin
         self.query_out = sys.stdout
-        self.consistency_level = cassandra.ConsistencyLevel.ONE
-        self.serial_consistency_level = cassandra.ConsistencyLevel.SERIAL
 
         self.empty_lines = 0
         self.statement_error = False
@@ -712,15 +722,15 @@ class Shell(cmd.Cmd):
         if tablename == 'roles':
             ks_meta = KeyspaceMetadata(ksname, True, None, None)
             table_meta = TableMetadata(ks_meta, 'roles')
-            table_meta.columns['role'] = ColumnMetadata(table_meta, 'role', cassandra.cqltypes.UTF8Type)
-            table_meta.columns['is_superuser'] = ColumnMetadata(table_meta, 'is_superuser', cassandra.cqltypes.BooleanType)
-            table_meta.columns['can_login'] = ColumnMetadata(table_meta, 'can_login', cassandra.cqltypes.BooleanType)
+            table_meta.columns['role'] = ColumnMetadata(table_meta, 'role', dse.cqltypes.UTF8Type)
+            table_meta.columns['is_superuser'] = ColumnMetadata(table_meta, 'is_superuser', dse.cqltypes.BooleanType)
+            table_meta.columns['can_login'] = ColumnMetadata(table_meta, 'can_login', dse.cqltypes.BooleanType)
         elif tablename == 'role_permissions':
             ks_meta = KeyspaceMetadata(ksname, True, None, None)
             table_meta = TableMetadata(ks_meta, 'role_permissions')
-            table_meta.columns['role'] = ColumnMetadata(table_meta, 'role', cassandra.cqltypes.UTF8Type)
-            table_meta.columns['resource'] = ColumnMetadata(table_meta, 'resource', cassandra.cqltypes.UTF8Type)
-            table_meta.columns['permission'] = ColumnMetadata(table_meta, 'permission', cassandra.cqltypes.UTF8Type)
+            table_meta.columns['role'] = ColumnMetadata(table_meta, 'role', dse.cqltypes.UTF8Type)
+            table_meta.columns['resource'] = ColumnMetadata(table_meta, 'resource', dse.cqltypes.UTF8Type)
+            table_meta.columns['permission'] = ColumnMetadata(table_meta, 'permission', dse.cqltypes.UTF8Type)
         else:
             raise ColumnFamilyNotFound("Column family %r not found" % tablename)
 
@@ -1748,8 +1758,11 @@ class Shell(cmd.Cmd):
         except IOError, e:
             self.printerr('Could not open %r: %s' % (fname, e))
             return
-        username = self.auth_provider.username if self.auth_provider else None
-        password = self.auth_provider.password if self.auth_provider else None
+
+        # DSE-specific: auth_provider may be set by pylib.dselib to something other than PlaintextAuthProvider
+        # and it may not necessarily have the username or password attributes (Kerberos)
+        username = self.auth_provider.username if self.auth_provider and hasattr(self.auth_provider, 'username') else None
+        password = self.auth_provider.password if self.auth_provider and hasattr(self.auth_provider, 'password') else None
         subshell = Shell(self.hostname, self.port, color=self.color,
                          username=username, password=password,
                          encoding=self.encoding, stdin=f, tty=False, use_conn=self.conn,
@@ -1762,7 +1775,7 @@ class Shell(cmd.Cmd):
                          display_double_precision=self.display_double_precision,
                          display_timezone=self.display_timezone,
                          max_trace_wait=self.max_trace_wait, ssl=self.ssl,
-                         request_timeout=self.session.default_timeout,
+                         request_timeout=self.execution_profiles[EXEC_PROFILE_DEFAULT].request_timeout,
                          connect_timeout=self.conn.connect_timeout)
         subshell.cmdloop()
         f.close()
@@ -1892,10 +1905,11 @@ class Shell(cmd.Cmd):
         """
         level = parsed.get_binding('level')
         if level is None:
-            print 'Current consistency level is %s.' % (cassandra.ConsistencyLevel.value_to_name[self.consistency_level])
+            print 'Current consistency level is %s.' % (dse.ConsistencyLevel.value_to_name[self.consistency_level])
             return
 
-        self.consistency_level = cassandra.ConsistencyLevel.name_to_value[level.upper()]
+        self.consistency_level = dse.ConsistencyLevel.name_to_value[level.upper()]
+        self.execution_profiles[EXEC_PROFILE_DEFAULT].consistency_level = self.consistency_level
         print 'Consistency level set to %s.' % (level.upper(),)
 
     def do_serial(self, parsed):
@@ -1918,10 +1932,11 @@ class Shell(cmd.Cmd):
         """
         level = parsed.get_binding('level')
         if level is None:
-            print 'Current serial consistency level is %s.' % (cassandra.ConsistencyLevel.value_to_name[self.serial_consistency_level])
+            print 'Current serial consistency level is %s.' % (dse.ConsistencyLevel.value_to_name[self.serial_consistency_level])
             return
 
-        self.serial_consistency_level = cassandra.ConsistencyLevel.name_to_value[level.upper()]
+        self.serial_consistency_level = dse.ConsistencyLevel.name_to_value[level.upper()]
+        self.execution_profiles[EXEC_PROFILE_DEFAULT].serial_consistency_level = self.serial_consistency_level
         print 'Serial consistency level set to %s.' % (level.upper(),)
 
     def do_login(self, parsed):
@@ -1948,9 +1963,9 @@ class Shell(cmd.Cmd):
                        protocol_version=self.conn.protocol_version,
                        auth_provider=auth_provider,
                        ssl_options=self.conn.ssl_options,
-                       load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]),
                        control_connection_timeout=self.conn.connect_timeout,
-                       connect_timeout=self.conn.connect_timeout)
+                       connect_timeout=self.conn.connect_timeout,
+                       execution_profiles=self.execution_profiles)
 
         if self.current_keyspace:
             session = conn.connect(self.current_keyspace)
@@ -2344,7 +2359,7 @@ def main(options, hostname, port):
             sys.exit("Can't open %r: %s" % (options.file, e))
 
     if options.debug:
-        sys.stderr.write("Using CQL driver: %s\n" % (cassandra,))
+        sys.stderr.write("Using CQL driver: %s\n" % (dse,))
         sys.stderr.write("Using connect timeout: %s seconds\n" % (options.connect_timeout,))
         sys.stderr.write("Using '%s' encoding\n" % (options.encoding,))
         sys.stderr.write("Using ssl: %s\n" % (options.ssl,))

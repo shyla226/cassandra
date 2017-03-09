@@ -29,11 +29,12 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 public class ContinuousPagingConfig
 {
     /** The default values currently match the values in the yaml file */
-    private final static int DEFAULT_MAX_CONCURRENT_SESSIONS = 8;
+    private final static int DEFAULT_MAX_CONCURRENT_SESSIONS = 60;
     private final static int DEFAULT_MAX_SESSION_PAGES = 4;
     private final static int DEFAULT_MAX_PAGE_SIZE_MB = 16;
     private final static int DEFAULT_MAX_CLIENT_WAIT_TIME_MS = 2000;
     private final static int DEFAULT_MAX_LOCAL_QUERY_TIME_MS = 5000;
+    private final static int DEFAULT_MAX_THREADS = 24;
 
     /** The maximum number of concurrent sessions, any additional
         session will be rejected with an unavailable error. */
@@ -56,9 +57,8 @@ public class ContinuousPagingConfig
      */
     public int max_local_query_time_ms;
 
-    /** The maximum number of threads dedicated to continuous paging sessions. By default this is null, which
-     * means that we should use max_concurrent_sessions (one thread per session). */
-    private Integer max_threads;
+    /** The maximum number of threads dedicated to continuous paging sessions. */
+    public int max_threads;
 
     public ContinuousPagingConfig()
     {
@@ -66,26 +66,23 @@ public class ContinuousPagingConfig
              DEFAULT_MAX_SESSION_PAGES,
              DEFAULT_MAX_PAGE_SIZE_MB,
              DEFAULT_MAX_CLIENT_WAIT_TIME_MS,
-             DEFAULT_MAX_LOCAL_QUERY_TIME_MS);
+             DEFAULT_MAX_LOCAL_QUERY_TIME_MS,
+             DEFAULT_MAX_THREADS);
     }
 
     public ContinuousPagingConfig(int max_concurrent_sessions,
                                   int max_session_pages,
                                   int max_page_size_mb,
                                   int max_client_wait_time_ms,
-                                  int max_local_query_time_ms)
+                                  int max_local_query_time_ms,
+                                  int max_threads)
     {
         this.max_concurrent_sessions = max_concurrent_sessions;
         this.max_session_pages = max_session_pages;
         this.max_page_size_mb = max_page_size_mb;
         this.max_client_wait_time_ms = max_client_wait_time_ms;
         this.max_local_query_time_ms = max_local_query_time_ms;
-        this.max_threads = null;
-    }
-
-    public int getNumThreads()
-    {
-        return max_threads == null ? max_concurrent_sessions : max_threads;
+        this.max_threads = max_threads;
     }
 
     @Override

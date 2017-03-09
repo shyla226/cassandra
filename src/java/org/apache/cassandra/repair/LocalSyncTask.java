@@ -19,8 +19,11 @@ package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +40,9 @@ import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.RangeHash;
+
+import static org.apache.cassandra.repair.StreamingRepairTask.REPAIR_STREAM_PLAN_DESCRIPTION;
 
 /**
  * LocalSyncTask performs streaming between local(coordinator) node and remote replica.
@@ -48,14 +54,16 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
     private static final Logger logger = LoggerFactory.getLogger(LocalSyncTask.class);
 
     private final long repairedAt;
+    private final UUID pendingRepair;
 
     private final boolean pullRepair;
 
-    public LocalSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, long repairedAt, boolean pullRepair,
-                         Executor taskExecutor, SyncTask next)
+    public LocalSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, long repairedAt, UUID pendingRepair, boolean pullRepair,
+                         Executor taskExecutor, SyncTask next, Map<InetAddress, Set<RangeHash>> receivedRangeCache)
     {
-        super(desc, r1, r2, taskExecutor, next);
+        super(desc, r1, r2, taskExecutor, next, receivedRangeCache);
         this.repairedAt = repairedAt;
+        this.pendingRepair = pendingRepair;
         this.pullRepair = pullRepair;
     }
 
@@ -63,14 +71,20 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
      * Starts sending/receiving our list of differences to/from the remote endpoint: creates a callback
      * that will be called out of band once the streams complete.
      */
-    protected void startSync(List<Range<Token>> differences)
+    protected void startSync(List<Range<Token>> transferToLeft, List<Range<Token>> transferToRight)
     {
         InetAddress local = FBUtilities.getBroadcastAddress();
         // We can take anyone of the node as source or destination, however if one is localhost, we put at source to avoid a forwarding
         InetAddress dst = r2.endpoint.equals(local) ? r1.endpoint : r2.endpoint;
+        List<Range<Token>> toRequest = r2.endpoint.equals(local) ? transferToRight : transferToLeft;
+        List<Range<Token>> toTransfer = r2.endpoint.equals(local) ? transferToLeft : transferToRight;
+
         InetAddress preferred = SystemKeyspace.getPreferredIP(dst);
 
-        String message = String.format("Performing streaming repair of %d ranges with %s", differences.size(), dst);
+        String message = String.format("Performing streaming repair of %d ranges to %s%s",
+                                       transferToLeft.size(), transferToLeft.size() != transferToRight.size()?
+                                                              String.format(" and %d ranges from", transferToRight.size()) : "",
+                                       dst);
         logger.info("[repair #{}] {}", desc.sessionId, message);
         boolean isIncremental = false;
         if (desc.parentSessionId != null)
@@ -79,14 +93,14 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
             isIncremental = prs.isIncremental;
         }
         Tracing.traceRepair(message);
-        StreamPlan plan = new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false).listeners(this)
-                                            .flushBeforeTransfer(true)
-                                            // request ranges from the remote node
-                                            .requestRanges(dst, preferred, desc.keyspace, differences, desc.columnFamily);
+        StreamPlan plan = new StreamPlan(REPAIR_STREAM_PLAN_DESCRIPTION, repairedAt, 1, false, isIncremental, false, pendingRepair).listeners(this)
+                                .flushBeforeTransfer(false)
+                                // request ranges from the remote node
+                                .requestRanges(dst, preferred, desc.keyspace, toRequest, desc.columnFamily);
         if (!pullRepair)
         {
             // send ranges to the remote node if we are not performing a pull repair
-            plan.transferRanges(dst, preferred, desc.keyspace, differences, desc.columnFamily);
+            plan.transferRanges(dst, preferred, desc.keyspace, toTransfer, desc.columnFamily);
         }
 
         plan.execute();

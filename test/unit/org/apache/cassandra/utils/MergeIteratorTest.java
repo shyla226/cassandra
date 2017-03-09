@@ -21,10 +21,9 @@ package org.apache.cassandra.utils;
 import java.util.Arrays;
 import java.util.Iterator;
 
-import io.reactivex.Single;
-import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
+import io.reactivex.Single;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -85,7 +84,7 @@ public class MergeIteratorTest
         protected E computeNext()
         {
             if (!iter.hasNext()) return endOfData();
-            return (iter.next());
+            return iter.next();
         }
 
         public void close()

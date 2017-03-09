@@ -20,14 +20,16 @@
  */
 package org.apache.cassandra.db.transform;
 
-import io.reactivex.Single;
+import java.util.Collections;
+
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.merge;
 
 public abstract class BasePartitions<R extends BaseRowIterator<?>, I extends BasePartitionIterator<? extends BaseRowIterator<?>>>
-extends RxBaseIterator<BaseRowIterator<?>, I, R>
+extends BaseIterator<BaseRowIterator<?>, I, R>
 implements BasePartitionIterator<R>
 {
 
@@ -45,9 +47,9 @@ implements BasePartitionIterator<R>
     // *********************************
 
 
-    protected Single<BaseRowIterator<?>> applyOne(Single<? extends BaseRowIterator<?>> value, Transformation transformation)
+    protected BaseRowIterator<?> applyOne(BaseRowIterator<?> value, Transformation transformation)
     {
-        return value == null ? null : value.map(v -> transformation.applyToPartition(v));
+        return value == null ? null : transformation.applyToPartition(value);
     }
 
     void add(Transformation transformation)
@@ -77,34 +79,41 @@ implements BasePartitionIterator<R>
 
     public final boolean hasNext()
     {
-        Single<BaseRowIterator<?>> next;
-
-        BaseIterator.Stop stop = this.stop;
-        while (this.next == null)
+        BaseRowIterator<?> next = null;
+        try
         {
-            Transformation[] fs = stack;
-            int len = length;
 
-            while (!stop.isSignalled && input.hasNext())
+            Stop stop = this.stop;
+            while (this.next == null)
             {
-                next = (Single<BaseRowIterator<?>>)input.next();
-                for (int i = 0; next != null & i < len; i++)
+                Transformation[] fs = stack;
+                int len = length;
+
+                while (!stop.isSignalled && input.hasNext())
                 {
-                    final int fi = i;
-                    next = next.map(n -> n == null ? n : fs[fi].applyToPartition(n));
+                    next = input.next();
+                    for (int i = 0 ; next != null & i < len ; i++)
+                        next = fs[i].applyToPartition(next);
+
+                    if (next != null)
+                    {
+                        this.next = next;
+                        return true;
+                    }
                 }
 
-                if (next != null)
-                {
-                    this.next = next;
-                    return true;
-                }
+                if (stop.isSignalled || !hasMoreContents())
+                    return false;
             }
+            return true;
 
-            if (stop.isSignalled || !hasMoreContents())
-                return false;
         }
-        return true;
+        catch (Throwable t)
+        {
+            if (next != null)
+                Throwables.close(t, Collections.singleton(next));
+            throw t;
+        }
     }
 
 }

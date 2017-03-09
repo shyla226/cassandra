@@ -178,13 +178,12 @@ public class RepairedDataTombstonesTest extends CQLTester
         Thread.sleep(1000);
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
         int partitionsFound = 0;
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
         {
             while (iterator.hasNext())
             {
                 partitionsFound++;
-                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
+                try (UnfilteredRowIterator rowIter = iterator.next())
                 {
                     int val = ByteBufferUtil.toInt(rowIter.partitionKey().getKey());
                     assertTrue("val=" + val, val >= 10 && val < 20);
@@ -244,11 +243,11 @@ public class RepairedDataTombstonesTest extends CQLTester
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
              includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
-                                cmd.executeLocally(executionController).blockingGet())
+                                cmd.executeLocally().blockingGet())
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
+                try (UnfilteredRowIterator rowIter = iterator.next())
                 {
                     if (!rowIter.partitionKey().equals(Util.dk(ByteBufferUtil.bytes(999)))) // partition key 999 is 'live' and used to avoid sstables from being dropped
                     {
@@ -287,11 +286,11 @@ public class RepairedDataTombstonesTest extends CQLTester
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
              includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
-                                cmd.executeLocally(executionController).blockingGet())
+                                cmd.executeLocally().blockingGet())
         {
             while (iterator.hasNext())
             {
-                try (UnfilteredRowIterator rowIter = iterator.next().blockingGet())
+                try (UnfilteredRowIterator rowIter = iterator.next())
                 {
                     while (rowIter.hasNext())
                     {
@@ -311,7 +310,7 @@ public class RepairedDataTombstonesTest extends CQLTester
 
     public static void repair(ColumnFamilyStore cfs, SSTableReader sstable) throws IOException
     {
-        sstable.descriptor.getMetadataSerializer().mutateRepairedAt(sstable.descriptor, 1);
+        sstable.descriptor.getMetadataSerializer().mutateRepaired(sstable.descriptor, 1, null);
         sstable.reloadSSTableMetadata();
         cfs.getTracker().notifySSTableRepairedStatusChanged(Collections.singleton(sstable));
     }

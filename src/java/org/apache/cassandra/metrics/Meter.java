@@ -19,24 +19,25 @@
 package org.apache.cassandra.metrics;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Metered;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 
 /**
  * A meter metric which measures mean throughput and one-, five-, and fifteen-minute
  * exponentially-weighted moving average throughputs.
  *
  * This class is nearly identical to {@link com.codahale.metrics.Meter}, except that
- * it maintains a <b>lastCounted</b> {@link AtomicLong} that keeps a snapshot of the
- * counter after every tick that is used to calculate the uncounted delta
- * in the next call to {@link EWMA#tick(long)}.
+ * we only call {@link EWMA#tick()} every {@link Meter#TICK_INTERVAL} seconds,
+ * by comparing the value of the counter with the last value that was used in the
+ * previous tick.
  *
  * @see EWMA
  */
-public class Meter implements Metered
+public class Meter implements Metered, Composable<Meter>
 {
     private static final long TICK_INTERVAL = TimeUnit.SECONDS.toNanos(5);
 
@@ -44,34 +45,73 @@ public class Meter implements Metered
     private final EWMA m5Rate = EWMA.fiveMinuteEWMA(false);
     private final EWMA m15Rate = EWMA.fifteenMinuteEWMA(false);
 
+    private final Clock clock;
+    private final int coreId;
+
     private final AtomicLong lastCounted = new AtomicLong();
-    private final LongAdder count = new LongAdder();
+    private final Counter count;
     private final long startTime;
     private final AtomicLong lastTick;
-    private final Clock clock;
+    private final AtomicBoolean scheduled = new AtomicBoolean(false);
 
     /**
      * Creates a new {@link com.codahale.metrics.Meter}.
      */
-    public Meter() {
-        this(Clock.defaultClock());
+    public Meter()
+    {
+        this(false);
+    }
+
+    /**
+     * Creates a new {@link com.codahale.metrics.Meter}.
+     *
+     * @param isComposite     whether the counter is aggreagated or not
+     */
+    public Meter(boolean isComposite)
+    {
+        this(Clock.defaultClock(), Counter.make(isComposite));
     }
 
     /**
      * Creates a new {@link com.codahale.metrics.Meter}.
      *
      * @param clock      the clock to use for the meter ticks
+     * @param count      the counter to use for counting
      */
-    public Meter(Clock clock) {
+    public Meter(Clock clock, Counter count)
+    {
         this.clock = clock;
+        this.count = count;
         this.startTime = this.clock.getTick();
         this.lastTick = new AtomicLong(startTime);
+        this.coreId = NettyRxScheduler.getNextCore();
+
+        scheduleIfComposite();
+    }
+
+    /**
+     * Composite timers are never updated and so we must manually schedule the ticks.
+     */
+    private void scheduleIfComposite()
+    {
+        if (count.getType() == Type.COMPOSITE)
+            NettyRxScheduler.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+    }
+
+    private void maybeScheduleTick()
+    {
+        if (scheduled.get())
+            return;
+
+        if (scheduled.compareAndSet(false, true))
+            NettyRxScheduler.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     /**
      * Mark the occurrence of an event.
      */
-    public void mark() {
+    public void mark()
+    {
         mark(1);
     }
 
@@ -80,9 +120,23 @@ public class Meter implements Metered
      *
      * @param n the number of events
      */
-    public void mark(long n) {
-        tickIfNecessary();
-        count.add(n);
+    public void mark(long n)
+    {
+        maybeScheduleTick();
+        count.inc(n);
+    }
+
+    private void scheduledTick()
+    {
+        try
+        {
+            scheduled.set(false);
+            tickIfNecessary();
+        }
+        finally
+        {
+            scheduleIfComposite();
+        }
     }
 
     private void tickIfNecessary() {
@@ -111,28 +165,33 @@ public class Meter implements Metered
     }
 
     @Override
-    public long getCount() {
-        return count.sum();
+    public long getCount()
+    {
+        return count.getCount();
     }
 
     @Override
-    public double getFifteenMinuteRate() {
+    public double getFifteenMinuteRate()
+    {
         tickIfNecessary();
         return m15Rate.getRate(TimeUnit.SECONDS);
     }
 
     @Override
-    public double getFiveMinuteRate() {
+    public double getFiveMinuteRate()
+    {
         tickIfNecessary();
         return m5Rate.getRate(TimeUnit.SECONDS);
     }
 
     @Override
-    public double getMeanRate() {
+    public double getMeanRate()
+    {
         return getMeanRate(getCount());
     }
 
-    public double getMeanRate(long count) {
+    public double getMeanRate(long count)
+    {
         if (count == 0) {
             return 0.0;
         } else {
@@ -142,8 +201,21 @@ public class Meter implements Metered
     }
 
     @Override
-    public double getOneMinuteRate() {
+    public double getOneMinuteRate()
+    {
         tickIfNecessary();
         return m1Rate.getRate(TimeUnit.SECONDS);
+    }
+
+    @Override
+    public Type getType()
+    {
+        return count.getType();
+    }
+
+    @Override
+    public void compose(Meter metric)
+    {
+        count.compose(metric.count);
     }
 }

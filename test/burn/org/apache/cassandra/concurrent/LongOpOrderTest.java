@@ -34,13 +34,8 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.NativeTransportService;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.junit.Assert.assertTrue;
@@ -241,8 +236,9 @@ public class LongOpOrderTest
     public void testOrdering() throws InterruptedException
     {
         DatabaseDescriptor.daemonInitialization();
+        io.netty.channel.EventLoopGroup workerGroup = NativeTransportService.makeWorkerGroup();
         NativeTransportService server = new NativeTransportService();
-        server.start();
+        server.start(workerGroup);
 
         errors.set(0);
         Thread.setDefaultUncaughtExceptionHandler(handler);

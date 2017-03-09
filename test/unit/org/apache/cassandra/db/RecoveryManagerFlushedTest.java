@@ -37,7 +37,7 @@ import io.reactivex.Single;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
-import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -127,7 +127,7 @@ public class RecoveryManagerFlushedTest
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
-        new RowUpdateBuilder(cfs.metadata, 0, key)
+        new RowUpdateBuilder(cfs.metadata(), 0, key)
             .clustering("c")
             .add("val", "val1")
             .build()

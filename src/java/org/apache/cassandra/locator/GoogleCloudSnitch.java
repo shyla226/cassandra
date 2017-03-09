@@ -33,6 +33,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -98,31 +99,33 @@ public class GoogleCloudSnitch extends AbstractNetworkTopologySnitch
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddress()))
             return gceZone;
-        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        if (state == null || state.getApplicationState(ApplicationState.RACK) == null)
-        {
-            if (savedEndpoints == null)
-                savedEndpoints = SystemKeyspace.loadDcRackInfo();
-            if (savedEndpoints.containsKey(endpoint))
-                return savedEndpoints.get(endpoint).get("rack");
-            return DEFAULT_RACK;
-        }
-        return state.getApplicationState(ApplicationState.RACK).value;
+
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        VersionedValue rack = epState != null ? epState.getApplicationState(ApplicationState.RACK) : null;
+        if (rack != null)
+            return rack.value;
+
+        if (savedEndpoints == null)
+            savedEndpoints = SystemKeyspace.loadDcRackInfo();
+        if (savedEndpoints.containsKey(endpoint))
+            return savedEndpoints.get(endpoint).get("rack");
+        return DEFAULT_RACK;
     }
 
     public String getDatacenter(InetAddress endpoint)
     {
         if (endpoint.equals(FBUtilities.getBroadcastAddress()))
             return gceRegion;
-        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-        if (state == null || state.getApplicationState(ApplicationState.DC) == null)
-        {
-            if (savedEndpoints == null)
-                savedEndpoints = SystemKeyspace.loadDcRackInfo();
-            if (savedEndpoints.containsKey(endpoint))
-                return savedEndpoints.get(endpoint).get("data_center");
-            return DEFAULT_DC;
-        }
-        return state.getApplicationState(ApplicationState.DC).value;
+
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        VersionedValue dc = epState != null ? epState.getApplicationState(ApplicationState.DC) : null;
+        if (dc != null)
+            return dc.value;
+
+        if (savedEndpoints == null)
+            savedEndpoints = SystemKeyspace.loadDcRackInfo();
+        if (savedEndpoints.containsKey(endpoint))
+            return savedEndpoints.get(endpoint).get("data_center");
+        return DEFAULT_DC;
     }
 }

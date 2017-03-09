@@ -18,9 +18,12 @@
 package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +36,7 @@ import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.RangeHash;
 
 /**
  * RemoteSyncTask sends {@link SyncRequest} to remote(non-coordinator) node
@@ -46,20 +50,29 @@ public class RemoteSyncTask extends SyncTask
     private final RepairSession session;
 
     public RemoteSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, RepairSession session,
-                          Executor taskExecutor, SyncTask next)
+                          Executor taskExecutor, SyncTask next, Map<InetAddress, Set<RangeHash>> receivedRangeCache)
     {
-        super(desc, r1, r2, taskExecutor, next);
+        super(desc, r1, r2, taskExecutor, next, receivedRangeCache);
         this.session = session;
     }
 
-    protected void startSync(List<Range<Token>> differences)
+    protected void startSync(List<Range<Token>> transferToLeft, List<Range<Token>> transferToRight)
     {
         // RemoteSyncTask expects SyncComplete message sent back.
         // Register task to RepairSession to receive response.
         session.waitForSync(Pair.create(desc, new NodePair(r1.endpoint, r2.endpoint)), this);
         InetAddress local = FBUtilities.getBroadcastAddress();
-        SyncRequest request = new SyncRequest(desc, local, r1.endpoint, r2.endpoint, differences);
-        String message = String.format("Forwarding streaming repair of %d ranges to %s (to be streamed with %s)", request.ranges.size(), request.src, request.dst);
+
+        List<Range<Token>> ranges = new ArrayList<>(transferToLeft.size() + transferToRight.size() + 1);
+        ranges.addAll(transferToLeft);
+        ranges.add(StreamingRepairTask.RANGE_SEPARATOR);
+        ranges.addAll(transferToRight);
+
+        SyncRequest request = new SyncRequest(desc, local, r1.endpoint, r2.endpoint, ranges);
+        String message = String.format("Forwarding streaming repair of %d ranges to %s%s (to be streamed with %s)",
+                                       transferToLeft.size(), request.src, transferToLeft.size() != transferToRight.size()?
+                                                                           String.format(" and %d ranges from", transferToRight.size()) : "",
+                                       request.dst);
         logger.info("[repair #{}] {}", desc.sessionId, message);
         Tracing.traceRepair(message);
         MessagingService.instance().sendOneWay(request.createMessage(), request.src);

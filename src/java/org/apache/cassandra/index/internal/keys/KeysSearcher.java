@@ -19,12 +19,8 @@ package org.apache.cassandra.index.internal.keys;
 
 import java.nio.ByteBuffer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -33,12 +29,10 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
-import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.schema.TableMetadata;
 
 public class KeysSearcher extends CassandraIndexSearcher
 {
-    private static final Logger logger = LoggerFactory.getLogger(KeysSearcher.class);
-
     public KeysSearcher(ReadCommand command,
                         RowFilter.Expression expression,
                         CassandraIndex indexer)
@@ -55,9 +49,9 @@ public class KeysSearcher extends CassandraIndexSearcher
 
         UnfilteredPartitionIterator iter = new UnfilteredPartitionIterator()
         {
-            private Single<UnfilteredRowIterator> next;
+            private UnfilteredRowIterator next;
 
-            public CFMetaData metadata()
+            public TableMetadata metadata()
             {
                 return command.metadata();
             }
@@ -67,12 +61,12 @@ public class KeysSearcher extends CassandraIndexSearcher
                 return prepareNext();
             }
 
-            public Single<UnfilteredRowIterator> next()
+            public UnfilteredRowIterator next()
             {
                 if (next == null)
                     prepareNext();
 
-                Single<UnfilteredRowIterator> toReturn = next;
+                UnfilteredRowIterator toReturn = next;
                 next = null;
                 return toReturn;
             }
@@ -87,7 +81,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                         continue;
 
                     ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
-                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata,
+                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
                                                                                            command.nowInSec(),
                                                                                            extendedFilter,
                                                                                            command.rowFilter(),
@@ -105,7 +99,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                                                                                 command.nowInSec()));
 
                     if (dataIter != null)
-                        next = dataIter;
+                        next = dataIter.blockingGet();
                 }
 
                 return next != null;

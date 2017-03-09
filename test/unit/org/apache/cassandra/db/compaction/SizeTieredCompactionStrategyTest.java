@@ -53,7 +53,11 @@ public class SizeTieredCompactionStrategyTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        // Disable tombstone histogram rounding for tests
+        System.setProperty("cassandra.streaminghistogram.roundseconds", "1");
+
         SchemaLoader.prepareServer();
+
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1));
@@ -158,7 +162,7 @@ public class SizeTieredCompactionStrategyTest
         for (int r = 0; r < numSSTables; r++)
         {
             String key = String.valueOf(r);
-            new RowUpdateBuilder(cfs.metadata, 0, key)
+            new RowUpdateBuilder(cfs.metadata(), 0, key)
                 .clustering("column").add("val", value)
                 .build().applyUnsafe();
             cfs.forceBlockingFlush();

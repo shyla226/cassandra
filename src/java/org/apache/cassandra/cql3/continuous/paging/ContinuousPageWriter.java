@@ -135,7 +135,7 @@ class ContinuousPageWriter
         }
         else
         {
-            writer.schedule();
+            writer.schedule(0);
         }
     }
 
@@ -216,7 +216,7 @@ class ContinuousPageWriter
         public void complete()
         {
             completed.compareAndSet(false, true);
-            schedule();
+            schedule(0);
         }
 
         public boolean completed()
@@ -225,11 +225,17 @@ class ContinuousPageWriter
         }
 
         /**
-         * This will add the writer at the back of the task queue of Netty's event loop.
+         * This will add the writer at the back of the task queue of Netty's event loop,
+         * either immediately of after the specified pause, in microseconds.
+         *
+         * @param pauseMicros - how long to wait before rescheduling the task, in microseconds
          */
-        public void schedule()
+        public void schedule(long pauseMicros)
         {
-            channel.eventLoop().execute(this);
+            if (pauseMicros > 0)
+                channel.eventLoop().schedule(this, pauseMicros, TimeUnit.MICROSECONDS);
+            else
+                channel.eventLoop().execute(this);
         }
 
         /**
@@ -302,21 +308,36 @@ class ContinuousPageWriter
          * Process any pending pages. This method processes any pending pages as long as the channel is writable
          * and we have permits, or aborted() returns true, in which case pages will be simply discarded.
          * <p>
-         * If the queue is not empty after finishing the iteration, then the task should be rescheduled.
+         * If the queue is not empty after finishing the iteration, then the task should be rescheduled. If the
+         * limiter did not release a permit, then the reschedule will only happen after a pause in microseconds.
+         * The limiter does not tell how much longer till the next permit is available, so we pause by one tenth
+         * of the whole interval between permits, so that we'll never be more than 10% slower (can we do better?).
+         * If there is no pause, then the CPU will be spinning for too long if the rate is really small,
+         * see APOLLO-316.
          * <p>
          * byteman tests inject exceptions in this method, if it is renamed then the tests should be
          * updated as well, see ContinuousPagingErrorsTest
          */
         private void processPendingPages()
         {
-            while(aborted() || (channel.isWritable() && limiter.tryAcquire()))
+            long pauseMicros = 0;
+            boolean aborted = aborted();
+            while(aborted || channel.isWritable())
             {
+                if (!aborted && !limiter.tryAcquire())
+                {
+                    long intervalMicros = (long)(TimeUnit.SECONDS.toMicros(1L) / limiter.getRate());
+                    pauseMicros = intervalMicros / 10;
+                    break;
+                }
+
                 // byteman tests rely on pages.poll() to inject exceptions in this method, see ContinuousPagingErrorsTest
                 Frame page = queue.poll();
                 if (page == null)
                     break;
 
                 processPage(page);
+                aborted = aborted();
             }
 
             if (!queue.isEmpty())
@@ -324,7 +345,7 @@ class ContinuousPageWriter
                 if (logger.isTraceEnabled())
                     logger.trace("Rescheduling since queue is not empty, either channel was not writable or permit not available");
 
-                schedule();
+                schedule(pauseMicros);
             }
         }
 

@@ -232,16 +232,15 @@ public class BatchMessage extends Message.Request
                                   response.setTracingId(finalTracingId);
 
                               return response;
-                          });
+                          })
+                          .doFinally(() -> Tracing.instance.stopSession());
         }
         catch (Exception e)
         {
+            Tracing.instance.stopSession();
+
             JVMStabilityInspector.inspectThrowable(e);
             return Single.just(ErrorMessage.fromException(e));
-        }
-        finally
-        {
-            Tracing.instance.stopSession();
         }
     }
 
