@@ -1650,12 +1650,12 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
-    protected Object set(Object...values)
+    protected Set set(Object...values)
     {
         return ImmutableSet.copyOf(values);
     }
 
-    protected Object map(Object...values)
+    protected Map map(Object...values)
     {
         if (values.length % 2 != 0)
             throw new IllegalArgumentException();
