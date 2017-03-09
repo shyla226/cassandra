@@ -20,18 +20,11 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -287,15 +280,5 @@ public class SelectLimitTest extends CQLTester
         assertRows(execute("SELECT * FROM %s LIMIT 2"),
                    row(sortedKeys.get(0), -1, 1, 1),
                    row(sortedKeys.get(2), -1, 1, 1));
-    }
-
-    /**
-     * Sorts a list of int32 keys by their Murmur3Partitioner token order.
-     */
-    private static List<Integer> partitionerSortedKeys(List<Integer> unsortedKeys)
-    {
-        List<DecoratedKey> decoratedKeys = unsortedKeys.stream().map(i -> Murmur3Partitioner.instance.decorateKey(Int32Type.instance.getSerializer().serialize(i))).collect(Collectors.toList());
-        Collections.sort(decoratedKeys, DecoratedKey.comparator);
-        return decoratedKeys.stream().map(dk -> Int32Type.instance.getSerializer().deserialize(dk.getKey())).collect(Collectors.toList());
     }
 }
