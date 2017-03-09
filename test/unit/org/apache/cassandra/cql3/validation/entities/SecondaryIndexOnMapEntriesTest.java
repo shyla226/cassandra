@@ -17,13 +17,10 @@
  */
 package org.apache.cassandra.cql3.validation.entities;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -35,12 +32,6 @@ import static org.junit.Assert.fail;
 
 public class SecondaryIndexOnMapEntriesTest extends CQLTester
 {
-    @BeforeClass
-    public static void setUp()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-    }
-
     @Test
     public void testShouldNotCreateIndexOnFrozenMaps() throws Throwable
     {
@@ -271,7 +262,7 @@ public class SecondaryIndexOnMapEntriesTest extends CQLTester
 
     private void assertRowsForConditions(IndexWhereClause whereClause, Object[]... rows) throws Throwable
     {
-        assertRows(execute("SELECT * FROM %s WHERE " + whereClause.text(), whereClause.params()), rows);
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE " + whereClause.text(), whereClause.params()), rows);
     }
 
     private void assertNoRowsForConditions(IndexWhereClause whereClause) throws Throwable
