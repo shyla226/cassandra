@@ -326,18 +326,23 @@ public abstract class CQLTester
             {
                 try
                 {
+                    logger.debug("Dropping {} tables created in previous test", tablesToDrop.size());
                     for (int i = tablesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
 
+                    logger.debug("Dropping {} aggregate functions created in previous test", aggregatesToDrop.size());
                     for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
 
+                    logger.debug("Dropping {} scalar functions created in previous test", functionsToDrop.size());
                     for (int i = functionsToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
 
+                    logger.debug("Dropping {} types created in previous test", typesToDrop.size());
                     for (int i = typesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
 
+                    logger.debug("Dropping {} keyspaces created in previous test", keyspacesToDrop.size());
                     for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
                         schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
 
@@ -346,6 +351,7 @@ public abstract class CQLTester
                     // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
                     // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
 
+                    logger.debug("Awaiting sstable cleanup");
                     final CountDownLatch latch = new CountDownLatch(1);
                     ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
                     {
@@ -357,6 +363,7 @@ public abstract class CQLTester
                     if (!latch.await(2, TimeUnit.SECONDS))
                         logger.warn("TImes out waiting for shutdown");
 
+                    logger.debug("Removing sstables");
                     removeAllSSTables(KEYSPACE, tablesToDrop);
                 }
                 catch (Exception e)

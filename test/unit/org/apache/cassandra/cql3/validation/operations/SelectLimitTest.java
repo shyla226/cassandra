@@ -20,6 +20,9 @@
  */
 package org.apache.cassandra.cql3.validation.operations;
 
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -27,14 +30,14 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 public class SelectLimitTest extends CQLTester
 {
-    @BeforeClass
-    public static void setUp()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-    }
-
     /**
      * Test limit across a partition range, requires byte ordered partitioner,
      * migrated from cql_tests.py:TestCQL.limit_range_test()
@@ -44,15 +47,16 @@ public class SelectLimitTest extends CQLTester
     {
         createTable("CREATE TABLE %s (userid int, url text, time bigint, PRIMARY KEY (userid, url)) WITH COMPACT STORAGE");
 
+        List<Integer> sortedKeys = partitionerSortedKeys(IntStream.range(0, 100).boxed().collect(Collectors.toList()));
         for (int i = 0; i < 100; i++)
             for (String tld : new String[] { "com", "org", "net" })
                 execute("INSERT INTO %s (userid, url, time) VALUES (?, ?, ?)", i, String.format("http://foo.%s", tld), 42L);
 
-        assertRows(execute("SELECT * FROM %s WHERE token(userid) >= token(2) LIMIT 1"),
-                   row(2, "http://foo.com", 42L));
+        assertRows(execute("SELECT * FROM %s WHERE token(userid) >= token(?) LIMIT 1", sortedKeys.get(2)),
+                   row(sortedKeys.get(2), "http://foo.com", 42L));
 
-        assertRows(execute("SELECT * FROM %s WHERE token(userid) > token(2) LIMIT 1"),
-                   row(3, "http://foo.com", 42L));
+        assertRows(execute("SELECT * FROM %s WHERE token(userid) > token(?) LIMIT 1", sortedKeys.get(2)),
+                   row(sortedKeys.get(3), "http://foo.com", 42L));
     }
 
     /**
@@ -101,6 +105,8 @@ public class SelectLimitTest extends CQLTester
     {
         createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY (k, v) ) WITH COMPACT STORAGE ");
 
+
+        List<Integer> sortedKeys = partitionerSortedKeys(Arrays.asList(0, 1, 2, 3));
         for (int i = 0; i < 4; i++)
             for (int j = 0; j < 4; j++)
                 execute("INSERT INTO %s(k, v) VALUES (?, ?)", i, j);
@@ -125,12 +131,12 @@ public class SelectLimitTest extends CQLTester
                    row(1, 2),
                    row(1, 3));
         assertRows(execute("SELECT * FROM %s WHERE v > 1 AND v <= 3 LIMIT 6 ALLOW FILTERING"),
-                   row(0, 2),
-                   row(0, 3),
-                   row(1, 2),
-                   row(1, 3),
-                   row(2, 2),
-                   row(2, 3));
+                   row(sortedKeys.get(0), 2),
+                   row(sortedKeys.get(0), 3),
+                   row(sortedKeys.get(1), 2),
+                   row(sortedKeys.get(1), 3),
+                   row(sortedKeys.get(2), 2),
+                   row(sortedKeys.get(2), 3));
     }
 
     @Test
@@ -150,9 +156,15 @@ public class SelectLimitTest extends CQLTester
         String query = "CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))";
 
         if (withCompactStorage)
+        {
             createTable(query + " WITH COMPACT STORAGE");
+            logger.debug("Testing with COMPACT STORAGE");
+        }
         else
+        {
             createTable(query);
+            logger.debug("Testing without COMPACT STORAGE");
+        }
 
         for (int i = 0; i < 5; i++)
         {
@@ -250,6 +262,7 @@ public class SelectLimitTest extends CQLTester
     {
         createTable("CREATE TABLE %s (pk int, c int, v int, s int static, PRIMARY KEY (pk, c))");
 
+        List<Integer> sortedKeys = partitionerSortedKeys(Arrays.asList(1, 2, 3, 4, 5));
         execute("INSERT INTO %s (pk, c, v, s) VALUES (1, -1, 1, 1)");
         execute("INSERT INTO %s (pk, c, v, s) VALUES (2, -1, 1, 1)");
         execute("INSERT INTO %s (pk, c, v, s) VALUES (3, -1, 1, 1)");
@@ -257,22 +270,32 @@ public class SelectLimitTest extends CQLTester
         execute("INSERT INTO %s (pk, c, v, s) VALUES (5, -1, 1, 1)");
 
         assertRows(execute("SELECT * FROM %s"),
-                   row(1, -1, 1, 1),
-                   row(2, -1, 1, 1),
-                   row(3, -1, 1, 1),
-                   row(4, -1, 1, 1),
-                   row(5, -1, 1, 1));
+                   row(sortedKeys.get(0), -1, 1, 1),
+                   row(sortedKeys.get(1), -1, 1, 1),
+                   row(sortedKeys.get(2), -1, 1, 1),
+                   row(sortedKeys.get(3), -1, 1, 1),
+                   row(sortedKeys.get(4), -1, 1, 1));
 
-        execute("DELETE FROM %s WHERE pk = 2");
+        execute("DELETE FROM %s WHERE pk = ?", sortedKeys.get(1));
 
         assertRows(execute("SELECT * FROM %s"),
-                   row(1, -1, 1, 1),
-                   row(3, -1, 1, 1),
-                   row(4, -1, 1, 1),
-                   row(5, -1, 1, 1));
+                   row(sortedKeys.get(0), -1, 1, 1),
+                   row(sortedKeys.get(2), -1, 1, 1),
+                   row(sortedKeys.get(3), -1, 1, 1),
+                   row(sortedKeys.get(4), -1, 1, 1));
 
         assertRows(execute("SELECT * FROM %s LIMIT 2"),
-                   row(1, -1, 1, 1),
-                   row(3, -1, 1, 1));
+                   row(sortedKeys.get(0), -1, 1, 1),
+                   row(sortedKeys.get(2), -1, 1, 1));
+    }
+
+    /**
+     * Sorts a list of int32 keys by their Murmur3Partitioner token order.
+     */
+    private static List<Integer> partitionerSortedKeys(List<Integer> unsortedKeys)
+    {
+        List<DecoratedKey> decoratedKeys = unsortedKeys.stream().map(i -> Murmur3Partitioner.instance.decorateKey(Int32Type.instance.getSerializer().serialize(i))).collect(Collectors.toList());
+        Collections.sort(decoratedKeys, DecoratedKey.comparator);
+        return decoratedKeys.stream().map(dk -> Int32Type.instance.getSerializer().deserialize(dk.getKey())).collect(Collectors.toList());
     }
 }
