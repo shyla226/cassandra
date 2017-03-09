@@ -796,8 +796,6 @@ public interface Row extends Unfiltered, Collection<ColumnData>
 
             public void reduce(int idx, Cell cell)
             {
-                Cell c = cell;
-
                 if (!activeDeletion.deletes(cell))
                     merged = merged == null ? cell : Cells.reconcile(merged, cell, nowInSec);
             }

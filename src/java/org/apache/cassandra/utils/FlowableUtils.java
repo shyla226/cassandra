@@ -107,6 +107,7 @@ public class FlowableUtils
     }
 
     // We have our own iter-to-flowable implementation to take care of closing on cancel and to ensure single use
+    // Alternative is to go through single-use iterable, Flowable.fromIterable and doFinally(close).
     private static class FlowableFromIter<T> extends Flowable<T>
     {
         CloseableIterator<T> iter;

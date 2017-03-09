@@ -118,39 +118,6 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         }
     }
 
-    /**
-     * Allows reuse of this iterator by moving to the next Key in the iteration.
-     * <p>
-     * Since we walk the datafile start to finish we can just update the
-     * data from the next partition in the file and iterate.  We can also
-     * use the index to jump to the start of a particular partition.
-     * <p>
-     * It's required the caller must have set the datafile position to
-     * the start of the passed partition key and have skipped over the
-     * partition key.
-     */
-    public SSTableIdentityIterator reuse(DecoratedKey key) throws IOException
-    {
-        try
-        {
-            //This method doesn't work for old formats
-            if (sstable.descriptor.version.correspondingMessagingVersion() < MessagingService.VERSION_30)
-                return create(sstable, this.dfile, key);
-
-            this.partitionLevelDeletion = DeletionTime.serializer.deserialize(dfile);
-            this.key = key;
-            this.iterator.setDefaultState();
-            this.staticRow = iterator.readStaticRow();
-
-            return this;
-        }
-        catch (IOException e)
-        {
-            sstable.markSuspect();
-            throw new CorruptSSTableException(e, dfile.getPath());
-        }
-    }
-
     public TableMetadata metadata()
     {
         return iterator.metadata;

@@ -23,13 +23,11 @@ import java.util.*;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
-
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -58,7 +56,7 @@ public class MergeIteratorComparisonTest
 
     static int ITERATOR_COUNT = 15;
     static int LIST_LENGTH = 15000;
-    static boolean BENCHMARK = true;
+    static boolean BENCHMARK = false;
 
     @Test
     public void testRandomInts()

@@ -23,7 +23,6 @@ import java.util.Iterator;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
-import io.reactivex.Single;
 import org.junit.Before;
 import org.junit.Test;
 

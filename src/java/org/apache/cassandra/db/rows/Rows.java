@@ -153,8 +153,7 @@ public abstract class Rows
         List<Iterator<ColumnData>> inputIterators = new ArrayList<>(1 + inputs.length);
         inputIterators.add(merged.iterator());
         for (Row row : inputs)
-            if (row != null)
-                inputIterators.add(row.iterator());
+            inputIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
 
         Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new Reducer<ColumnData, Object>()
         {

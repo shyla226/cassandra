@@ -458,7 +458,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             {
                 UnfilteredRowIterator i = FlowablePartitions.toIterator(fup);
                 // We want to cache only rowsToCache rows
-                CachedPartition toCache = 
+                CachedPartition toCache =
                         CachedBTreePartition.create(
                                 DataLimits.cqlLimits(rowsToCache).filter(i, nowInSec()),
                                 nowInSec()

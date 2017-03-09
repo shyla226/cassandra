@@ -84,6 +84,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -663,7 +664,7 @@ public class SelectStatement implements CQLStatement
 
             page.map(pi ->
                      {
-                         Flowable<RowIterator> it = PartitionIterators.toFlowable(pi);
+                         Flowable<RowIterator> it = FlowableUtils.fromCloseableIterator(pi);
 
                          it.takeWhile((p) -> !builder.isCompleted())
                            .map(p -> {
@@ -1067,7 +1068,7 @@ public class SelectStatement implements CQLStatement
                                       int nowInSec,
                                       int userLimit) throws InvalidRequestException
     {
-        return partitions.flatMap(p -> PartitionIterators.toFlowable(p)
+        return partitions.flatMap(p -> FlowableUtils.fromCloseableIterator(p)
                                         .reduce(ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection),
                                                 (res, r) ->
                                                 {

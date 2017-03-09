@@ -21,11 +21,18 @@ import java.io.IOError;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.Callable;
+
+import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
+import io.reactivex.Flowable;
 import io.reactivex.Single;
+import io.reactivex.SingleSource;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
@@ -44,7 +51,6 @@ public abstract class UnfilteredPartitionIterators
     private static final Serializer serializer = new Serializer();
 
     private static final Comparator<UnfilteredRowIterator> partitionComparator = Comparator.comparing(BaseRowIterator::partitionKey);
-//            Comparator.comparing(BaseRowIterator::partitionKey);
 
     private UnfilteredPartitionIterators() {}
 

@@ -31,12 +31,9 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.Flowable;
 import io.reactivex.Maybe;
 import io.reactivex.Scheduler;
-import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.MergeFlowable;
@@ -208,7 +205,11 @@ public class FlowablePartitions
 
     public static Flowable<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
     {
-        return FlowableUtils.fromCloseableIterator(iter).map(i -> fromIterator(i, scheduler));
+        Flowable<FlowableUnfilteredPartition> flowable = FlowableUtils.fromCloseableIterator(iter)
+                                                                      .map(i -> fromIterator(i, scheduler));
+        if (scheduler != null)
+            flowable.subscribeOn(scheduler);
+        return flowable;
     }
 
     public static UnfilteredPartitionIterator toPartitions(Flowable<FlowableUnfilteredPartition> source, TableMetadata metadata)

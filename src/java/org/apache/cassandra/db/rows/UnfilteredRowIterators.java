@@ -534,7 +534,7 @@ public abstract class UnfilteredRowIterators
 
         private final Row.Merger rowMerger;
         private RangeTombstoneMarker.Merger markerMerger;
-        
+
         private final DeletionTime partitionLevelDeletion;
 
         public MergeReducer(int size, boolean reversed, DeletionTime partitionLevelDeletion, Columns columns, int nowInSec, MergeListener listener)

@@ -146,17 +146,4 @@ public abstract class PartitionIterators
                 iterator.close();
         }
     }
-
-    /**
-     * Convert the iterator to a flowable and closes it when the flowable subscription is cancelled or the
-     * flowable has completed.
-     *
-     * @param iterator - the iterator to convert, it will be consumed and closed
-     *
-     * @return a flowable for the iterator passed in created via FLowable.fromIterable()
-     */
-    public static Flowable<RowIterator> toFlowable(PartitionIterator iterator)
-    {
-        return Flowable.using(() -> iterator, (iter) -> Flowable.fromIterable(() -> iter), (iter) -> iter.close());
-    }
 }
