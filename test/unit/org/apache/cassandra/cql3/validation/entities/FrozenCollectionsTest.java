@@ -17,10 +17,13 @@
  */
 package org.apache.cassandra.cql3.validation.entities;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.serializers.MapSerializer;
+import org.apache.cassandra.serializers.SetSerializer;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -40,20 +43,12 @@ import static org.junit.Assert.assertEquals;
 
 public class FrozenCollectionsTest extends CQLTester
 {
-    @BeforeClass
-    public static void setUpClass()     // overrides CQLTester.setUpClass()
-    {
-        // Selecting partitioner for a table is not exposed on CREATE TABLE.
-        StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-
-        prepareServer();
-    }
-
     @Test
     public void testPartitionKeyUsage() throws Throwable
     {
         createTable("CREATE TABLE %s (k frozen<set<int>> PRIMARY KEY, v int)");
 
+        List<Set<Integer>> sortedKeys = partitionerSortedSetKeys(Arrays.asList(set(), set(1, 2, 3), set(4, 5, 6), set(7, 8, 9)));
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", set(), 1);
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", set(1, 2, 3), 1);
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", set(4, 5, 6), 0);
@@ -63,23 +58,23 @@ public class FrozenCollectionsTest extends CQLTester
         execute("UPDATE %s SET v=? WHERE k=?", 0, set());
         execute("UPDATE %s SET v=? WHERE k=?", 0, set(1, 2, 3));
 
-        assertRows(execute("SELECT * FROM %s"),
-            row(set(), 0),
-            row(set(1, 2, 3), 0),
-            row(set(4, 5, 6), 0),
-            row(set(7, 8, 9), 0)
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
+            row(sortedKeys.get(0), 0),
+            row(sortedKeys.get(1), 0),
+            row(sortedKeys.get(2), 0),
+            row(sortedKeys.get(3), 0)
         );
 
-        assertRows(execute("SELECT k FROM %s"),
-            row(set()),
-            row(set(1, 2, 3)),
-            row(set(4, 5, 6)),
-            row(set(7, 8, 9))
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s"),
+            row(sortedKeys.get(0)),
+            row(sortedKeys.get(1)),
+            row(sortedKeys.get(2)),
+            row(sortedKeys.get(3))
         );
 
         assertRows(execute("SELECT * FROM %s LIMIT 2"),
-                row(set(), 0),
-                row(set(1, 2, 3), 0)
+            row(sortedKeys.get(0), 0),
+            row(sortedKeys.get(1), 0)
         );
 
         assertRows(execute("SELECT * FROM %s WHERE k=?", set(4, 5, 6)),
@@ -90,23 +85,23 @@ public class FrozenCollectionsTest extends CQLTester
                 row(set(), 0)
         );
 
-        assertRows(execute("SELECT * FROM %s WHERE k IN ?", list(set(4, 5, 6), set())),
-                   row(set(), 0),
-                   row(set(4, 5, 6), 0)
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE k IN ?", list(sortedKeys.get(0), sortedKeys.get(1))),
+            row(sortedKeys.get(0), 0),
+            row(sortedKeys.get(1), 0)
         );
 
-        assertRows(execute("SELECT * FROM %s WHERE token(k) >= token(?)", set(4, 5, 6)),
-                row(set(4, 5, 6), 0),
-                row(set(7, 8, 9), 0)
+        assertRows(execute("SELECT * FROM %s WHERE token(k) >= token(?)", sortedKeys.get(2)),
+                row(sortedKeys.get(2), 0),
+                row(sortedKeys.get(3), 0)
         );
 
         assertInvalid("INSERT INTO %s (k, v) VALUES (null, 0)");
 
-        execute("DELETE FROM %s WHERE k=?", set());
-        execute("DELETE FROM %s WHERE k=?", set(4, 5, 6));
+        execute("DELETE FROM %s WHERE k=?", sortedKeys.get(0));
+        execute("DELETE FROM %s WHERE k=?", sortedKeys.get(2));
         assertRows(execute("SELECT * FROM %s"),
-            row(set(1, 2, 3), 0),
-            row(set(7, 8, 9), 0)
+            row(sortedKeys.get(1), 0),
+            row(sortedKeys.get(3), 0)
         );
     }
 
@@ -114,6 +109,14 @@ public class FrozenCollectionsTest extends CQLTester
     public void testNestedPartitionKeyUsage() throws Throwable
     {
         createTable("CREATE TABLE %s (k frozen<map<set<int>, list<int>>> PRIMARY KEY, v int)");
+
+        List<Map<Set<Integer>, List<Integer>>> sortedKeys = partitionerSortedMapKeys(Arrays.asList(
+            map(),
+            map(set(), list(1, 2, 3)),
+            map(set(1, 2, 3), list(1, 2, 3)),
+            map(set(4, 5, 6), list(1, 2, 3)),
+            map(set(7, 8, 9), list(1, 2, 3))
+        ));
 
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", map(), 1);
         execute("INSERT INTO %s (k, v) VALUES (?, ?)", map(set(), list(1, 2, 3)), 0);
@@ -125,7 +128,7 @@ public class FrozenCollectionsTest extends CQLTester
         execute("UPDATE %s SET v=? WHERE k=?", 0, map());
         execute("UPDATE %s SET v=? WHERE k=?", 0, map(set(1, 2, 3), list(1, 2, 3)));
 
-        assertRows(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
             row(map(), 0),
             row(map(set(), list(1, 2, 3)), 0),
             row(map(set(1, 2, 3), list(1, 2, 3)), 0),
@@ -133,7 +136,7 @@ public class FrozenCollectionsTest extends CQLTester
             row(map(set(7, 8, 9), list(1, 2, 3)), 0)
         );
 
-        assertRows(execute("SELECT k FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT k FROM %s"),
             row(map()),
             row(map(set(), list(1, 2, 3))),
             row(map(set(1, 2, 3), list(1, 2, 3))),
@@ -142,9 +145,9 @@ public class FrozenCollectionsTest extends CQLTester
         );
 
         assertRows(execute("SELECT * FROM %s LIMIT 3"),
-            row(map(), 0),
-            row(map(set(), list(1, 2, 3)), 0),
-            row(map(set(1, 2, 3), list(1, 2, 3)), 0)
+            row(sortedKeys.get(0), 0),
+            row(sortedKeys.get(1), 0),
+            row(sortedKeys.get(2), 0)
         );
 
         assertRows(execute("SELECT * FROM %s WHERE k=?", map(set(4, 5, 6), list(1, 2, 3))),
@@ -152,32 +155,31 @@ public class FrozenCollectionsTest extends CQLTester
         );
 
         assertRows(execute("SELECT * FROM %s WHERE k=?", map()),
-                row(map(), 0)
+            row(map(), 0)
         );
 
         assertRows(execute("SELECT * FROM %s WHERE k=?", map(set(), list(1, 2, 3))),
-                row(map(set(), list(1, 2, 3)), 0)
+            row(map(set(), list(1, 2, 3)), 0)
         );
 
-        assertRows(execute("SELECT * FROM %s WHERE k IN ?", list(map(set(4, 5, 6), list(1, 2, 3)), map(), map(set(), list(1, 2, 3)))),
-                   row(map(), 0),
-                   row(map(set(), list(1, 2, 3)), 0),
-                   row(map(set(4, 5, 6), list(1, 2, 3)), 0)
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE k IN ?", list(map(set(4, 5, 6), list(1, 2, 3)), map(), map(set(), list(1, 2, 3)))),
+            row(map(), 0),
+            row(map(set(), list(1, 2, 3)), 0),
+            row(map(set(4, 5, 6), list(1, 2, 3)), 0)
         );
 
-        assertRows(execute("SELECT * FROM %s WHERE token(k) >= token(?)", map(set(4, 5, 6), list(1, 2, 3))),
-            row(map(set(4, 5, 6), list(1, 2, 3)), 0),
-            row(map(set(7, 8, 9), list(1, 2, 3)), 0)
+        assertRows(execute("SELECT * FROM %s WHERE token(k) >= token(?)", sortedKeys.get(3)),
+            row(sortedKeys.get(3), 0),
+            row(sortedKeys.get(4), 0)
         );
 
         execute("DELETE FROM %s WHERE k=?", map());
         execute("DELETE FROM %s WHERE k=?", map(set(), list(1, 2, 3)));
         execute("DELETE FROM %s WHERE k=?", map(set(4, 5, 6), list(1, 2, 3)));
-        assertRows(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
             row(map(set(1, 2, 3), list(1, 2, 3)), 0),
             row(map(set(7, 8, 9), list(1, 2, 3)), 0)
         );
-
     }
 
     @Test
@@ -391,7 +393,7 @@ public class FrozenCollectionsTest extends CQLTester
             // overwrite with update
             execute ("UPDATE %s SET b=? WHERE a=?", map(set(), list(1, 2, 3)), 1);
 
-            assertRows(execute("SELECT * FROM %s"),
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                 row(0, map(), set()),
                 row(1, map(set(), list(1, 2, 3)), set()),
                 row(2, map(set(1, 2, 3), list(1, 2, 3)), set(1, 2, 3)),
@@ -399,7 +401,7 @@ public class FrozenCollectionsTest extends CQLTester
                 row(4, map(set(7, 8, 9), list(1, 2, 3)), set(1, 2, 3))
             );
 
-            assertRows(execute("SELECT b FROM %s"),
+            assertRowsIgnoringOrder(execute("SELECT b FROM %s"),
                 row(map()),
                 row(map(set(), list(1, 2, 3))),
                 row(map(set(1, 2, 3), list(1, 2, 3))),
@@ -407,7 +409,7 @@ public class FrozenCollectionsTest extends CQLTester
                 row(map(set(7, 8, 9), list(1, 2, 3)))
             );
 
-            assertRows(execute("SELECT c FROM %s"),
+            assertRowsIgnoringOrder(execute("SELECT c FROM %s"),
                 row(set()),
                 row(set()),
                 row(set(1, 2, 3)),
@@ -461,7 +463,7 @@ public class FrozenCollectionsTest extends CQLTester
         execute("INSERT INTO %s (a, b, d) VALUES (?, ?, ?)", 1, 1, 0);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 2, 0, map(set(1, 2, 3), list(1, 2, 3)), 0);
 
-        assertRows(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
             row(0, 0, map(), 0),
             row(0, 1, map(), 0),
             row(1, 0, map(set(), list(1, 2, 3)), 0),
@@ -474,7 +476,7 @@ public class FrozenCollectionsTest extends CQLTester
         );
 
         execute("DELETE c FROM %s WHERE a=?", 0);
-        assertRows(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                 row(0, 0, null, 0),
                 row(0, 1, null, 0),
                 row(1, 0, map(set(), list(1, 2, 3)), 0),
@@ -483,14 +485,14 @@ public class FrozenCollectionsTest extends CQLTester
         );
 
         execute("DELETE FROM %s WHERE a=?", 0);
-        assertRows(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                 row(1, 0, map(set(), list(1, 2, 3)), 0),
                 row(1, 1, map(set(), list(1, 2, 3)), 0),
                 row(2, 0, map(set(1, 2, 3), list(1, 2, 3)), 0)
         );
 
         execute("UPDATE %s SET c=? WHERE a=?", map(set(1, 2, 3), list(1, 2, 3)), 1);
-        assertRows(execute("SELECT * FROM %s"),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                 row(1, 0, map(set(1, 2, 3), list(1, 2, 3)), 0),
                 row(1, 1, map(set(1, 2, 3), list(1, 2, 3)), 0),
                 row(2, 0, map(set(1, 2, 3), list(1, 2, 3)), 0)
@@ -593,7 +595,7 @@ public class FrozenCollectionsTest extends CQLTester
         assertInvalidMessage("Clustering columns can only be restricted with CONTAINS with a secondary index or filtering",
                              "SELECT * FROM %s WHERE b CONTAINS ?", 1);
 
-        assertRows(execute("SELECT * FROM %s WHERE b CONTAINS ? ALLOW FILTERING", 1),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE b CONTAINS ? ALLOW FILTERING", 1),
                    row(0, list(1, 2, 3), set(1, 2, 3), map(1, "a")),
                    row(1, list(1, 2, 3), set(4, 5, 6), map(2, "b")));
 
@@ -604,7 +606,7 @@ public class FrozenCollectionsTest extends CQLTester
                    row(0, list(1, 2, 3), set(1, 2, 3), map(1, "a")));
 
         // index lookup on b
-        assertRows(execute("SELECT * FROM %s WHERE b=?", list(1, 2, 3)),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE b=?", list(1, 2, 3)),
             row(0, list(1, 2, 3), set(1, 2, 3), map(1, "a")),
             row(1, list(1, 2, 3), set(4, 5, 6), map(2, "b"))
         );
@@ -734,12 +736,12 @@ public class FrozenCollectionsTest extends CQLTester
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, map(0, 0, 1, 1), 0, 0);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 1, map(1, 1, 2, 2), 0, 0);
 
-        assertRows(execute("SELECT * FROM %s WHERE d=? AND b CONTAINS ? ALLOW FILTERING", 0, 0),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE d=? AND b CONTAINS ? ALLOW FILTERING", 0, 0),
                 row(0, map(0, 0, 1, 1), 0, 0),
                 row(1, map(0, 0, 1, 1), 0, 0)
         );
 
-        assertRows(execute("SELECT * FROM %s WHERE d=? AND b CONTAINS KEY ? ALLOW FILTERING", 0, 0),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE d=? AND b CONTAINS KEY ? ALLOW FILTERING", 0, 0),
                 row(0, map(0, 0, 1, 1), 0, 0),
                 row(1, map(0, 0, 1, 1), 0, 0)
         );
@@ -753,12 +755,12 @@ public class FrozenCollectionsTest extends CQLTester
 
         dropIndex("DROP INDEX %s.d_index");
 
-        assertRows(execute("SELECT * FROM %s WHERE c=? AND b CONTAINS ? ALLOW FILTERING", 0, 0),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE c=? AND b CONTAINS ? ALLOW FILTERING", 0, 0),
                 row(0, map(0, 0, 1, 1), 0, 0),
                 row(1, map(0, 0, 1, 1), 0, 0)
         );
 
-        assertRows(execute("SELECT * FROM %s WHERE c=? AND b CONTAINS KEY ? ALLOW FILTERING", 0, 0),
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE c=? AND b CONTAINS KEY ? ALLOW FILTERING", 0, 0),
                 row(0, map(0, 0, 1, 1), 0, 0),
                 row(1, map(0, 0, 1, 1), 0, 0)
         );
@@ -1172,5 +1174,29 @@ public class FrozenCollectionsTest extends CQLTester
         flush();
 
         assertRows(execute("SELECT s FROM %s WHERE k = 0"), row(set(largeText, "v1", "v2")));
+    }
+
+    /**
+     * Sorts a list of set<int> keys by their Murmur3Partitioner token order.
+     */
+    protected static List<Set<Integer>> partitionerSortedSetKeys(List<Set<Integer>> unsortedKeys)
+    {
+        SetSerializer<Integer> serializer = SetType.getInstance(Int32Type.instance, false).getSerializer();
+        List<DecoratedKey> decoratedKeys = unsortedKeys.stream().map(i -> Murmur3Partitioner.instance.decorateKey(serializer.serialize(i))).collect(Collectors.toList());
+        Collections.sort(decoratedKeys, DecoratedKey.comparator);
+        return decoratedKeys.stream().map(dk -> serializer.deserialize(dk.getKey())).collect(Collectors.toList());
+    }
+
+    /**
+     * Sorts a list of set<int> keys by their Murmur3Partitioner token order.
+     */
+    protected static List<Map<Set<Integer>, List<Integer>>> partitionerSortedMapKeys(List<Map<Set<Integer>, List<Integer>>> unsortedKeys)
+    {
+        SetType<Integer> keyType = SetType.getInstance(Int32Type.instance, false);
+        ListType<Integer> valueType = ListType.getInstance(Int32Type.instance, false);
+        MapSerializer<Set<Integer>, List<Integer>> serializer = MapType.getInstance(keyType, valueType, false).getSerializer();
+        List<DecoratedKey> decoratedKeys = unsortedKeys.stream().map(i -> Murmur3Partitioner.instance.decorateKey(serializer.serialize(i))).collect(Collectors.toList());
+        Collections.sort(decoratedKeys, DecoratedKey.comparator);
+        return decoratedKeys.stream().map(dk -> serializer.deserialize(dk.getKey())).collect(Collectors.toList());
     }
 }

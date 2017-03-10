@@ -24,16 +24,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.ClientState;
@@ -51,14 +48,6 @@ public class SelectionColumnMappingTest extends CQLTester
     String typeName;
     UserType userType;
     String functionName;
-
-    @BeforeClass
-    public static void setUpClass()     // overrides CQLTester.setUpClass()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-
-        prepareServer();
-    }
 
     @Test
     public void testSelectionColumnMapping() throws Throwable

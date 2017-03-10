@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3.validation.entities;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.BeforeClass;
@@ -28,14 +30,6 @@ import org.apache.cassandra.service.StorageService;
 
 public class UserTypesTest extends CQLTester
 {
-    @BeforeClass
-    public static void setUpClass()     // overrides CQLTester.setUpClass()
-    {
-        // Selecting partitioner for a table is not exposed on CREATE TABLE.
-        StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-
-        prepareServer();
-    }
 
     @Test
     public void testInvalidField() throws Throwable
@@ -183,9 +177,9 @@ public class UserTypesTest extends CQLTester
         execute("INSERT INTO %s (a, b) VALUES (2, ?)", userType("a", 2, "b", 2));
 
         beforeAndAfterFlush(() ->
-            assertRows(execute("SELECT b.a, b.b FROM %s"),
-                       row(1, null),
-                       row(2, 2))
+            assertRowsIgnoringOrder(execute("SELECT b.a, b.b FROM %s"),
+                                    row(1, null),
+                                    row(2, 2))
         );
     }
 
@@ -270,7 +264,7 @@ public class UserTypesTest extends CQLTester
             execute("INSERT INTO %s (x, y) VALUES(4, ?)", map("fourthValue", userType("a", null, "b", 4)));
 
             beforeAndAfterFlush(() ->
-                assertRows(execute("SELECT * FROM %s"),
+                assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                         row(1, map("firstValue", userType("a", 1))),
                         row(2, map("secondValue", userType("a", 2, "b", 2))),
                         row(3, map("thirdValue", userType("a", 3, "b", null))),
@@ -297,9 +291,9 @@ public class UserTypesTest extends CQLTester
         execute("UPDATE %s SET y['secondValue'] = {a: 2, b: 2} WHERE x = 1");
 
         beforeAndAfterFlush(() ->
-                            assertRows(execute("SELECT * FROM %s"),
-                                       row(1, map("firstValue", userType("a", 1),
-                                                  "secondValue", userType("a", 2, "b", 2))))
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
+                       row(1, map("firstValue", userType("a", 1),
+                                  "secondValue", userType("a", 2, "b", 2))))
         );
     }
 
@@ -325,7 +319,7 @@ public class UserTypesTest extends CQLTester
             execute("INSERT INTO %s (x, y) VALUES(4, ?)", set(userType("a", null, "b", 4)));
 
             beforeAndAfterFlush(() ->
-                assertRows(execute("SELECT * FROM %s"),
+                assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                         row(1, set(userType("a", 1))),
                         row(2, set(userType("a", 2, "b", 2))),
                         row(3, set(userType("a", 3, "b", null))),
@@ -356,7 +350,7 @@ public class UserTypesTest extends CQLTester
             execute("INSERT INTO %s (x, y) VALUES (4, ?)", list(userType("a", null, "b", 4)));
 
             beforeAndAfterFlush(() ->
-                assertRows(execute("SELECT * FROM %s"),
+                assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                         row(1, list(userType("a", 1))),
                         row(2, list(userType("a", 2, "b", 2))),
                         row(3, list(userType("a", 3, "b", null))),
@@ -382,7 +376,7 @@ public class UserTypesTest extends CQLTester
         execute("INSERT INTO %s (a, b) VALUES (4, (4, ?))", userType("a", null, "b", 4, "c", null));
 
         beforeAndAfterFlush(() ->
-            assertRows(execute("SELECT * FROM %s"),
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                     row(1, tuple(1, userType("a", 1, "b", 1))),
                     row(2, tuple(2, userType("a", 2, "b", 2, "c", 2))),
                     row(3, tuple(3, userType("a", 3, "b", 3, "c", null))),
@@ -407,7 +401,7 @@ public class UserTypesTest extends CQLTester
         execute("INSERT INTO %s (a, b) VALUES(4, ?)", tuple(4, tuple(1, userType("a", null, "b", 4, "c", null))));
 
         beforeAndAfterFlush(() ->
-            assertRows(execute("SELECT * FROM %s"),
+            assertRowsIgnoringOrder(execute("SELECT * FROM %s"),
                     row(1, tuple(1, tuple(1, userType("a", 1, "b", 1)))),
                     row(2, tuple(2, tuple(1, userType("a", 2, "b", 2, "c", 2)))),
                     row(3, tuple(3, tuple(1, userType("a", 3, "b", 3, "c", null)))),
@@ -435,7 +429,7 @@ public class UserTypesTest extends CQLTester
         execute("INSERT INTO %s (a, b) VALUES(4, {x: ?})", userType("a", null, "b", 4));
 
         beforeAndAfterFlush(() ->
-            assertRows(execute("SELECT b.x.a, b.x.b, b.x.c FROM %s"),
+            assertRowsIgnoringOrder(execute("SELECT b.x.a, b.x.b, b.x.c FROM %s"),
                        row(1, 1, null),
                        row(2, 2, 2),
                        row(3, 3, null),
