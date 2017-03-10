@@ -23,6 +23,8 @@ import java.io.Closeable;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Assert;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
@@ -36,7 +38,9 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 
@@ -45,6 +49,12 @@ import org.apache.cassandra.utils.KillerForTests;
  */
 public class OutOfSpaceTest extends CQLTester
 {
+    @BeforeClass
+    public static void setup()
+    {
+        FileUtils.setFSErrorHandler(new DefaultFSErrorHandler());
+    }
+
     @Test
     public void testFlushUnwriteableDie() throws Throwable
     {
@@ -142,14 +152,12 @@ public class OutOfSpaceTest extends CQLTester
 
     public void flushAndExpectError(Class<? extends Throwable> errorClass) throws InterruptedException, ExecutionException
     {
-        // TODO fix this test, disabled for TPC prototype
-        /*
         try
         {
-            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().get();
+            Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable()).forceFlush().blockingGet();
             fail(errorClass.getSimpleName() + " expected.");
         }
-        catch (ExecutionException e)
+        catch (Throwable e)
         {
             // Correct path.
             Throwable t = e.getCause();
@@ -157,7 +165,7 @@ public class OutOfSpaceTest extends CQLTester
                 t = t.getCause();
             Assert.assertTrue(errorClass.isInstance(t));
         }
-        */
+
 
         // Make sure commit log wasn't discarded.
         TableId tableId = currentTableMetadata().id;

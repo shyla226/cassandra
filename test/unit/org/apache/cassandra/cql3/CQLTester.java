@@ -64,6 +64,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
@@ -208,6 +209,10 @@ public abstract class CQLTester
 
         //Required for TPC
         requireNetwork(false);
+
+        CassandraDaemon d = new CassandraDaemon();
+        d.completeSetup();
+        StorageService.instance.registerDaemon(d);
     }
 
     public static void cleanupAndLeaveDirs() throws IOException

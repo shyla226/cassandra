@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,6 +35,7 @@ import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.db.rows.MergeReducer;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
@@ -563,10 +566,18 @@ public class Memtable implements Comparable<Memtable>
             this.isBatchLogTable = cfs.name.equals(SystemKeyspace.BATCHES) && cfs.keyspace.getName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME);
 
             if (flushLocation == null)
+            {
                 writer = createFlushWriter(txn, cfs.newSSTableDescriptor(getDirectories().getWriteableLocationAsFile(estimatedSize)), columnsCollector.get(), statsCollector.get());
+            }
             else
-                writer = createFlushWriter(txn, cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(flushLocation)), columnsCollector.get(), statsCollector.get());
+            {
+                // Don't write to blacklisted disks
+                File flushTableDir = getDirectories().getLocationForDisk(flushLocation);
+                if (BlacklistedDirectories.isUnwritable(flushTableDir))
+                    throw new FSWriteError(new IOException("SSTable flush dir has been blacklisted"), flushTableDir.getAbsolutePath());
 
+                writer = createFlushWriter(txn, cfs.newSSTableDescriptor(flushTableDir), columnsCollector.get(), statsCollector.get());
+            }
         }
 
         protected Directories getDirectories()

@@ -470,7 +470,7 @@ public class NettyRxScheduler extends Scheduler
         final Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
-        RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
+        RxJavaPlugins.setErrorHandler(e -> CassandraDaemon.defaultExceptionHandler.accept(Thread.currentThread(), e));
 
         /**
          * This handler wraps every scheduled task with a runnable that sets the thread local state to

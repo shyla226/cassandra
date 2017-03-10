@@ -27,6 +27,8 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -104,6 +106,18 @@ public class CassandraDaemon
         });
         logger = LoggerFactory.getLogger(CassandraDaemon.class);
     }
+
+    static public BiConsumer<Thread, Throwable> defaultExceptionHandler = new BiConsumer<Thread, Throwable>()
+    {
+        public void accept(Thread t, Throwable e)
+        {
+            StorageMetrics.exceptions.inc();
+            logger.error("Exception in thread " + t, e);
+            Tracing.trace("Exception in thread {}", t, e);
+
+            JVMStabilityInspector.inspectThrowable(e);
+        }
+    };
 
     private void maybeInitJmx()
     {
@@ -229,27 +243,7 @@ public class CassandraDaemon
         {
             public void uncaughtException(Thread t, Throwable e)
             {
-                StorageMetrics.exceptions.inc();
-                logger.error("Exception in thread " + t, e);
-                Tracing.trace("Exception in thread {}", t, e);
-                for (Throwable e2 = e; e2 != null; e2 = e2.getCause())
-                {
-                    JVMStabilityInspector.inspectThrowable(e2);
-
-                    if (e2 instanceof FSError)
-                    {
-                        if (e2 != e) // make sure FSError gets logged exactly once.
-                            logger.error("Exception in thread " + t, e2);
-                        FileUtils.handleFSError((FSError) e2);
-                    }
-
-                    if (e2 instanceof CorruptSSTableException)
-                    {
-                        if (e2 != e)
-                            logger.error("Exception in thread " + t, e2);
-                        FileUtils.handleCorruptSSTable((CorruptSSTableException) e2);
-                    }
-                }
+                defaultExceptionHandler.accept(t, e);
             }
         });
 

@@ -57,7 +57,6 @@ public class DefaultFSErrorHandler implements FSErrorHandler
         if (!StorageService.instance.isDaemonSetupCompleted())
             handleStartupFSError(e);
 
-        JVMStabilityInspector.inspectThrowable(e);
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
             case stop_paranoid:

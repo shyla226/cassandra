@@ -914,14 +914,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 try
                 {
                     publisher.onNext(flush.postFlushTask.get());
+                    publisher.onComplete();
                 }
                 catch (InterruptedException|ExecutionException exc)
                 {
                     logger.error("Unexpected exception running post flush task", exc);
                     JVMStabilityInspector.inspectThrowable(exc);
-                    throw new RuntimeException(exc);
+                    publisher.onError(exc);
                 }
-                publisher.onComplete();
             });
             return publisher.single(CommitLogPosition.NONE).observeOn(Schedulers.io());
         }
