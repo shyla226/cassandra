@@ -111,7 +111,7 @@ public class QueryController
                                                                                      key,
                                                                                      command.clusteringIndexFilter(key));
 
-            return Single.just(FlowablePartitions.toIterator(partition.queryMemtableAndDisk(cfs, executionController)));
+            return Single.just(FlowablePartitions.toIterator(partition.queryStorage(cfs, executionController).blockingSingle()));
         }
         finally
         {

@@ -76,7 +76,7 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return Single.just(
                 FlowablePartitions.toIterator(
                         SinglePartitionReadCommand.create(indexMetadata, command.nowInSec(), indexKey, ColumnFilter.all(indexMetadata), filter)
-                                                  .queryMemtableAndDisk(indexCfs, executionController.indexReadController())));
+                                                  .queryStorage(indexCfs, executionController.indexReadController()).blockingSingle()));
     }
 
     private ClusteringIndexFilter makeIndexFilter(ReadCommand command)

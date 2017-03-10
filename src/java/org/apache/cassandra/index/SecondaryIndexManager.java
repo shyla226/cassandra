@@ -585,8 +585,8 @@ public class SecondaryIndexManager implements IndexRegistry
                         if (!readStatic)
                         {
                             if (!partition.staticRow().isEmpty())
-                                indexers.forEach(indexer -> indexer.insertRow(partition.staticRow()));
-                            indexers.forEach((Index.Indexer i) -> i.partitionDelete(partition.partitionLevelDeletion()));
+                                indexers.forEach(indexer -> indexer.insertRow(partition.staticRow()).blockingAwait());
+                            indexers.forEach((Index.Indexer i) -> i.partitionDelete(partition.partitionLevelDeletion()).blockingAwait());
                             readStatic = true;
                         }
 
@@ -599,7 +599,7 @@ public class SecondaryIndexManager implements IndexRegistry
                             if (unfilteredRow.isRow())
                             {
                                 Row row = (Row) unfilteredRow;
-                                indexers.forEach(indexer -> indexer.insertRow(row));
+                                indexers.forEach(indexer -> indexer.insertRow(row).blockingAwait());
                             }
                             else
                             {
@@ -614,10 +614,10 @@ public class SecondaryIndexManager implements IndexRegistry
                         {
                             Iterator<RangeTombstone> iter = deletionInfo.rangeIterator(false);
                             while (iter.hasNext())
-                                indexers.forEach(indexer -> indexer.rangeTombstone(iter.next()));
+                                indexers.forEach(indexer -> indexer.rangeTombstone(iter.next()).blockingAwait());
                         }
 
-                        indexers.forEach(Index.Indexer::finish);
+                        indexers.forEach(indexer -> indexer.finish().blockingAwait());
                     }
                 }
             }

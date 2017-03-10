@@ -368,7 +368,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
-    protected Flowable<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public Flowable<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         if (cfs.isRowCacheEnabled())
             return getThroughCache(cfs, executionController);       // tpc TODO: Not tested!
@@ -376,9 +376,10 @@ public class SinglePartitionReadCommand extends ReadCommand
             return deferredQuery(cfs, executionController);
     }
 
-    Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        return Flowable.defer(() -> Flowable.just(queryMemtableAndDisk(cfs, executionController)));//.subscribeOn(Schedulers.io()));
+        return Flowable.defer(() -> Flowable.just(queryMemtableAndDisk(cfs, executionController)))
+                       .subscribeOn(NettyRxScheduler.getForKey(cfs.metadata().keyspace, partitionKey(), true));
     }
 
     /**
@@ -521,7 +522,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * Also note that one must have created a {@code ReadExecutionController} on the queried table and we require it as
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
-    public FlowableUnfilteredPartition queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    private FlowableUnfilteredPartition queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);

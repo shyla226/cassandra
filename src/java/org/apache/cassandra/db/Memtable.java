@@ -26,6 +26,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import io.reactivex.Completable;
+import io.reactivex.Flowable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
@@ -424,31 +427,45 @@ public class Memtable implements Comparable<Memtable>
 
         // avoid iterating over the memtable if we purge all tombstones
         boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
-        int minLocalDeletionTime = Integer.MAX_VALUE;
+        int minLocalDeletionTime[] = new int[NettyRxScheduler.NUM_NETTY_THREADS];
+        Arrays.fill(minLocalDeletionTime, Integer.MAX_VALUE);
 
-        ArrayList<PartitionPosition> keysInRange = new ArrayList<>();
-        for (int i = 0; i < partitions.size(); i++)
+        ArrayList<Flowable<PartitionPosition>> all = new ArrayList<>(partitions.size());
+
+        for (int i = 0; i < NettyRxScheduler.getNumCores(); i++)
         {
-            TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(i);
-            SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
+            final int coreId = i;
+            NettyRxScheduler scheduler = NettyRxScheduler.getForCore(coreId);
 
-            if (startIsMin)
-                trimmedMemtableSubrange = stopIsMin ? memtableSubrange : memtableSubrange.headMap(keyRange.right, includeStop);
-            else
-                trimmedMemtableSubrange = stopIsMin
-                         ? memtableSubrange.tailMap(keyRange.left, includeStart)
-                         : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
+            all.add(Flowable.defer(() ->
+                                   {
+                                       TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(coreId);
+                                       SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
 
-            if (findMinLocalDeletionTime)
-            {
-                for (AtomicBTreePartition partition : trimmedMemtableSubrange.values())
-                    minLocalDeletionTime = Math.min(minLocalDeletionTime, partition.stats().minLocalDeletionTime);
-            }
+                                       if (startIsMin)
+                                           trimmedMemtableSubrange = stopIsMin ? memtableSubrange : memtableSubrange.headMap(keyRange.right, includeStop);
+                                       else
+                                           trimmedMemtableSubrange = stopIsMin
+                                                                     ? memtableSubrange.tailMap(keyRange.left, includeStart)
+                                                                     : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-            keysInRange.addAll(trimmedMemtableSubrange.keySet());
+                                       if (findMinLocalDeletionTime)
+                                       {
+                                           for (AtomicBTreePartition partition : trimmedMemtableSubrange.values())
+                                               minLocalDeletionTime[coreId] = Math.min(minLocalDeletionTime[coreId], partition.stats().minLocalDeletionTime);
+                                       }
+
+
+                                       return Flowable.fromIterable(trimmedMemtableSubrange.keySet());
+                                   })
+                            .subscribeOn(scheduler));
+
+            // For system tables we just use the first core
+            if (!hasSplits)
+                break;
         }
 
-        return new MemtableUnfilteredPartitionIterator(cfs, keysInRange.iterator(), minLocalDeletionTime, columnFilter, dataRange);
+        return new MemtableUnfilteredPartitionIterator(cfs, Flowable.concat(all).blockingIterable().iterator(), minLocalDeletionTime, columnFilter, dataRange);
     }
 
     private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getAllSortedPartitions()
@@ -678,11 +695,11 @@ public class Memtable implements Comparable<Memtable>
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
 
-        public MemtableUnfilteredPartitionIterator(ColumnFamilyStore cfs, Iterator<PartitionPosition> iter, int minLocalDeletionTime, ColumnFilter columnFilter, DataRange dataRange)
+        public MemtableUnfilteredPartitionIterator(ColumnFamilyStore cfs, Iterator<PartitionPosition> iter, int[] minLocalDeletionTime, ColumnFilter columnFilter, DataRange dataRange)
         {
             this.cfs = cfs;
             this.iter = iter;
-            this.minLocalDeletionTime = minLocalDeletionTime;
+            this.minLocalDeletionTime = Arrays.stream(minLocalDeletionTime).min().getAsInt();
             this.columnFilter = columnFilter;
             this.dataRange = dataRange;
         }
@@ -710,7 +727,11 @@ public class Memtable implements Comparable<Memtable>
             DecoratedKey key = (DecoratedKey)position;
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position));
+            UnfilteredRowIterator row = Single.defer(() -> Single.just(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position))))
+                                              .observeOn(NettyRxScheduler.getForKey(cfs.keyspace.getName(), key, true))
+                                              .blockingGet();
+
+            return row;
         }
 
         public void close()

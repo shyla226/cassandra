@@ -163,7 +163,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
 
                     @SuppressWarnings("resource") // We close right away if empty, and if it's assign to next it will be called either
                     // by the next caller of next, or through closing this iterator is this come before.
-                    Single<UnfilteredRowIterator> dataIter = filterStaleEntries(FlowablePartitions.toIterator(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController)),
+                    Single<UnfilteredRowIterator> dataIter = filterStaleEntries(FlowablePartitions.toIterator(dataCmd.queryStorage(index.baseCfs, executionController).blockingSingle()),
                                                                                 indexKey.getKey(), entries,
                                                                                 executionController.writeOpOrderGroup(),
                                                                                 command.nowInSec());
@@ -233,7 +233,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                          dataIter.partitionLevelDeletion(),
                                                                          dataIter.isReverseOrder());
 
-                return deleteAllEntries(staleEntries, writeOp, nowInSec).andThen(Single.just(iteratorToReturn));
+                return deleteAllEntries(staleEntries, writeOp, nowInSec).toSingleDefault(iteratorToReturn);
             }
 
             return Single.just(dataIter);

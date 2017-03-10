@@ -92,14 +92,14 @@ public class KeysSearcher extends CassandraIndexSearcher
                     @SuppressWarnings("resource") // filterIfStale closes it's iterator if either it materialize it or if it returns null.
                     // Otherwise, we close right away if empty, and if it's assigned to next it will be called either
                     // by the next caller of next, or through closing this iterator is this come before.
-                    Single<UnfilteredRowIterator> dataIter = Single.just(filterIfStale(FlowablePartitions.toIterator(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController)),
+                    UnfilteredRowIterator dataIter = filterIfStale(FlowablePartitions.toIterator(dataCmd.queryStorage(index.baseCfs, executionController).blockingSingle()),
                                                                                 hit,
                                                                                 indexKey.getKey(),
                                                                                 executionController.writeOpOrderGroup(),
-                                                                                command.nowInSec()));
+                                                                                command.nowInSec());
 
                     if (dataIter != null)
-                        next = dataIter.blockingGet();
+                        next = dataIter;
                 }
 
                 return next != null;
@@ -144,7 +144,7 @@ public class KeysSearcher extends CassandraIndexSearcher
             index.deleteStaleEntry(index.getIndexCfs().decorateKey(indexedValue),
                     makeIndexClustering(iterator.partitionKey().getKey(), Clustering.EMPTY),
                     new DeletionTime(indexHit.primaryKeyLivenessInfo().timestamp(), nowInSec),
-                    writeOp);
+                    writeOp).blockingAwait();
             iterator.close();
             return null;
         }

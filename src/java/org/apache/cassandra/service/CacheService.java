@@ -414,7 +414,7 @@ public class CacheService implements CacheServiceMBean
                     int nowInSec = FBUtilities.nowInSeconds();
                     SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), nowInSec, key);
                     try (ReadExecutionController controller = cmd.executionController();
-                         UnfilteredRowIterator iter = FlowablePartitions.toIterator(cmd.queryMemtableAndDisk(cfs, controller)))
+                         UnfilteredRowIterator iter = FlowablePartitions.toIterator(cmd.deferredQuery(cfs, controller).blockingSingle()))
                     {
                         CachedPartition toCache = CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(iter, nowInSec), nowInSec);
                         return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);

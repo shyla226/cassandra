@@ -78,7 +78,8 @@ public class SecondaryIndexTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(WITH_KEYS_INDEX).truncateBlocking();
     }
 
-    @Test
+    //@Test
+    //TPC this test requires a BOP
     public void testIndexScan()
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(WITH_COMPOSITE_INDEX);
@@ -89,7 +90,7 @@ public class SecondaryIndexTest
         new RowUpdateBuilder(cfs.metadata(), 0, "k4").clustering("c").add("birthdate", 3L).add("notbirthdate", 2L).build().applyUnsafe();
 
         // basic single-expression query
-        List<FilteredPartition> partitions = Util.getAll(Util.cmd(cfs).fromKeyExcl("k1").toKeyIncl("k3").columns("birthdate").build());
+        List<FilteredPartition> partitions = Util.getAll(Util.cmd(cfs).fromKeyIncl("k1").toKeyIncl("k3").columns("birthdate").build());
         assertEquals(2, partitions.size());
         Util.assertCellValue(2L, cfs, Util.row(partitions.get(0), "c"), "birthdate");
         Util.assertCellValue(1L, cfs, Util.row(partitions.get(1), "c"), "birthdate");
@@ -479,7 +480,7 @@ public class SecondaryIndexTest
             current.unbuild()
                    .indexes(current.indexes.with(indexDef))
                    .build();
-        MigrationManager.announceTableUpdate(updated, true);
+        MigrationManager.announceTableUpdate(updated, true).blockingAwait();
 
         // fait for the index to be built
         Index index = cfs.indexManager.getIndex(indexDef);
