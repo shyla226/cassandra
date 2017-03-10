@@ -2061,7 +2061,7 @@ public class SASIIndexTest
             // expected since CONTAINS + analyzed only support LIKE
         }
 
-        QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, containsTable));
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE 'Pav%%';", KS_NAME, containsTable));
         Assert.assertNotNull(results);
         Assert.assertEquals(1, results.size());
 
@@ -2253,7 +2253,7 @@ public class SASIIndexTest
         IndexMemtable afterFlushMemtable = index.getCurrentMemtable();
 
         Assert.assertNotSame(afterFlushMemtable, beforeFlushMemtable);
-        Assert.assertNull(afterFlushMemtable.search(expression));
+        Assert.assertEquals(afterFlushMemtable.search(expression).getCount(), 0);
         Assert.assertEquals(0, index.getPendingMemtables().size());
 
         loadData(new HashMap<String, Pair<String, Integer>>()
@@ -2279,7 +2279,7 @@ public class SASIIndexTest
         index.discardMemtable(store.getTracker().getView().getCurrentMemtable());
 
         Assert.assertEquals(0, index.getPendingMemtables().size());
-        Assert.assertNull(index.searchMemtable(expression));
+        Assert.assertEquals(index.searchMemtable(expression).getCount(), 0);
 
         // test discarding data from memtable
         loadData(new HashMap<String, Pair<String, Integer>>()
@@ -2293,7 +2293,7 @@ public class SASIIndexTest
         Assert.assertTrue(index.searchMemtable(expression).getCount() > 0);
 
         index.switchMemtable();
-        Assert.assertNull(index.searchMemtable(expression));
+        Assert.assertEquals(index.searchMemtable(expression).getCount(), 0);
     }
 
     private static ColumnFamilyStore loadData(Map<String, Pair<String, Integer>> data, boolean forceFlush)
