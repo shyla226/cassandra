@@ -29,7 +29,6 @@ import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 
 import org.junit.Test;
 
-import org.apache.cassandra.Util;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 
@@ -546,20 +545,6 @@ public class ReplicationAwareTokenAllocatorTest
     @Test
     public void testNewCluster()
     {
-        Util.flakyTest(this::flakyTestNewCluster,
-                       5,
-                       "It tends to fail sometimes due to the random selection of the tokens in the first few nodes.");
-    }
-
-    public void flakyTestNewCluster()
-    {
-        // This test is flaky because the selection of the tokens for the first RF nodes (which is random, with an
-        // uncontrolled seed) can sometimes cause a pathological situation where the algorithm will find a (close to)
-        // ideal distribution of tokens for some number of nodes, which in turn will inevitably cause it to go into a
-        // bad (unacceptable to the test criteria) distribution after adding one more node.
-
-        // This should happen very rarely, unless something is broken in the token allocation code.
-
         for (int rf = 2; rf <= 5; ++rf)
         {
             for (int perUnitCount = 1; perUnitCount <= MAX_VNODE_COUNT; perUnitCount *= 4)
@@ -609,19 +594,34 @@ public class ReplicationAwareTokenAllocatorTest
     static class Summary
     {
         double min = 1;
+        int minAt = -1;
         double max = 1;
+        int maxAt = -1;
         double stddev = 0;
+        int stdAt = -1;
 
-        void update(SummaryStatistics stat)
+        void update(SummaryStatistics stat, int point)
         {
-            min = Math.min(min, stat.getMin());
-            max = Math.max(max, stat.getMax());
-            stddev = Math.max(stddev, stat.getStandardDeviation());
+            if (stat.getMin() <= min)
+            {
+                min = stat.getMin();
+                minAt = point;
+            }
+            if (stat.getMax() >= max)
+            {
+                max = stat.getMax();
+                maxAt = point;
+            }
+            if (stat.getStandardDeviation() >= stddev)
+            {
+                stddev = stat.getStandardDeviation();
+                stdAt = point;
+            }
         }
 
         public String toString()
         {
-            return String.format("max %.2f min %.2f stddev %.4f", max, min, stddev);
+            return String.format("max %.3f @%d min %.3f @%d stddev %.4f @%d", max, maxAt, min, minAt, stddev, stdAt);
         }
     }
 
@@ -670,12 +670,12 @@ public class ReplicationAwareTokenAllocatorTest
         SummaryStatistics unitStat = new SummaryStatistics();
         for (Map.Entry<Unit, Double> en : ownership.entrySet())
             unitStat.addValue(en.getValue() * inverseAverage / t.unitToTokens.get(en.getKey()).size());
-        su.update(unitStat);
+        su.update(unitStat, t.unitCount());
 
         SummaryStatistics tokenStat = new SummaryStatistics();
         for (Token tok : t.sortedTokens.keySet())
             tokenStat.addValue(replicatedTokenOwnership(tok, t.sortedTokens, t.strategy) * inverseAverage);
-        st.update(tokenStat);
+        st.update(tokenStat, t.unitCount());
 
         if (print)
         {
