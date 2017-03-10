@@ -53,6 +53,7 @@ import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
+import static org.apache.cassandra.cql3.QueryProcessor.executeInternalAsync;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 
 /**
@@ -1264,7 +1265,7 @@ public final class SchemaKeyspace
 
     private static Single<UntypedResultSet> query(String query, Object... variables)
     {
-        return executeInternal(query, variables);
+        return executeInternalAsync(query, variables);
     }
 
     /*

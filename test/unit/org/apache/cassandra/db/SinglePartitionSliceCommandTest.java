@@ -112,8 +112,8 @@ public class SinglePartitionSliceCommandTest
     {
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.bytes("k1"));
 
-        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s) VALUES ('k1', 's')").blockingGet();
-        Assert.assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").blockingGet().isEmpty());
+        QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, s) VALUES ('k1', 's')");
+        Assert.assertFalse(QueryProcessor.executeInternal("SELECT s FROM ks.tbl WHERE k='k1'").isEmpty());
 
         ColumnFilter columnFilter = ColumnFilter.selection(RegularAndStaticColumns.of(s));
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.NONE, false);

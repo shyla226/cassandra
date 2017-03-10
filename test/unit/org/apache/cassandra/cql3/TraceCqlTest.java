@@ -55,8 +55,6 @@ public class TraceCqlTest extends CQLTester
     @Test
     public void testCqlStatementTracing() throws Throwable
     {
-        requireNetwork();
-
         createTable("CREATE TABLE %s (id int primary key, v1 text, v2 text)");
         execute("INSERT INTO %s (id, v1, v2) VALUES (?, ?, ?)", 1, "Apache", "Cassandra");
         execute("INSERT INTO %s (id, v1, v2) VALUES (?, ?, ?)", 2, "trace", "test");

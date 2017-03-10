@@ -99,7 +99,7 @@ public class CQLSSTableWriterTest
 
             loadSSTables(dataDir, KS);
 
-            UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace.table1;").blockingGet();
+            UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace.table1;");
             assertEquals(4, rs.size());
 
             Iterator<UntypedResultSet.Row> iter = rs.iterator();
@@ -298,7 +298,7 @@ public class CQLSSTableWriterTest
 
         loadSSTables(dataDir, KS);
 
-        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace2.table2;").blockingGet();
+        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT * FROM cql_keyspace2.table2;");
         assertEquals(threads.length * NUMBER_WRITES_IN_RUNNABLE, rs.size());
     }
 
@@ -350,7 +350,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(dataDir, KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
         TypeCodec collectionCodec = UDHelper.codecFor(DataType.CollectionType.frozenList(tuple2Type));
         TypeCodec tuple3Codec = UDHelper.codecFor(tuple3Type);
 
@@ -421,7 +421,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(dataDir, KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
 
         assertEquals(resultSet.size(), 100);
         int cnt = 0;
@@ -512,7 +512,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(dataDir, KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
         Iterator<UntypedResultSet.Row> iter = resultSet.iterator();
         UntypedResultSet.Row r1 = iter.next();
         assertEquals(1, r1.getInt("k"));
@@ -574,7 +574,7 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(dataDir, KS);
 
-        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE).blockingGet();
+        UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
         assertEquals(2, resultSet.size());
 
         Iterator<UntypedResultSet.Row> iter = resultSet.iterator();

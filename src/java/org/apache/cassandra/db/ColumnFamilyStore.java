@@ -553,6 +553,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public void invalidate(boolean expectMBean)
     {
+        if (!valid)
+            return;
+
         // disable and cancel in-progress compactions before invalidating
         valid = false;
 

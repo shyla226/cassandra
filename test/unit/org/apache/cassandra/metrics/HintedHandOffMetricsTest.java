@@ -56,7 +56,7 @@ public class HintedHandOffMetricsTest
             HintsService.instance.metrics.incrPastWindow(InetAddress.getLocalHost());
         HintsService.instance.metrics.log();
 
-        UntypedResultSet rows = executeInternal("SELECT hints_dropped FROM system." + SystemKeyspace.PEER_EVENTS).blockingGet();
+        UntypedResultSet rows = executeInternal("SELECT hints_dropped FROM system." + SystemKeyspace.PEER_EVENTS);
         Map<UUID, Integer> returned = rows.one().getMap("hints_dropped", UUIDType.instance, Int32Type.instance);
         assertEquals(Iterators.getLast(returned.values().iterator()).intValue(), 99);
     }

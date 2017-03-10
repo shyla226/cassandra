@@ -552,7 +552,7 @@ public class QueryPagerTest
 
         // Insert rows but with a tombstone as last cell
         for (int i = 0; i < 5; i++)
-            executeInternal(String.format("INSERT INTO %s.%s (k, c, v) VALUES ('k%d', 'c%d', null)", keyspace, table, 0, i)).blockingGet();
+            executeInternal(String.format("INSERT INTO %s.%s (k, c, v) VALUES ('k%d', 'c%d', null)", keyspace, table, 0, i));
 
         ReadCommand command = SinglePartitionReadCommand.create(cfs.metadata(), nowInSec, Util.dk("k0"), Slice.ALL);
 

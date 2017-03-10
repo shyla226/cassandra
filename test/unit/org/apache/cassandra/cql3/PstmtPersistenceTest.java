@@ -97,7 +97,7 @@ public class PstmtPersistenceTest extends CQLTester
         }
 
         // add anther prepared statement and sync it to table
-        QueryProcessor.prepare("SELECT * FROM bar WHERE key = ?", clientState);
+        QueryProcessor.prepare("SELECT * FROM bar WHERE key = ?", clientState).blockingGet();
         Assert.assertEquals(6, QueryProcessor.preparedStatementsCount());
         rows = QueryProcessor.executeOnceInternal(queryAll).blockingGet().size();
         Assert.assertEquals(6, rows);

@@ -170,7 +170,7 @@ public class BatchlogManagerTest extends CQLTester
         for (int i = 0; i < 100; i++)
         {
             String query = String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD1, i);
-            UntypedResultSet result = executeInternal(query).blockingGet();
+            UntypedResultSet result = executeInternal(query);
             assertNotNull(result);
             if (i < 50)
             {
@@ -195,7 +195,7 @@ public class BatchlogManagerTest extends CQLTester
         }
 
         // Ensure that no stray mutations got somehow applied.
-        UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD1)).blockingGet();
+        UntypedResultSet result = executeInternal(String.format("SELECT count(*) FROM \"%s\".\"%s\"", KEYSPACE1, CF_STANDARD1));
         assertNotNull(result);
         assertEquals(500, result.one().getLong("count"));
     }
@@ -247,7 +247,7 @@ public class BatchlogManagerTest extends CQLTester
         // We should see half of Standard2-targeted mutations written after the replay and all of Standard3 mutations applied.
         for (int i = 0; i < 1000; i++)
         {
-            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD2,i)).blockingGet();
+            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD2,i));
             assertNotNull(result);
             if (i >= 500)
             {
@@ -263,7 +263,7 @@ public class BatchlogManagerTest extends CQLTester
 
         for (int i = 0; i < 1000; i++)
         {
-            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD3, i)).blockingGet();
+            UntypedResultSet result = executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE key = intAsBlob(%d)", KEYSPACE1, CF_STANDARD3, i));
             assertNotNull(result);
             assertEquals(ByteBufferUtil.bytes(i), result.one().getBytes("key"));
             assertEquals("name" + i, result.one().getString("name"));
@@ -297,7 +297,7 @@ public class BatchlogManagerTest extends CQLTester
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES,
                                      uuid);
-        UntypedResultSet result = executeInternal(query).blockingGet();
+        UntypedResultSet result = executeInternal(query);
         assertNotNull(result);
         assertEquals(1L, result.one().getLong("count"));
     }
@@ -334,7 +334,7 @@ public class BatchlogManagerTest extends CQLTester
                                      SchemaConstants.SYSTEM_KEYSPACE_NAME,
                                      SystemKeyspace.BATCHES,
                                      uuid);
-        UntypedResultSet result = executeInternal(query).blockingGet();
+        UntypedResultSet result = executeInternal(query);
         assertNotNull(result);
         assertEquals(0L, result.one().getLong("count"));
     }

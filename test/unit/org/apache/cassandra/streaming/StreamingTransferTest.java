@@ -328,7 +328,7 @@ public class StreamingTransferTest
 
             // test we can search:
             UntypedResultSet result = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE birthdate = %d",
-                                                                                   cfs.metadata.keyspace, cfs.metadata.name, val)).blockingGet();
+                                                                                   cfs.metadata.keyspace, cfs.metadata.name, val));
             assertEquals(1, result.size());
 
             assert result.iterator().next().getBytes("key").equals(ByteBufferUtil.bytes(key));

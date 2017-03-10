@@ -56,12 +56,7 @@ public class ViewSchemaTest extends CQLTester
 {
     ProtocolVersion protocolVersion = ProtocolVersion.V4;
     private final List<String> views = new ArrayList<>();
-
-    @BeforeClass
-    public static void startup()
-    {
-        requireNetwork();
-    }
+    
     @Before
     public void begin()
     {

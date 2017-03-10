@@ -34,9 +34,8 @@ import org.apache.cassandra.service.EmbeddedCassandraService;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
-public class PreparedStatementsTest extends SchemaLoader
+public class PreparedStatementsTest extends CQLTester
 {
-    private static Cluster cluster;
     private static Session session;
 
     private static final String KEYSPACE = "prepared_stmt_cleanup";
@@ -44,36 +43,13 @@ public class PreparedStatementsTest extends SchemaLoader
                                                     " WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };";
     private static final String dropKsStatement = "DROP KEYSPACE IF EXISTS " + KEYSPACE;
 
-    @BeforeClass
-    public static void setup() throws Exception
-    {
-        Schema.instance.clear();
-
-        EmbeddedCassandraService cassandra = new EmbeddedCassandraService();
-        cassandra.start();
-
-        // Currently the native server start method return before the server is fully binded to the socket, so we need
-        // to wait slightly before trying to connect to it. We should fix this but in the meantime using a sleep.
-        Thread.sleep(500);
-
-        cluster = Cluster.builder().addContactPoint("127.0.0.1")
-                                   .withPort(DatabaseDescriptor.getNativeTransportPort())
-                                   .build();
-        session = cluster.connect();
-
-        session.execute(dropKsStatement);
-        session.execute(createKsStatement);
-    }
-
-    @AfterClass
-    public static void tearDown() throws Exception
-    {
-        cluster.close();
-    }
-
     @Test
     public void testInvalidatePreparedStatementsOnDrop()
     {
+        session = sessionNet();
+        session.execute(dropKsStatement);
+        session.execute(createKsStatement);
+
         String createTableStatement = "CREATE TABLE IF NOT EXISTS " + KEYSPACE + ".qp_cleanup (id int PRIMARY KEY, cid int, val text);";
         String dropTableStatement = "DROP TABLE IF EXISTS " + KEYSPACE + ".qp_cleanup;";
 
@@ -103,6 +79,8 @@ public class PreparedStatementsTest extends SchemaLoader
     @Test
     public void testStatementRePreparationOnReconnect()
     {
+        session = sessionNet();
+
         session.execute(dropKsStatement);
         session.execute(createKsStatement);
 
@@ -117,13 +95,6 @@ public class PreparedStatementsTest extends SchemaLoader
         session.execute(preparedInsert.bind(1, 1, "value"));
         assertEquals(1, session.execute(preparedSelect.bind(1)).all().size());
 
-        cluster.close();
-
-        cluster = Cluster.builder().addContactPoint("127.0.0.1")
-                                   .withPort(DatabaseDescriptor.getNativeTransportPort())
-                                   .build();
-        session = cluster.connect();
-
         preparedInsert = session.prepare(insertCQL);
         preparedSelect = session.prepare(selectCQL);
         session.execute(preparedInsert.bind(1, 1, "value"));
@@ -134,6 +105,8 @@ public class PreparedStatementsTest extends SchemaLoader
     @Test
     public void prepareAndExecuteWithCustomExpressions() throws Throwable
     {
+        session = sessionNet();
+
         session.execute(dropKsStatement);
         session.execute(createKsStatement);
         String table = "custom_expr_test";

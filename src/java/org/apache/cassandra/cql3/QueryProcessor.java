@@ -292,7 +292,7 @@ public class QueryProcessor implements QueryHandler
         return prepared;
     }
 
-    public static Single<UntypedResultSet> executeInternal(String query, Object... values)
+    public static Single<UntypedResultSet> executeInternalAsync(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
         Single<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
@@ -303,6 +303,11 @@ public class QueryProcessor implements QueryHandler
             else
                 return UntypedResultSet.EMPTY;
         });
+    }
+
+    public static UntypedResultSet executeInternal(String query, Object... values)
+    {
+        return executeInternalAsync(query, values).blockingGet();
     }
 
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, Object... values)

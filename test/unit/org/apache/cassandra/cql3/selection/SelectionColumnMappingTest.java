@@ -108,7 +108,7 @@ public class SelectionColumnMappingTest extends CQLTester
     {
         // demonstrate behaviour of token() with composite partition key
         tableName = createTable("CREATE TABLE %s (a int, b text, PRIMARY KEY ((a, b)))");
-        ColumnSpecification tokenSpec = columnSpecification("system.token(a, b)", BytesType.instance);
+        ColumnSpecification tokenSpec = columnSpecification("system.token(a, b)", LongType.instance);
         SelectionColumnMapping expected = SelectionColumnMapping.newMapping()
                                                                 .addMapping(tokenSpec, columnDefinitions("a", "b"));
         // we don't use verify like with the other tests because this query will produce no results

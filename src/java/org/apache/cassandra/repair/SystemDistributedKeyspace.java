@@ -254,7 +254,7 @@ public final class SystemDistributedKeyspace
                                Lists.newArrayList(bytes(keyspace),
                                                   bytes(view),
                                                   bytes(hostId),
-                                                  bytes(BuildStatus.STARTED.toString())));
+                                                  bytes(BuildStatus.STARTED.toString()))).blockingGet();
     }
 
     public static void successfulViewBuild(String keyspace, String view, UUID hostId)
@@ -265,7 +265,7 @@ public final class SystemDistributedKeyspace
                                Lists.newArrayList(bytes(BuildStatus.SUCCESS.toString()),
                                                   bytes(keyspace),
                                                   bytes(view),
-                                                  bytes(hostId)));
+                                                  bytes(hostId))).blockingGet();
     }
 
     public static Map<UUID, String> viewStatus(String keyspace, String view)
@@ -297,7 +297,7 @@ public final class SystemDistributedKeyspace
     {
         String buildReq = "DELETE FROM %s.%s WHERE keyspace_name = ? AND view_name = ?";
         // TODO make async?
-        QueryProcessor.executeInternal(format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName).blockingGet();
+        QueryProcessor.executeInternal(format(buildReq, SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, VIEW_BUILD_STATUS), keyspaceName, viewName);
         forceBlockingFlush(VIEW_BUILD_STATUS);
     }
 
@@ -310,7 +310,7 @@ public final class SystemDistributedKeyspace
             {
                 valueList.add(bytes(v));
             }
-            QueryProcessor.process(fmtQry, ConsistencyLevel.ONE, valueList);
+            QueryProcessor.process(fmtQry, ConsistencyLevel.ONE, valueList).blockingGet();
         }
         catch (Throwable t)
         {

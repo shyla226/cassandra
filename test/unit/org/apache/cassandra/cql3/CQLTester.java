@@ -850,7 +850,7 @@ public abstract class CQLTester
                 logger.trace("Executing: {} with values {}", query, formatAllValues(values));
             if (reusePrepared)
             {
-                rs = QueryProcessor.executeInternal(query, transformValues(values)).blockingGet();
+                rs = QueryProcessor.executeInternal(query, transformValues(values));
 
                 // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
                 // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously

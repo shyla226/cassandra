@@ -378,7 +378,7 @@ public class LocalSessions
     LocalSession loadUnsafe(UUID sessionId)
     {
         String query = "SELECT * FROM %s.%s WHERE parent_id=?";
-        UntypedResultSet result = QueryProcessor.executeInternal(String.format(query, keyspace, table), sessionId).blockingGet();
+        UntypedResultSet result = QueryProcessor.executeInternal(String.format(query, keyspace, table), sessionId);
         if (result.isEmpty())
             return null;
 

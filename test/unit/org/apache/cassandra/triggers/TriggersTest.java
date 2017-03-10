@@ -188,7 +188,7 @@ public class TriggersTest
     private void assertUpdateIsAugmented(int key)
     {
         UntypedResultSet rs = QueryProcessor.executeInternal(
-                String.format("SELECT * FROM %s.%s WHERE k=%s", ksName, cfName, key)).blockingGet();
+                String.format("SELECT * FROM %s.%s WHERE k=%s", ksName, cfName, key));
         assertTrue(String.format("Expected value (%s) for augmented cell v2 was not found", key), rs.one().has("v2"));
         assertEquals(999, rs.one().getInt("v2"));
     }
@@ -196,7 +196,7 @@ public class TriggersTest
     private void assertUpdateNotExecuted(String cf, int key)
     {
         UntypedResultSet rs = QueryProcessor.executeInternal(
-                String.format("SELECT * FROM %s.%s WHERE k=%s", ksName, cf, key)).blockingGet();
+                String.format("SELECT * FROM %s.%s WHERE k=%s", ksName, cf, key));
         assertTrue(rs.isEmpty());
     }
 

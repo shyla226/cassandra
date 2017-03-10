@@ -174,14 +174,14 @@ public class SystemKeyspaceTest
         QueryProcessor.executeInternal(String.format("INSERT INTO system.local(key, release_version, cluster_name) " +
                                                      "VALUES ('local', '%s', '%s')",
                                                      version,
-                                                     DatabaseDescriptor.getClusterName())).blockingGet();
+                                                     DatabaseDescriptor.getClusterName()));
         String r = readLocalVersion();
         assertEquals(String.format("Expected %s, got %s", version, r), version, r);
     }
 
     private String readLocalVersion()
     {
-        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT release_version FROM system.local WHERE key='local'").blockingGet();
+        UntypedResultSet rs = QueryProcessor.executeInternal("SELECT release_version FROM system.local WHERE key='local'");
         return rs.isEmpty() || !rs.one().has("release_version") ? null : rs.one().getString("release_version");
     }
 }
