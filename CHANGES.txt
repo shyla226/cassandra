@@ -1,4 +1,6 @@
 4.0
+ * Add the currentTimestamp, currentDate, currentTime and currentTimeUUID functions (CASSANDRA-13132)
+ * Remove config option index_interval (CASSANDRA-10671)
  * Reduce lock contention for collection types and serializers (CASSANDRA-13271)
  * Make it possible to override MessagingService.Verb ids (CASSANDRA-13283)
  * Avoid synchronized on prepareForRepair in ActiveRepairService (CASSANDRA-9292)
@@ -36,9 +38,11 @@
  * Conditionally update index built status to avoid unnecessary flushes (CASSANDRA-12969)
  * cqlsh auto completion: refactor definition of compaction strategy options (CASSANDRA-12946)
  * Add support for arithmetic operators (CASSANDRA-11935)
+ * Add histogram for delay to deliver hints (CASSANDRA-13234)
 
 
 3.11.0
+ * Improve SASI range iterator efficiency on intersection with an empty range (CASSANDRA-12915).
  * Fix equality comparisons of columns using the duration type (CASSANDRA-13174)
  * Move to FastThreadLocalThread and FastThreadLocal (CASSANDRA-13034)
  * nodetool stopdaemon errors out (CASSANDRA-13030)
@@ -48,6 +52,9 @@
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
  * Address message coalescing regression (CASSANDRA-12676)
 Merged from 3.0:
+ * Slice.isEmpty() returns false for some empty slices (CASSANDRA-13305)
+ * Add formatted row output to assertEmpty in CQL Tester (CASSANDRA-13238)
+ * Prevent data loss on upgrade 2.1 - 3.0 by adding component separator to LogRecord absolute path (CASSANDRA-13294)
  * Improve testing on macOS by eliminating sigar logging (CASSANDRA-13233)
  * Cqlsh copy-from should error out when csv contains invalid data for collections (CASSANDRA-13071)
  * Update c.yaml doc for offheap memtables (CASSANDRA-13179)
@@ -69,6 +76,9 @@ Merged from 3.0:
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
 Merged from 2.2:
+ * Commitlog replay may fail if last mutation is within 4 bytes of end of segment (CASSANDRA-13282)
+ * Fix queries updating multiple time the same list (CASSANDRA-13130)
+ * Fix GRANT/REVOKE when keyspace isn't specified (CASSANDRA-13053)
  * Avoid race on receiver by starting streaming sender thread after sending init message (CASSANDRA-12886)
  * Fix "multiple versions of ant detected..." when running ant test (CASSANDRA-13232)
  * Coalescing strategy sleeps too much (CASSANDRA-13090)

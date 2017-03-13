@@ -632,9 +632,6 @@ public class DatabaseDescriptor
             throw new ConfigurationException("index_summary_capacity_in_mb option was set incorrectly to '"
                                              + conf.index_summary_capacity_in_mb + "', it should be a non-negative integer.", false);
 
-        if (conf.index_interval != null)
-            logger.warn("index_interval has been deprecated and should be removed from cassandra.yaml");
-
         if(conf.encryption_options != null)
         {
             logger.warn("Please rename encryption_options as server_encryption_options in the yaml");
@@ -1197,6 +1194,14 @@ public class DatabaseDescriptor
     public static String getAllocateTokensForKeyspace()
     {
         return System.getProperty(Config.PROPERTY_PREFIX + "allocate_tokens_for_keyspace", conf.allocate_tokens_for_keyspace);
+    }
+
+    public static Integer getAllocateTokensForLocalReplicationFactor()
+    {
+        String propValue = System.getProperty(Config.PROPERTY_PREFIX + "allocate_tokens_for_local_replication_factor");
+        if (propValue != null)
+            return Integer.parseInt(propValue);
+        return conf.allocate_tokens_for_local_replication_factor;
     }
 
     public static Collection<String> tokensFromString(String tokenString)

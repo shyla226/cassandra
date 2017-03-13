@@ -80,6 +80,8 @@ public class Config
     public int num_tokens = 1;
     /** Triggers automatic allocation of tokens if set, using the replication strategy of the referenced keyspace */
     public String allocate_tokens_for_keyspace = null;
+    /** Alternative direct specification of the local replication factor to use */
+    public Integer allocate_tokens_for_local_replication_factor = null;
 
     public volatile long request_timeout_in_ms = 10000L;
 
@@ -216,9 +218,6 @@ public class Config
     public EncryptionOptions.ServerEncryptionOptions encryption_options;
 
     public InternodeCompression internode_compression = InternodeCompression.none;
-
-    @Deprecated
-    public Integer index_interval = null;
 
     public int hinted_handoff_throttle_in_kb = 1024;
     public int batchlog_replay_throttle_in_kb = 1024;

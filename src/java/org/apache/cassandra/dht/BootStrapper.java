@@ -162,8 +162,9 @@ public class BootStrapper extends ProgressEventNotifierSupport
     public static Collection<Token> getBootstrapTokens(final TokenMetadata metadata, InetAddress address, int schemaWaitDelay) throws ConfigurationException
     {
         String allocationKeyspace = DatabaseDescriptor.getAllocateTokensForKeyspace();
+        Integer allocationReplicas = DatabaseDescriptor.getAllocateTokensForLocalReplicationFactor();
         Collection<String> initialTokens = DatabaseDescriptor.getInitialTokens();
-        if (initialTokens.size() > 0 && allocationKeyspace != null)
+        if (initialTokens.size() > 0 && (allocationKeyspace != null || allocationReplicas != null))
             logger.warn("manually specified tokens override automatic allocation");
 
         // if user specified tokens, use those
@@ -174,8 +175,8 @@ public class BootStrapper extends ProgressEventNotifierSupport
         if (numTokens < 1)
             throw new ConfigurationException("num_tokens must be >= 1");
 
-        if (allocationKeyspace != null)
-            return allocateTokens(metadata, address, allocationKeyspace, numTokens, schemaWaitDelay);
+        if (allocationKeyspace != null || allocationReplicas != null)
+            return allocateTokens(metadata, address, allocationKeyspace, allocationReplicas, numTokens, schemaWaitDelay);
 
         if (numTokens == 1)
             logger.warn("Picking random token for a single vnode.  You should probably add more vnodes and/or use the automatic token allocation mechanism.");
@@ -201,19 +202,27 @@ public class BootStrapper extends ProgressEventNotifierSupport
     static Collection<Token> allocateTokens(final TokenMetadata metadata,
                                             InetAddress address,
                                             String allocationKeyspace,
+                                            Integer localReplicationFactor,
                                             int numTokens,
                                             int schemaWaitDelay)
     {
         StorageService.instance.waitForSchema(schemaWaitDelay);
-        if (!FBUtilities.getBroadcastAddress().equals(InetAddress.getLoopbackAddress()))
-            Gossiper.waitToSettle();
+        Gossiper.waitToSettle("allocating tokens");
 
-        Keyspace ks = Keyspace.open(allocationKeyspace);
-        if (ks == null)
-            throw new ConfigurationException("Problem opening token allocation keyspace " + allocationKeyspace);
-        AbstractReplicationStrategy rs = ks.getReplicationStrategy();
+        if (allocationKeyspace != null)
+        {
+            Keyspace ks = Keyspace.open(allocationKeyspace);
+            if (ks == null)
+                throw new ConfigurationException("Problem opening token allocation keyspace " + allocationKeyspace);
+            AbstractReplicationStrategy rs = ks.getReplicationStrategy();
+            return TokenAllocation.allocateTokens(metadata, rs, address, numTokens);
+        }
+        else if (localReplicationFactor != null)
+        {
+            return TokenAllocation.allocateTokens(metadata, localReplicationFactor, DatabaseDescriptor.getEndpointSnitch(), address, numTokens);
+        }
 
-        return TokenAllocation.allocateTokens(metadata, rs, address, numTokens);
+        throw new IllegalArgumentException();
     }
 
     public static Collection<Token> getRandomTokens(TokenMetadata metadata, int numTokens)

@@ -26,14 +26,13 @@ num_tokens: 1
 
 # Triggers automatic allocation of num_tokens tokens for this node. The allocation
 # algorithm attempts to choose tokens in a way that optimizes replicated load over
-# the nodes in the datacenter for the replication strategy used by the specified
-# keyspace.
+# the nodes in the datacenter for the specified DC-level replication factor.
 #
 # The load assigned to each node will be close to proportional to its number of
 # vnodes.
 #
 # Only supported with the Murmur3Partitioner.
-# allocate_tokens_for_keyspace: KEYSPACE
+# allocate_tokens_for_local_replication_factor: 3
 
 # initial_token allows you to specify tokens manually.  While you can use it with
 # vnodes (num_tokens > 1, above) -- in which case you should provide a 

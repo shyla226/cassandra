@@ -22,6 +22,7 @@ Table of Contents
       4.1.6. EXECUTE
       4.1.7. BATCH
       4.1.8. REGISTER
+      4.1.9. CANCEL
     4.2. Responses
       4.2.1. ERROR
       4.2.2. READY
@@ -36,7 +37,6 @@ Table of Contents
       4.2.6. EVENT
       4.2.7. AUTH_CHALLENGE
       4.2.8. AUTH_SUCCESS
-      4.2.9. CANCEL
   5. Compression
   6. Data Type Serialization Formats
   7. User Defined Type Serialization
@@ -382,7 +382,7 @@ Table of Contents
               When continuous paging is enabled, the query results will be pushed to the client asynchronously and
               according to the paging options in the request message, without the client having to request each
               single page. Each response message will have the same stream id as the initial request.
-              Continuous paging can be interrupted by the client at any time via a CANCEL request, see section 4.2.9.
+              Continuous paging can be interrupted by the client at any time via a CANCEL request, see section 4.1.9.
 
   Note that the consistency is ignored by some queries (USE, CREATE, ALTER,
   TRUNCATE, ...).
@@ -487,6 +487,19 @@ Table of Contents
   dedicate a handful of connections to receive events, but to *not* register
   for events on all connections, as this would only result in receiving
   multiple times the same event messages, wasting bandwidth.
+
+4.1.9. CANCEL
+
+  Request to cancel an asynchronous operation. The body of the message is:
+  - an [int] identifying the operation type:
+      - 0x00000001 for "continuous paging", see section 4.1.4
+  - an [int] equal to the stream id of the initial request message.
+
+  The server will reply with a RESULT of type ROWS (section 4.2.5.2),
+  containing a single row with a single boolean value, which is set to:
+  - true if the operation was cancelled,
+  - false if the operation was not found.
+  If an operation is found but cannot be cancelled, an error is returned instead.
 
 
 4.2. Responses
@@ -838,19 +851,6 @@ Table of Contents
   from the server that the client may require to finish the authentication
   process. What that token contains and whether it can be null depends on the
   actual authenticator used.
-
-4.2.9. CANCEL
-
-  Request to cancel an asynchronous operation. The body of the message is:
-  - an [int] identifying the operation type:
-      - 0x00000001 for "continuous paging", see section 4.1.4
-  - an [int] equal to the stream id of the initial request message.
-
-  The server will reply with a RESULT of type ROWS (section 4.2.5.2),
-  containing a single row with a single boolean value, which is set to:
-  - true if the operation was cancelled,
-  - false if the operation was not found.
-  If an operation is found but cannot be cancelled, an error is returned instead.
 
 5. Compression
 
@@ -1229,7 +1229,7 @@ Table of Contents
               the client, for example if the client is unable to keep up with the rate during
               a continuous paging session.
 
-10. Chages from version 5
+10. Changes from version 5
 
   * Second most signficant bit in the frame version byte is set to one to indicate
     a dse protocol message (section 2.1)
@@ -1238,4 +1238,4 @@ Table of Contents
     * Added options to QUERY message (section 4.1.4)
     * Added response parameters to ROWS response (section 4.2.5.2)
 
-  * Added CANCEL message (section 4.2.9)
+  * Added CANCEL message (section 4.1.9)
