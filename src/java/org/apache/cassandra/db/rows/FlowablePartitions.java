@@ -242,6 +242,7 @@ public class FlowablePartitions
         public void close()
         {
             subscription.cancel();
+            Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
         }
 
         @Override
