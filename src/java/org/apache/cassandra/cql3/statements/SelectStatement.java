@@ -657,10 +657,15 @@ public class SelectStatement implements CQLStatement
 
                 maybeReschedule(builder);
             }
+            catch (ClientWriteException e)
+            {
+                logger.debug("Continuous paging client did not keep up: {}", e.getMessage());
+                builder.complete(e);
+            }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.error("Failed to process multiple pages with error: {}", t.getMessage(), t);
+                logger.error("Continuous paging failed with unexpected error: {}", t.getMessage(), t);
 
                 builder.complete(t);
             }
