@@ -2131,7 +2131,7 @@ public class StorageProxy implements StorageProxyMBean
             if (result != null)
                 return;
 
-            result = handler.get().blockingGet();
+            result = handler.get().subscribeOn(Schedulers.io()).blockingGet();
         }
 
         protected RowIterator computeNext()

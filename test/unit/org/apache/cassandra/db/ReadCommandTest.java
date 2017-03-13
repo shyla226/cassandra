@@ -21,7 +21,9 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
+import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -53,6 +55,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class ReadCommandTest
 {
@@ -216,7 +219,7 @@ public class ReadCommandTest
 
         // Given the data above, when the keys are sorted and the deletions removed, we should
         // get these clustering rows in this order
-        String[] expectedRows = new String[] { "aa", "ff", "ee", "cc", "dd", "cc", "bb"};
+        Set<String> expectedRows = Sets.newHashSet("col=aa", "col=ff", "col=ee", "col=cc", "col=dd", "col=cc", "col=bb");
 
         List<ByteBuffer> buffers = new ArrayList<>(groups.length);
         int nowInSeconds = FBUtilities.nowInSeconds();
@@ -309,14 +312,14 @@ public class ReadCommandTest
                     while (rowIterator.hasNext())
                     {
                         Row row = rowIterator.next();
-                        assertEquals("col=" + expectedRows[i++], row.clustering().toString(cfs.metadata()));
+                        assertTrue(expectedRows.contains(row.clustering().toString(cfs.metadata())));
                         //System.out.print(row.toString(cfs.metadata, true));
                     }
                 }
             }
 
             assertEquals(5, numPartitions);
-            assertEquals(expectedRows.length, i);
+            assertEquals(expectedRows.size(), i);
         }
     }
 }
