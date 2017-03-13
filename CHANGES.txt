@@ -38,6 +38,7 @@
  * Conditionally update index built status to avoid unnecessary flushes (CASSANDRA-12969)
  * cqlsh auto completion: refactor definition of compaction strategy options (CASSANDRA-12946)
  * Add support for arithmetic operators (CASSANDRA-11935)
+ * Add histogram for delay to deliver hints (CASSANDRA-13234)
 
 
 3.11.0
@@ -75,6 +76,7 @@ Merged from 3.0:
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
 Merged from 2.2:
+ * Commitlog replay may fail if last mutation is within 4 bytes of end of segment (CASSANDRA-13282)
  * Fix queries updating multiple time the same list (CASSANDRA-13130)
  * Fix GRANT/REVOKE when keyspace isn't specified (CASSANDRA-13053)
  * Avoid race on receiver by starting streaming sender thread after sending init message (CASSANDRA-12886)
