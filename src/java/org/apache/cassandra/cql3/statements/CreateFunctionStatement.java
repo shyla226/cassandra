@@ -158,7 +158,7 @@ public final class CreateFunctionStatement extends SchemaAlteringStatement
                                            calledOnNullInput ? "CALLED ON NULL INPUT" : "RETURNS NULL ON NULL INPUT"));
 
             if (!Functions.typesMatch(old.returnType(), returnType))
-                error(String.format("Cannot replace function %s, the new return type %s is not compatible with the return type %s of existing function",
+                return error(String.format("Cannot replace function %s, the new return type %s is not compatible with the return type %s of existing function",
                                     functionName, returnType.asCQL3Type(), old.returnType().asCQL3Type()));
         }
 
