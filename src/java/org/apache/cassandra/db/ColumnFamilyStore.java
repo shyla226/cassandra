@@ -1371,8 +1371,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public Completable apply(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
-        return Completable.defer(() -> applyInternal(update, indexer, opGroup, commitLogPosition))
-                   .subscribeOn(NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey(), true));
+        return applyInternal(update, indexer, opGroup, commitLogPosition)
+               .subscribeOn(NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey(), true));
     }
 
     Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
@@ -1380,7 +1380,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         long start = System.nanoTime();
         Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
         return mt.put(update, indexer, opGroup)
-                 .flatMapCompletable(timeDelta ->
+                 .map(timeDelta ->
                                      {
                                          DecoratedKey key = update.partitionKey();
                                          invalidateCachedPartition(key);
@@ -1396,15 +1396,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                          if (timeDelta < Long.MAX_VALUE)
                                              metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
 
-                                         return CompletableObserver::onComplete;
+                                         return 0;
                                      })
                  .onErrorResumeNext(e ->
                                     {
                                         RuntimeException exc = new RuntimeException(e.getMessage()
                                                                                     + " for ks: "
                                                                                     + keyspace.getName() + ", table: " + name, e);
-                                        return Completable.error(exc);
-                                    });
+                                        return Single.error(exc);
+                                    })
+                .toCompletable();
     }
 
     /**

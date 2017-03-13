@@ -244,7 +244,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         if (existingIndex.isPresent())
         {
             if (ifNotExists)
-                return null;
+                return Maybe.empty();
             else
                 return error(String.format("Index %s is a duplicate of existing index %s",
                                            index.name, existingIndex.get().name));

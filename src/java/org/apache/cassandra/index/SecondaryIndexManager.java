@@ -900,19 +900,46 @@ public class SecondaryIndexManager implements IndexRegistry
         public void onPartitionDeletion(DeletionTime deletionTime)
         {
             for (Index.Indexer indexer : indexers)
-                allCompletables = allCompletables.concatWith(indexer.partitionDelete(deletionTime));
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.partitionDelete(deletionTime));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public void onRangeTombstone(RangeTombstone tombstone)
         {
             for (Index.Indexer indexer : indexers)
-                allCompletables = allCompletables.concatWith(indexer.rangeTombstone(tombstone));
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.rangeTombstone(tombstone));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public void onInserted(Row row)
         {
             for (Index.Indexer indexer : indexers)
-                allCompletables = allCompletables.concatWith(indexer.insertRow(row));
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.insertRow(row));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public void onUpdated(Row existing, Row updated)
@@ -955,13 +982,31 @@ public class SecondaryIndexManager implements IndexRegistry
             Row newRow = toInsert.build();
 
             for (Index.Indexer indexer : indexers)
-                allCompletables = allCompletables.concatWith(indexer.updateRow(oldRow, newRow));
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.updateRow(oldRow, newRow));
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
         }
 
         public Completable commit()
         {
             for (Index.Indexer indexer : indexers)
-                allCompletables = allCompletables.concatWith(indexer.finish());
+            {
+                try
+                {
+                    allCompletables = allCompletables.concatWith(indexer.finish());
+                }
+                catch (Exception exc)
+                {
+                    allCompletables = allCompletables.concatWith(Completable.error(exc));
+                }
+            }
 
             return allCompletables;
         }
