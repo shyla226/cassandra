@@ -400,19 +400,24 @@ public class MigrationManager
     // Returns a future on the local application of the schema
     private static Completable announce(final Collection<Mutation> schema)
     {
-        Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
-                                            .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+        return Completable.defer(() ->
+                                 {
 
-        for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
-        {
-            // only push schema to nodes with known and equal versions
-            if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
-                    MessagingService.instance().knowsVersion(endpoint) &&
-                    MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
-                pushSchemaMutation(endpoint, schema);
-        }
+                                     Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
+                                                                         .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
 
-        return observable;
+                                     for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
+                                     {
+                                         // only push schema to nodes with known and equal versions
+                                         if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
+                                             MessagingService.instance().knowsVersion(endpoint) &&
+                                             MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
+                                             pushSchemaMutation(endpoint, schema);
+                                     }
+
+                                     return observable;
+                                 });
+
     }
 
     /**

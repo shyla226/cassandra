@@ -31,6 +31,7 @@ import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -480,6 +481,8 @@ public class Keyspace
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return Completable.error(new RuntimeException("Testing write failures"));
 
+        Scheduler schedulerForPartition = NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false);
+
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
         return Completable.using(
@@ -589,10 +592,7 @@ public class Keyspace
                                 if (requiresViewUpdate)
                                 {
                                     Tracing.trace("Creating materialized view mutations from base table replica");
-                                    // TODO - pushViewReplicaUpdates will change the rx core, resulting in an
-                                    // IllegalMonitorStateException when releasing the locks, try for example ViewFilteringTest
-                                    // I'm not really sure what the view lock management should be changed to, and if it still
-                                    // makes sense at all
+
                                     viewUpdateCompletable = viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeCommitLog, baseComplete);
                                     viewUpdateCompletable.doOnError(exc -> {
                                             JVMStabilityInspector.inspectThrowable(exc);
@@ -631,14 +631,20 @@ public class Keyspace
             {
                 if (locks != null)
                 {
-                    for (Lock lock : locks)
-                    {
-                        if (lock != null)
-                            lock.unlock();
-                    }
+
+                    //The locks need to be accessed on the same thread
+                    //they were created
+                    schedulerForPartition.scheduleDirect(() ->
+                                                         {
+                                                             for (Lock lock : locks)
+                                                             {
+                                                                 if (lock != null)
+                                                                     lock.unlock();
+                                                             }
+                                                         });
                 }
             }
-        ).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false)); // route to the correct core
+        ).subscribeOn(schedulerForPartition); // route to the correct core
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

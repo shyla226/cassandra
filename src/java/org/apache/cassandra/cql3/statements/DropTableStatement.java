@@ -64,44 +64,48 @@ public class DropTableStatement extends SchemaAlteringStatement
 
     public Maybe<Event.SchemaChange> announceMigration(QueryState queryState, boolean isLocalOnly) throws ConfigurationException
     {
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace());
-        if (ksm == null)
-            return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
+        return Maybe.defer(() ->
+                           {
 
-        TableMetadata metadata = ksm.getTableOrViewNullable(columnFamily());
-        if (metadata != null)
-        {
-            if (metadata.isView())
-                return error("Cannot use DROP TABLE on Materialized View");
+                               KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace());
+                               if (ksm == null)
+                                   return error(String.format("Cannot drop table in unknown keyspace '%s'", keyspace()));
 
-            boolean rejectDrop = false;
-            StringBuilder messageBuilder = new StringBuilder();
-            for (ViewMetadata def : ksm.views)
-            {
-                if (def.baseTableId.equals(metadata.id))
-                {
-                    if (rejectDrop)
-                        messageBuilder.append(',');
-                    rejectDrop = true;
-                    messageBuilder.append(def.name);
-                }
-            }
-            if (rejectDrop)
-            {
-                return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
-                                           keyspace(),
-                                           messageBuilder.toString()));
-            }
-        }
+                               TableMetadata metadata = ksm.getTableOrViewNullable(columnFamily());
+                               if (metadata != null)
+                               {
+                                   if (metadata.isView())
+                                       return error("Cannot use DROP TABLE on Materialized View");
 
-        return MigrationManager.announceTableDrop(keyspace(), columnFamily(), isLocalOnly)
-                               .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
-                               .onErrorResumeNext(e ->
-                                                  {
-                                                      if (e instanceof ConfigurationException && ifExists)
-                                                          return Maybe.empty();
+                                   boolean rejectDrop = false;
+                                   StringBuilder messageBuilder = new StringBuilder();
+                                   for (ViewMetadata def : ksm.views)
+                                   {
+                                       if (def.baseTableId.equals(metadata.id))
+                                       {
+                                           if (rejectDrop)
+                                               messageBuilder.append(',');
+                                           rejectDrop = true;
+                                           messageBuilder.append(def.name);
+                                       }
+                                   }
+                                   if (rejectDrop)
+                                   {
+                                       return error(String.format("Cannot drop table when materialized views still depend on it (%s.{%s})",
+                                                                  keyspace(),
+                                                                  messageBuilder.toString()));
+                                   }
+                               }
 
-                                                      return Maybe.error(e);
-                                                  });
+                               return MigrationManager.announceTableDrop(keyspace(), columnFamily(), isLocalOnly)
+                                                      .andThen(Maybe.just(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, keyspace(), columnFamily())))
+                                                      .onErrorResumeNext(e ->
+                                                                         {
+                                                                             if (e instanceof ConfigurationException && ifExists)
+                                                                                 return Maybe.empty();
+
+                                                                             return Maybe.error(e);
+                                                                         });
+                           });
     }
 }

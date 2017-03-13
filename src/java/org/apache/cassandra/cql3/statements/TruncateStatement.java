@@ -19,7 +19,9 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.concurrent.TimeoutException;
 
+import io.reactivex.Completable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -61,34 +63,28 @@ public class TruncateStatement extends CFStatement implements CQLStatement
 
     public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime) throws InvalidRequestException, TruncateException
     {
-        try
-        {
-            TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
-            if (metaData.isView())
-                throw new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead");
-
-            StorageProxy.truncateBlocking(keyspace(), columnFamily());
-        }
-        catch (UnavailableException | TimeoutException e)
-        {
-            throw new TruncateException(e);
-        }
-
-        return Single.just(new ResultMessage.Void());
+        return executeInternal(state, options);
     }
 
     public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
-        try
-        {
-            // TODO rx-ify
-            ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(columnFamily());
-            cfs.truncateBlocking();
-            return Single.just(new ResultMessage.Void());
-        }
-        catch (Exception e)
-        {
-            return Single.error(new TruncateException(e));
-        }
+        return Single.defer(() ->
+                            {
+                                try
+                                {
+                                    TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
+                                    if (metaData.isView())
+                                        return Single.error(new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead"));
+
+                                    StorageProxy.truncateBlocking(keyspace(), columnFamily());
+                                }
+                                catch (UnavailableException | TimeoutException e)
+                                {
+                                    return Single.error(new TruncateException(e));
+                                }
+
+                                return Single.just(new ResultMessage.Void());
+                            })
+                     .subscribeOn(Schedulers.io());
     }
 }
