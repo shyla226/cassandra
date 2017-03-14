@@ -103,7 +103,7 @@ public class CompactionsTest
 
         // enable compaction, submit background and wait for it to complete
         store.enableAutoCompaction();
-        FBUtilities.waitOnFutures(CompactionManager.instance.submitBackground(store));
+        FBUtilities.waitOnFutures(CompactionManager.instance.submitMaximal(store, FBUtilities.nowInSeconds(), false));
         do
         {
             TimeUnit.SECONDS.sleep(1);
