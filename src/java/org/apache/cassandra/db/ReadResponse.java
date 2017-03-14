@@ -168,11 +168,13 @@ public abstract class ReadResponse
 
         private static List<ImmutableBTreePartition> build(UnfilteredPartitionIterator iterator, ReadCommand command)
         {
-            if (!iterator.hasNext())
-                return Collections.emptyList();
 
             try
             {
+                if (!iterator.hasNext())
+                    return Collections.emptyList();
+
+
                 if (command instanceof SinglePartitionReadCommand)
                 {
                     try (UnfilteredRowIterator partition = iterator.next())
