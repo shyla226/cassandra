@@ -31,6 +31,7 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import junit.framework.Assert;
 
+import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.Keyspace;
@@ -1558,6 +1559,8 @@ public class ViewFilteringTest extends CQLTester
 
         while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
             Thread.sleep(10);
+
+        BatchlogManager.instance.forceBatchlogReplay();
 
         assertRowsIgnoringOrder(execute("SELECT a, b, c, d FROM mv_test"),
             row(0, 0, 1, 0),
