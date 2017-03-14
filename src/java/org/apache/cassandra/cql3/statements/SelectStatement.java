@@ -38,6 +38,7 @@ import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -482,7 +483,8 @@ public class SelectStatement implements CQLStatement
                    + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
         Single<ResultMessage.Rows> msg;
-        Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStartNanoTime);
+        //FIXME: TPC Paging needs to happen on a blocking threadpool, eventually this should be all flowable
+        Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStartNanoTime).observeOn(Schedulers.io());
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
