@@ -193,6 +193,15 @@ public class NettyRxScheduler extends Scheduler
     }
 
     /**
+     * When tests are run that don't properly setup netty and rx, use this to ensure perCoreSchedulers isn't full of nulls
+     */
+    public static void setupForTesting()
+    {
+        for (int i = 0; i < perCoreSchedulers.length; i++)
+            perCoreSchedulers[i] = localNettyEventLoop.get();
+    }
+
+    /**
      * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
      * core is valid via {@link NettyRxScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
