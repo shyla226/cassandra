@@ -133,27 +133,33 @@ public class PartitionRangeReadTest
 
         // Start and end inclusive
         partitions = Util.getAll(Util.cmd(cfs).fromKeyIncl("2").toKeyIncl("7").build());
-        assertEquals(6, partitions.size());
-        assertTrue(partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("2")));
-        assertTrue(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("7")));
+        assertEquals(8, partitions.size());
+        assertTrue(ByteBufferUtil.string(partitions.get(0).iterator().next().getCell(cDef).value()),
+                   partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("7")));
+        assertTrue(ByteBufferUtil.string(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value()),
+                   partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("2")));
 
         // Start and end excluded
         partitions = Util.getAll(Util.cmd(cfs).fromKeyExcl("2").toKeyExcl("7").build());
-        assertEquals(4, partitions.size());
-        assertTrue(partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("3")));
-        assertTrue(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("6")));
+        assertEquals(6, partitions.size());
+        assertTrue(ByteBufferUtil.string(partitions.get(0).iterator().next().getCell(cDef).value()),
+                   partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("9")));
+        assertTrue(ByteBufferUtil.string(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value()),
+                   partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("8")));
 
         // Start excluded, end included
         partitions = Util.getAll(Util.cmd(cfs).fromKeyExcl("2").toKeyIncl("7").build());
-        assertEquals(5, partitions.size());
-        assertTrue(partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("3")));
-        assertTrue(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("7")));
+        assertEquals(7, partitions.size());
+        assertTrue(ByteBufferUtil.string(partitions.get(0).iterator().next().getCell(cDef).value()),
+                   partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("9")));
+        assertTrue(ByteBufferUtil.string(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value()),
+                   partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("2")));
 
         // Start included, end excluded
         partitions = Util.getAll(Util.cmd(cfs).fromKeyIncl("2").toKeyExcl("7").build());
-        assertEquals(5, partitions.size());
-        assertTrue(partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("2")));
-        assertTrue(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("6")));
+        assertEquals(7, partitions.size());
+        assertTrue(partitions.get(0).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("7")));
+        assertTrue(partitions.get(partitions.size() - 1).iterator().next().getCell(cDef).value().equals(ByteBufferUtil.bytes("8")));
     }
 }
 

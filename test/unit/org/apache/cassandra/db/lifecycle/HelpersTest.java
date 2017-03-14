@@ -31,6 +31,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -46,7 +47,7 @@ public class HelpersTest
     @BeforeClass
     public static void setUp()
     {
-        DatabaseDescriptor.daemonInitialization();
+        SchemaLoader.prepareServer();
         MockSchema.cleanup();
     }
 
