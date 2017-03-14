@@ -21,7 +21,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import com.google.common.base.Splitter;
@@ -177,15 +176,15 @@ public class Client extends SimpleClient
         }
         else if (msgType.equals("CREDENTIALS"))
         {
-            System.err.println("[WARN] CREDENTIALS command is deprecated, use AUTHENTICATE instead");
-            CredentialsMessage msg = new CredentialsMessage();
-            msg.credentials.putAll(readCredentials(iter));
-            return msg;
+            System.err.println("[ERROR] CREDENTIALS command is no longer supported, use AUTHENTICATE instead");
+            return null;
         }
         else if (msgType.equals("AUTHENTICATE"))
         {
             Map<String, String> credentials = readCredentials(iter);
-            if(!credentials.containsKey(PasswordAuthenticator.USERNAME_KEY) || !credentials.containsKey(PasswordAuthenticator.PASSWORD_KEY))
+            if(credentials == null ||
+               !credentials.containsKey(PasswordAuthenticator.USERNAME_KEY) ||
+               !credentials.containsKey(PasswordAuthenticator.PASSWORD_KEY))
             {
                 System.err.println("[ERROR] Authentication requires both 'username' and 'password'");
                 return null;
@@ -217,24 +216,13 @@ public class Client extends SimpleClient
             String[] kv = next.split("=");
             if (kv.length != 2)
             {
-                System.err.println("[ERROR] Default authentication requires username & password");
+                if (!next.isEmpty())
+                    System.err.println("[ERROR] Expected key=val, instead got: " + next);
                 return null;
             }
             credentials.put(kv[0], kv[1]);
         }
         return credentials;
-    }
-
-    private byte[] encodeCredentialsForSasl(Map<String, String> credentials)
-    {
-        byte[] username = credentials.get(PasswordAuthenticator.USERNAME_KEY).getBytes(StandardCharsets.UTF_8);
-        byte[] password = credentials.get(PasswordAuthenticator.PASSWORD_KEY).getBytes(StandardCharsets.UTF_8);
-        byte[] initialResponse = new byte[username.length + password.length + 2];
-        initialResponse[0] = 0;
-        System.arraycopy(username, 0, initialResponse, 1, username.length);
-        initialResponse[username.length + 1] = 0;
-        System.arraycopy(password, 0, initialResponse, username.length + 2, password.length);
-        return initialResponse;
     }
 
     public static void main(String[] args) throws Exception
