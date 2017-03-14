@@ -470,6 +470,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         daemon.deactivate();
     }
 
+    @VisibleForTesting
+    public CassandraDaemon getDaemon()
+    {
+        return daemon;
+    }
+
     private synchronized UUID prepareForReplacement() throws ConfigurationException
     {
         if (SystemKeyspace.bootstrapComplete())

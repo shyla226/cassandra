@@ -437,6 +437,12 @@ public class CassandraDaemon
         setupCompleted = true;
     }
 
+    @VisibleForTesting
+    public void setSetupCompleted(boolean completed)
+    {
+        setupCompleted = completed;
+    }
+
     public boolean setupCompleted()
     {
         return setupCompleted;
