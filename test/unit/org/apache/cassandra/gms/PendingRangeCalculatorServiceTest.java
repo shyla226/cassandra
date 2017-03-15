@@ -33,6 +33,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
@@ -118,7 +119,7 @@ public class PendingRangeCalculatorServiceTest
         EndpointState state = new EndpointState(hb);
         Collection<Token> tokens = new ArrayList<>();
 
-        tokens.add(new ByteOrderedPartitioner.BytesToken(new byte[]{1,2,3}));
+        tokens.add(new Murmur3Partitioner.LongToken(7));
         state.addApplicationState(ApplicationState.TOKENS, StorageService.instance.valueFactory.tokens(tokens));
         state.addApplicationState(ApplicationState.STATUS, bootstrapping ?
                 StorageService.instance.valueFactory.bootstrapping(tokens) : StorageService.instance.valueFactory.normal(tokens));

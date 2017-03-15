@@ -29,7 +29,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -47,6 +49,8 @@ public class FailureDetectorTest
         System.setProperty("cassandra.max_local_pause_in_ms", "20000");
 
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        NettyRxScheduler.register();
     }
 
     @Test

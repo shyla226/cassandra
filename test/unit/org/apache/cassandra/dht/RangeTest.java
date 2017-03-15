@@ -49,6 +49,7 @@ public class RangeTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
     }
 
     @Test

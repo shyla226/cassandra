@@ -23,6 +23,7 @@ import java.util.Collections;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
 import org.apache.cassandra.streaming.StreamEvent;
@@ -39,6 +40,8 @@ public class StreamStateStoreTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        NettyRxScheduler.register();
     }
 
     @Test
