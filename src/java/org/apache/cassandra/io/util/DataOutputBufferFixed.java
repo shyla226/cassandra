@@ -43,7 +43,7 @@ public class DataOutputBufferFixed extends DataOutputBuffer
 
     public DataOutputBufferFixed(ByteBuffer buffer)
     {
-        super(buffer);
+        super(buffer, null);
     }
 
     @Override
