@@ -23,8 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.*;
 import com.google.common.io.Files;
 
 import org.junit.BeforeClass;
@@ -32,11 +31,14 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.*;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -57,6 +59,7 @@ public class CQLSSTableWriterTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     @BeforeClass
@@ -70,7 +73,6 @@ public class CQLSSTableWriterTest
     @Test
     public void testUnsortedWriter() throws Exception
     {
-        try (AutoCloseable switcher = Util.switchPartitioner(ByteOrderedPartitioner.instance))
         {
             String KS = "cql_keyspace";
             String TABLE = "table1";
@@ -106,15 +108,14 @@ public class CQLSSTableWriterTest
             UntypedResultSet.Row row;
 
             row = iter.next();
+            assertEquals(1, row.getInt("k"));
+            assertEquals("test2", row.getString("v1"));
+            assertEquals(44, row.getInt("v2"));
+
+            row = iter.next();
             assertEquals(0, row.getInt("k"));
             assertEquals("test1", row.getString("v1"));
             assertEquals(24, row.getInt("v2"));
-
-            row = iter.next();
-            assertEquals(1, row.getInt("k"));
-            assertEquals("test2", row.getString("v1"));
-            //assertFalse(row.has("v2"));
-            assertEquals(44, row.getInt("v2"));
 
             row = iter.next();
             assertEquals(2, row.getInt("k"));
@@ -330,6 +331,12 @@ public class CQLSSTableWriterTest
 
         UserType tuple2Type = writer.getUDType("tuple2");
         UserType tuple3Type = writer.getUDType("tuple3");
+
+        SortedSet<Integer> sortedTokens = com.google.common.collect.Sets.newTreeSet(Comparator.comparing(a -> DatabaseDescriptor.getPartitioner().decorateKey(Int32Type.instance.decompose(a))));
+
+        for (int i = 0; i < 100; i++)
+            sortedTokens.add(i);
+
         for (int i = 0; i < 100; i++)
         {
             writer.addRow(i,
@@ -355,10 +362,11 @@ public class CQLSSTableWriterTest
         TypeCodec tuple3Codec = UDHelper.codecFor(tuple3Type);
 
         assertEquals(resultSet.size(), 100);
-        int cnt = 0;
+
+        Iterator<Integer> it = sortedTokens.iterator();
         for (UntypedResultSet.Row row: resultSet) {
-            assertEquals(cnt,
-                         row.getInt("k"));
+            int cnt = it.next();
+            assertEquals(cnt, row.getInt("k"));
             List<UDTValue> values = (List<UDTValue>) collectionCodec.deserialize(row.getBytes("v1"),
                                                                                  ProtocolVersion.NEWEST_SUPPORTED);
             assertEquals(values.get(0).getInt("a"), cnt * 10);
@@ -371,7 +379,6 @@ public class CQLSSTableWriterTest
             assertEquals(v2.getInt("a"), cnt * 100);
             assertEquals(v2.getInt("b"), cnt * 200);
             assertEquals(v2.getInt("c"), cnt * 300);
-            cnt++;
         }
     }
 
@@ -406,6 +413,12 @@ public class CQLSSTableWriterTest
         TypeCodec tuple2Codec = UDHelper.codecFor(tuple2Type);
         TypeCodec nestedTupleCodec = UDHelper.codecFor(nestedTuple);
 
+        SortedSet<Integer> sortedTokens = com.google.common.collect.Sets.newTreeSet(Comparator.comparing(a -> DatabaseDescriptor.getPartitioner().decorateKey(Int32Type.instance.decompose(a))));
+
+        for (int i = 0; i < 100; i++)
+            sortedTokens.add(i);
+
+
         for (int i = 0; i < 100; i++)
         {
             writer.addRow(i,
@@ -424,10 +437,10 @@ public class CQLSSTableWriterTest
         UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
 
         assertEquals(resultSet.size(), 100);
-        int cnt = 0;
+        Iterator<Integer> it = sortedTokens.iterator();
         for (UntypedResultSet.Row row: resultSet) {
-            assertEquals(cnt,
-                         row.getInt("k"));
+            int cnt = it.next();
+            assertEquals(cnt, row.getInt("k"));
             UDTValue nestedTpl = (UDTValue) nestedTupleCodec.deserialize(row.getBytes("v1"),
                                                                          ProtocolVersion.NEWEST_SUPPORTED);
             assertEquals(nestedTpl.getInt("c"), cnt * 100);
@@ -435,7 +448,6 @@ public class CQLSSTableWriterTest
             assertEquals(tpl.getInt("a"), cnt * 200);
             assertEquals(tpl.getInt("b"), cnt * 300);
 
-            cnt++;
         }
     }
 
@@ -512,22 +524,23 @@ public class CQLSSTableWriterTest
         writer.close();
         loadSSTables(dataDir, KS);
 
+        //In token order
         UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
         Iterator<UntypedResultSet.Row> iter = resultSet.iterator();
         UntypedResultSet.Row r1 = iter.next();
-        assertEquals(1, r1.getInt("k"));
-        assertEquals(1, r1.getInt("c1"));
-        assertEquals(1, r1.getInt("c2"));
-        assertEquals(false, r1.has("v"));
+        assertEquals(5, r1.getInt("k"));
+        assertEquals(5, r1.getInt("c1"));
+        assertEquals(5, r1.getInt("c2"));
+        assertEquals(true, r1.has("v"));
         UntypedResultSet.Row r2 = iter.next();
-        assertEquals(2, r2.getInt("k"));
-        assertEquals(2, r2.getInt("c1"));
-        assertEquals(2, r2.getInt("c2"));
+        assertEquals(1, r2.getInt("k"));
+        assertEquals(1, r2.getInt("c1"));
+        assertEquals(1, r2.getInt("c2"));
         assertEquals(false, r2.has("v"));
         UntypedResultSet.Row r3 = iter.next();
-        assertEquals(3, r3.getInt("k"));
-        assertEquals(3, r3.getInt("c1"));
-        assertEquals(3, r3.getInt("c2"));
+        assertEquals(2, r3.getInt("k"));
+        assertEquals(2, r3.getInt("c1"));
+        assertEquals(2, r3.getInt("c2"));
         assertEquals(false, r3.has("v"));
         UntypedResultSet.Row r4 = iter.next();
         assertEquals(4, r4.getInt("k"));
@@ -535,11 +548,10 @@ public class CQLSSTableWriterTest
         assertEquals(4, r4.getInt("c2"));
         assertEquals(false, r3.has("v"));
         UntypedResultSet.Row r5 = iter.next();
-        assertEquals(5, r5.getInt("k"));
-        assertEquals(5, r5.getInt("c1"));
-        assertEquals(5, r5.getInt("c2"));
-        assertEquals(true, r5.has("v"));
-        assertEquals("5", r5.getString("v"));
+        assertEquals(3, r5.getInt("k"));
+        assertEquals(3, r5.getInt("c1"));
+        assertEquals(3, r5.getInt("c2"));
+        assertEquals(false, r5.has("v"));
     }
 
     @Test

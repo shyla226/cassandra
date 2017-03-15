@@ -20,12 +20,17 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.SortedSet;
 
+import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 
 import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
@@ -79,9 +84,16 @@ public class BigTableWriterTest extends AbstractTransactionalTest
             this.descriptor = desc;
             this.writer = sw;
 
+            SortedSet<Integer> sortedTokens = Sets.newTreeSet(Comparator.comparing(a -> DatabaseDescriptor.getPartitioner().decorateKey(Int32Type.instance.decompose(a))));
+
             for (int i = 0; i < 100; i++)
+                sortedTokens.add(i);
+
+            Iterator<Integer> it = sortedTokens.iterator();
+            while (it.hasNext())
             {
-                UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), i);
+                Integer nextKey = it.next();
+                UpdateBuilder update = UpdateBuilder.create(cfs.metadata(), nextKey);
                 for (int j = 0; j < 10; j++)
                     update.newRow(j).add("val", SSTableRewriterTest.random(0, 1000));
                 writer.append(update.build().unfilteredIterator());

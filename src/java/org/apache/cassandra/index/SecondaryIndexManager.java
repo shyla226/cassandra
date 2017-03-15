@@ -486,9 +486,8 @@ public class SecondaryIndexManager implements IndexRegistry
                      .map(cfs -> wait.add(cfs.forceFlush().toObservable()))
                      .orElseGet(() -> nonCfsIndexes.add(index)));
         }
-
+        Observable.merge(wait).blockingSubscribe();
         executeAllBlocking(nonCfsIndexes.stream(), Index::getBlockingFlushTask);
-        Observable.merge(wait).blockingLast();
     }
 
     /**
