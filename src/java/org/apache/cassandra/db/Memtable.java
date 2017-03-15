@@ -35,6 +35,7 @@ import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.db.rows.MergeReducer;
+import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -575,6 +576,10 @@ public class Memtable implements Comparable<Memtable>
                 File flushTableDir = getDirectories().getLocationForDisk(flushLocation);
                 if (BlacklistedDirectories.isUnwritable(flushTableDir))
                     throw new FSWriteError(new IOException("SSTable flush dir has been blacklisted"), flushTableDir.getAbsolutePath());
+
+                // // exclude directory if its total writeSize does not fit to data directory
+                if (flushLocation.getAvailableSpace() < estimatedSize)
+                    throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + estimatedSize + " bytes"), "");
 
                 writer = createFlushWriter(txn, cfs.newSSTableDescriptor(flushTableDir), columnsCollector.get(), statsCollector.get());
             }
