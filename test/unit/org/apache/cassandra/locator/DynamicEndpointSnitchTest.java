@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -32,13 +33,14 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 
-public class DynamicEndpointSnitchTest
+public class DynamicEndpintSnitchTest
 {
 
     @BeforeClass
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     private static void setScores(DynamicEndpointSnitch dsnitch,  int rounds, List<InetAddress> hosts, Integer... scores) throws InterruptedException
