@@ -27,6 +27,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClockAndCount;
 import org.apache.cassandra.db.context.CounterContext.Relationship;
@@ -54,9 +55,8 @@ public class CounterContextTest
     @BeforeClass
     public static void setupDD()
     {
-        SchemaLoader.prepareServer();
-
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     @Test

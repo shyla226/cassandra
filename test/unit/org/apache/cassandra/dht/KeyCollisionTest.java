@@ -62,12 +62,6 @@ public class KeyCollisionTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF));
     }
 
-    @AfterClass
-    public static void tearDown()
-    {
-        DatabaseDescriptor.setPartitionerUnsafe(oldPartitioner);
-    }
-
     @Test
     public void testGetSliceWithCollision() throws Exception
     {
@@ -99,18 +93,18 @@ public class KeyCollisionTest
         builder.clustering("c").add("val", "asdf").build().applyUnsafe();
     }
 
-    static class BigIntegerToken extends ComparableObjectToken<BigInteger>
+    static class BigIntegerToken extends ComparableObjectToken<Long>
     {
         private static final long serialVersionUID = 1L;
 
-        public BigIntegerToken(BigInteger token)
+        public BigIntegerToken(Long token)
         {
             super(token);
         }
 
         // convenience method for testing
         public BigIntegerToken(String token) {
-            this(new BigInteger(token));
+            this(Long.valueOf(token));
         }
 
         @Override
