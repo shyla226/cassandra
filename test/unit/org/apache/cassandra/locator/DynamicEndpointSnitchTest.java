@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 
-public class DynamicEndpintSnitchTest
+public class DynamicEndpointSnitchTest
 {
 
     @BeforeClass
