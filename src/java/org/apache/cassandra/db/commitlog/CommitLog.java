@@ -263,38 +263,39 @@ public class CommitLog implements CommitLogMBean
             if (totalSize > MAX_MUTATION_SIZE)
             {
                 return Single.error(
-                    new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
-                                                               FBUtilities.prettyPrintMemory(totalSize),
-                                                               FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
+                new IllegalArgumentException(String.format("Mutation of %s is too large for the maximum size of %s",
+                                                           FBUtilities.prettyPrintMemory(totalSize),
+                                                           FBUtilities.prettyPrintMemory(MAX_MUTATION_SIZE))));
             }
 
-            // TODO convert allocation to Rx/Observable
-            Allocation alloc = segmentManager.allocate(mutation, totalSize);
+            return segmentManager.allocate(mutation, totalSize)
+                                 .flatMap(alloc ->
+                                          {
+                                              CRC32 checksum = new CRC32();
+                                              final ByteBuffer buffer = alloc.getBuffer();
+                                              try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
+                                              {
+                                                  // checksummed length
+                                                  dos.writeInt(size);
+                                                  updateChecksumInt(checksum, size);
+                                                  buffer.putInt((int) checksum.getValue());
 
-            CRC32 checksum = new CRC32();
-            final ByteBuffer buffer = alloc.getBuffer();
-            try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
-            {
-                // checksummed length
-                dos.writeInt(size);
-                updateChecksumInt(checksum, size);
-                buffer.putInt((int) checksum.getValue());
+                                                  // checksummed mutation
+                                                  dos.write(dob.getData(), 0, size);
+                                                  updateChecksum(checksum, buffer, buffer.position() - size, size);
+                                                  buffer.putInt((int) checksum.getValue());
+                                              }
+                                              catch (IOException e)
+                                              {
+                                                  return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
+                                              }
+                                              finally
+                                              {
+                                                  alloc.markWritten();
+                                              }
 
-                // checksummed mutation
-                dos.write(dob.getData(), 0, size);
-                updateChecksum(checksum, buffer, buffer.position() - size, size);
-                buffer.putInt((int) checksum.getValue());
-            }
-            catch (IOException e)
-            {
-                return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
-            }
-            finally
-            {
-                alloc.markWritten();
-            }
-
-            return executor.finishWriteFor(alloc).toSingle(() -> alloc.getCommitLogPosition());
+                                              return executor.finishWriteFor(alloc).toSingle(() -> alloc.getCommitLogPosition());
+                                          });
         }
         catch (IOException e)
         {

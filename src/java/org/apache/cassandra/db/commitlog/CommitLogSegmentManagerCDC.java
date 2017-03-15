@@ -31,6 +31,8 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogSegment.CDCState;
@@ -92,25 +94,29 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * @throws WriteTimeoutException If segment disallows CDC mutations, we throw WTE
      */
     @Override
-    public CommitLogSegment.Allocation allocate(Mutation mutation, int size) throws WriteTimeoutException
+    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size) throws WriteTimeoutException
     {
-        CommitLogSegment segment = allocatingFrom();
-        CommitLogSegment.Allocation alloc;
 
-        throwIfForbidden(mutation, segment);
-        while ( null == (alloc = segment.allocate(mutation, size)) )
-        {
-            // Failed to allocate, so move to a new segment with enough room if possible.
-            advanceAllocatingFrom(segment);
-            segment = allocatingFrom();
+        return Single.defer(() ->
+                            {
+                                CommitLogSegment segment = allocatingFrom();
+                                CommitLogSegment.Allocation alloc;
 
-            throwIfForbidden(mutation, segment);
-        }
+                                throwIfForbidden(mutation, segment);
+                                while (null == (alloc = segment.allocate(mutation, size)))
+                                {
+                                    // Failed to allocate, so move to a new segment with enough room if possible.
+                                    advanceAllocatingFrom(segment);
+                                    segment = allocatingFrom();
 
-        if (mutation.trackedByCDC())
-            segment.setCDCState(CDCState.CONTAINS);
+                                    throwIfForbidden(mutation, segment);
+                                }
 
-        return alloc;
+                                if (mutation.trackedByCDC())
+                                    segment.setCDCState(CDCState.CONTAINS);
+
+                                return Single.just(alloc);
+                            }).subscribeOn(Schedulers.io());
     }
 
     private void throwIfForbidden(Mutation mutation, CommitLogSegment segment) throws WriteTimeoutException

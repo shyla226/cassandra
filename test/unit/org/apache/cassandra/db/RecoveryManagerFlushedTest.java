@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -95,10 +97,11 @@ public class RecoveryManagerFlushedTest
     /* test that commit logs do not replay flushed data */
     public void testWithFlush() throws Exception
     {
-        // Flush everything that may be in the commit log now to start fresh
-        Single.merge(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
-        Single.merge(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
+        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
+        // Flush everything that may be in the commit log now to start fresh
+        Single.concat(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).flush()).blockingLast();
+        Single.concat(Keyspace.open(SchemaConstants.SCHEMA_KEYSPACE_NAME).flush()).blockingLast();
 
         CompactionManager.instance.disableAutoCompaction();
 

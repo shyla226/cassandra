@@ -20,6 +20,8 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
 
+import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -46,19 +48,22 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
      * @param size total size of mutation (overhead + serialized size)
      * @return the provided Allocation object
      */
-    public CommitLogSegment.Allocation allocate(Mutation mutation, int size)
+    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size)
     {
-        CommitLogSegment segment = allocatingFrom();
+        return Single.defer(() -> {
+            CommitLogSegment segment = allocatingFrom();
 
-        CommitLogSegment.Allocation alloc;
-        while ( null == (alloc = segment.allocate(mutation, size)) )
-        {
-            // failed to allocate, so move to a new segment with enough room
-            advanceAllocatingFrom(segment);
-            segment = allocatingFrom();
-        }
+            CommitLogSegment.Allocation alloc;
+            while ( null == (alloc = segment.allocate(mutation, size)) )
+            {
+                // failed to allocate, so move to a new segment with enough room
+                advanceAllocatingFrom(segment);
+                segment = allocatingFrom();
+            }
 
-        return alloc;
+            return Single.just(alloc);
+        }).subscribeOn(Schedulers.io());
+
     }
 
     /**

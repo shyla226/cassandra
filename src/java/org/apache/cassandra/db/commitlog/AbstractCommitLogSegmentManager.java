@@ -188,7 +188,7 @@ public abstract class AbstractCommitLogSegmentManager
     /**
      * Allocate a segment within this CLSM. Should either succeed or throw.
      */
-    public abstract Allocation allocate(Mutation mutation, int size);
+    public abstract Single<Allocation> allocate(Mutation mutation, int size);
 
     /**
      * The recovery and replay process replays mutations into memtables and flushes them to disk. Individual CLSM

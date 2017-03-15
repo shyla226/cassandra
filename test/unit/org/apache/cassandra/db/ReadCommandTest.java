@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -195,31 +196,31 @@ public class ReadCommandTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF3);
 
-        String[][][] groups = new String[][][] {
-            new String[][] {
-                new String[] { "1", "key1", "aa", "a" }, // "1" indicates to create the data, "-1" to delete the row
-                new String[] { "1", "key2", "bb", "b" },
-                new String[] { "1", "key3", "cc", "c" }
-            },
-            new String[][] {
-                new String[] { "1", "key3", "dd", "d" },
-                new String[] { "1", "key2", "ee", "e" },
-                new String[] { "1", "key1", "ff", "f" }
-            },
-            new String[][] {
-                new String[] { "1", "key6", "aa", "a" },
-                new String[] { "1", "key5", "bb", "b" },
-                new String[] { "1", "key4", "cc", "c" }
-            },
-            new String[][] {
-                new String[] { "-1", "key6", "aa", "a" },
-                new String[] { "-1", "key2", "bb", "b" }
-            }
+        String[][][] groups = new String[][][]{
+        new String[][]{
+        new String[]{ "1", "key1", "aa", "a" }, // "1" indicates to create the data, "-1" to delete the row
+        new String[]{ "1", "key2", "bb", "b" },
+        new String[]{ "1", "key3", "cc", "c" }
+        },
+        new String[][]{
+        new String[]{ "1", "key3", "dd", "d" },
+        new String[]{ "1", "key2", "ee", "e" },
+        new String[]{ "1", "key1", "ff", "f" }
+        },
+        new String[][]{
+        new String[]{ "1", "key6", "aa", "a" },
+        new String[]{ "1", "key5", "bb", "b" },
+        new String[]{ "1", "key4", "cc", "c" }
+        },
+        new String[][]{
+        new String[]{ "-1", "key6", "aa", "a" },
+        new String[]{ "-1", "key2", "bb", "b" }
+        }
         };
 
         // Given the data above, when the keys are sorted and the deletions removed, we should
         // get these clustering rows in this order
-        Set<String> expectedRows = Sets.newHashSet("col=aa", "col=ff", "col=ee", "col=cc", "col=dd", "col=cc", "col=bb");
+        List<String> expectedRows = Lists.newArrayList("col=aa", "col=ff", "col=ee", "col=cc", "col=dd", "col=cc", "col=bb");
 
         List<ByteBuffer> buffers = new ArrayList<>(groups.length);
         int nowInSeconds = FBUtilities.nowInSeconds();
@@ -281,25 +282,25 @@ public class ReadCommandTest
             }
         }
 
-        try(PartitionIterator partitionIterator = UnfilteredPartitionIterators.mergeAndFilter(iterators,
-                                                                                          nowInSeconds,
-                                                                                          new UnfilteredPartitionIterators.MergeListener()
-        {
-            public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
-            {
-                return null;
-            }
+        try (PartitionIterator partitionIterator = UnfilteredPartitionIterators.mergeAndFilter(iterators,
+                                                                                               nowInSeconds,
+                                                                                               new UnfilteredPartitionIterators.MergeListener()
+                                                                                               {
+                                                                                                   public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
+                                                                                                   {
+                                                                                                       return null;
+                                                                                                   }
 
-            public void close()
-            {
+                                                                                                   public void close()
+                                                                                                   {
 
-            }
+                                                                                                   }
 
-            public boolean callOnTrivialMerge()
-            {
-                return false;
-            }
-        }))
+                                                                                                   public boolean callOnTrivialMerge()
+                                                                                                   {
+                                                                                                       return false;
+                                                                                                   }
+                                                                                               }))
         {
 
             int i = 0;
@@ -307,10 +308,11 @@ public class ReadCommandTest
             while (partitionIterator.hasNext())
             {
                 numPartitions++;
-                try(RowIterator rowIterator = partitionIterator.next())
+                try (RowIterator rowIterator = partitionIterator.next())
                 {
                     while (rowIterator.hasNext())
                     {
+                        i++;
                         Row row = rowIterator.next();
                         assertTrue(expectedRows.contains(row.clustering().toString(cfs.metadata())));
                         //System.out.print(row.toString(cfs.metadata, true));
