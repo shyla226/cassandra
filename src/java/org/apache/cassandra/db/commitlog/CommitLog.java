@@ -285,7 +285,7 @@ public class CommitLog implements CommitLogMBean
                                                   updateChecksum(checksum, buffer, buffer.position() - size, size);
                                                   buffer.putInt((int) checksum.getValue());
                                               }
-                                              catch (IOException e)
+                                              catch (Exception e)
                                               {
                                                   return Single.error(new FSWriteError(e, alloc.getSegment().getPath()));
                                               }
@@ -294,7 +294,7 @@ public class CommitLog implements CommitLogMBean
                                                   alloc.markWritten();
                                               }
 
-                                              return executor.finishWriteFor(alloc).toSingle(() -> alloc.getCommitLogPosition());
+                                              return executor.finishWriteFor(alloc).toSingle(alloc::getCommitLogPosition);
                                           });
         }
         catch (IOException e)
