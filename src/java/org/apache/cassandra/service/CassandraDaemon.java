@@ -197,8 +197,8 @@ public class CassandraDaemon
      */
     public void initializeTPC()
     {
-        workerGroup = NativeTransportService.makeWorkerGroup();
-        NettyRxScheduler.register(workerGroup);
+        workerGroup = NativeTransportService.eventLoopGroup;
+        NettyRxScheduler.register();
     }
 
     /**
@@ -219,8 +219,6 @@ public class CassandraDaemon
         Mx4jTool.maybeLoad();
 
         ThreadAwareSecurityManager.install();
-
-        NettyRxScheduler.initRx();
 
         logSystemInfo();
 
@@ -555,9 +553,9 @@ public class CassandraDaemon
         // Do not put any references to DatabaseDescriptor above the forceStaticInitialization call.
         try
         {
-            initializeTPC();
-
             applyConfig();
+
+            initializeTPC();
 
             try
             {

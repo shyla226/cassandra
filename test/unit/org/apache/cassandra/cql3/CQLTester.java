@@ -177,10 +177,8 @@ public abstract class CQLTester
         DatabaseDescriptor.daemonInitialization();
 
         //Required early for TPC
-        workerGroup = NativeTransportService.makeWorkerGroup();
-        NettyRxScheduler.register(workerGroup);
-
-        NettyRxScheduler.initRx();
+        workerGroup = NativeTransportService.eventLoopGroup;
+        NettyRxScheduler.register();
 
         // Cleanup first
         try
@@ -207,7 +205,6 @@ public abstract class CQLTester
         SystemKeyspace.persistLocalMetadata();
         isServerPrepared = true;
 
-        //Required for TPC
         requireNetwork(false);
 
         CassandraDaemon d = new CassandraDaemon();

@@ -20,18 +20,13 @@ package org.apache.cassandra.io.sstable;
 import java.io.*;
 
 import io.reactivex.Flowable;
-import io.reactivex.Observable;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.reactivestreams.Subscription;
 
 public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterator>, UnfilteredRowIterator
 {
@@ -59,6 +54,7 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         this.shouldClose = shouldClose;
     }
 
+    @SuppressWarnings("resource") // file closed on IOException or by SSTableIdentityIterator
     public static SSTableIdentityIterator create(SSTableReader sstable, long partitionStartPosition, DecoratedKey key)
     {
         FileDataInput file = sstable.getFileDataInput(partitionStartPosition);
@@ -72,7 +68,9 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
         catch (IOException e)
         {
             sstable.markSuspect();
-            throw new CorruptSSTableException(e, file.getPath());
+            String filePath = file.getPath();
+            FileUtils.closeQuietly(file);
+            throw new CorruptSSTableException(e, filePath);
         }
         return create(sstable, file, key, true);
     }

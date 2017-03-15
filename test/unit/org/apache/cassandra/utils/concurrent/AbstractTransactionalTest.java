@@ -18,20 +18,23 @@
 */
 package org.apache.cassandra.utils.concurrent;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 @Ignore
 public abstract class AbstractTransactionalTest
 {
     @BeforeClass
-    public static void setupDD()
+    public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     protected abstract TestableTransaction newTest() throws Exception;

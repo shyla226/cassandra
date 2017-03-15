@@ -42,6 +42,7 @@ import static org.apache.cassandra.concurrent.NettyRxScheduler.NUM_NETTY_THREADS
 public class NativeTransportService
 {
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
+    public static final EventLoopGroup eventLoopGroup = makeWorkerGroup();
 
     private List<Server> servers = Collections.emptyList();
 
@@ -65,7 +66,7 @@ public class NativeTransportService
         this.nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 
-    public static EventLoopGroup makeWorkerGroup()
+    private static EventLoopGroup makeWorkerGroup()
     {
         if (useEpoll())
         {

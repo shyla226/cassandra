@@ -44,7 +44,7 @@ public class NativeTransportServiceTest
     public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
-        workerGroup = NativeTransportService.makeWorkerGroup();
+        workerGroup = NativeTransportService.eventLoopGroup;
     }
 
     @After

@@ -46,8 +46,8 @@ public class EmbeddedCassandraService
     public void start() throws IOException
     {
         cassandraDaemon = CassandraDaemon.instance;
-        cassandraDaemon.initializeTPC();
         cassandraDaemon.applyConfig();
+        cassandraDaemon.initializeTPC();
         cassandraDaemon.init(null);
         cassandraDaemon.start();
     }

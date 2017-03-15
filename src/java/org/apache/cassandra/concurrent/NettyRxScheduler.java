@@ -27,6 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -58,6 +59,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
+import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -95,6 +97,10 @@ public class NettyRxScheduler extends Scheduler
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
+
+    // set to true once the Netty event loop group is registered, this should only happen once per JVM
+    // but unit tests may try to register multiple times if they are run without forking per test class
+    private final static AtomicBoolean nettyEventGroupRegistered = new AtomicBoolean(false);
 
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
@@ -156,8 +162,12 @@ public class NettyRxScheduler extends Scheduler
         return localNettyEventLoop.get();
     }
 
-    public static void register(EventLoopGroup workerGroup)
+    public static void register()
     {
+        if (!nettyEventGroupRegistered.compareAndSet(false, true))
+            return; // this should only happen if unit tests are run without forking a JVM per test class, TODO change into an assertion?
+
+        EventLoopGroup workerGroup = NativeTransportService.eventLoopGroup;
         CountDownLatch ready = new CountDownLatch(NUM_NETTY_THREADS);
 
         for (int i = 0; i < NUM_NETTY_THREADS; i++)
@@ -173,6 +183,7 @@ public class NettyRxScheduler extends Scheduler
         }
 
         Uninterruptibles.awaitUninterruptibly(ready);
+        initRx();
     }
 
     public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
@@ -474,7 +485,7 @@ public class NettyRxScheduler extends Scheduler
         }
     }
 
-    public static void initRx()
+    private static void initRx()
     {
         final Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
