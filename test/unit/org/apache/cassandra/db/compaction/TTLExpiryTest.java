@@ -82,7 +82,7 @@ public class TTLExpiryTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore("Standard1");
         cfs.disableAutoCompaction();
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(0).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(0).build(), true).blockingAwait();
         String key = "ttl";
         new RowUpdateBuilder(cfs.metadata(), 1L, 1, key)
                     .add("col1", ByteBufferUtil.EMPTY_BYTE_BUFFER)
@@ -163,7 +163,7 @@ public class TTLExpiryTest
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
         // To reproduce #10944, we need our gcBefore to be equal to the locaDeletionTime. A gcGrace of 1 will (almost always) give us that.
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(force10944Bug ? 1 : 0).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(force10944Bug ? 1 : 0).build(), true).blockingAwait();
         long timestamp = System.currentTimeMillis();
         String key = "ttl";
         new RowUpdateBuilder(cfs.metadata(), timestamp, 1, key)
@@ -211,7 +211,7 @@ public class TTLExpiryTest
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore("Standard1");
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(0).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(0).build(), true).blockingAwait();
         long timestamp = System.currentTimeMillis();
         String key = "ttl";
         new RowUpdateBuilder(cfs.metadata(), timestamp, 1, key)
@@ -259,7 +259,7 @@ public class TTLExpiryTest
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore("Standard1");
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(0).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(0).build(), true).blockingAwait();
 
         new RowUpdateBuilder(cfs.metadata(), System.currentTimeMillis(), "test")
                 .noRowMarker()

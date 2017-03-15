@@ -121,7 +121,7 @@ public class TableBackedCustomIndex implements Index
     {
         this.metadata = indexDef;
         this.indexCfm = buildIndexCFMetadata();
-        MigrationManager.announceNewTable(this.indexCfm, true);
+        MigrationManager.announceNewTable(this.indexCfm, true).blockingAwait();
         indexCfs = Keyspace.openAndGetStore(this.indexCfm);
     }
 

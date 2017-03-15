@@ -334,7 +334,7 @@ public class SchemaLoader
     {
         for (KeyspaceMetadata ksm : schema)
             for (TableMetadata cfm : ksm.tablesAndViews())
-                MigrationManager.announceTableUpdate(cfm.unbuild().compression(CompressionParams.snappy()).build(), true);
+                MigrationManager.announceTableUpdate(cfm.unbuild().compression(CompressionParams.snappy()).build(), true).blockingAwait();
     }
 
     public static TableMetadata.Builder counterCFMD(String ksName, String cfName)

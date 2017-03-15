@@ -27,6 +27,10 @@ import java.lang.management.RuntimeMXBean;
 import io.reactivex.Completable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.reactivex.internal.schedulers.ImmediateThinScheduler;
+import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -384,7 +388,8 @@ public class MigrationManager
 
         if (announceLocally)
             return Completable.fromRunnable(() -> Schema.instance.merge(mutations))
-                              .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+                              .subscribeOn(NettyRxScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                           ImmediateThinScheduler.INSTANCE);
         else
             return announce(mutations);
     }

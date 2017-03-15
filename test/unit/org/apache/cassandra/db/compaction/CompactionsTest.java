@@ -87,10 +87,10 @@ public class CompactionsTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_DENSE1);
         store.clearUnsafe();
-        MigrationManager.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).build(), true);
-
         // disable compaction while flushing
         store.disableAutoCompaction();
+
+        MigrationManager.announceTableUpdate(store.metadata().unbuild().gcGraceSeconds(1).build(), true).blockingAwait();
 
         long timestamp = populate(KEYSPACE1, CF_DENSE1, 0, 9, 3); //ttl=3s
 

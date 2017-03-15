@@ -30,6 +30,7 @@ import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Striped;
 
 import io.reactivex.Completable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -121,6 +122,8 @@ public class CounterMutation implements IMutation
 
     private Single<Mutation> applyCounterMutation(long startTime)
     {
+        Scheduler scheduler = NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false);
+
         return Single.defer(() ->
         {
             Keyspace keyspace = Keyspace.open(getKeyspaceName());
@@ -146,8 +149,11 @@ public class CounterMutation implements IMutation
 
                 Completable completable = result.applyAsync();
                 completable = completable.doFinally(() -> {
-                    for (Lock lock : locks)
-                        lock.unlock();
+                    scheduler.scheduleDirect(() ->
+                                             {
+                                                 for (Lock lock : locks)
+                                                     lock.unlock();
+                                             });
                 });
                 return completable.toSingleDefault(result);
             }
@@ -158,7 +164,7 @@ public class CounterMutation implements IMutation
                     lock.unlock();
                 throw t;
             }
-        }).subscribeOn(NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false));
+        }).subscribeOn(scheduler);
     }
 
     public void apply()

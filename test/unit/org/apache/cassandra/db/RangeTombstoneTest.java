@@ -315,7 +315,7 @@ public class RangeTombstoneTest
     {
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true).blockingAwait();
 
         String key = "7810";
 
@@ -338,7 +338,7 @@ public class RangeTombstoneTest
     {
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true).blockingAwait();
 
         String key = "7808_1";
         UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0);
@@ -358,7 +358,7 @@ public class RangeTombstoneTest
     {
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true);
+        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true).blockingAwait();
 
         String key = "7808_2";
         UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0);
@@ -476,7 +476,7 @@ public class RangeTombstoneTest
                 current.unbuild()
                        .indexes(current.indexes.with(indexDef))
                        .build();
-            MigrationManager.announceTableUpdate(updated, true);
+            MigrationManager.announceTableUpdate(updated, true).blockingAwait();
         }
 
         Future<?> rebuild = cfs.indexManager.addIndex(indexDef);
@@ -582,7 +582,7 @@ public class RangeTombstoneTest
                 current.unbuild()
                        .indexes(current.indexes.with(indexDef))
                        .build();
-            MigrationManager.announceTableUpdate(updated, true);
+            MigrationManager.announceTableUpdate(updated, true).blockingAwait();
         }
 
         Future<?> rebuild = cfs.indexManager.addIndex(indexDef);

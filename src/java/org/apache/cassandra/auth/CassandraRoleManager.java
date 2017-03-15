@@ -347,7 +347,7 @@ public class CassandraRoleManager implements IRoleManager
                                                      AuthKeyspace.ROLES,
                                                      DEFAULT_SUPERUSER_NAME,
                                                      escape(hashpw(DEFAULT_SUPERUSER_PASSWORD))),
-                                       consistencyForRole(DEFAULT_SUPERUSER_NAME));
+                                       consistencyForRole(DEFAULT_SUPERUSER_NAME)).blockingGet();
                 logger.info("Created default superuser role '{}'", DEFAULT_SUPERUSER_NAME);
             }
         }
@@ -382,7 +382,7 @@ public class CassandraRoleManager implements IRoleManager
                 }
                 catch (Exception e)
                 {
-                    logger.info("Setup task failed with error, rescheduling");
+                    logger.info("Setup task failed with error, rescheduling", e);
                     scheduleSetupTask(setupTask);
                 }
             }
@@ -427,7 +427,7 @@ public class CassandraRoleManager implements IRoleManager
                                                          AuthKeyspace.ROLES,
                                                          row.getString("salted_hash"),
                                                          row.getString("username")),
-                                           consistencyForRole(row.getString("username")));
+                                           consistencyForRole(row.getString("username"))).blockingGet();
                 }
                 logger.info("Completed conversion of legacy credentials");
             }

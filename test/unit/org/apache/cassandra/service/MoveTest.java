@@ -153,7 +153,7 @@ public class MoveTest
                                                                                     .addPartitionKeyColumn("key", BytesType.instance)
                                                                                     .build()));
 
-        MigrationManager.announceNewKeyspace(keyspace);
+        MigrationManager.announceNewKeyspace(keyspace).blockingAwait();
     }
 
     private static Object[] configOptions(Integer[] replicas)

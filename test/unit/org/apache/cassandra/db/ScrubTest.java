@@ -26,6 +26,7 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -140,7 +141,7 @@ public class ScrubTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(COUNTER_CF);
         cfs.clearUnsafe();
 
-        fillCounterCF(cfs, numPartitions);
+        String[] tokens = fillCounterCF(cfs, numPartitions);
 
         assertOrderedAll(cfs, numPartitions);
 
@@ -149,7 +150,7 @@ public class ScrubTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
         //make sure to override at most 1 chunk when compression is enabled
-        overrideWithGarbage(sstable, ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("1"));
+        overrideWithGarbage(sstable, ByteBufferUtil.bytes(tokens[0]), ByteBufferUtil.bytes(tokens[1]));
 
         // with skipCorrupted == false, the scrub is expected to fail
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(Arrays.asList(sstable), OperationType.SCRUB);
@@ -313,10 +314,6 @@ public class ScrubTest
     @Test
     public void testScrubOutOfOrder() throws Exception
     {
-        // This test assumes ByteOrderPartitioner to create out-of-order SSTable
-        IPartitioner oldPartitioner = DatabaseDescriptor.getPartitioner();
-        DatabaseDescriptor.setPartitionerUnsafe(new ByteOrderedPartitioner());
-
         // Create out-of-order SSTable
         File tempDir = File.createTempFile("ScrubTest.testScrubOutOfOrder", "").getParentFile();
         // create ks/cf directory
@@ -383,8 +380,6 @@ public class ScrubTest
         finally
         {
             FileUtils.deleteRecursive(tempDataDir);
-            // reset partitioner
-            DatabaseDescriptor.setPartitionerUnsafe(oldPartitioner);
         }
     }
 
@@ -486,23 +481,30 @@ public class ScrubTest
         cfs.forceBlockingFlush();
     }
 
-    protected void fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
+    protected String[] fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
     {
+        SortedSet<String> tokenSorted = Sets.newTreeSet(Comparator.comparing(a -> cfs.getPartitioner()
+                                                                                     .decorateKey(ByteBufferUtil.bytes(a))));
+
         for (int i = 0; i < partitionsPerSSTable; i++)
         {
             PartitionUpdate update = UpdateBuilder.create(cfs.metadata(), String.valueOf(i))
                                                   .newRow("r1").add("val", 100L)
                                                   .build();
+            tokenSorted.add(String.valueOf(i));
+
             new CounterMutation(new Mutation(update), ConsistencyLevel.ONE).apply();
         }
 
         cfs.forceBlockingFlush();
+
+        return tokenSorted.toArray(new String[]{});
     }
 
     @Test
     public void testScrubColumnValidation() throws InterruptedException, RequestExecutionException, ExecutionException
     {
-        QueryProcessor.process(String.format("CREATE TABLE \"%s\".test_compact_static_columns (a bigint, b timeuuid, c boolean static, d text, PRIMARY KEY (a, b))", KEYSPACE), ConsistencyLevel.ONE);
+        QueryProcessor.process(String.format("CREATE TABLE \"%s\".test_compact_static_columns (a bigint, b timeuuid, c boolean static, d text, PRIMARY KEY (a, b))", KEYSPACE), ConsistencyLevel.ONE).blockingGet();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("test_compact_static_columns");
@@ -511,7 +513,7 @@ public class ScrubTest
         cfs.forceBlockingFlush();
         CompactionManager.instance.performScrub(cfs, false, true, 2);
 
-        QueryProcessor.process("CREATE TABLE \"Keyspace1\".test_scrub_validation (a text primary key, b int)", ConsistencyLevel.ONE);
+        QueryProcessor.process("CREATE TABLE \"Keyspace1\".test_scrub_validation (a text primary key, b int)", ConsistencyLevel.ONE).blockingGet();
         ColumnFamilyStore cfs2 = keyspace.getColumnFamilyStore("test_scrub_validation");
 
         new Mutation(UpdateBuilder.create(cfs2.metadata(), "key").newRow().add("b", LongType.instance.decompose(1L)).build()).apply();
@@ -527,7 +529,7 @@ public class ScrubTest
     @Test
     public void testValidationCompactStorage() throws Exception
     {
-        QueryProcessor.process(String.format("CREATE TABLE \"%s\".test_compact_dynamic_columns (a int, b text, c text, PRIMARY KEY (a, b)) WITH COMPACT STORAGE", KEYSPACE), ConsistencyLevel.ONE);
+        QueryProcessor.process(String.format("CREATE TABLE \"%s\".test_compact_dynamic_columns (a int, b text, c text, PRIMARY KEY (a, b)) WITH COMPACT STORAGE", KEYSPACE), ConsistencyLevel.ONE).blockingGet();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("test_compact_dynamic_columns");
@@ -680,8 +682,7 @@ public class ScrubTest
     @Test
     public void testFilterOutDuplicates() throws Exception
     {
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        QueryProcessor.process(String.format("CREATE TABLE \"%s\".cf_with_duplicates_3_0 (a int, b int, c int, PRIMARY KEY (a, b))", KEYSPACE), ConsistencyLevel.ONE);
+        QueryProcessor.process(String.format("CREATE TABLE \"%s\".cf_with_duplicates_3_0 (a int, b int, c int, PRIMARY KEY (a, b))", KEYSPACE), ConsistencyLevel.ONE).blockingGet();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("cf_with_duplicates_3_0");
