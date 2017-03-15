@@ -25,6 +25,7 @@ import java.net.UnknownHostException;
 import java.util.EnumMap;
 import java.util.Map;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -51,6 +52,7 @@ public class EC2SnitchTest
     public static void setup() throws Exception
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
         SchemaLoader.mkdirs();
         SchemaLoader.cleanup();
         Keyspace.setInitialized();
