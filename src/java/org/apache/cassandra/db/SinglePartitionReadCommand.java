@@ -23,7 +23,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 import io.reactivex.*;
@@ -43,12 +42,10 @@ import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
@@ -540,8 +537,8 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         /*
          * We have 2 main strategies:
-         *   1) We query memtables and sstables simulateneously. This is our most generic strategy and the one we use
-         *      unless we have a names filter that we know we can optimize futher.
+         *   1) We query memtables and sstables simultaneously. This is our most generic strategy and the one we use
+         *      unless we have a names filter that we know we can optimize further.
          *   2) If we have a name filter (so we query specific rows), we can make a bet: that all column for all queried row
          *      will have data in the most recent sstable(s), thus saving us from reading older ones. This does imply we
          *      have a way to guarantee we have all the data for what is queried, which is only possible for name queries
@@ -588,6 +585,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
             long mostRecentPartitionTombstone = Long.MIN_VALUE;
             int nonIntersectingSSTables = 0;
+            int ssTablesIterated = 0;
             List<SSTableReader> skippedSSTablesWithTombstones = null;
 
             for (SSTableReader sstable : view.sstables)
@@ -619,6 +617,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
                 iterators.add(iter);
+                ssTablesIterated++;
                 mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
                                                         iter.header.partitionLevelDeletion.markedForDeleteAt());
             }
@@ -639,6 +638,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                         oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
                     iterators.add(iter);
+                    ssTablesIterated++;
                     includedDueToTombstones++;
                 }
             }
@@ -649,11 +649,15 @@ public class SinglePartitionReadCommand extends ReadCommand
             if (iterators.isEmpty())
                 return FlowablePartitions.empty(cfs.metadata(), partitionKey(), filter.isReversed());
 
-
             StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
-            FlowableUnfilteredPartition result = withSSTablesIterated(iterators, cfs.metric);
 
-            return result;
+            FlowableUnfilteredPartition merged = FlowablePartitions.merge(iterators, nowInSec());
+
+            DecoratedKey key = merged.header.partitionKey;
+            cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(merged.header.partitionKey.getKey(), key.hashCode(), 1);
+            cfs.metric.updateSSTableIterated(ssTablesIterated);
+
+            return merged;
         }
     }
 
@@ -669,15 +673,15 @@ public class SinglePartitionReadCommand extends ReadCommand
         return clusteringIndexFilter().shouldInclude(sstable);
     }
 
-    private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs, final SSTableReader sstable)
-    {
-        return StorageHook.instance.makeRowIteratorWithLowerBound(cfs,
-                                                                  partitionKey(),
-                                                                  sstable,
-                                                                  clusteringIndexFilter(),
-                                                                  columnFilter());
-
-    }
+//    private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs, final SSTableReader sstable)
+//    {
+//        return StorageHook.instance.makeRowIteratorWithLowerBound(cfs,
+//                                                                  partitionKey(),
+//                                                                  sstable,
+//                                                                  clusteringIndexFilter(),
+//                                                                  columnFilter());
+//
+//    }
 
     private FlowableUnfilteredPartition makeFlowable(ColumnFamilyStore cfs, final SSTableReader sstable)
     {
@@ -685,17 +689,14 @@ public class SinglePartitionReadCommand extends ReadCommand
         return sstable.flowable(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed());
     }
 
-    /**
-     * Return a wrapped iterator that when closed will update the sstables iterated and READ sample metrics.
-     * Note that we cannot use the Transformations framework because they greedily get the static row, which
-     * would cause all iterators to be initialized and hence all sstables to be accessed.
-     */
-    private FlowableUnfilteredPartition withSSTablesIterated(List<FlowableUnfilteredPartition> iterators,
-                                                             TableMetrics metrics)
-    {
-        @SuppressWarnings("resource") //  Closed through the closing of the result of the caller method.
-        FlowableUnfilteredPartition merged = FlowablePartitions.merge(iterators, nowInSec());
-
+//    /**
+//     * Return a wrapped iterator that when closed will update the sstables iterated and READ sample metrics.
+//     * Note that we cannot use the Transformations framework because they greedily get the static row, which
+//     * would cause all iterators to be initialized and hence all sstables to be accessed.
+//     */
+//    private FlowableUnfilteredPartition withSSTablesIterated(List<FlowableUnfilteredPartition> iterators,
+//                                                             TableMetrics metrics)
+//    {
 //        if(!merged.isEmpty())
 //        {
 //            DecoratedKey key = merged.partitionKey();
@@ -712,8 +713,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 //            //metrics.updateSSTableIterated(sstablesIterated);
 //            Tracing.trace("Merged data from memtables and {} sstables", sstablesIterated);
 //        });
-        return merged;
-    }
+//        return Transformation.apply(merged, new UpdateSstablesIterated());
+//    }
 
     private boolean queriesMulticellType(TableMetadata table)
     {

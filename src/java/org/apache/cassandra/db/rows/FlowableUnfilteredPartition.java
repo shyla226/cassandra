@@ -21,9 +21,9 @@ import io.reactivex.Flowable;
 import io.reactivex.Single;
 
 /**
- * A partition container providing access to the rows of the partition together with deletion informations.
+ * A partition container providing access to the rows of the partition together with deletion information.
  * <p>
- * The supplied {@code PartitionHeader} contains a few partition top-level informations.
+ * The supplied {@code PartitionHeader} contains partition top-level information.
  * The content is a flowable stream of {@code Unfiltered}, that is of either {@code Row} or {@code RangeTombstoneMarker}.
  * An unfiltered partition <b>must</b> provide the following guarantees:
  *   1. the returned {@code Unfiltered} must be in clustering order, or in reverse clustering
