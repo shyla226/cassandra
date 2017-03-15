@@ -456,7 +456,7 @@ public class BufferedRandomAccessFileTest
 
         r.close(); // closing to test read after close
 
-        expectException(() -> r.read(), NullPointerException.class);
+        expectException(() -> r.read(), AssertionError.class);
 
         //Used to throw ClosedChannelException, but now that it extends BDOSP it just NPEs on the buffer
         //Writing to a BufferedOutputStream that is closed generates no error

@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import static org.junit.Assert.*;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -56,6 +57,7 @@ public class RandomAccessReaderTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     private static final class Parameters

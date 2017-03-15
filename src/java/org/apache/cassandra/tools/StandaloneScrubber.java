@@ -28,6 +28,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.commons.cli.*;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -55,6 +56,7 @@ public class StandaloneScrubber
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
+        NettyRxScheduler.register();
 
         try
         {
