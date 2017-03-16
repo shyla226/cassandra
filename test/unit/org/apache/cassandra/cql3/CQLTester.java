@@ -1382,7 +1382,7 @@ public abstract class CQLTester
     /**
      * Sorts a list of int32 keys by their Murmur3Partitioner token order.
      */
-    protected static List<Integer> partitionerSortedKeys(List<Integer> unsortedKeys)
+    public static List<Integer> partitionerSortedKeys(List<Integer> unsortedKeys)
     {
         List<DecoratedKey> decoratedKeys = unsortedKeys.stream().map(i -> Murmur3Partitioner.instance.decorateKey(Int32Type.instance.getSerializer().serialize(i))).collect(Collectors.toList());
         Collections.sort(decoratedKeys, DecoratedKey.comparator);

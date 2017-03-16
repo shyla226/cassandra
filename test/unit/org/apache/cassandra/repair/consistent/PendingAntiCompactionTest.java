@@ -19,19 +19,16 @@
 package org.apache.cassandra.repair.consistent;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -91,11 +88,17 @@ public class PendingAntiCompactionTest
 
     private void makeSSTables(int num)
     {
+        ArrayList<Integer> unsortedKeys = new ArrayList<>(num * 2);
+        for (int i = 0; i < num * 2; i++)
+            unsortedKeys.add(i);
+
+        List<Integer> sortedKeys = CQLTester.partitionerSortedKeys(unsortedKeys);
         for (int i = 0; i < num; i++)
         {
-            int val = i * 2;  // multiplied to prevent ranges from overlapping
+            int val = sortedKeys.get(i * 2);  // multiplied to prevent ranges from overlapping
+            int val2 = sortedKeys.get((i * 2) + 1);
             QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), val, val);
-            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), val+1, val+1);
+            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), val2, val2);
             cfs.forceBlockingFlush();
         }
         Assert.assertEquals(num, cfs.getLiveSSTables().size());
@@ -124,24 +127,23 @@ public class PendingAntiCompactionTest
     @Test
     public void successCase() throws Exception
     {
-        Assert.assertSame(ByteOrderedPartitioner.class, DatabaseDescriptor.getPartitioner().getClass());
         cfs.disableAutoCompaction();
+
+        List<Integer> sortedKeys = CQLTester.partitionerSortedKeys(Arrays.asList(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
 
         // create 2 sstables, one that will be split, and another that will be moved
         for (int i = 0; i < 8; i++)
-        {
-            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), i, i);
-        }
+            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), sortedKeys.get(i), sortedKeys.get(i));
         cfs.forceBlockingFlush();
+
         for (int i = 8; i < 12; i++)
-        {
-            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), i, i);
-        }
+            QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (?, ?)", ks, tbl), sortedKeys.get(i), sortedKeys.get(i));
         cfs.forceBlockingFlush();
+
         Assert.assertEquals(2, cfs.getLiveSSTables().size());
 
-        Token left = ByteOrderedPartitioner.instance.getToken(ByteBufferUtil.bytes((int) 6));
-        Token right = ByteOrderedPartitioner.instance.getToken(ByteBufferUtil.bytes((int) 16));
+        Token left = Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(6)));
+        Token right = Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(16)));
         Collection<Range<Token>> ranges = Collections.singleton(new Range<>(left, right));
 
         // create a session so the anti compaction can fine it
