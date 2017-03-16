@@ -37,7 +37,9 @@ public class CompositeHistogramTest
     private static final DecayingEstimatedHistogramTest.TestClock CLOCK = new DecayingEstimatedHistogramTest.TestClock();
     private static final int TEST_UPDATE_INTERVAL_MILLIS = 0; // zero ensures updates are performed on read
     private static final DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR =
-        DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS);
+        DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
+
+    private static final double DELTA = 1e-15; // precision for double comparisons
 
     @Test
     public void testSingleAggregation()
@@ -148,7 +150,8 @@ public class CompositeHistogramTest
 
         DecayingEstimatedHistogram.Reservoir reservoir = DecayingEstimatedHistogram.makeCompositeReservoir(considerZeroes,
                                                                                                            DEFAULT_MAX_TRACKABLE_VALUE,
-                                                                                                           TEST_UPDATE_INTERVAL_MILLIS);
+                                                                                                           TEST_UPDATE_INTERVAL_MILLIS,
+                                                                                                           CLOCK);
         CompositeHistogram compositeHistogram = new CompositeHistogram(reservoir);
         DecayingEstimatedHistogram controlHistogram = new DecayingEstimatedHistogram(considerZeroes,
                                                                                      DEFAULT_MAX_TRACKABLE_VALUE,
@@ -197,15 +200,15 @@ public class CompositeHistogramTest
 
         assertTrue(controlSnapshot.size() == aggregatedSnapshot.size());
         assertTrue(Arrays.equals(controlSnapshot.getValues(), aggregatedSnapshot.getValues()));
-        assertTrue(controlSnapshot.getMean() == aggregatedSnapshot.getMean());
-        assertTrue(controlSnapshot.getMin() == aggregatedSnapshot.getMin());
-        assertTrue(controlSnapshot.getMax() == aggregatedSnapshot.getMax());
-        assertTrue(controlSnapshot.getMedian() == aggregatedSnapshot.getMedian());
-        assertTrue(controlSnapshot.get75thPercentile() == aggregatedSnapshot.get75thPercentile());
-        assertTrue(controlSnapshot.get95thPercentile() == aggregatedSnapshot.get95thPercentile());
-        assertTrue(controlSnapshot.get98thPercentile() == aggregatedSnapshot.get98thPercentile());
-        assertTrue(controlSnapshot.get99thPercentile() == aggregatedSnapshot.get99thPercentile());
-        assertTrue(controlSnapshot.get999thPercentile() == aggregatedSnapshot.get999thPercentile());
+        assertEquals(controlSnapshot.getMean(), aggregatedSnapshot.getMean(), DELTA);
+        assertEquals(controlSnapshot.getMin(), aggregatedSnapshot.getMin());
+        assertEquals(controlSnapshot.getMax(), aggregatedSnapshot.getMax());
+        assertEquals(controlSnapshot.getMedian(), aggregatedSnapshot.getMedian(), DELTA);
+        assertEquals(controlSnapshot.get75thPercentile(), aggregatedSnapshot.get75thPercentile(), DELTA);
+        assertEquals(controlSnapshot.get95thPercentile(), aggregatedSnapshot.get95thPercentile(), DELTA);
+        assertEquals(controlSnapshot.get98thPercentile(), aggregatedSnapshot.get98thPercentile(), DELTA);
+        assertEquals(controlSnapshot.get99thPercentile(), aggregatedSnapshot.get99thPercentile(), DELTA);
+        assertEquals(controlSnapshot.get999thPercentile(), aggregatedSnapshot.get999thPercentile(), DELTA);
     }
 
     @Test(expected = UnsupportedOperationException.class)

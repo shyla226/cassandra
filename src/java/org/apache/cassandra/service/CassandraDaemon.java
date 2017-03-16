@@ -25,10 +25,8 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
@@ -170,9 +168,6 @@ public class CassandraDaemon
 
     static final CassandraDaemon instance = new CassandraDaemon();
 
-    /** The Netty worker group for TPC threads*/
-    private EventLoopGroup workerGroup;
-
     private NativeTransportService nativeTransportService;
     private JMXConnectorServer jmxServer;
 
@@ -197,7 +192,6 @@ public class CassandraDaemon
      */
     public void initializeTPC()
     {
-        workerGroup = NativeTransportService.eventLoopGroup;
         NettyRxScheduler.register();
     }
 
@@ -628,7 +622,7 @@ public class CassandraDaemon
         if (nativeTransportService == null)
             throw new IllegalStateException("setup() must be called first for CassandraDaemon");
         else
-            nativeTransportService.start(workerGroup);
+            nativeTransportService.start();
     }
 
     public void stopNativeTransport()

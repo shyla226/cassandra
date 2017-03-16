@@ -27,7 +27,6 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import io.netty.channel.EventLoopGroup;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
@@ -38,13 +37,10 @@ import static org.junit.Assert.assertTrue;
 
 public class NativeTransportServiceTest
 {
-    private static EventLoopGroup workerGroup;
-
     @BeforeClass
     public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
-        workerGroup = NativeTransportService.eventLoopGroup;
     }
 
     @After
@@ -67,9 +63,9 @@ public class NativeTransportServiceTest
     public void testIgnoresStartOnAlreadyStarted()
     {
         withService((NativeTransportService service) -> {
-            service.start(workerGroup);
-            service.start(workerGroup);
-            service.start(workerGroup);
+            service.start();
+            service.start();
+            service.start();
         });
     }
 
@@ -96,7 +92,7 @@ public class NativeTransportServiceTest
     @Test
     public void testConcurrentStarts()
     {
-        withService(service -> service.start(workerGroup), false, 20);
+        withService(service -> service.start(), false, 20);
     }
 
     @Test
@@ -133,7 +129,7 @@ public class NativeTransportServiceTest
 
         withService((NativeTransportService service) ->
                     {
-                        service.initialize(workerGroup);
+                        service.initialize();
                         assertEquals(1, service.getServers().size());
                         Server server = service.getServers().iterator().next();
                         assertTrue(server.useSSL);
@@ -150,7 +146,7 @@ public class NativeTransportServiceTest
 
         withService((NativeTransportService service) ->
                     {
-                        service.initialize(workerGroup);
+                        service.initialize();
                         assertEquals(1, service.getServers().size());
                         Server server = service.getServers().iterator().next();
                         assertTrue(server.useSSL);
@@ -167,7 +163,7 @@ public class NativeTransportServiceTest
 
         withService((NativeTransportService service) ->
                     {
-                        service.initialize(workerGroup);
+                        service.initialize();
                         assertEquals(2, service.getServers().size());
                         assertEquals(
                                     Sets.newHashSet(Arrays.asList(
@@ -192,7 +188,7 @@ public class NativeTransportServiceTest
         assertFalse(service.isRunning());
         if (start)
         {
-            service.start(workerGroup);
+            service.start();
             assertTrue(service.isRunning());
         }
         try

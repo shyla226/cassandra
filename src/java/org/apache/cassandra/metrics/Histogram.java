@@ -98,7 +98,7 @@ public interface Histogram extends Metric, Sampling, Counting, Composable<Histog
     public static Histogram make(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis, boolean isComposite)
     {
         return isComposite
-               ? new CompositeHistogram(DecayingEstimatedHistogram.makeCompositeReservoir(considerZeroes, maxTrackableValue, updateIntervalMillis))
+               ? new CompositeHistogram(DecayingEstimatedHistogram.makeCompositeReservoir(considerZeroes, maxTrackableValue, updateIntervalMillis, ApproximateClock.defaultClock()))
                : new DecayingEstimatedHistogram(considerZeroes, maxTrackableValue, updateIntervalMillis, ApproximateClock.defaultClock());
     }
 

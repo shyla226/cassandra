@@ -236,9 +236,8 @@ public class LongOpOrderTest
     public void testOrdering() throws InterruptedException
     {
         DatabaseDescriptor.daemonInitialization();
-        io.netty.channel.EventLoopGroup workerGroup = NativeTransportService.eventLoopGroup;
         NativeTransportService server = new NativeTransportService();
-        server.start(workerGroup);
+        server.start();
 
         errors.set(0);
         Thread.setDefaultUncaughtExceptionHandler(handler);

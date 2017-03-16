@@ -104,10 +104,10 @@ final class DecayingEstimatedHistogram implements Histogram
         this.recorder = new Recorder(bucketProperties, reservoir);
     }
 
-    static Reservoir makeCompositeReservoir(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis)
+    static Reservoir makeCompositeReservoir(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis, Clock clock)
     {
         return new ForwardDecayingReservoir(new BucketProperties(maxTrackableValue),
-                                            ApproximateClock.defaultClock(),
+                                            clock,
                                             considerZeroes,
                                             updateIntervalMillis,
                                             true);

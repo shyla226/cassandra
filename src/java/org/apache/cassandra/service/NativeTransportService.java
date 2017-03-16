@@ -89,7 +89,7 @@ public class NativeTransportService
      * Creates netty thread pools and event loops.
      */
     @VisibleForTesting
-    synchronized void initialize(EventLoopGroup workerGroup)
+    synchronized void initialize()
     {
         if (initialized)
             return;
@@ -101,7 +101,7 @@ public class NativeTransportService
             servers = new ArrayList<>(1);
 
             org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                                                                    .withEventLoopGroup(workerGroup)
+                                                                    .withEventLoopGroup(eventLoopGroup)
                                                                     .withHost(nativeAddr)
                                                                     .withPort(nativePort)
                                                                     .withSSL(false);
@@ -112,7 +112,7 @@ public class NativeTransportService
         {
 
             org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                    .withEventLoopGroup(workerGroup)
+                    .withEventLoopGroup(eventLoopGroup)
                     .withHost(nativeAddr);
 
             if (nativePort != nativePortSSL)
@@ -146,13 +146,12 @@ public class NativeTransportService
         initialized = true;
     }
 
-
     /**
      * Starts native transport servers.
      */
-    public void start(EventLoopGroup workerGroup)
+    public void start()
     {
-        initialize(workerGroup);
+        initialize();
 
         servers.forEach(Server::start);
     }

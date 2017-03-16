@@ -18,12 +18,23 @@
 
 package org.apache.cassandra.metrics;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static junit.framework.Assert.assertFalse;
 
 public class LatencyMetricsTest
 {
+    @BeforeClass
+    public static void setupClass()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
+    }
+
     /**
      * Test bitsets in a "real-world" environment, i.e., bloom filters
      */

@@ -22,12 +22,10 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,7 +33,6 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.*;
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -97,7 +94,6 @@ public abstract class CQLTester
     public static final String DATA_CENTER = "datacenter1";
     public static final String RACK1 = "rack1";
 
-    private static EventLoopGroup workerGroup;
     private static NativeTransportService server;
 
     protected static final int nativePort;
@@ -177,7 +173,6 @@ public abstract class CQLTester
         DatabaseDescriptor.daemonInitialization();
 
         //Required early for TPC
-        workerGroup = NativeTransportService.eventLoopGroup;
         NettyRxScheduler.register();
 
         // Cleanup first
@@ -204,12 +199,6 @@ public abstract class CQLTester
         Keyspace.setInitialized();
         SystemKeyspace.persistLocalMetadata();
         isServerPrepared = true;
-
-        requireNetwork(false);
-
-        CassandraDaemon d = new CassandraDaemon();
-        d.completeSetup();
-        StorageService.instance.registerDaemon(d);
     }
 
     public static void cleanupAndLeaveDirs() throws IOException
@@ -393,7 +382,6 @@ public abstract class CQLTester
             }
             return;
         }
-        assert workerGroup != null;
 
         SystemKeyspace.finishStartup();
         SystemKeyspace.persistLocalMetadata();
@@ -403,7 +391,7 @@ public abstract class CQLTester
         SchemaLoader.startGossiper();
 
         server = new NativeTransportService(nativeAddr, nativePort);
-        server.start(workerGroup);
+        server.start();
 
         if (initClientClusters)
         {
