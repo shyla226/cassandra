@@ -27,8 +27,11 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -74,17 +77,20 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
 
     public final IEndpointSnitch subsnitch;
 
+    @Nullable // may be null for testing
     private volatile ScheduledFuture<?> updateSchedular;
+
+    @Nullable // may be null for testing
     private volatile ScheduledFuture<?> resetSchedular;
 
     private static final double percentile = .9;
 
     public DynamicEndpointSnitch(IEndpointSnitch snitch)
     {
-        this(snitch, null);
+        this(snitch, null, true);
     }
 
-    public DynamicEndpointSnitch(IEndpointSnitch snitch, String instance)
+    public DynamicEndpointSnitch(IEndpointSnitch snitch, String instance, boolean useScheduler)
     {
         mbeanName = "org.apache.cassandra.db:type=DynamicEndpointSnitch";
         if (instance != null)
@@ -93,8 +99,12 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
 
         if (DatabaseDescriptor.isDaemonInitialized())
         {
-            updateSchedular = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::updateScores, dynamicUpdateInterval, dynamicUpdateInterval, TimeUnit.MILLISECONDS);
-            resetSchedular = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::reset, dynamicResetInterval, dynamicResetInterval, TimeUnit.MILLISECONDS);
+            if (useScheduler)
+            {
+                updateSchedular = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::updateScores, dynamicUpdateInterval, dynamicUpdateInterval, TimeUnit.MILLISECONDS);
+                resetSchedular = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::reset, dynamicResetInterval, dynamicResetInterval, TimeUnit.MILLISECONDS);
+            }
+
             registerMBean();
         }
     }
@@ -143,8 +153,11 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
 
     public void close()
     {
-        updateSchedular.cancel(false);
-        resetSchedular.cancel(false);
+        if (updateSchedular != null)
+            updateSchedular.cancel(false);
+
+        if (resetSchedular != null)
+            resetSchedular.cancel(false);
 
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
         try
@@ -271,7 +284,12 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         sample.update(latency);
     }
 
-    private void updateScores() // this is expensive
+    /**
+     * This is either called by the scheduler every dynamic_snitch_update_interval_in_ms milliseconds
+     * or directly by the unit tests.
+     */
+    @VisibleForTesting
+    void updateScores() // this is expensive
     {
         if (!StorageService.instance.isGossipActive())
             return;

@@ -95,8 +95,6 @@ final class DecayingEstimatedHistogram implements Histogram
      * (at the keyspace or global level). */
     private final Recorder recorder;
 
-    @VisibleForTesting
-    public static boolean forceImmediateAggregationForTesting = false;
 
 
     DecayingEstimatedHistogram(boolean considerZeroes, long maxTrackableValue, int updateTimeMillis, Clock clock)
@@ -362,12 +360,12 @@ final class DecayingEstimatedHistogram implements Histogram
         private volatile Snapshot snapshot;
 
         /** This is true when this is the reservoir of a composite histogram */
-        private boolean isComposite;
+        private final boolean isComposite;
 
         /** Composite reservoirs are scheduled eagerly, but single reservoir are
          * scheduled by the recorder.
          */
-        private AtomicBoolean scheduled;
+        private final AtomicBoolean scheduled;
 
         /**
          * This is set to true by the aggregating thread when at least one of the local buckets
@@ -438,7 +436,7 @@ final class DecayingEstimatedHistogram implements Histogram
          */
         void onReadAggregate()
         {
-            if (updateIntervalMillis <= 0 || forceImmediateAggregationForTesting)
+            if (updateIntervalMillis <= 0)
                 aggregate();
         }
 

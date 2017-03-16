@@ -22,14 +22,24 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class NativeAllocatorTest
 {
+
+    @BeforeClass
+    public static void setupClass()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
+    }
 
     @Test
     public void testBookKeeping() throws ExecutionException, InterruptedException
@@ -62,16 +72,17 @@ public class NativeAllocatorTest
                 }
             }));
             allocatorRef.set(allocator);
-            final Runnable markBlocking = new Runnable()
-            {
-
-                public void run()
-                {
-                    barrier.set(order.newBarrier());
-                    barrier.get().issue();
-                    barrier.get().markBlocking();
-                }
-            };
+            // see TODO  below
+//            final Runnable markBlocking = new Runnable()
+//            {
+//
+//                public void run()
+//                {
+//                    barrier.set(order.newBarrier());
+//                    barrier.get().issue();
+//                    barrier.get().markBlocking();
+//                }
+//            };
             final Runnable run = new Runnable()
             {
                 public void run()
@@ -114,10 +125,11 @@ public class NativeAllocatorTest
                     Assert.assertEquals(0, allocator.offHeap().owns());
 
                     // allocate above limit, check we block until "marked blocking"
-                    exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
-                    allocator.allocate(110, group);
-                    Assert.assertNotNull(barrier.get());
-                    Assert.assertEquals(110, allocator.offHeap().owns());
+                    // TODO - we no longer block when allocating above limit and so these 4 lines no longer work
+//                    exec.schedule(markBlocking, 10L, TimeUnit.MILLISECONDS);
+//                    allocator.allocate(110, group);
+//                    Assert.assertNotNull(barrier.get());
+//                    Assert.assertEquals(110, allocator.offHeap().owns());
                 }
             };
             exec.submit(run).get();

@@ -50,7 +50,8 @@ public class DynamicEndpointSnitchTest
             for (int i = 0; i < hosts.size(); i++)
                 dsnitch.receiveTiming(hosts.get(i), scores[i]);
         }
-        Thread.sleep(150);
+
+        dsnitch.updateScores();
     }
 
     @Test
@@ -68,7 +69,7 @@ public class DynamicEndpointSnitchTest
 
         List<InetAddress> order;
 
-        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()), false);
         try
         {
 
@@ -109,7 +110,7 @@ public class DynamicEndpointSnitchTest
             dsnitch.close();
         }
 
-        dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+        dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()), false);
 
         try
         {

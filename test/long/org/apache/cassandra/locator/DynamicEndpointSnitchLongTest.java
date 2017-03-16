@@ -52,7 +52,7 @@ public class DynamicEndpointSnitchLongTest
             // do this because SS needs to be initialized before DES can work properly.
             StorageService.instance.unsafeInitialize();
             SimpleSnitch ss = new SimpleSnitch();
-            DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+            DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()), true);
             InetAddress self = FBUtilities.getBroadcastAddress();
 
             List<InetAddress> hosts = new ArrayList<>();

@@ -44,6 +44,7 @@ import static org.apache.cassandra.cql3.statements.BatchStatement.metrics;
 public class BatchMetricsTest extends SchemaLoader
 {
     private static EmbeddedCassandraService cassandra;
+    private static int defaultMetricsHistogramUpdateTimeMillis;
 
     private static Cluster cluster;
     private static Session session;
@@ -70,13 +71,14 @@ public class BatchMetricsTest extends SchemaLoader
 
         ps = session.prepare("INSERT INTO " + KEYSPACE + '.' + TABLE + " (id, val) VALUES (?, ?);");
 
-        DecayingEstimatedHistogram.forceImmediateAggregationForTesting = true;
+        defaultMetricsHistogramUpdateTimeMillis = DatabaseDescriptor.getMetricsHistogramUpdateTimeMillis();
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0);
     }
 
     @AfterClass
     public static void teardown()
     {
-        DecayingEstimatedHistogram.forceImmediateAggregationForTesting = false;
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(defaultMetricsHistogramUpdateTimeMillis);
     }
 
     private void executeBatch(boolean isLogged, int distinctPartitions, int statementsPerPartition)
