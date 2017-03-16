@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -204,8 +205,8 @@ public class Util
         for (int i=0; i<howMany; i++)
         {
             if(!endpointTokenPrefilled)
-                endpointTokens.add(new BigIntegerToken(String.valueOf(10 * i)));
-            keyTokens.add(new BigIntegerToken(String.valueOf(10 * i + 5)));
+                endpointTokens.add(new Murmur3Partitioner.LongToken(10 * i));
+            keyTokens.add(new Murmur3Partitioner.LongToken(10 * i + 5));
             hostIds.add(hostIdPool.get(i));
         }
 

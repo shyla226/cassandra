@@ -30,6 +30,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -62,7 +63,7 @@ import static org.junit.Assert.assertNotNull;
 
 public class MoveTest
 {
-    private static final IPartitioner partitioner = RandomPartitioner.instance;
+    private static final IPartitioner partitioner = Murmur3Partitioner.instance;
     private static IPartitioner oldPartitioner;
     //Simple Strategy Keyspaces
     private static final String Simple_RF1_KeyspaceName = "MoveTestKeyspace1";
