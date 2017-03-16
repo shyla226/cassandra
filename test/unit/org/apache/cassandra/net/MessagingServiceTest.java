@@ -36,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Iterables;
 
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.metrics.Timer;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -61,6 +62,8 @@ public class MessagingServiceTest
     public static void beforeClass() throws UnknownHostException
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
+
         DatabaseDescriptor.setBackPressureStrategy(new MockBackPressureStrategy(Collections.emptyMap()));
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.0.0.1"));
 
