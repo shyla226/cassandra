@@ -198,6 +198,14 @@ public abstract class CQLTester
 
         Keyspace.setInitialized();
         SystemKeyspace.persistLocalMetadata();
+
+        SystemKeyspace.finishStartup();
+        SystemKeyspace.persistLocalMetadata();
+        StorageService.instance.populateTokenMetadata();
+
+        //TPC requires local vnodes to be generated so we need to
+        //put the SS through join.
+        StorageService.instance.initServer();
         isServerPrepared = true;
     }
 
