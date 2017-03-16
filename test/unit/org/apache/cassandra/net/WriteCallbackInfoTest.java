@@ -21,6 +21,7 @@ package org.apache.cassandra.net;
 import java.net.InetAddress;
 import java.util.UUID;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -43,6 +44,7 @@ public class WriteCallbackInfoTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     @Test
