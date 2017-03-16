@@ -23,6 +23,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -37,8 +38,9 @@ public class JoinTokenRingTest
     {
         DatabaseDescriptor.daemonInitialization();
         SchemaLoader.startGossiper();
+        // use this hook to make the schema changes before joinRing() happens
+        CQLTester.preJoinHook = () -> SchemaLoader.schemaDefinition("JoinTokenRingTest");
         SchemaLoader.prepareServer();
-        SchemaLoader.schemaDefinition("JoinTokenRingTest");
     }
 
     @Test

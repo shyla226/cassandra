@@ -24,13 +24,11 @@ import java.math.BigInteger;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.*;
 import org.junit.*;
@@ -160,6 +158,8 @@ public abstract class CQLTester
     private boolean usePrepared = USE_PREPARED_VALUES;
     private static boolean reusePrepared = REUSE_PREPARED;
 
+    public static Runnable preJoinHook = () -> {};
+
     protected boolean usePrepared()
     {
         return usePrepared;
@@ -202,6 +202,8 @@ public abstract class CQLTester
         SystemKeyspace.finishStartup();
         SystemKeyspace.persistLocalMetadata();
         StorageService.instance.populateTokenMetadata();
+
+        preJoinHook.run();
 
         //TPC requires local vnodes to be generated so we need to
         //put the SS through join.

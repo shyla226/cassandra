@@ -43,9 +43,13 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SchemaLoader
 {
+    private static final Logger logger = LoggerFactory.getLogger(SchemaLoader.class);
+
     @BeforeClass
     public static void loadSchema() throws ConfigurationException
     {
