@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.*;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -59,6 +61,7 @@ public class QueryPagerTest
     public static final String CF_CQL = "table2";
     public static final String CF_CQL_WITH_STATIC = "with_static";
     public static final int nowInSec = FBUtilities.nowInSeconds();
+    public static List<String> tokenOrderedKeys;
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -105,6 +108,8 @@ public class QueryPagerTest
         int nbKeys = 10;
         int nbCols = 10;
 
+        SortedSet<String> tokens = Sets.newTreeSet(Comparator.comparing(a -> cfs().getPartitioner().decorateKey(bytes(a))));
+
         // *
         // * Creates the following data:
         // *   k1: c1 ... cn
@@ -115,10 +120,13 @@ public class QueryPagerTest
         {
             for (int j = 0; j < nbCols; j++)
             {
+                tokens.add("k" + i);
                 RowUpdateBuilder builder = new RowUpdateBuilder(cfs().metadata(), FBUtilities.timestampMicros(), "k" + i);
                 builder.clustering("c" + j).add("val", "").build().applyUnsafe();
             }
         }
+
+        tokenOrderedKeys = Lists.newArrayList(tokens);
     }
 
     private static ColumnFamilyStore cfs()
@@ -470,20 +478,20 @@ public class QueryPagerTest
 
     public void rangeNamesQueryTest(boolean testPagingState, ProtocolVersion protocolVersion) throws Exception
     {
-        ReadCommand command = rangeNamesQuery("k0", "k5", 100, "c1", "c4", "c8");
+        ReadCommand command = rangeNamesQuery(tokenOrderedKeys.get(0), tokenOrderedKeys.get(5), 100, "c1", "c4", "c8");
         QueryPager pager = command.getPager(null, protocolVersion);
 
         assertFalse(pager.isExhausted());
         List<FilteredPartition> partitions = query(pager, 3 * 3);
         for (int i = 1; i <= 3; i++)
-            assertRow(partitions.get(i-1), "k" + i, "c1", "c4", "c8");
+            assertRow(partitions.get(i-1), tokenOrderedKeys.get(i), "c1", "c4", "c8");
         assertFalse(pager.isExhausted());
 
         pager = maybeRecreate(pager, command, testPagingState, protocolVersion);
         assertFalse(pager.isExhausted());
         partitions = query(pager, 3 * 3, 2 * 3);
         for (int i = 4; i <= 5; i++)
-            assertRow(partitions.get(i-4), "k" + i, "c1", "c4", "c8");
+            assertRow(partitions.get(i-4), tokenOrderedKeys.get(i), "c1", "c4", "c8");
 
         assertTrue(pager.isExhausted());
     }
@@ -499,45 +507,45 @@ public class QueryPagerTest
 
     public void rangeSliceQueryTest(boolean testPagingState, ProtocolVersion protocolVersion) throws Exception
     {
-        ReadCommand command = rangeSliceQuery("k1", "k5", 100, "c1", "c7");
+        ReadCommand command = rangeSliceQuery(tokenOrderedKeys.get(0), tokenOrderedKeys.get(4), 100, "c1", "c7");
         QueryPager pager = command.getPager(null, protocolVersion);
 
         assertFalse(pager.isExhausted());
         List<FilteredPartition> partitions = query(pager, 5);
-        assertRow(partitions.get(0), "k2", "c1", "c2", "c3", "c4", "c5");
+        assertRow(partitions.get(0), tokenOrderedKeys.get(1), "c1", "c2", "c3", "c4", "c5");
         assertFalse(pager.isExhausted());
 
         pager = maybeRecreate(pager, command, testPagingState, protocolVersion);
         assertFalse(pager.isExhausted());
         partitions = query(pager, 4);
-        assertRow(partitions.get(0), "k2", "c6", "c7");
-        assertRow(partitions.get(1), "k3", "c1", "c2");
+        assertRow(partitions.get(0), tokenOrderedKeys.get(1), "c6", "c7");
+        assertRow(partitions.get(1), tokenOrderedKeys.get(2), "c1", "c2");
         assertFalse(pager.isExhausted());
 
         pager = maybeRecreate(pager, command, testPagingState, protocolVersion);
         assertFalse(pager.isExhausted());
         partitions = query(pager, 6);
-        assertRow(partitions.get(0), "k3", "c3", "c4", "c5", "c6", "c7");
-        assertRow(partitions.get(1), "k4", "c1");
+        assertRow(partitions.get(0), tokenOrderedKeys.get(2), "c3", "c4", "c5", "c6", "c7");
+        assertRow(partitions.get(1), tokenOrderedKeys.get(3), "c1");
         assertFalse(pager.isExhausted());
 
         pager = maybeRecreate(pager, command, testPagingState, protocolVersion);
         assertFalse(pager.isExhausted());
         partitions = query(pager, 5);
-        assertRow(partitions.get(0), "k4", "c2", "c3", "c4", "c5", "c6");
+        assertRow(partitions.get(0), tokenOrderedKeys.get(3), "c2", "c3", "c4", "c5", "c6");
         assertFalse(pager.isExhausted());
 
         pager = maybeRecreate(pager, command, testPagingState, protocolVersion);
         assertFalse(pager.isExhausted());
         partitions = query(pager, 5);
-        assertRow(partitions.get(0), "k4", "c7");
-        assertRow(partitions.get(1), "k5", "c1", "c2", "c3", "c4");
+        assertRow(partitions.get(0),tokenOrderedKeys.get(3), "c7");
+        assertRow(partitions.get(1), tokenOrderedKeys.get(4), "c1", "c2", "c3", "c4");
         assertFalse(pager.isExhausted());
 
         pager = maybeRecreate(pager, command, testPagingState, protocolVersion);
         assertFalse(pager.isExhausted());
         partitions = query(pager, 5, 3);
-        assertRow(partitions.get(0), "k5", "c5", "c6", "c7");
+        assertRow(partitions.get(0), tokenOrderedKeys.get(4), "c5", "c6", "c7");
 
         assertTrue(pager.isExhausted());
     }
