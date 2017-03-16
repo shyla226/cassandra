@@ -95,6 +95,8 @@ final class DecayingEstimatedHistogram implements Histogram
      * (at the keyspace or global level). */
     private final Recorder recorder;
 
+    @VisibleForTesting
+    public static boolean forceImmediateAggregationForTesting = false;
 
 
     DecayingEstimatedHistogram(boolean considerZeroes, long maxTrackableValue, int updateTimeMillis, Clock clock)
@@ -436,7 +438,7 @@ final class DecayingEstimatedHistogram implements Histogram
          */
         void onReadAggregate()
         {
-            if (updateIntervalMillis <= 0)
+            if (updateIntervalMillis <= 0 || forceImmediateAggregationForTesting)
                 aggregate();
         }
 

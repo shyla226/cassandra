@@ -20,6 +20,7 @@ package org.apache.cassandra.metrics;
 
 import java.io.IOException;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -68,6 +69,14 @@ public class BatchMetricsTest extends SchemaLoader
         session.execute("CREATE TABLE IF NOT EXISTS " + TABLE + " (id int PRIMARY KEY, val text);");
 
         ps = session.prepare("INSERT INTO " + KEYSPACE + '.' + TABLE + " (id, val) VALUES (?, ?);");
+
+        DecayingEstimatedHistogram.forceImmediateAggregationForTesting = true;
+    }
+
+    @AfterClass
+    public static void teardown()
+    {
+        DecayingEstimatedHistogram.forceImmediateAggregationForTesting = false;
     }
 
     private void executeBatch(boolean isLogged, int distinctPartitions, int statementsPerPartition)
