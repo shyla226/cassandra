@@ -352,14 +352,14 @@ public class TPCOpOrder
                 if (prev == null)
                     break;
                 // if we haven't finished this Ordered yet abort and let it clean up when it's done
-                if (prev.running > FINISHED)
+                if (prev.running != FINISHED)
                     return;
                 start = prev;
             }
 
             // now walk forwards in time, in case we finished up late
             Group end = this.next;
-            while (end.running <= FINISHED)
+            while (end.running == FINISHED)
                 end = end.next;
 
             // now walk from first to last, unlinking the prev pointer and waking up any blocking threads
