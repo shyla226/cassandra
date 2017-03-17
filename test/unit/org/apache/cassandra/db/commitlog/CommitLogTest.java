@@ -125,7 +125,6 @@ public class CommitLogTest
         // an error. If we hit a "Kill the JVM" condition while working with the CL when we don't expect it, an aggressive
         // KillerForTests will assertion out on us.
         oldKiller = JVMStabilityInspector.replaceKiller(testKiller);
-        StorageService.instance.getDaemon().setSetupCompleted(false);
     }
 
     @AfterClass
