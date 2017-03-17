@@ -44,7 +44,7 @@ public class SSTableExpiredBlockersTest extends ToolsTester
     {
         NettyRxScheduler.setupForTesting();
         // returns exit code 1, since no sstables are there
-        runTool(1, "org.apache.cassandra.tools.SSTableExpiredBlockers", "system_auth", "roles");
+        runTool(1, "org.apache.cassandra.tools.SSTableExpiredBlockers", "system", "range_xfers");
         assertNoUnexpectedThreadsStarted(EXPECTED_THREADS_WITH_SCHEMA, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaLoaded();
         assertServerNotLoaded();
