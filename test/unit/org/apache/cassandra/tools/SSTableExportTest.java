@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.tools;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -41,6 +42,7 @@ public class SSTableExportTest extends ToolsTester
     @Test
     public void testSSTableExport_WithArgs() throws Exception
     {
+        NettyRxScheduler.setupForTesting();
         runTool(0, "org.apache.cassandra.tools.SSTableExport", findOneSSTable("legacy_sstables", "legacy_ma_simple"));
         assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaNotLoaded();
