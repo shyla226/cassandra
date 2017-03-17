@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.tools;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -41,6 +42,7 @@ public class StandaloneUpgraderTest extends ToolsTester
     @Test
     public void testStandaloneUpgrader_WithArgs()
     {
+        NettyRxScheduler.setupForTesting();
         runTool(0, "org.apache.cassandra.tools.StandaloneUpgrader", "--debug", "system_schema", "tables");
         assertNoUnexpectedThreadsStarted(EXPECTED_THREADS_WITH_SCHEMA, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaLoaded();
