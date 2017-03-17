@@ -1289,7 +1289,7 @@ public final class SchemaKeyspace
         Completable.concat(mutations.stream().map(Mutation::applyAsync).collect(toList())).blockingAwait();
 
         if (SchemaKeyspace.FLUSH_SCHEMA_TABLES)
-            SchemaKeyspace.flush();
+            SchemaKeyspace.flush().blockingAwait();
     }
 
     static Keyspaces fetchKeyspaces(Set<String> toFetch)
