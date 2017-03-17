@@ -305,11 +305,12 @@ public class MessagePayloadTest extends CQLTester
             Single<ResultMessage.Prepared> result = QueryProcessor.instance.prepare(query, state, customPayload);
             if (customPayload != null)
             {
-                result.map(prepared -> {
+                result = result.map(prepared -> {
                     prepared.setCustomPayload(responsePayload);
+                    responsePayload = null;
+
                     return prepared;
                 });
-                responsePayload = null;
             }
             return result;
         }
