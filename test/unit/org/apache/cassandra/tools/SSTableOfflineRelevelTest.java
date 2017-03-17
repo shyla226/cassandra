@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.tools;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -41,8 +42,9 @@ public class SSTableOfflineRelevelTest extends ToolsTester
     @Test
     public void testSSTableOfflineRelevel_WithArgs()
     {
+        NettyRxScheduler.setupForTesting();
         // Note: SSTableOfflineRelevel exits with code 1 if no sstables to relevel have been found
-        runTool(1, "org.apache.cassandra.tools.SSTableOfflineRelevel", "system_schema", "tables");
+        runTool(1, "org.apache.cassandra.tools.SSTableOfflineRelevel", "system_auth", "roles");
         assertNoUnexpectedThreadsStarted(EXPECTED_THREADS_WITH_SCHEMA, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaLoaded();
         assertServerNotLoaded();
