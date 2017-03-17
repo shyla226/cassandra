@@ -91,7 +91,7 @@ public class NettyRxScheduler extends Scheduler
         }
     };
 
-    final static Map<String, List<Long>> keyspaceToRangeMapping = new HashMap<>();
+    final static Map<String, List<Token>> keyspaceToRangeMapping = new HashMap<>();
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
 
@@ -297,13 +297,13 @@ public class NettyRxScheduler extends Scheduler
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
         }
 
-        List<Long> keyspaceRanges = getRangeList(keyspaceName, true);
-        Long keyToken = (Long)key.getToken().getTokenValue();
+        List<Token> keyspaceRanges = getRangeList(keyspaceName, true);
+        Token keyToken = key.getToken();
 
-        Long rangeStart = keyspaceRanges.get(0);
+        Token rangeStart = keyspaceRanges.get(0);
         for (int i = 1; i < keyspaceRanges.size(); i++)
         {
-            Long next = keyspaceRanges.get(i);
+            Token next = keyspaceRanges.get(i);
             if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
             {
                 //logger.info("Read moving to {} from {}", i-1, getCoreId());
@@ -320,22 +320,22 @@ public class NettyRxScheduler extends Scheduler
         throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
     }
 
-    public static List<Long> getRangeList(String keyspaceName, boolean persist)
+    public static List<Token> getRangeList(String keyspaceName, boolean persist)
     {
         return getRangeList(Keyspace.open(keyspaceName), persist);
     }
 
-    public static List<Long> getRangeList(Keyspace keyspace, boolean persist)
+    public static List<Token> getRangeList(Keyspace keyspace, boolean persist)
     {
-        List<Long> ranges = keyspaceToRangeMapping.get(keyspace.getName());
+        List<Token> ranges = keyspaceToRangeMapping.get(keyspace.getName());
 
         if (ranges != null)
             return ranges;
 
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspace);
-        List<Long> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS)
+        List<Token> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS)
                                           .stream()
-                                          .map(s -> (Long) s.getToken().getTokenValue())
+                                          .map(s -> s.getToken())
                                           .collect(Collectors.toList());
 
         if (persist)
