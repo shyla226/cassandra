@@ -621,9 +621,9 @@ public abstract class ModificationStatement implements CQLStatement
             mutationObservables.add(mutation.applyAsync());
 
         if (mutationObservables.size() == 1)
-            return mutationObservables.get(0).toSingle(() -> new ResultMessage.Void());
+            return mutationObservables.get(0).toSingle(ResultMessage.Void::new);
         else
-            return Completable.merge(mutationObservables).toSingle(() -> new ResultMessage.Void());
+            return Completable.merge(mutationObservables).toSingle(ResultMessage.Void::new);
     }
 
     public Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException

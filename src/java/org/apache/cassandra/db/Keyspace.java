@@ -488,6 +488,7 @@ public class Keyspace
         return Completable.using(
             () -> requiresViewUpdate ? new Lock[mutation.getTableIds().size()] : null,
 
+            // completable source
             (locks) -> Completable.defer(() ->
             {
                 if (requiresViewUpdate)
@@ -571,6 +572,7 @@ public class Keyspace
                 return Completable.using(
                     () -> writeOrder.start(),
 
+                    // completable provider
                     (opGroup) -> commitLogPositionObservable
                        .flatMapCompletable(commitLogPosition -> {
 
@@ -624,9 +626,11 @@ public class Keyspace
 
                        }),
 
+                    // disposer
                     (opGroup) -> opGroup.close());
             }),
 
+        // disposer
         (locks) ->
             {
                 if (locks != null)

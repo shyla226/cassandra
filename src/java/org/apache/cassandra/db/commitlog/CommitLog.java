@@ -295,7 +295,7 @@ public class CommitLog implements CommitLogMBean
                                               }
 
                                               return executor.finishWriteFor(alloc).toSingle(alloc::getCommitLogPosition);
-                                          }).doFinally(() -> dob.recycle());
+                                          }).doFinally(dob::recycle);
         }
         catch (IOException e)
         {

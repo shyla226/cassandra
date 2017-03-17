@@ -49,19 +49,10 @@ public class RxSubscriptionDebugger
         if (enabled.compareAndSet(false, true))
         {
             RxJavaPlugins.setOnObservableAssembly(RxSubscriptionDebugger::onCreate);
-            RxJavaPlugins.setOnObservableSubscribe(RxSubscriptionDebugger::onSubscribe);
-
             RxJavaPlugins.setOnCompletableAssembly(RxSubscriptionDebugger::onCreate);
-            RxJavaPlugins.setOnCompletableSubscribe(RxSubscriptionDebugger::onSubscribe);
-
             RxJavaPlugins.setOnSingleAssembly(RxSubscriptionDebugger::onCreate);
-            RxJavaPlugins.setOnSingleSubscribe(RxSubscriptionDebugger::onSubscribe);
-
             RxJavaPlugins.setOnMaybeAssembly(RxSubscriptionDebugger::onCreate);
-            RxJavaPlugins.setOnMaybeSubscribe(RxSubscriptionDebugger::onSubscribe);
-
             RxJavaPlugins.setOnFlowableAssembly(RxSubscriptionDebugger::onCreate);
-            RxJavaPlugins.setOnFlowableSubscribe(RxSubscriptionDebugger::onSubscribe);
 
             startWatcher();
 
@@ -90,15 +81,6 @@ public class RxSubscriptionDebugger
     {
         observables.putIfAbsent(System.identityHashCode(observable), Pair.create(System.nanoTime(), Thread.currentThread().getStackTrace()));
         return observable;
-    }
-
-
-    static <T,O> O onSubscribe(T observable, O observer)
-    {
-        if (null == observables.remove(System.identityHashCode(observable)))
-            logger.info("Missing observable chain " + observable);
-
-        return observer;
     }
 
     static void startWatcher()
