@@ -618,6 +618,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                 iterators.add(iter);
                 ssTablesIterated++;
+                sstable.incrementReadCount();
                 mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
                                                         iter.header.partitionLevelDeletion.markedForDeleteAt());
             }
@@ -640,6 +641,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     iterators.add(iter);
                     ssTablesIterated++;
                     includedDueToTombstones++;
+                    sstable.incrementReadCount();
                 }
             }
             if (Tracing.isTracing())

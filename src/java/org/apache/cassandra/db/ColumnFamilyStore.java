@@ -917,7 +917,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 try
                 {
                     publisher.onNext(flush.postFlushTask.get());
-                    publisher.onComplete();
+                    // Note: If we issue onComplete or the subscribers will not get the onNext notification.
                 }
                 catch (InterruptedException|ExecutionException exc)
                 {
@@ -926,7 +926,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     publisher.onError(exc);
                 }
             });
-            return publisher.single(CommitLogPosition.NONE).observeOn(Schedulers.io());
+            return publisher.first(CommitLogPosition.NONE).observeOn(Schedulers.io());
         }
     }
 
@@ -1011,7 +1011,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                       logger.debug("forceFlush requested but everything is clean in {}", name);
                                       CommitLogPosition pos = current.getCommitLogLowerBound();
                                       publisher.onNext(pos == null ? CommitLogPosition.NONE : pos);
-                                      publisher.onComplete();
+                                      // Note: If we issue onComplete or the subscribers will not get the onNext notification.
                                   });
 
         return publisher.first(CommitLogPosition.NONE).observeOn(Schedulers.io());
