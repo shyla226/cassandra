@@ -21,10 +21,18 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.statements.IndexTarget;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Indexes;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -81,6 +89,8 @@ public class StreamingTransferTest
     public static final String CF_STANDARD3 = "Standard3";
     public static final String KEYSPACE2 = "StreamingTransferTest2";
 
+    List<Integer> sortedKeys = CQLTester.partitionerSortedKeys(Arrays.asList(0, 1, 2));
+
     @BeforeClass
     public static void defineSchema() throws Exception
     {
@@ -92,12 +102,24 @@ public class StreamingTransferTest
                        standardCFMD(KEYSPACE1, CF_STANDARD),
                        TableMetadata.builder(KEYSPACE1, CF_COUNTER)
                                     .isCounter(true)
-                                    .addPartitionKeyColumn("key", BytesType.instance),
+                                    .addPartitionKeyColumn("key", Int32Type.instance),
                        TableMetadata.builder(KEYSPACE1, CF_STANDARDINT)
                                     .addPartitionKeyColumn("key", AsciiType.instance)
                                     .addClusteringColumn("cols", Int32Type.instance)
                                     .addRegularColumn("val", BytesType.instance),
-                       compositeIndexCFMD(KEYSPACE1, CF_INDEX, true));
+                       // compositeIndexCFMD(KEYSPACE1, CF_INDEX, true),
+                       TableMetadata.builder(KEYSPACE1, CF_INDEX)
+                                    .addPartitionKeyColumn("key", Int32Type.instance)
+                                    .addClusteringColumn("c1", Int32Type.instance)
+                                    .addRegularColumn("birthdate", Int32Type.instance)
+                                    .addRegularColumn("notbirthdate", Int32Type.instance)
+                                    .addStaticColumn("static", Int32Type.instance)
+                                    .indexes(Indexes.builder().add(IndexMetadata.fromIndexTargets(
+                                        Collections.singletonList(new IndexTarget(new ColumnIdentifier("birthdate", true),
+                                                                                  IndexTarget.Type.VALUES)),
+                                        CF_INDEX + "_birthdate_key_index",
+                                        IndexMetadata.Kind.COMPOSITES,
+                                        Collections.EMPTY_MAP)).build()));
 
         createKeyspace(KEYSPACE2, KeyspaceParams.simple(1));
 
@@ -138,10 +160,9 @@ public class StreamingTransferTest
     public void testRequestEmpty() throws Exception
     {
         // requesting empty data should succeed
-        IPartitioner p = Util.testPartitioner();
         List<Range<Token>> ranges = new ArrayList<>();
-        ranges.add(new Range<>(p.getMinimumToken(), p.getToken(ByteBufferUtil.bytes("key1"))));
-        ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("key2")), p.getMinimumToken()));
+        ranges.add(new Range<>(Murmur3Partitioner.instance.getMinimumToken(), new Murmur3Partitioner.LongToken(1)));
+        ranges.add(new Range<>(new Murmur3Partitioner.LongToken(2), Murmur3Partitioner.instance.getMinimumToken()));
 
         StreamResultFuture futureResult = new StreamPlan("StreamingTransferTest")
                                                   .requestRanges(LOCAL, LOCAL, KEYSPACE2, ranges)
@@ -166,13 +187,13 @@ public class StreamingTransferTest
      * Create and transfer a single sstable, and return the keys that should have been transferred.
      * The Mutator must create the given column, but it may also create any other columns it pleases.
      */
-    private List<String> createAndTransfer(ColumnFamilyStore cfs, Mutator mutator, boolean transferSSTables) throws Exception
+    private List<Integer> createAndTransfer(ColumnFamilyStore cfs, Mutator mutator, boolean transferSSTables) throws Exception
     {
         // write a temporary SSTable, and unregister it
         logger.debug("Mutating {}", cfs.name);
         long timestamp = 1234;
-        for (int i = 1; i <= 3; i++)
-            mutator.mutate("key" + i, "col" + i, timestamp);
+        for (int i = 0; i < 3; i++)
+            mutator.mutate(sortedKeys.get(i), sortedKeys.get(i), timestamp);
         cfs.forceBlockingFlush();
         Util.compactAll(cfs, Integer.MAX_VALUE).get();
         assertEquals(1, cfs.getLiveSSTables().size());
@@ -185,14 +206,14 @@ public class StreamingTransferTest
             SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
             cfs.clearUnsafe();
             transferSSTables(sstable);
-            offs = new int[]{1, 3};
+            offs = new int[]{sortedKeys.get(0), sortedKeys.get(2)};
         }
         else
         {
             long beforeStreaming = System.currentTimeMillis();
             transferRanges(cfs);
             cfs.discardSSTables(beforeStreaming);
-            offs = new int[]{2, 3};
+            offs = new int[]{sortedKeys.get(0), sortedKeys.get(2)};
         }
 
         // confirm that a single SSTable was transferred and registered
@@ -203,41 +224,45 @@ public class StreamingTransferTest
         assertEquals(offs.length, partitions.size());
         for (int i = 0; i < offs.length; i++)
         {
-            String key = "key" + offs[i];
-            String col = "col" + offs[i];
+            int expectedKey = offs[i];
+            int expectedCol = offs[i];
 
-            assert !Util.getAll(Util.cmd(cfs, key).build()).isEmpty();
             ImmutableBTreePartition partition = partitions.get(i);
-            assert ByteBufferUtil.compareUnsigned(partition.partitionKey().getKey(), ByteBufferUtil.bytes(key)) == 0;
-            assert ByteBufferUtil.compareUnsigned(partition.iterator().next().clustering().get(0), ByteBufferUtil.bytes(col)) == 0;
+            Assert.assertEquals(expectedKey, (int) Int32Type.instance.getSerializer().deserialize(partition.partitionKey().getKey()));
+            Assert.assertEquals(expectedCol, (int) Int32Type.instance.getSerializer().deserialize(partition.iterator().next().clustering().get(0)));
+
+            DecoratedKey key = Murmur3Partitioner.instance.decorateKey(Int32Type.instance.getSerializer().serialize(expectedKey));
+            Assert.assertFalse(Util.getAll(Util.cmd(cfs, key).build()).isEmpty());
         }
 
         // and that the max timestamp for the file was rediscovered
         assertEquals(timestamp, cfs.getLiveSSTables().iterator().next().getMaxTimestamp());
 
-        List<String> keys = new ArrayList<>();
-        for (int off : offs)
-            keys.add("key" + off);
-
-        logger.debug("... everything looks good for {}", cfs.name);
+        List<Integer> keys = new ArrayList<>(offs.length);
+        for (int i = 0; i < offs.length; i++)
+            keys.add(offs[i]);
         return keys;
     }
 
     private void transferSSTables(SSTableReader sstable) throws Exception
     {
-        IPartitioner p = sstable.getPartitioner();
         List<Range<Token>> ranges = new ArrayList<>();
-        ranges.add(new Range<>(p.getMinimumToken(), p.getToken(ByteBufferUtil.bytes("key1"))));
-        ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("key2")), p.getMinimumToken()));
+        ranges.add(new Range<>(
+                Murmur3Partitioner.instance.getMinimumToken(),
+                Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(0)))));
+        ranges.add(new Range<>(
+                Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(1))),
+                Murmur3Partitioner.instance.getMinimumToken()));
         transfer(sstable, ranges);
     }
 
     private void transferRanges(ColumnFamilyStore cfs) throws Exception
     {
-        IPartitioner p = cfs.getPartitioner();
         List<Range<Token>> ranges = new ArrayList<>();
         // wrapped range
-        ranges.add(new Range<Token>(p.getToken(ByteBufferUtil.bytes("key1")), p.getToken(ByteBufferUtil.bytes("key0"))));
+        ranges.add(new Range<>(
+                Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(1))),
+                Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(0)))));
         StreamPlan streamPlan = new StreamPlan("StreamingTransferTest").transferRanges(LOCAL, cfs.keyspace.getName(), ranges, cfs.getTableName());
         streamPlan.execute().get();
         verifyConnectionsAreClosed();
@@ -309,11 +334,11 @@ public class StreamingTransferTest
         final Keyspace keyspace = Keyspace.open(KEYSPACE1);
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_INDEX);
 
-        List<String> keys = createAndTransfer(cfs, new Mutator()
+        List<Integer> keys = createAndTransfer(cfs, new Mutator()
         {
-            public void mutate(String key, String col, long timestamp) throws Exception
+            public void mutate(int key, int col, long timestamp) throws Exception
             {
-                long val = key.hashCode();
+                int val = new Integer(key).hashCode();
 
                 RowUpdateBuilder builder = new RowUpdateBuilder(cfs.metadata(), timestamp, key);
                 builder.clustering(col).add("birthdate", ByteBufferUtil.bytes(val));
@@ -322,16 +347,16 @@ public class StreamingTransferTest
         }, transferSSTables);
 
         // confirm that the secondary index was recovered
-        for (String key : keys)
+        for (Integer key : keys)
         {
-            long val = key.hashCode();
+            int val = key.hashCode();
 
             // test we can search:
             UntypedResultSet result = QueryProcessor.executeInternal(String.format("SELECT * FROM \"%s\".\"%s\" WHERE birthdate = %d",
                                                                                    cfs.metadata.keyspace, cfs.metadata.name, val));
             assertEquals(1, result.size());
 
-            assert result.iterator().next().getBytes("key").equals(ByteBufferUtil.bytes(key));
+            Assert.assertEquals((int) key, result.iterator().next().getInt("key"));
         }
     }
 
@@ -345,10 +370,7 @@ public class StreamingTransferTest
         String cfname = "StandardInteger1";
         Keyspace keyspace = Keyspace.open(ks);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
-        ClusteringComparator comparator = cfs.getComparator();
-
         String key = "key1";
-
 
         RowUpdateBuilder updates = new RowUpdateBuilder(cfs.metadata(), FBUtilities.timestampMicros(), key);
 
@@ -363,13 +385,6 @@ public class StreamingTransferTest
                 .add("val", ByteBuffer.wrap(new byte[DatabaseDescriptor.getColumnIndexSize()]))
                 .build()
                 .apply();
-
-        // add RangeTombstones
-        //updates = new RowUpdateBuilder(cfs.metadata, FBUtilities.timestampMicros() + 1 , key);
-        //updates.addRangeTombstone(Slice.make(comparator, comparator.make(2), comparator.make(4)))
-        //        .build()
-        //        .apply();
-
 
         updates = new RowUpdateBuilder(cfs.metadata(), FBUtilities.timestampMicros() + 1, key);
         updates.addRangeTombstone(5, 7)
@@ -585,6 +600,6 @@ public class StreamingTransferTest
     */
     public interface Mutator
     {
-        public void mutate(String key, String col, long timestamp) throws Exception;
+        public void mutate(int key, int col, long timestamp) throws Exception;
     }
 }

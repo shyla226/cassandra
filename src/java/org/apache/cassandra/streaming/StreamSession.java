@@ -799,7 +799,8 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         List<Single<CommitLogPosition>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
-        Single.merge(flushes).blockingLast();
+        if (!flushes.isEmpty())
+            Single.merge(flushes).blockingLast();
     }
 
     private synchronized void prepareReceiving(StreamSummary summary)
