@@ -20,8 +20,10 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
 
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -50,20 +52,33 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
      */
     public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size)
     {
-        return Single.defer(() -> {
-            CommitLogSegment segment = allocatingFrom();
 
-            CommitLogSegment.Allocation alloc;
-            while ( null == (alloc = segment.allocate(mutation, size)) )
-            {
-                // failed to allocate, so move to a new segment with enough room
-                advanceAllocatingFrom(segment);
-                segment = allocatingFrom();
-            }
+        CommitLogSegment segment = allocatingFrom();
+        CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
 
-            return Single.just(alloc);
-        }).subscribeOn(Schedulers.io());
+        if (alloc == null)
+        {
+            Scheduler scheduler = NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false);
 
+            // failed to allocate, so move to a new segment with enough room
+            return Single.fromCallable(() ->
+                                       {
+                                           CommitLogSegment.Allocation nalloc;
+                                           CommitLogSegment nsegment = segment;
+                                           do
+                                           {
+                                               advanceAllocatingFrom(nsegment);
+                                               nsegment = allocatingFrom();
+                                           }
+                                           while ((nalloc = nsegment.allocate(mutation, size)) == null);
+
+                                           return nalloc;
+                                       })
+                         .subscribeOn(Schedulers.io()) //Do blocking on IO Sched, continue on TPC thread
+                         .observeOn(scheduler);
+        }
+
+        return Single.just(alloc);
     }
 
     /**
