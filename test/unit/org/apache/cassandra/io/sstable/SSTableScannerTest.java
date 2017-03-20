@@ -30,6 +30,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
@@ -61,6 +62,8 @@ public class SSTableScannerTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
+        DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
@@ -129,7 +132,7 @@ public class SSTableScannerTest
 
     private static Token token(int key)
     {
-        return key == Integer.MIN_VALUE ? ByteOrderedPartitioner.MINIMUM : new ByteOrderedPartitioner.BytesToken(toKey(key).getBytes());
+        return key == Integer.MIN_VALUE ? Util.testPartitioner().getMinimumToken() : Util.token(toKey(key));
     }
 
     private static PartitionPosition min(int key)
@@ -152,8 +155,8 @@ public class SSTableScannerTest
 
     private static Range<Token> rangeFor(int start, int end)
     {
-        return new Range<Token>(new ByteOrderedPartitioner.BytesToken(toKey(start).getBytes()),
-                                end == Integer.MIN_VALUE ? ByteOrderedPartitioner.MINIMUM : new ByteOrderedPartitioner.BytesToken(toKey(end).getBytes()));
+        return new Range<Token>(token(start),
+                                token(end));
     }
 
     private static Collection<Range<Token>> makeRanges(int ... keys)

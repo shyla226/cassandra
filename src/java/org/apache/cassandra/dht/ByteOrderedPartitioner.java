@@ -33,6 +33,7 @@ import org.apache.cassandra.utils.Pair;
 
 import org.apache.commons.lang3.ArrayUtils;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -40,18 +41,22 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class ByteOrderedPartitioner implements IPartitioner
 {
     public static final BytesToken MINIMUM = new BytesToken(ArrayUtils.EMPTY_BYTE_ARRAY);
+    public static final BytesToken MAXIMUM = new MaxBytesToken();
 
     public static final BigInteger BYTE_MASK = new BigInteger("255");
 
     private static final long EMPTY_SIZE = ObjectSizes.measure(MINIMUM);
 
     public static final ByteOrderedPartitioner instance = new ByteOrderedPartitioner();
+
+    private final Optional<Splitter> splitter = Optional.of(new Splitter(this));
 
     public static class BytesToken extends Token
     {
@@ -77,6 +82,9 @@ public class ByteOrderedPartitioner implements IPartitioner
 
         public int compareTo(Token other)
         {
+            if (other instanceof MaxBytesToken)
+                return -other.compareTo(this);
+
             BytesToken o = (BytesToken) other;
             return FBUtilities.compareUnsigned(token, o.token, 0, 0, token.length, o.token.length);
         }
@@ -93,6 +101,8 @@ public class ByteOrderedPartitioner implements IPartitioner
         {
             if (this == obj)
                 return true;
+            if (obj instanceof MaxBytesToken)
+                return obj.equals(this);
             if (!(obj instanceof BytesToken))
                 return false;
             BytesToken other = (BytesToken) obj;
@@ -121,8 +131,22 @@ public class ByteOrderedPartitioner implements IPartitioner
         @Override
         public double size(Token next)
         {
-            throw new UnsupportedOperationException(String.format("Token type %s does not support token allocation.",
-                                                                  getClass().getSimpleName()));
+            byte[] other = ((BytesToken) next).token;
+            int shift = 0;
+            double sz = 0;
+            // Note: do not generate separate values for left and right as this will result in catastrophic cancellation.
+            while (shift < token.length && shift < other.length)
+                sz += Math.scalb((other[shift] & 0xFF) - (token[shift] & 0xFF), ++shift * -8);
+            // Only one of the loops below can be triggered.
+            while (shift < token.length)
+                sz += Math.scalb(-token[shift] & 0xFF, ++shift * -8);
+            while (shift < other.length)
+                sz += Math.scalb(other[shift] & 0xFF, ++shift * -8);
+            // Address wraparound.
+            if (sz <= 0.0)
+                sz += 1;
+
+            return sz;
         }
 
         @Override
@@ -131,6 +155,26 @@ public class ByteOrderedPartitioner implements IPartitioner
             throw new UnsupportedOperationException(String.format("Token type %s does not support token allocation.",
                                                                   getClass().getSimpleName()));
         }
+    }
+
+    public static class MaxBytesToken extends BytesToken
+    {
+        public MaxBytesToken()
+        {
+            super(ArrayUtils.EMPTY_BYTE_ARRAY);
+        }
+
+        public int compareTo(Token other)
+        {
+            return other instanceof MaxBytesToken ? 0 : 1;
+        }
+
+        public boolean equals(Object obj)
+        {
+            return obj instanceof MaxBytesToken;
+        }
+
+        // size, midpoint and split work correctly due to wraparound handling.
     }
 
     public BytesToken getToken(ByteBuffer key)
@@ -158,9 +202,34 @@ public class ByteOrderedPartitioner implements IPartitioner
         return new BytesToken(bytesForBig(midpair.left, sigbytes, midpair.right));
     }
 
-    public Token split(Token left, Token right, double ratioToLeft)
+    public Token split(Token lt, Token rt, double ratioToLeft)
     {
-        throw new UnsupportedOperationException();
+        BytesToken ltoken = (BytesToken) lt;
+        BytesToken rtoken = (BytesToken) rt;
+
+        int sigbytes = Math.max(ltoken.token.length, rtoken.token.length);
+        BigDecimal left = new BigDecimal(bigForBytes(ltoken.token, sigbytes));
+        BigDecimal right = new BigDecimal(bigForBytes(rtoken.token, sigbytes));
+
+        BigDecimal ratio = BigDecimal.valueOf(ratioToLeft);
+
+        BigInteger newToken;
+
+        if (left.compareTo(right) < 0)
+        {
+            newToken = right.subtract(left).multiply(ratio).add(left).toBigInteger();
+        }
+        else
+        {
+            BigInteger maxVal = BigInteger.ONE.shiftLeft(8 * sigbytes);
+            BigDecimal max = new BigDecimal(maxVal);
+            // wrapping case
+            // L + ((R - min) + (max - L)) * ratio
+
+            newToken = max.add(right).subtract(left).multiply(ratio).add(left).toBigInteger().mod(maxVal);
+        }
+
+        return new BytesToken(bytesForBig(newToken, sigbytes, false));
     }
 
     /**
@@ -177,6 +246,11 @@ public class ByteOrderedPartitioner implements IPartitioner
         } else
             b = bytes;
         return new BigInteger(1, b);
+    }
+
+    public Optional<Splitter> splitter()
+    {
+        return splitter;
     }
 
     /**
@@ -205,6 +279,11 @@ public class ByteOrderedPartitioner implements IPartitioner
     public BytesToken getMinimumToken()
     {
         return MINIMUM;
+    }
+
+    public BytesToken getMaximumToken()
+    {
+        return MAXIMUM;
     }
 
     public BytesToken getRandomToken()

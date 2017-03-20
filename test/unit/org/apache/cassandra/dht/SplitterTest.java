@@ -46,6 +46,12 @@ public class SplitterTest
     }
 
     @Test
+    public void randomSplitTestNoVNodesByteOrderedPartitioner()
+    {
+        randomSplitTestNoVNodes(ByteOrderedPartitioner.instance);
+    }
+
+    @Test
     public void randomSplitTestVNodesRandomPartitioner()
     {
         randomSplitTestVNodes(new RandomPartitioner());
@@ -55,6 +61,12 @@ public class SplitterTest
     {
         randomSplitTestVNodes(new Murmur3Partitioner());
     }
+    @Test
+    public void randomSplitTestVNodesByteOrderedPartitioner()
+    {
+        randomSplitTestVNodes(ByteOrderedPartitioner.instance);
+    }
+
 
     public void randomSplitTestNoVNodes(IPartitioner partitioner)
     {
@@ -62,7 +74,7 @@ public class SplitterTest
         Random r = new Random();
         for (int i = 0; i < 10000; i++)
         {
-            List<Range<Token>> localRanges = generateLocalRanges(1, r.nextInt(4)+1, splitter, r, partitioner instanceof RandomPartitioner);
+            List<Range<Token>> localRanges = generateLocalRanges(1, r.nextInt(4)+1, splitter, r, partitioner);
             List<Token> boundaries = splitter.splitOwnedRanges(r.nextInt(9) + 1, localRanges, false);
             assertTrue("boundaries = "+boundaries+" ranges = "+localRanges, assertRangeSizeEqual(localRanges, boundaries, partitioner, splitter, true));
         }
@@ -78,7 +90,7 @@ public class SplitterTest
             int numTokens = 172 + r.nextInt(128);
             int rf = r.nextInt(4) + 2;
             int parts = r.nextInt(5)+1;
-            List<Range<Token>> localRanges = generateLocalRanges(numTokens, rf, splitter, r, partitioner instanceof RandomPartitioner);
+            List<Range<Token>> localRanges = generateLocalRanges(numTokens, rf, splitter, r, partitioner);
             List<Token> boundaries = splitter.splitOwnedRanges(parts, localRanges, true);
             if (!assertRangeSizeEqual(localRanges, boundaries, partitioner, splitter, false))
                 fail(String.format("Could not split %d tokens with rf=%d into %d parts (localRanges=%s, boundaries=%s)", numTokens, rf, parts, localRanges, boundaries));
@@ -88,59 +100,57 @@ public class SplitterTest
     private boolean assertRangeSizeEqual(List<Range<Token>> localRanges, List<Token> tokens, IPartitioner partitioner, Splitter splitter, boolean splitIndividualRanges)
     {
         Token start = partitioner.getMinimumToken();
-        List<BigInteger> splits = new ArrayList<>();
+        List<Double> splits = new ArrayList<>();
 
         for (int i = 0; i < tokens.size(); i++)
         {
-            Token end = i == tokens.size() - 1 ? partitioner.getMaximumToken() : tokens.get(i);
+            Token end = tokens.get(i);
             splits.add(sumOwnedBetween(localRanges, start, end, splitter, splitIndividualRanges));
             start = end;
         }
         // when we dont need to keep around full ranges, the difference is small between the partitions
-        BigDecimal delta = splitIndividualRanges ? BigDecimal.valueOf(0.001) : BigDecimal.valueOf(0.2);
+        double delta = splitIndividualRanges ? 0.001 : 0.2;
         boolean allBalanced = true;
-        for (BigInteger b : splits)
+        for (double b : splits)
         {
-            for (BigInteger i : splits)
+            for (double i : splits)
             {
-                BigDecimal bdb = new BigDecimal(b);
-                BigDecimal bdi = new BigDecimal(i);
-                BigDecimal q = bdb.divide(bdi, 2, BigDecimal.ROUND_HALF_DOWN);
-                if (q.compareTo(BigDecimal.ONE.add(delta)) > 0 || q.compareTo(BigDecimal.ONE.subtract(delta)) < 0)
+                double q = b / i;
+                if (Math.abs(q - 1) > delta)
                     allBalanced = false;
             }
         }
         return allBalanced;
     }
 
-    private BigInteger sumOwnedBetween(List<Range<Token>> localRanges, Token start, Token end, Splitter splitter, boolean splitIndividualRanges)
+    private double sumOwnedBetween(List<Range<Token>> localRanges, Token start, Token end, Splitter splitter, boolean splitIndividualRanges)
     {
-        BigInteger sum = BigInteger.ZERO;
+        double sum = 0;
         for (Range<Token> range : localRanges)
         {
             if (splitIndividualRanges)
             {
                 Set<Range<Token>> intersections = new Range<>(start, end).intersectionWith(range);
                 for (Range<Token> intersection : intersections)
-                    sum = sum.add(splitter.valueForToken(intersection.right).subtract(splitter.valueForToken(intersection.left)));
+                    sum += intersection.left.size(intersection.right);
             }
             else
             {
                 if (new Range<>(start, end).contains(range.left))
-                    sum = sum.add(splitter.valueForToken(range.right).subtract(splitter.valueForToken(range.left)));
+                    sum += range.left.size(range.right);
             }
         }
         return sum;
     }
 
-    private List<Range<Token>> generateLocalRanges(int numTokens, int rf, Splitter splitter, Random r, boolean randomPartitioner)
+    private List<Range<Token>> generateLocalRanges(int numTokens, int rf, Splitter splitter, Random r, IPartitioner partitioner)
     {
         int localTokens = numTokens * rf;
         List<Token> randomTokens = new ArrayList<>();
 
         for (int i = 0; i < localTokens * 2; i++)
         {
-            Token t = splitter.tokenForValue(randomPartitioner ? new BigInteger(127, r) : BigInteger.valueOf(r.nextLong()));
+            Token t = partitioner.getRandomToken(r);
             randomTokens.add(t);
         }
 

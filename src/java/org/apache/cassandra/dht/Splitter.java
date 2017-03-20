@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.dht;
 
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -26,7 +25,7 @@ import java.util.List;
 /**
  * Partition splitter.
  */
-public abstract class Splitter
+public class Splitter
 {
     private final IPartitioner partitioner;
 
@@ -35,78 +34,73 @@ public abstract class Splitter
         this.partitioner = partitioner;
     }
 
-    protected abstract Token tokenForValue(BigInteger value);
-
-    protected abstract BigInteger valueForToken(Token token);
-
     public List<Token> splitOwnedRanges(int parts, List<Range<Token>> localRanges, boolean dontSplitRanges)
     {
         if (localRanges == null || localRanges.isEmpty() || parts == 1)
             return Collections.singletonList(partitioner.getMaximumToken());
 
-        BigInteger totalTokens = BigInteger.ZERO;
+        double totalTokens = 0;
         for (Range<Token> r : localRanges)
         {
-            BigInteger right = valueForToken(token(r.right));
-            totalTokens = totalTokens.add(right.subtract(valueForToken(r.left)));
+            totalTokens += r.left.size(r.right);
         }
-        BigInteger perPart = totalTokens.divide(BigInteger.valueOf(parts));
+        double perPart = totalTokens / parts;
         // the range owned is so tiny we can't split it:
-        if (perPart.equals(BigInteger.ZERO))
+        if (perPart == 0)
             return Collections.singletonList(partitioner.getMaximumToken());
 
         if (dontSplitRanges)
             return splitOwnedRangesNoPartialRanges(localRanges, perPart, parts);
 
         List<Token> boundaries = new ArrayList<>();
-        BigInteger sum = BigInteger.ZERO;
+        double sum = 0;
         for (Range<Token> r : localRanges)
         {
-            Token right = token(r.right);
-            BigInteger currentRangeWidth = valueForToken(right).subtract(valueForToken(r.left)).abs();
-            BigInteger left = valueForToken(r.left);
-            while (sum.add(currentRangeWidth).compareTo(perPart) >= 0)
+            double currentRangeWidth = r.left.size(r.right);
+            Token left = r.left;
+            while (sum + currentRangeWidth >= perPart)
             {
-                BigInteger withinRangeBoundary = perPart.subtract(sum);
-                left = left.add(withinRangeBoundary);
-                boundaries.add(tokenForValue(left));
-                currentRangeWidth = currentRangeWidth.subtract(withinRangeBoundary);
-                sum = BigInteger.ZERO;
+                double withinRangeBoundary = perPart - sum;
+                left = partitioner.split(left, r.right, withinRangeBoundary / currentRangeWidth);
+                boundaries.add(left);
+                currentRangeWidth = currentRangeWidth - withinRangeBoundary;
+                sum = 0;
             }
-            sum = sum.add(currentRangeWidth);
+            sum += currentRangeWidth;
         }
-        boundaries.set(boundaries.size() - 1, partitioner.getMaximumToken());
+        if (boundaries.size() < parts)
+            boundaries.add(partitioner.getMaximumToken());
+        else
+            boundaries.set(boundaries.size() - 1, partitioner.getMaximumToken());
 
         assert boundaries.size() == parts : boundaries.size() +"!="+parts+" "+boundaries+":"+localRanges;
         return boundaries;
     }
 
-    private List<Token> splitOwnedRangesNoPartialRanges(List<Range<Token>> localRanges, BigInteger perPart, int parts)
+    private List<Token> splitOwnedRangesNoPartialRanges(List<Range<Token>> localRanges, double perPart, int parts)
     {
         List<Token> boundaries = new ArrayList<>(parts);
-        BigInteger sum = BigInteger.ZERO;
+        double sum = 0;
         int i = 0;
         while (boundaries.size() < parts - 1)
         {
             Range<Token> r = localRanges.get(i);
             Range<Token> nextRange = localRanges.get(i + 1);
-            Token right = token(r.right);
-            Token nextRight = token(nextRange.right);
 
-            BigInteger currentRangeWidth = valueForToken(right).subtract(valueForToken(r.left));
-            BigInteger nextRangeWidth = valueForToken(nextRight).subtract(valueForToken(nextRange.left));
-            sum = sum.add(currentRangeWidth);
+            double currentRangeWidth = r.left.size(r.right);
+            double nextRangeWidth = nextRange.left.size(nextRange.right);
+            sum += currentRangeWidth;
             // does this or next range take us beyond the per part limit?
-            if (sum.compareTo(perPart) > 0 || sum.add(nextRangeWidth).compareTo(perPart) > 0)
+            if (sum + nextRangeWidth > perPart)
             {
                 // Either this or the next range will take us beyond the perPart limit. Will stopping now or
                 // adding the next range create the smallest difference to perPart?
-                BigInteger diffCurrent = sum.subtract(perPart).abs();
-                BigInteger diffNext = sum.add(nextRangeWidth).subtract(perPart).abs();
-                if (diffNext.compareTo(diffCurrent) >= 0)
+                double diffCurrent = Math.abs(sum - perPart);
+                double diffNext = Math.abs(sum + nextRangeWidth - perPart);
+                if (diffNext >= diffCurrent)
                 {
-                    sum = BigInteger.ZERO;
-                    boundaries.add(right);
+                    sum = 0;
+                    boundaries.add(r.right);
                 }
             }
             i++;
@@ -114,14 +108,4 @@ public abstract class Splitter
         boundaries.add(partitioner.getMaximumToken());
         return boundaries;
     }
-
-    /**
-     * We avoid calculating for wrap around ranges, instead we use the actual max token, and then, when translating
-     * to PartitionPositions, we include tokens from .minKeyBound to .maxKeyBound to make sure we include all tokens.
-     */
-    private Token token(Token t)
-    {
-        return t.equals(partitioner.getMinimumToken()) ? partitioner.getMaximumToken() : t;
-    }
-
 }

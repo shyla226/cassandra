@@ -48,18 +48,7 @@ public class Murmur3Partitioner implements IPartitioner
     public static final Murmur3Partitioner instance = new Murmur3Partitioner();
     public static final AbstractType<?> partitionOrdering = new PartitionerDefinedOrder(instance);
 
-    private final Splitter splitter = new Splitter(this)
-    {
-        public Token tokenForValue(BigInteger value)
-        {
-            return new LongToken(value.longValue());
-        }
-
-        public BigInteger valueForToken(Token token)
-        {
-            return BigInteger.valueOf(((LongToken) token).token);
-        }
-    };
+    private final Splitter splitter = new Splitter(this);
 
     public DecoratedKey decorateKey(ByteBuffer key)
     {

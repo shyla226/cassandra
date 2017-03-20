@@ -50,18 +50,7 @@ public class RandomPartitioner implements IPartitioner
     public static final RandomPartitioner instance = new RandomPartitioner();
     public static final AbstractType<?> partitionOrdering = new PartitionerDefinedOrder(instance);
 
-    private final Splitter splitter = new Splitter(this)
-    {
-        public Token tokenForValue(BigInteger value)
-        {
-            return new BigIntegerToken(value);
-        }
-
-        public BigInteger valueForToken(Token token)
-        {
-            return ((BigIntegerToken)token).getTokenValue();
-        }
-    };
+    private final Splitter splitter = new Splitter(this);
 
     public DecoratedKey decorateKey(ByteBuffer key)
     {
