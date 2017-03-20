@@ -353,7 +353,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
                     Tracing.traceRepair(message);
                     Tracing.instance.stopSession();
                 }
-                executor.shutdownNow();
+                executor.shutdown();
             }
         });
     }

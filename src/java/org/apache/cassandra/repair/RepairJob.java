@@ -216,7 +216,8 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
     private <T> void waitForRemainingTasksAndFail(String phase, Iterable<? extends ListenableFuture<? extends T>> tasks,
                                                   Throwable t)
     {
-        logger.warn("[{}] [repair #{}] {} {} failed", session.parentRepairSession, session.getId(), desc.columnFamily, phase, t);
+        logger.warn("[{}] [repair #{}] {} {} failed. Will wait a maximum of {} hours for remaining tasks to finish.",
+                    session.parentRepairSession, session.getId(), desc.columnFamily, phase, MAX_WAIT_FOR_REMAINING_TASKS_IN_HOURS, t);
         //wait for remaining tasks to complete
         try
         {
