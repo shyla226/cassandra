@@ -60,7 +60,7 @@ public class MergeFlowableComparisonTest
     }
 
     static int ITERATOR_COUNT = 15;
-    static int LIST_LENGTH = 15000;
+    static int LIST_LENGTH = 2500;
     static boolean BENCHMARK = false;
     static int DELAY_CHANCE = 3;            // 1/this of the inputs will be async delayed randomly, 0 for all
     Random rand = new Random();
