@@ -20,7 +20,9 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.Map;
 
+import com.google.common.collect.Maps;
 import org.junit.Test;
 
 import org.apache.cassandra.*;
@@ -28,6 +30,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -50,24 +53,21 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
         try (SSTableWriter writer = getWriter(cfs, dir, txn))
         {
-            for (int i = 0; i < 10000; i++)
+            Map<DecoratedKey, PartitionUpdate> updates = prepare(cfs, 0, 20000);
+
+            int idx = 0;
+            SSTableReader s = null;
+            for (PartitionUpdate update : updates.values())
             {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer.append(builder.build().unfilteredIterator());
+                writer.append(update.unfilteredIterator());
+                if (++idx == 10000)
+                {
+                    s = writer.setMaxDataAge(1000).openEarly();
+                    assert s != null;
+                    assertFileCounts(dir.list());
+                }
             }
 
-            SSTableReader s = writer.setMaxDataAge(1000).openEarly();
-            assert s != null;
-            assertFileCounts(dir.list());
-            for (int i = 10000; i < 20000; i++)
-            {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer.append(builder.build().unfilteredIterator());
-            }
             SSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
             assertTrue(s.last.compareTo(s2.last) < 0);
             assertFileCounts(dir.list());
@@ -93,6 +93,20 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         }
     }
 
+    private Map<DecoratedKey, PartitionUpdate> prepare(ColumnFamilyStore cfs, int from, int to)
+    {
+        Map<DecoratedKey, PartitionUpdate> updates = Maps.newTreeMap();
+        for (int i = from; i < to; i++)
+        {
+            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
+            for (int j = 0; j < 100; j++)
+                builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
+            PartitionUpdate update = builder.build();
+            updates.put(update.partitionKey(), update);
+        }
+        return updates;
+    }
+
 
     @Test
     public void testAbortTxnWithClosedWriterShouldRemoveSSTable() throws InterruptedException
@@ -105,21 +119,17 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
         try (SSTableWriter writer = getWriter(cfs, dir, txn))
         {
-            for (int i = 0; i < 10000; i++)
-            {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer.append(builder.build().unfilteredIterator());
-            }
+            Map<DecoratedKey, PartitionUpdate> updates = prepare(cfs, 0, 20000);
 
-            assertFileCounts(dir.list());
-            for (int i = 10000; i < 20000; i++)
+            int idx = 0;
+            SSTableReader s = null;
+            for (PartitionUpdate update : updates.values())
             {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer.append(builder.build().unfilteredIterator());
+                writer.append(update.unfilteredIterator());
+                if (++idx == 10000)
+                {
+                    assertFileCounts(dir.list());
+                }
             }
             SSTableReader sstable = writer.finish(true);
             int datafiles = assertFileCounts(dir.list());
@@ -156,21 +166,20 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         SSTableWriter writer2 = getWriter(cfs, dir, txn);
         try
         {
-            for (int i = 0; i < 10000; i++)
-            {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer1.append(builder.build().unfilteredIterator());
-            }
+            Map<DecoratedKey, PartitionUpdate> updates = prepare(cfs, 0, 20000);
 
-            assertFileCounts(dir.list());
-            for (int i = 10000; i < 20000; i++)
+            int idx = 0;
+            SSTableReader s = null;
+            for (PartitionUpdate update : updates.values())
             {
-                UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                for (int j = 0; j < 100; j++)
-                    builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                writer2.append(builder.build().unfilteredIterator());
+                if (idx < 10000)
+                    writer1.append(update.unfilteredIterator());
+                else
+                    writer2.append(update.unfilteredIterator());
+                if (++idx == 10000)
+                {
+                    assertFileCounts(dir.list());
+                }
             }
             SSTableReader sstable = writer1.finish(true);
             txn.update(sstable, false);
