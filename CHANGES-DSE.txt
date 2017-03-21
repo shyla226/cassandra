@@ -3,6 +3,7 @@ DSE 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Fix SmallInt and TinyInt serialization (APOLLO-542)
  * Check for null/empty password before calling legacyAuthenticate from CassandraLoginModule (APOLLO-412)
  * Allow registering user expression on SelectStatement (APOLLO-491)
  * Apply request timeout in cqlsh COPY correctly, after upgrading to execution profiles (APOLLO-411)
