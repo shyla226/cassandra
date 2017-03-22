@@ -22,8 +22,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
-import java.util.*;
-import java.util.Timer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,8 +36,7 @@ import java.util.zip.CRC32;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
-import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.config.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -86,7 +90,7 @@ public abstract class CommitLogSegment
     static final int SYNC_MARKER_SIZE = 4 + 4;
 
     // The OpOrder used to order appends wrt sync
-    private final OpOrder appendOrder = new OpOrder(this);
+    private final OpOrder appendOrder = new OpOrder();
 
     private final AtomicInteger allocatePosition = new AtomicInteger();
 
@@ -204,7 +208,7 @@ public abstract class CommitLogSegment
     @SuppressWarnings("resource") //we pass the op order around
     Allocation allocate(Mutation mutation, int size)
     {
-        final TPCOpOrder.Group opGroup = appendOrder.start();
+        final OpOrder.Group opGroup = appendOrder.start();
         try
         {
             int position = allocate(size);
@@ -261,7 +265,7 @@ public abstract class CommitLogSegment
         // This actually isn't strictly necessary, as currently all calls to discardUnusedTail are executed either by the thread
         // running sync or within a mutation already protected by this OpOrdering, but to prevent future potential mistakes,
         // we duplicate the protection here so that the contract between discardUnusedTail() and sync() is more explicit.
-        try (TPCOpOrder.Group group = appendOrder.start())
+        try (OpOrder.Group group = appendOrder.start())
         {
             while (true)
             {
@@ -640,11 +644,11 @@ public abstract class CommitLogSegment
     protected static class Allocation
     {
         private final CommitLogSegment segment;
-        private final TPCOpOrder.Group appendOp;
+        private final OpOrder.Group appendOp;
         private final int position;
         private final ByteBuffer buffer;
 
-        Allocation(CommitLogSegment segment, TPCOpOrder.Group appendOp, int position, ByteBuffer buffer)
+        Allocation(CommitLogSegment segment, OpOrder.Group appendOp, int position, ByteBuffer buffer)
         {
             this.segment = segment;
             this.appendOp = appendOp;

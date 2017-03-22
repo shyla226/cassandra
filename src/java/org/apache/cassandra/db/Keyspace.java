@@ -31,7 +31,6 @@ import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -57,6 +56,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 
 /**
  * It represents a Keyspace.
@@ -83,7 +83,7 @@ public class Keyspace
 
     //OpOrder is defined globally since we need to order writes across
     //Keyspaces in the case of Views (batchlog of view mutations)
-    public static final OpOrder writeOrder = new OpOrder(Keyspace.class);
+    public static final OpOrderThreaded writeOrder = NettyRxScheduler.newOpOrderThreaded(Keyspace.class);
 
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
@@ -380,8 +380,8 @@ public class Keyspace
         cfs.getCompactionStrategyManager().shutdown();
         CompactionManager.instance.interruptCompactionForCFs(cfs.concatWithIndexes(), true);
         // wait for any outstanding reads/writes that might affect the CFS
-        cfs.keyspace.writeOrder.awaitNewBarrier();
-        cfs.readOrdering.awaitNewBarrier();
+        cfs.keyspace.writeOrder.awaitNewThreadedBarrier();
+        cfs.readOrdering.awaitNewThreadedBarrier();
 
         unloadCf(cfs);
     }

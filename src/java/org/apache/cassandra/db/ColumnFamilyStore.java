@@ -40,7 +40,6 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
 import io.reactivex.Completable;
-import io.reactivex.CompletableObserver;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subjects.BehaviorSubject;
@@ -84,6 +83,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.json.simple.JSONArray;
@@ -233,7 +233,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private final Tracker data;
 
     /* The read order, used to track accesses to off-heap memtable storage */
-    public final OpOrder readOrdering = new OpOrder(this);
+    public final OpOrderThreaded readOrdering = NettyRxScheduler.newOpOrderThreaded(this);
 
     /* This is used to generate the next index for a SSTable */
     private final AtomicInteger fileIndexGenerator = new AtomicInteger(0);
@@ -1078,7 +1078,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     private final class Flush implements Runnable
     {
-        final OpOrder.Barrier writeBarrier;
+        final OpOrderThreaded.Barrier writeBarrier;
         final List<Memtable> memtables = new ArrayList<>();
         final ListenableFutureTask<CommitLogPosition> postFlushTask;
         final PostFlush postFlush;
@@ -1099,7 +1099,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
              * In doing so it also tells the write operations to update the commitLogUpperBound of the memtable, so
              * that we know the CL position we are dirty to, which can be marked clean when we complete.
              */
-            writeBarrier = keyspace.writeOrder.newBarrier();
+            writeBarrier = keyspace.writeOrder.newThreadedBarrier();
 
             // submit flushes for the memtable for any indexed sub-cfses, and our own
             AtomicReference<CommitLogPosition> commitLogUpperBound = new AtomicReference<>();
@@ -1269,7 +1269,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         private void reclaim(final Memtable memtable)
         {
             // issue a read barrier for reclaiming the memory, and offload the wait to another thread
-            final OpOrder.Barrier readBarrier = readOrdering.newBarrier();
+            final OpOrderThreaded.Barrier readBarrier = readOrdering.newThreadedBarrier();
             readBarrier.issue();
             postFlushTask.addListener(new WrappedRunnable()
             {
@@ -1369,13 +1369,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ key - key for update/insert
      * param @ columnFamily - columnFamily changes
      */
-    public Completable apply(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public Completable apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         return applyInternal(update, indexer, opGroup, commitLogPosition)
                .subscribeOn(NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey(), true));
     }
 
-    Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         long start = System.nanoTime();
         Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
@@ -1742,7 +1742,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         ByteBuffer keyBuffer = hexFormat ? ByteBufferUtil.hexToBytes(key) : metadata().partitionKeyType.fromString(key);
         DecoratedKey dk = decorateKey(keyBuffer);
-        try (TPCOpOrder.Group op = readOrdering.start())
+        try (OpOrder.Group op = readOrdering.start())
         {
             List<String> files = new ArrayList<>();
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)

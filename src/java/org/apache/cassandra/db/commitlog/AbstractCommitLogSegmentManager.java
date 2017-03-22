@@ -288,7 +288,7 @@ public abstract class AbstractCommitLogSegmentManager
 
         // make sure the writes have materialized inside of the memtables by waiting for all outstanding writes
         // to complete
-        Keyspace.writeOrder.awaitNewBarrier();
+        Keyspace.writeOrder.awaitNewThreadedBarrier();
 
         // flush and wait for all CFs that are dirty in segments up-to and including 'last'
         Observable<CommitLogPosition> observable = flushDataFrom(segmentsToRecycle, true);

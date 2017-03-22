@@ -23,7 +23,7 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -34,15 +34,15 @@ public class ReadExecutionController implements AutoCloseable
     private static final Logger logger = LoggerFactory.getLogger(ReadExecutionController.class);
 
     // For every reads
-    private final TPCOpOrder.Group baseOp;
+    private final OpOrder.Group baseOp;
     private final TableMetadata baseMetadata; // kept to sanity check that we have take the op order on the right table
 
     // For index reads
     private final ReadExecutionController indexController;
-    private final TPCOpOrder.Group writeOp;
+    private final OpOrder.Group writeOp;
     private boolean closed;
 
-    private ReadExecutionController(TPCOpOrder.Group baseOp, TableMetadata baseMetadata, ReadExecutionController indexController, TPCOpOrder.Group writeOp)
+    private ReadExecutionController(OpOrder.Group baseOp, TableMetadata baseMetadata, ReadExecutionController indexController, OpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -59,7 +59,7 @@ public class ReadExecutionController implements AutoCloseable
         return indexController;
     }
 
-    public TPCOpOrder.Group writeOpOrderGroup()
+    public OpOrder.Group writeOpOrderGroup()
     {
         return writeOp;
     }
@@ -95,7 +95,7 @@ public class ReadExecutionController implements AutoCloseable
         }
         else
         {
-            TPCOpOrder.Group baseOp = null, writeOp = null;
+            OpOrder.Group baseOp = null, writeOp = null;
             ReadExecutionController indexController = null;
             // OpOrder.start() shouldn't fail, but better safe than sorry.
             try

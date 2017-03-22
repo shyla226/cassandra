@@ -23,7 +23,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -84,7 +84,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
      * @return an array containing first the difference in size seen after merging the updates, and second the minimum
      * time detla between updates.
      */
-    public Single<long[]> addAllWithSizeDelta(final PartitionUpdate update, TPCOpOrder.Group writeOp, UpdateTransaction indexer)
+    public Single<long[]> addAllWithSizeDelta(final PartitionUpdate update, OpOrder.Group writeOp, UpdateTransaction indexer)
     {
         RowUpdater updater = new RowUpdater(this, allocator, writeOp, indexer);
         try
@@ -194,7 +194,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
     {
         final AtomicBTreePartition updating;
         final MemtableAllocator allocator;
-        final TPCOpOrder.Group writeOp;
+        final OpOrder.Group writeOp;
         final UpdateTransaction indexer;
         final int nowInSec;
         Row.Builder regularBuilder;
@@ -203,7 +203,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         long colUpdateTimeDelta = Long.MAX_VALUE;
         List<Row> inserted; // TODO: replace with walk of aborted BTree
 
-        private RowUpdater(AtomicBTreePartition updating, MemtableAllocator allocator, TPCOpOrder.Group writeOp, UpdateTransaction indexer)
+        private RowUpdater(AtomicBTreePartition updating, MemtableAllocator allocator, OpOrder.Group writeOp, UpdateTransaction indexer)
         {
             this.updating = updating;
             this.allocator = allocator;

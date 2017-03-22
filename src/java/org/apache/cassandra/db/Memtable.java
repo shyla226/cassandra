@@ -28,13 +28,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
-import io.reactivex.Completable;
 import io.reactivex.Flowable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.concurrent.TPCOpOrder;
-import org.apache.cassandra.db.rows.MergeReducer;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.utils.MergeIterator;
@@ -69,6 +65,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
@@ -111,7 +108,7 @@ public class Memtable implements Comparable<Memtable>
     private final AtomicLong currentOperations = new AtomicLong(0);
 
     // the write barrier for directing writes to this memtable during a switch
-    private volatile OpOrder.Barrier writeBarrier;
+    private volatile OpOrderThreaded.Barrier writeBarrier;
     // the precise upper bound of CommitLogPosition owned by this memtable
     private volatile AtomicReference<CommitLogPosition> commitLogUpperBound;
     // the precise lower bound of CommitLogPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
@@ -241,7 +238,7 @@ public class Memtable implements Comparable<Memtable>
     }
 
     @VisibleForTesting
-    public void setDiscarding(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
+    public void setDiscarding(OpOrderThreaded.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
         assert this.writeBarrier == null;
         this.commitLogUpperBound = commitLogUpperBound;
@@ -255,14 +252,14 @@ public class Memtable implements Comparable<Memtable>
     }
 
     // decide if this memtable should take the write, or if it should go to the next memtable
-    public boolean accepts(TPCOpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         // if the barrier hasn't been set yet, then this memtable is still taking ALL writes
-        OpOrder.Barrier barrier = this.writeBarrier;
+        OpOrderThreaded.Barrier barrier = this.writeBarrier;
         if (barrier == null)
             return true;
         // if the barrier has been set, but is in the past, we are definitely destined for a future memtable
-        if (!barrier.isAfter(opGroup))
+        if (!barrier.isAfter(Thread.currentThread(), opGroup))
             return false;
         // if we aren't durable we are directed only by the barrier
         if (commitLogPosition == null)
@@ -329,7 +326,7 @@ public class Memtable implements Comparable<Memtable>
      *
      * commitLogSegmentPosition should only be null if this is a secondary index, in which case it is *expected* to be null
      */
-    Single<Long> put(PartitionUpdate update, UpdateTransaction indexer, TPCOpOrder.Group opGroup)
+    Single<Long> put(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup)
     {
         DecoratedKey key = update.partitionKey();
         TreeMap<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
@@ -685,7 +682,7 @@ public class Memtable implements Comparable<Memtable>
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead
-        try (final TPCOpOrder.Group group = new OpOrder(null).start())
+        try (final OpOrder.Group group = new OpOrder().start())
         {
             int rowOverhead;
             MemtableAllocator allocator = MEMORY_POOL.newAllocator();

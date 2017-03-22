@@ -20,7 +20,7 @@ package org.apache.cassandra.index.internal.keys;
 import java.nio.ByteBuffer;
 
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -133,7 +133,7 @@ public class KeysSearcher extends CassandraIndexSearcher
     private UnfilteredRowIterator filterIfStale(UnfilteredRowIterator iterator,
                                                 Row indexHit,
                                                 ByteBuffer indexedValue,
-                                                TPCOpOrder.Group writeOp,
+                                                OpOrder.Group writeOp,
                                                 int nowInSec)
     {
         assert iterator.metadata().isCompactTable();

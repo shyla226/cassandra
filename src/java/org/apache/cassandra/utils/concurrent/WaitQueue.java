@@ -79,6 +79,10 @@ public final class WaitQueue
     // the waiting signals
     private final ConcurrentLinkedQueue<RegisteredSignal> queue = new ConcurrentLinkedQueue<>();
 
+    public Signal register()
+    {
+        return register(Thread.currentThread());
+    }
     /**
      * The calling thread MUST be the thread that uses the signal
      * @return                                x

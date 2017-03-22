@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 
 import io.reactivex.Completable;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
@@ -187,7 +187,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
         return Single.just(iter).doOnError(t -> iter.close());
     }
 
-    private Completable deleteAllEntries(final List<IndexEntry> entries, final TPCOpOrder.Group writeOp, final int nowInSec)
+    private Completable deleteAllEntries(final List<IndexEntry> entries, final OpOrder.Group writeOp, final int nowInSec)
     {
         return Completable.merge(entries.stream()
                                         .map(entry -> index.deleteStaleEntry(entry.indexValue,
@@ -201,7 +201,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
     private Single<UnfilteredRowIterator> filterStaleEntries(UnfilteredRowIterator dataIter,
                                                      final ByteBuffer indexValue,
                                                      final List<IndexEntry> entries,
-                                                     final TPCOpOrder.Group writeOp,
+                                                     final OpOrder.Group writeOp,
                                                      final int nowInSec)
     {
         // collect stale index entries and delete them when we close this iterator

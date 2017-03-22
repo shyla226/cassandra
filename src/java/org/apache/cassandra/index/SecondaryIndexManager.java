@@ -42,7 +42,7 @@ import io.reactivex.Observable;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.*;
@@ -559,7 +559,7 @@ public class SecondaryIndexManager implements IndexRegistry
             SinglePartitionPager pager = new SinglePartitionPager(cmd, null, ProtocolVersion.CURRENT);
             while (!pager.isExhausted())
             {
-                try (TPCOpOrder.Group writeGroup = Keyspace.writeOrder.start();
+                try (OpOrder.Group writeGroup = Keyspace.writeOrder.start();
                      UnfilteredPartitionIterator page = pager.fetchPageUnfiltered(pageSize, baseCfs.metadata()).blockingGet())
                 {
                     if (!page.hasNext())
@@ -832,7 +832,7 @@ public class SecondaryIndexManager implements IndexRegistry
     /**
      * Transaction for updates on the write path.
      */
-    public UpdateTransaction newUpdateTransaction(PartitionUpdate update, TPCOpOrder.Group opGroup, int nowInSec)
+    public UpdateTransaction newUpdateTransaction(PartitionUpdate update, OpOrder.Group opGroup, int nowInSec)
     {
         if (!hasIndexes())
             return UpdateTransaction.NO_OP;

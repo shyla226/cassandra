@@ -1,7 +1,7 @@
 package org.apache.cassandra.index.internal;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -163,7 +163,7 @@ public class TableBackedCustomIndex implements Index
     public Index.Indexer indexerFor(final DecoratedKey key,
                                     final RegularAndStaticColumns columns,
                                     final int nowInSec,
-                                    final TPCOpOrder.Group opGroup,
+                                    final OpOrder.Group opGroup,
                                     final IndexTransaction.Type transactionType)
     {
         return new Index.Indexer()

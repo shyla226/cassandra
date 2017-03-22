@@ -19,20 +19,24 @@ package org.apache.cassandra.hints;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.Queue;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
-import org.apache.cassandra.concurrent.TPCOpOrder;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
@@ -67,7 +71,7 @@ final class HintsBuffer
 
         position = new AtomicInteger();
         offsets = new ConcurrentHashMap<>();
-        appendOrder = new OpOrder(this);
+        appendOrder = new OpOrder();
     }
 
     static HintsBuffer create(int slabSize)
@@ -155,7 +159,7 @@ final class HintsBuffer
                                                              slab.capacity() / 2));
         }
 
-        TPCOpOrder.Group opGroup = appendOrder.start(); // will eventually be closed by the receiver of the allocation
+        OpOrder.Group opGroup = appendOrder.start(); // will eventually be closed by the receiver of the allocation
         try
         {
             return allocate(totalSize, opGroup);
@@ -167,7 +171,7 @@ final class HintsBuffer
         }
     }
 
-    private Allocation allocate(int totalSize, TPCOpOrder.Group opGroup)
+    private Allocation allocate(int totalSize, OpOrder.Group opGroup)
     {
         int offset = allocateBytes(totalSize);
         if (offset < 0)
@@ -216,9 +220,9 @@ final class HintsBuffer
     {
         private final Integer offset;
         private final int totalSize;
-        private final TPCOpOrder.Group opGroup;
+        private final OpOrder.Group opGroup;
 
-        Allocation(int offset, int totalSize, TPCOpOrder.Group opGroup)
+        Allocation(int offset, int totalSize, OpOrder.Group opGroup)
         {
             this.offset = offset;
             this.totalSize = totalSize;

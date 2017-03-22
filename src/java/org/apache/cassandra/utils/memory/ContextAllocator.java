@@ -20,7 +20,7 @@ package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -30,10 +30,10 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
  */
 public final class ContextAllocator extends AbstractAllocator
 {
-    private final TPCOpOrder.Group opGroup;
+    private final OpOrder.Group opGroup;
     private final MemtableBufferAllocator allocator;
 
-    public ContextAllocator(TPCOpOrder.Group opGroup, MemtableBufferAllocator allocator)
+    public ContextAllocator(OpOrder.Group opGroup, MemtableBufferAllocator allocator)
     {
         this.opGroup = opGroup;
         this.allocator = allocator;

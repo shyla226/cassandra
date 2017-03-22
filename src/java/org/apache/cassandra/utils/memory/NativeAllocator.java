@@ -24,7 +24,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -65,9 +65,9 @@ public class NativeAllocator extends MemtableAllocator
 
     private static class CloningBTreeRowBuilder extends BTreeRow.Builder
     {
-        final TPCOpOrder.Group writeOp;
+        final OpOrder.Group writeOp;
         final NativeAllocator allocator;
-        private CloningBTreeRowBuilder(TPCOpOrder.Group writeOp, NativeAllocator allocator)
+        private CloningBTreeRowBuilder(OpOrder.Group writeOp, NativeAllocator allocator)
         {
             super(true);
             this.writeOp = writeOp;
@@ -89,12 +89,12 @@ public class NativeAllocator extends MemtableAllocator
         }
     }
 
-    public Row.Builder rowBuilder(TPCOpOrder.Group opGroup)
+    public Row.Builder rowBuilder(OpOrder.Group opGroup)
     {
         return new CloningBTreeRowBuilder(opGroup, this);
     }
 
-    public DecoratedKey clone(DecoratedKey key, TPCOpOrder.Group writeOp)
+    public DecoratedKey clone(DecoratedKey key, OpOrder.Group writeOp)
     {
         return new NativeDecoratedKey(key.getToken(), this, writeOp, key.getKey());
     }
@@ -104,7 +104,7 @@ public class NativeAllocator extends MemtableAllocator
         return cloneToHeap;
     }
 
-    public long allocate(int size, TPCOpOrder.Group opGroup)
+    public long allocate(int size, OpOrder.Group opGroup)
     {
         assert size >= 0;
         offHeap().allocate(size, opGroup);

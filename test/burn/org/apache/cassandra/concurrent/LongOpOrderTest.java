@@ -44,14 +44,13 @@ import static org.junit.Assert.assertTrue;
 // TODO: should also test markBlocking and SyncOrdered
 public class LongOpOrderTest
 {
-
     private static final Logger logger = LoggerFactory.getLogger(LongOpOrderTest.class);
 
     static final int CONSUMERS = 4;
     static final int PRODUCERS = NettyRxScheduler.NUM_NETTY_THREADS;
 
-    static final long RUNTIME = TimeUnit.MINUTES.toMillis(5);
-    static final long REPORT_INTERVAL = TimeUnit.MINUTES.toMillis(1);
+    static final long RUNTIME = TimeUnit.SECONDS.toMillis(20);
+    static final long REPORT_INTERVAL = TimeUnit.SECONDS.toMillis(5);
 
     static final Thread.UncaughtExceptionHandler handler = new Thread.UncaughtExceptionHandler()
     {
@@ -63,7 +62,7 @@ public class LongOpOrderTest
         }
     };
 
-    final OpOrder order = new OpOrder(this);
+    final OpOrder order = new OpOrder();
     final AtomicInteger errors = new AtomicInteger();
 
     class TestOrdering implements Runnable
@@ -83,7 +82,7 @@ public class LongOpOrderTest
 
             for (int i = startOffset * producers ; i < (startOffset * producers) + producers ; i++)
             {
-                NettyRxScheduler.getForCore(i).scheduleDirect(new Producer());
+                NettyRxScheduler.getForCore(i).scheduleDirect(new Producer(i));
             }
             exec.execute(this);
         }
@@ -139,10 +138,10 @@ public class LongOpOrderTest
 
             volatile OpOrder.Barrier barrier;
             volatile State replacement;
-            final NonBlockingHashMap<TPCOpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
+            final NonBlockingHashMap<OpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
             int checkCount = -1;
 
-            boolean accept(TPCOpOrder.Group opGroup)
+            boolean accept(OpOrder.Group opGroup)
             {
                 if (barrier != null && !barrier.isAfter(opGroup))
                     return false;
@@ -181,10 +180,10 @@ public class LongOpOrderTest
                     checkCount = totalCount();
                     delete = false;
                 }
-                for (Map.Entry<TPCOpOrder.Group, AtomicInteger> e : count.entrySet())
+                for (Map.Entry<OpOrder.Group, AtomicInteger> e : count.entrySet())
                 {
-                    TPCOpOrder.Group group = e.getKey();
-                    if (group.compareTo(barrier.getSyncPoint(group.coreId)) > 0)
+                    OpOrder.Group group = e.getKey();
+                    if (group.compareTo(barrier.getSyncPoint()) > 0)
                     {
                         errors.incrementAndGet();
                         logger.error("Received an operation that was created after the barrier was issued.");
@@ -201,32 +200,40 @@ public class LongOpOrderTest
 
         }
 
-        final NonBlockingHashMap<TPCOpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
+        final NonBlockingHashMap<OpOrder.Group, AtomicInteger> count = new NonBlockingHashMap<>();
 
         class Producer implements Runnable
         {
+            int core;
+            OpOrder.Group current;
+
+            public Producer(int core)
+            {
+                this.core = core;
+                current = order.start();
+            }
+
             public void run()
             {
-
-                //for (int i = 0; i < 8192; i++)
+                for (int i = 0; i < 1; ++i)
                 {
                     AtomicInteger c;
-                    try (TPCOpOrder.Group opGroup = order.start())
+                    if (null == (c = count.get(current)))
                     {
-                        if (null == (c = count.get(opGroup)))
-                        {
-                            count.putIfAbsent(opGroup, new AtomicInteger());
-                            c = count.get(opGroup);
-                        }
-                        c.incrementAndGet();
-                        State s = state;
-                        while (!s.accept(opGroup))
-                            s = s.replacement;
+                        count.putIfAbsent(current, new AtomicInteger());
+                        c = count.get(current);
                     }
+                    c.incrementAndGet();
+                    State s = state;
+                    while (!s.accept(current))
+                        s = s.replacement;
+                    current.close();
+
+                    current = order.start();
                 }
 
-                //Reschedule
-                NettyRxScheduler.instance().scheduleDirect(this);
+                //Reschedule, keeping an oporder open
+                NettyRxScheduler.getForCore(core).scheduleDirect(this);
             }
         }
 
@@ -237,6 +244,7 @@ public class LongOpOrderTest
     {
         DatabaseDescriptor.daemonInitialization();
         NativeTransportService server = new NativeTransportService();
+        NettyRxScheduler.register();
         server.start();
 
         errors.set(0);

@@ -20,7 +20,7 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.MemoryUtil;
@@ -30,7 +30,7 @@ public class NativeDecoratedKey extends DecoratedKey
 {
     final long peer;
 
-    public NativeDecoratedKey(Token token, NativeAllocator allocator, TPCOpOrder.Group writeOp, ByteBuffer key)
+    public NativeDecoratedKey(Token token, NativeAllocator allocator, OpOrder.Group writeOp, ByteBuffer key)
     {
         super(token);
         assert key != null;

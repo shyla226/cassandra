@@ -53,6 +53,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
@@ -62,6 +63,8 @@ import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,6 +107,43 @@ public class NettyRxScheduler extends Scheduler
 
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
+
+    final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
+    {
+        public int idLimit()
+        {
+            return NUM_NETTY_THREADS + 1;
+        }
+
+        public int idFor(Thread t)
+        {
+            if (t instanceof NettyRxThread)
+                return ((NettyRxThread)t).getCpuId();
+            return NUM_NETTY_THREADS;
+
+//          This is what we should be doing:
+
+//            if (!StorageService.instance.isInitialized())
+//                return 0;
+//
+//            throw new IllegalStateException("TPC OpOrder groups can only be created and accessed from TPC threads.");
+
+//          Bit it doesn't currently work!
+        }
+
+        public boolean barrierPermitted()
+        {
+            if (!isTPCThread())
+                return true;
+
+            throw new IllegalStateException("Barriers should not be issued from a TPC thread.");
+        }
+    };
+
+    public static OpOrderThreaded newOpOrderThreaded(Object creator)
+    {
+        return new OpOrderThreaded(creator, threadIdentifier);
+    }
 
     private final static class NettyRxThread extends FastThreadLocalThread
     {
@@ -219,7 +259,16 @@ public class NettyRxScheduler extends Scheduler
      */
     public static int getCoreId()
     {
-        Thread t = Thread.currentThread();
+        return getCoreId(Thread.currentThread());
+    }
+
+    /**
+     * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
+     * core is valid via {@link NettyRxScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
+     * array with length num_cores + 1, and use thread safe operations only on the last element.
+     */
+    public static int getCoreId(Thread t)
+    {
         return t instanceof NettyRxThread ? ((NettyRxThread)t).getCpuId() : perCoreSchedulers.length;
     }
 

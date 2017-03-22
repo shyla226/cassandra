@@ -34,7 +34,7 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.QueryValidationException;
 import io.reactivex.Completable;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -1022,9 +1022,9 @@ public class CustomIndexTest extends CQLTester
         ColumnFamilyStore baseCfs;
         AtomicInteger indexedRowCount = new AtomicInteger(0);
 
-        TPCOpOrder.Group readOrderingAtStart = null;
-        TPCOpOrder.Group readOrderingAtFinish = null;
-        Set<TPCOpOrder.Group> writeGroups = new HashSet<>();
+        OpOrder.Group readOrderingAtStart = null;
+        OpOrder.Group readOrderingAtFinish = null;
+        Set<OpOrder.Group> writeGroups = new HashSet<>();
         List<OpOrder.Barrier> barriers = new ArrayList<>();
 
         static final int ROWS_IN_PARTITION = 1000;
@@ -1052,7 +1052,7 @@ public class CustomIndexTest extends CQLTester
         public Indexer indexerFor(final DecoratedKey key,
                                   RegularAndStaticColumns columns,
                                   int nowInSec,
-                                  TPCOpOrder.Group opGroup,
+                                  OpOrder.Group opGroup,
                                   IndexTransaction.Type transactionType)
         {
             if (readOrderingAtStart == null)

@@ -29,7 +29,7 @@ import java.util.function.BiFunction;
 import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCOpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
@@ -391,7 +391,7 @@ public interface Index
     public Indexer indexerFor(DecoratedKey key,
                               RegularAndStaticColumns columns,
                               int nowInSec,
-                              TPCOpOrder.Group opGroup,
+                              OpOrder.Group opGroup,
                               IndexTransaction.Type transactionType);
 
     /**
