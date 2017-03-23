@@ -1,4 +1,6 @@
 3.11.0
+ * Default logging we ship will incorrectly print "?:?" for "%F:%L" pattern (CASSANDRA-13317)
+ * Possible AssertionError in UnfilteredRowIteratorWithLowerBound (CASSANDRA-13366)
  * Support unaligned memory access for AArch64 (CASSANDRA-13326)
  * Improve SASI range iterator efficiency on intersection with an empty range (CASSANDRA-12915).
  * Fix equality comparisons of columns using the duration type (CASSANDRA-13174)
@@ -11,6 +13,7 @@
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
  * Address message coalescing regression (CASSANDRA-12676)
 Merged from 3.0:
+ * Bugs handling range tombstones in the sstable iterators (CASSANDRA-13340)
  * Fix CONTAINS filtering for null collections (CASSANDRA-13246)
  * Applying: Use a unique metric reservoir per test run when using Cassandra-wide metrics residing in MBeans (CASSANDRA-13216)
  * Propagate row deletions in 2i tables on upgrade (CASSANDRA-13320)
