@@ -33,7 +33,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * Identifies observables that were not subscribed to
+ * Identifies observables that were not subscribed to after 5 seconds
  */
 public class RxSubscriptionDebugger
 {
@@ -49,14 +49,21 @@ public class RxSubscriptionDebugger
         if (enabled.compareAndSet(false, true))
         {
             RxJavaPlugins.setOnObservableAssembly(RxSubscriptionDebugger::onCreate);
+            RxJavaPlugins.setOnObservableSubscribe(RxSubscriptionDebugger::onSubscribe);
+
             RxJavaPlugins.setOnCompletableAssembly(RxSubscriptionDebugger::onCreate);
+            RxJavaPlugins.setOnCompletableSubscribe(RxSubscriptionDebugger::onSubscribe);
+
             RxJavaPlugins.setOnSingleAssembly(RxSubscriptionDebugger::onCreate);
+            RxJavaPlugins.setOnSingleSubscribe(RxSubscriptionDebugger::onSubscribe);
+
             RxJavaPlugins.setOnMaybeAssembly(RxSubscriptionDebugger::onCreate);
+            RxJavaPlugins.setOnMaybeSubscribe(RxSubscriptionDebugger::onSubscribe);
+
             RxJavaPlugins.setOnFlowableAssembly(RxSubscriptionDebugger::onCreate);
+            RxJavaPlugins.setOnFlowableSubscribe(RxSubscriptionDebugger::onSubscribe);
 
             startWatcher();
-
-            System.err.println("STARTED");
         }
     }
 
@@ -81,6 +88,12 @@ public class RxSubscriptionDebugger
     {
         observables.putIfAbsent(System.identityHashCode(observable), Pair.create(System.nanoTime(), Thread.currentThread().getStackTrace()));
         return observable;
+    }
+
+    static <T,O> O onSubscribe(T observable, O observer)
+    {
+        observables.remove(System.identityHashCode(observable));
+        return observer;
     }
 
     static void startWatcher()
@@ -118,6 +131,4 @@ public class RxSubscriptionDebugger
 
         return sb.toString();
     }
-
-
 }
