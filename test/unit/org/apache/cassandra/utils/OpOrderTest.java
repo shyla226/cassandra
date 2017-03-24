@@ -34,7 +34,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.LongOpOrderTest;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * Quick test OpOrder in the way we use it.
@@ -50,7 +50,7 @@ public class OpOrderTest
     static final long REPORT_INTERVAL = TimeUnit.SECONDS.toMillis(5);
 
     final AtomicLong errors = new AtomicLong(0);
-    OpOrderThreaded order;
+    OpOrder order;
     State currentState;
 
     static final Thread.UncaughtExceptionHandler handler = new Thread.UncaughtExceptionHandler()
@@ -71,7 +71,8 @@ public class OpOrderTest
         NettyRxScheduler.register();
         Thread.setDefaultUncaughtExceptionHandler(handler);
 
-        order = NettyRxScheduler.newOpOrderThreaded(this);
+        order = new OpOrder();
+        //order = NettyRxScheduler.newOpOrderThreaded(this);
         currentState = new State();
 
         ExecutorService consumerExec = Executors.newFixedThreadPool(CONSUMERS);
@@ -111,7 +112,7 @@ public class OpOrderTest
 
                                          State prevState = currentState;     // multiple threads could be accessing same prev. That's ok
                                          currentState = new State();
-                                         order.awaitNewThreadedBarrier();            // happens-before point... currentState must be seen by other threads now
+                                         order.awaitNewBarrier();            // happens-before point... currentState must be seen by other threads now
                                          if (!prevState.done)
                                          {
                                              prevState.done = true;

@@ -622,9 +622,9 @@ public class CustomCassandraIndex implements Index
         Collection<ColumnFamilyStore> cfss = Collections.singleton(indexCfs);
         CompactionManager.instance.interruptCompactionForCFs(cfss, true);
         CompactionManager.instance.waitForCessation(cfss);
-        indexCfs.keyspace.writeOrder.awaitNewThreadedBarrier();
+        indexCfs.keyspace.writeOrder.awaitNewBarrier();
         indexCfs.forceBlockingFlush();
-        indexCfs.readOrdering.awaitNewThreadedBarrier();
+        indexCfs.readOrdering.awaitNewBarrier();
         indexCfs.invalidate();
     }
 

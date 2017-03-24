@@ -45,7 +45,6 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.*;
 import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
 import static java.util.Collections.singleton;
@@ -272,12 +271,12 @@ public class TrackerTest
 
         Memtable prev1 = tracker.switchMemtable(true, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
         OpOrder.Group write1 = cfs.keyspace.writeOrder.start();
-        OpOrderThreaded.Barrier barrier1 = cfs.keyspace.writeOrder.newThreadedBarrier();
+        OpOrder.Barrier barrier1 = cfs.keyspace.writeOrder.newBarrier();
         prev1.setDiscarding(barrier1, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier1.issue();
         Memtable prev2 = tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
         OpOrder.Group write2 = cfs.keyspace.writeOrder.start();
-        OpOrderThreaded.Barrier barrier2 = cfs.keyspace.writeOrder.newThreadedBarrier();
+        OpOrder.Barrier barrier2 = cfs.keyspace.writeOrder.newBarrier();
         prev2.setDiscarding(barrier2, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier2.issue();
         Memtable cur = tracker.getView().getCurrentMemtable();

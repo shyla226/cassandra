@@ -662,7 +662,7 @@ public final class Schema
         // remove the keyspace from the static instances.
         Keyspace.clear(keyspace.name);
         unload(keyspace);
-        Keyspace.writeOrder.awaitNewThreadedBarrier();
+        Keyspace.writeOrder.awaitNewBarrier();
 
         keyspace.functions.udas().forEach(this::notifyDropAggregate);
         keyspace.functions.udfs().forEach(this::notifyDropFunction);

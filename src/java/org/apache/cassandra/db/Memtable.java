@@ -65,7 +65,6 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
@@ -108,7 +107,7 @@ public class Memtable implements Comparable<Memtable>
     private final AtomicLong currentOperations = new AtomicLong(0);
 
     // the write barrier for directing writes to this memtable during a switch
-    private volatile OpOrderThreaded.Barrier writeBarrier;
+    private volatile OpOrder.Barrier writeBarrier;
     // the precise upper bound of CommitLogPosition owned by this memtable
     private volatile AtomicReference<CommitLogPosition> commitLogUpperBound;
     // the precise lower bound of CommitLogPosition owned by this memtable; equal to its predecessor's commitLogUpperBound
@@ -238,7 +237,7 @@ public class Memtable implements Comparable<Memtable>
     }
 
     @VisibleForTesting
-    public void setDiscarding(OpOrderThreaded.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
+    public void setDiscarding(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
         assert this.writeBarrier == null;
         this.commitLogUpperBound = commitLogUpperBound;
@@ -255,11 +254,11 @@ public class Memtable implements Comparable<Memtable>
     public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         // if the barrier hasn't been set yet, then this memtable is still taking ALL writes
-        OpOrderThreaded.Barrier barrier = this.writeBarrier;
+        OpOrder.Barrier barrier = this.writeBarrier;
         if (barrier == null)
             return true;
         // if the barrier has been set, but is in the past, we are definitely destined for a future memtable
-        if (!barrier.isAfter(Thread.currentThread(), opGroup))
+        if (!barrier.isAfter(opGroup))
             return false;
         // if we aren't durable we are directed only by the barrier
         if (commitLogPosition == null)

@@ -115,7 +115,6 @@ import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 
@@ -2160,10 +2159,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 return;
 
             final ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(tableId);
-            final OpOrderThreaded.Barrier barrier;
+            final OpOrder.Barrier barrier;
             if (cfs != null)
             {
-                barrier = cfs.readOrdering.newThreadedBarrier();
+                barrier = cfs.readOrdering.newBarrier();
                 barrier.issue();
             }
             else

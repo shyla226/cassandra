@@ -681,9 +681,9 @@ public abstract class CassandraIndex implements Index
         Collection<ColumnFamilyStore> cfss = Collections.singleton(indexCfs);
         CompactionManager.instance.interruptCompactionForCFs(cfss, true);
         CompactionManager.instance.waitForCessation(cfss);
-        Keyspace.writeOrder.awaitNewThreadedBarrier();
+        Keyspace.writeOrder.awaitNewBarrier();
         indexCfs.forceBlockingFlush();
-        indexCfs.readOrdering.awaitNewThreadedBarrier();
+        indexCfs.readOrdering.awaitNewBarrier();
         indexCfs.invalidate();
     }
 

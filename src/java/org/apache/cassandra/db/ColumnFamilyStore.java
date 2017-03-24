@@ -83,7 +83,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.json.simple.JSONArray;
@@ -233,7 +232,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private final Tracker data;
 
     /* The read order, used to track accesses to off-heap memtable storage */
-    public final OpOrderThreaded readOrdering = NettyRxScheduler.newOpOrderThreaded(this);
+    public final OpOrder readOrdering = new OpOrder();
 
     /* This is used to generate the next index for a SSTable */
     private final AtomicInteger fileIndexGenerator = new AtomicInteger(0);
@@ -1078,7 +1077,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     private final class Flush implements Runnable
     {
-        final OpOrderThreaded.Barrier writeBarrier;
+        final OpOrder.Barrier writeBarrier;
         final List<Memtable> memtables = new ArrayList<>();
         final ListenableFutureTask<CommitLogPosition> postFlushTask;
         final PostFlush postFlush;
@@ -1099,7 +1098,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
              * In doing so it also tells the write operations to update the commitLogUpperBound of the memtable, so
              * that we know the CL position we are dirty to, which can be marked clean when we complete.
              */
-            writeBarrier = keyspace.writeOrder.newThreadedBarrier();
+            writeBarrier = keyspace.writeOrder.newBarrier();
 
             // submit flushes for the memtable for any indexed sub-cfses, and our own
             AtomicReference<CommitLogPosition> commitLogUpperBound = new AtomicReference<>();
@@ -1269,7 +1268,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         private void reclaim(final Memtable memtable)
         {
             // issue a read barrier for reclaiming the memory, and offload the wait to another thread
-            final OpOrderThreaded.Barrier readBarrier = readOrdering.newThreadedBarrier();
+            final OpOrder.Barrier readBarrier = readOrdering.newBarrier();
             readBarrier.issue();
             postFlushTask.addListener(new WrappedRunnable()
             {
