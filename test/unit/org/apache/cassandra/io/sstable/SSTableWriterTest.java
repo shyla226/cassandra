@@ -20,9 +20,10 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.File;
 import java.nio.ByteBuffer;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-import com.google.common.collect.Maps;
 import org.junit.Test;
 
 import org.apache.cassandra.*;
@@ -30,10 +31,10 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static junit.framework.Assert.fail;
@@ -53,20 +54,14 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
         try (SSTableWriter writer = getWriter(cfs, dir, txn))
         {
-            Map<DecoratedKey, PartitionUpdate> updates = prepare(cfs, 0, 20000);
+            final List<DecoratedKey> keys = generateKeys(cfs, 20000);
+            addUpdatesToWriter(cfs, writer, keys.subList(0, 10000));
 
-            int idx = 0;
-            SSTableReader s = null;
-            for (PartitionUpdate update : updates.values())
-            {
-                writer.append(update.unfilteredIterator());
-                if (++idx == 10000)
-                {
-                    s = writer.setMaxDataAge(1000).openEarly();
-                    assert s != null;
-                    assertFileCounts(dir.list());
-                }
-            }
+            SSTableReader s = writer.setMaxDataAge(1000).openEarly();
+            assert s != null;
+            assertFileCounts(dir.list());
+
+            addUpdatesToWriter(cfs, writer, keys.subList(10000, 20000));
 
             SSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
             assertTrue(s.last.compareTo(s2.last) < 0);
@@ -93,18 +88,27 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         }
     }
 
-    private Map<DecoratedKey, PartitionUpdate> prepare(ColumnFamilyStore cfs, int from, int to)
+    private List<DecoratedKey> generateKeys(ColumnFamilyStore cfs, int num)
     {
-        Map<DecoratedKey, PartitionUpdate> updates = Maps.newTreeMap();
-        for (int i = from; i < to; i++)
+        final TableMetadata metadata = cfs.metadata();
+        final List<DecoratedKey> keys = new ArrayList(num);
+
+        for (int i = 0; i < num; i++)
+            keys.add(metadata.partitioner.decorateKey(random(i, 10)));
+
+        Collections.sort(keys, DecoratedKey.comparator);
+        return keys;
+    }
+
+    private void addUpdatesToWriter(ColumnFamilyStore cfs, SSTableWriter writer, List<DecoratedKey> keys)
+    {
+        for (DecoratedKey key : keys)
         {
-            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
+            UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), key).withTimestamp(1);
             for (int j = 0; j < 100; j++)
                 builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-            PartitionUpdate update = builder.build();
-            updates.put(update.partitionKey(), update);
+            writer.append(builder.build().unfilteredIterator());
         }
-        return updates;
     }
 
 
@@ -119,18 +123,13 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
         try (SSTableWriter writer = getWriter(cfs, dir, txn))
         {
-            Map<DecoratedKey, PartitionUpdate> updates = prepare(cfs, 0, 20000);
+            final List<DecoratedKey> keys = generateKeys(cfs, 20000);
+            addUpdatesToWriter(cfs, writer, keys.subList(0, 10000));
 
-            int idx = 0;
-            SSTableReader s = null;
-            for (PartitionUpdate update : updates.values())
-            {
-                writer.append(update.unfilteredIterator());
-                if (++idx == 10000)
-                {
-                    assertFileCounts(dir.list());
-                }
-            }
+            assertFileCounts(dir.list());
+
+            addUpdatesToWriter(cfs, writer, keys.subList(10000, 20000));
+
             SSTableReader sstable = writer.finish(true);
             int datafiles = assertFileCounts(dir.list());
             assertEquals(datafiles, 1);
@@ -150,6 +149,10 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             assertEquals(datafiles, 0);
             validateCFS(cfs);
         }
+        finally
+        {
+            txn.close();
+        }
     }
 
     @Test
@@ -166,21 +169,13 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         SSTableWriter writer2 = getWriter(cfs, dir, txn);
         try
         {
-            Map<DecoratedKey, PartitionUpdate> updates = prepare(cfs, 0, 20000);
+            final List<DecoratedKey> keys = generateKeys(cfs, 20000);
+            addUpdatesToWriter(cfs, writer1, keys.subList(0, 10000));
 
-            int idx = 0;
-            SSTableReader s = null;
-            for (PartitionUpdate update : updates.values())
-            {
-                if (idx < 10000)
-                    writer1.append(update.unfilteredIterator());
-                else
-                    writer2.append(update.unfilteredIterator());
-                if (++idx == 10000)
-                {
-                    assertFileCounts(dir.list());
-                }
-            }
+            assertFileCounts(dir.list());
+
+            addUpdatesToWriter(cfs, writer2, keys.subList(10000, 20000));
+
             SSTableReader sstable = writer1.finish(true);
             txn.update(sstable, false);
 
@@ -206,6 +201,8 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         {
             writer1.close();
             writer2.close();
+
+            txn.close();
         }
     }
 
@@ -246,6 +243,10 @@ public class SSTableWriterTest extends SSTableWriterTestBase
 
             txn.abort();
             LifecycleTransaction.waitForDeletions();
+        }
+        finally
+        {
+            txn.close();
         }
     }
 

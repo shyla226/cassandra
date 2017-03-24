@@ -1350,6 +1350,12 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <!--<jvmarg value="-XX:+HeapDumpOnOutOfMemoryError"/>-->
+        <!--<jvmarg value="-XX:+UnlockCommercialFeatures"/>-->
+        <!--<jvmarg value="-XX:+FlightRecorder"/>-->
+        <!--<jvmarg value="-XX:+UnlockDiagnosticVMOptions"/>-->
+        <!--<jvmarg value="-XX:+DebugNonSafepoints"/>-->
+        <!--<jvmarg value="-XX:StartFlightRecording=name=auto_recording,filename=${test.name}.jfr,dumponexit=true,settings=/home/stefi/profiling-advanced.jfc"/>-->
       </testmacrohelper>
     </sequential>
   </macrodef>
