@@ -1,4 +1,8 @@
 4.0
+ * Upgrade junit from 4.6 to 4.12 (CASSANDRA-13360)
+ * Cleanup ParentRepairSession after repairs (CASSANDRA-13359)
+ * Incremental repair not streaming correct sstables (CASSANDRA-13328)
+ * Upgrade the jna version to 4.3.0 (CASSANDRA-13300)
  * Add the currentTimestamp, currentDate, currentTime and currentTimeUUID functions (CASSANDRA-13132)
  * Remove config option index_interval (CASSANDRA-10671)
  * Reduce lock contention for collection types and serializers (CASSANDRA-13271)
@@ -42,6 +46,10 @@
 
 
 3.11.0
+ * Forbid SELECT restrictions and CREATE INDEX over non-frozen UDT columns (CASSANDRA-13247)
+ * Default logging we ship will incorrectly print "?:?" for "%F:%L" pattern (CASSANDRA-13317)
+ * Possible AssertionError in UnfilteredRowIteratorWithLowerBound (CASSANDRA-13366)
+ * Support unaligned memory access for AArch64 (CASSANDRA-13326)
  * Improve SASI range iterator efficiency on intersection with an empty range (CASSANDRA-12915).
  * Fix equality comparisons of columns using the duration type (CASSANDRA-13174)
  * Move to FastThreadLocalThread and FastThreadLocal (CASSANDRA-13034)
@@ -52,6 +60,10 @@
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
  * Address message coalescing regression (CASSANDRA-12676)
 Merged from 3.0:
+ * Bugs handling range tombstones in the sstable iterators (CASSANDRA-13340)
+ * Fix CONTAINS filtering for null collections (CASSANDRA-13246)
+ * Applying: Use a unique metric reservoir per test run when using Cassandra-wide metrics residing in MBeans (CASSANDRA-13216)
+ * Propagate row deletions in 2i tables on upgrade (CASSANDRA-13320)
  * Slice.isEmpty() returns false for some empty slices (CASSANDRA-13305)
  * Add formatted row output to assertEmpty in CQL Tester (CASSANDRA-13238)
  * Prevent data loss on upgrade 2.1 - 3.0 by adding component separator to LogRecord absolute path (CASSANDRA-13294)
@@ -76,6 +88,9 @@ Merged from 3.0:
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
 Merged from 2.2:
+ * Discard in-flight shadow round responses (CASSANDRA-12653)
+ * Don't anti-compact repaired data to avoid inconsistencies (CASSANDRA-13153)
+ * Wrong logger name in AnticompactionTask (CASSANDRA-13343)
  * Commitlog replay may fail if last mutation is within 4 bytes of end of segment (CASSANDRA-13282)
  * Fix queries updating multiple time the same list (CASSANDRA-13130)
  * Fix GRANT/REVOKE when keyspace isn't specified (CASSANDRA-13053)

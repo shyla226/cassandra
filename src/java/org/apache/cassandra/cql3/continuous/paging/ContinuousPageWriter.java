@@ -109,7 +109,8 @@ class ContinuousPageWriter
                 ContinuousPagingService.metrics.serverBlocked.inc();
 
                 if (!pages.offer(frame, config.max_client_wait_time_ms, TimeUnit.MILLISECONDS))
-                    throw new ClientWriteException("Timed out adding page to output queue");
+                    throw new ClientWriteException(String.format("Timed out adding page to output queue for %s, queue was still full after %d milliseconds",
+                                                                 writer.channel.remoteAddress(), config.max_client_wait_time_ms));
 
                 ContinuousPagingService.metrics.serverBlockedLatency.addNano(System.nanoTime() - start);
             }

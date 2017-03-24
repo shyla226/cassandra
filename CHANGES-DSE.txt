@@ -3,6 +3,8 @@ DSE 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Fix SmallInt and TinyInt serialization (APOLLO-542)
+ * Check for null/empty password before calling legacyAuthenticate from CassandraLoginModule (APOLLO-412)
  * Allow registering user expression on SelectStatement (APOLLO-491)
  * Apply request timeout in cqlsh COPY correctly, after upgrading to execution profiles (APOLLO-411)
  * Update java driver to DSE driver version 1.2.0-eap5-SNAPSHOT (APOLLO-357)
@@ -16,7 +18,7 @@ Merged from dse5.1:
  * Add client warning to SASI index (APOLLO-93)
  * Cqlsh copy-from: add support for UNSET values (APOLLO-4)
  * Improve error message for incompatible authn/authz config (APOLLO-226)
- * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291, APOLLO-312, APOLLO-316, APOLLO-432, APOLLO-438)
+ * Continuous paging (APOLLO-3, APOLLO-267, APOLLO-277, APOLLO-291, APOLLO-312, APOLLO-316, APOLLO-432, APOLLO-438, APOLLO-517)
  * Added show-queries, query-log-file and no-progress log options to cassandra-stress (APOLLO-41)
  * Allow large partition generation in cassandra-stress user mode (APOLLO-35)
  * Optimize VIntCoding and BufferedDataOutputStreamPlus (APOLLO-49)
@@ -42,6 +44,8 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Log when waiting remaining repair tasks to finish (APOLLO-103)
+ * Avoid AssertionError when shutting down finished repair executor (APOLLO-119)
  * Add allocate_tokens_for_local_replication_factor flag (APOLLO-34)
  * Backport CASSANDRA-13080: Use new token allocation for non bootstrap case as well (APOLLO-34)
  * Backport CASSANDRA-12990: More fixes to the TokenAllocator (APOLLO-34)
