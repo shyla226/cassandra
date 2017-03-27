@@ -31,6 +31,7 @@ import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
@@ -143,38 +144,47 @@ public abstract class AbstractReadExecutor
             final long constructionTime = System.currentTimeMillis();
             MessagingService.Verb verb = MessagingService.Verb.READ;
 
-            return command.executeLocally()
-                          .map(iterator -> ReadResponse.createLocalResponse(iterator, command))
-                          .flatMapCompletable(response ->
-                                              {
-                                                  if (command.complete())
-                                                  {
-                                                      handler.response(response);
-                                                  }
-                                                  else
-                                                  {
-                                                      MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                                                      handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                                                  }
-
-                                                  MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
-
-                                                  return Completable.complete();
-                                              })
-                          .onErrorResumeNext(t ->
+            return Single.defer(() -> Single.just(command.executeForTests()))   // tpc TODO
+                         .map(iterator -> ReadResponse.createLocalResponse(iterator, command))
+                         .flatMapCompletable(response ->
                                              {
-                                                 if (t instanceof TombstoneOverwhelmingException)
+                                                 if (command.complete())
                                                  {
-                                                     handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
-                                                     logger.error(t.getMessage());
-                                                     return Completable.complete();
+                                                     handler.response(response);
                                                  }
                                                  else
                                                  {
-                                                     handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                                                     return Completable.error(t);
+                                                     MessagingService.instance()
+                                                                     .incrementDroppedMessages(verb,
+                                                                                               System.currentTimeMillis() -
+                                                                                               constructionTime);
+                                                     handler.onFailure(FBUtilities.getBroadcastAddress(),
+                                                                       RequestFailureReason.UNKNOWN);
                                                  }
-                                             });
+
+                                                 MessagingService.instance()
+                                                                 .addLatency(FBUtilities.getBroadcastAddress(),
+                                                                             TimeUnit.NANOSECONDS.toMillis(
+                                                                             System.nanoTime() - start));
+
+                                                 return Completable.complete();
+                                             })
+                         .onErrorResumeNext(t ->
+                                            {
+                                                if (t instanceof TombstoneOverwhelmingException)
+                                                {
+                                                    handler.onFailure(FBUtilities.getBroadcastAddress(),
+                                                                      RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
+                                                    logger.error(t.getMessage());
+                                                    return Completable.complete();
+                                                }
+                                                else
+                                                {
+                                                    handler.onFailure(FBUtilities.getBroadcastAddress(),
+                                                                      RequestFailureReason.UNKNOWN);
+                                                    return Completable.error(t);
+                                                }
+                                            });
         });
     }
 

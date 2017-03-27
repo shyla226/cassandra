@@ -136,7 +136,7 @@ public class TWCSSplitPartitionBench extends CQLTester
                                                                      Optional.empty());
 
 
-        try (UnfilteredPartitionIterator pi = rc.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator pi = rc.executeForTests())
         {
             cachedPartition = new MBROnHeapUnfilteredPartitions(pi);
         }

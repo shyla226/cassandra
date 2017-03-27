@@ -28,6 +28,8 @@ import com.google.common.base.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Flowable;
+import io.reactivex.functions.Function;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.context.*;
@@ -43,6 +45,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -121,7 +124,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * @param nowInSec the time of query in seconds.
      * @return the filtered iterator.
      */
-    public abstract UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec);
+//    public abstract UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec);
+    public abstract Flowable<FlowableUnfilteredPartition> filter(Flowable<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec);
 
     /**
      * Whether the provided row in the provided partition satisfies this filter.
@@ -241,12 +245,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             super(expressions);
         }
 
-        public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec)
+        @Override
+        public Flowable<FlowableUnfilteredPartition> filter(Flowable<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
         {
             if (expressions.isEmpty())
                 return iter;
-
-            final TableMetadata metadata = iter.metadata();
 
             List<Expression> partitionLevelExpressions = new ArrayList<>();
             List<Expression> rowLevelExpressions = new ArrayList<>();
@@ -261,46 +264,49 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             long numberOfRegularColumnExpressions = rowLevelExpressions.size();
             final boolean filterNonStaticColumns = numberOfRegularColumnExpressions > 0;
 
-            class IsSatisfiedFilter extends Transformation<UnfilteredRowIterator>
-            {
-                DecoratedKey pk;
-                public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
+            return FlowableUtils.skippingMap(
+                iter,
+                partition ->
                 {
-                    pk = partition.partitionKey();
+                    DecoratedKey pk = partition.header.partitionKey;
 
                     // Short-circuit all partitions that won't match based on static and partition keys
                     for (Expression e : partitionLevelExpressions)
-                        if (!e.isSatisfiedBy(metadata, partition.partitionKey(), partition.staticRow()))
+                        if (!e.isSatisfiedBy(metadata, pk, partition.staticRow.blockingGet()))  // tpc TODO blockingGet should disappear
                         {
-                            partition.close();
+                            partition.unused();
                             return null;
                         }
 
-                    UnfilteredRowIterator iterator = Transformation.apply(partition, this);
-                    if (filterNonStaticColumns && !iterator.hasNext())
-                    {
-                        iterator.close();
-                        return null;
-                    }
+                    FlowableUnfilteredPartition iterator = new FlowableUnfilteredPartition(
+                        partition.header,
+                        partition.staticRow,
+                        FlowableUtils.skippingMap(partition.content, unfiltered ->
+                        {
+                            if (unfiltered.isRow())
+                            {
+                                Row purged = ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec);
+                                if (purged == null)
+                                    return null;
+
+                                for (Expression e : rowLevelExpressions)
+                                    if (!e.isSatisfiedBy(metadata, pk, purged))
+                                        return null;
+                            }
+
+                            return unfiltered;
+                        }
+                    ));
+                    //Transformation.apply(partition, this);
+                    // tpc maybe TODO: No emptiness check for Flowables
+//                    if (filterNonStaticColumns && !iterator.hasNext())
+//                    {
+//                        iterator.close();
+//                        return null;
+//                    }
 
                     return iterator;
-                }
-
-                public Row applyToRow(Row row)
-                {
-                    Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
-                    if (purged == null)
-                        return null;
-
-                    for (Expression e : rowLevelExpressions)
-                        if (!e.isSatisfiedBy(metadata, pk, purged))
-                            return null;
-
-                    return row;
-                }
-            }
-
-            return Transformation.apply(iter, new IsSatisfiedFilter());
+                });
         }
 
         protected RowFilter withNewExpressions(List<Expression> expressions)

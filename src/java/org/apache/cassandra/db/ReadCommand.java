@@ -27,6 +27,8 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
 import io.reactivex.Single;
+import io.reactivex.functions.Action;
+import io.reactivex.functions.Function;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -373,101 +375,61 @@ public abstract class ReadCommand implements ReadQuery
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     @SuppressWarnings("resource")
     @Override
-    public Single<UnfilteredPartitionIterator> executeLocally()
+    public Flowable<FlowableUnfilteredPartition> executeLocally()
     {
-        Single s = Single.defer(
-        () ->
+        long startTimeNanos = System.nanoTime();
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
+        Index index = getIndex(cfs);
+
+        Index.Searcher pickSearcher = null;
+        if (index != null)
         {
-            long startTimeNanos = System.nanoTime();
-            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
-            Index index = getIndex(cfs);
+            if (!cfs.indexManager.isIndexQueryable(index))
+                throw new IndexNotAvailableException(index);
 
-            Index.Searcher pickSearcher = null;
-            if (index != null)
+            pickSearcher = index.searcherFor(this);
+            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+        }
+
+        Index.Searcher searcher = pickSearcher;
+        Flowable<FlowableUnfilteredPartition> flowable = Flowable.<FlowableUnfilteredPartition, ReadExecutionController>using(
+            () -> ReadExecutionController.forCommand(this),
+            controller ->
             {
-                if (!cfs.indexManager.isIndexQueryable(index))
-                    throw new IndexNotAvailableException(index);
+                Flowable<FlowableUnfilteredPartition> r = searcher == null
+                                                          ? queryStorage(cfs, controller)
+                                                          : FlowablePartitions.fromPartitions(searcher.search(controller).blockingGet(), null);
 
-                pickSearcher = index.searcherFor(this);
-                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
-            }
+                r = withTracking(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos);
 
-            Index.Searcher searcher = pickSearcher;
-            ReadExecutionController controller = ReadExecutionController.forCommand(this);
-            try
-            {
-                Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                                                                   ? Single.just(FlowablePartitions.toPartitions(queryStorage(cfs, controller), cfs.metadata()))
-                                                                   : searcher.search(controller);
+                // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+                // no point in checking it again.
+                RowFilter updatedFilter = searcher == null
+                                          ? rowFilter()
+                                          : index.getPostIndexQueryFilter(rowFilter());
 
-                return resultIterator.map(r ->
-                                          {
-                                              r = withTracking(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos);
+                // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+                // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+                // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+                // processing we do on it).
+                return limits().filter(updatedFilter.filter(r, cfs.metadata(), nowInSec()), nowInSec());
+            },
+            controller -> controller.close()
+        );
 
-                                              // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
-                                              // no point in checking it again.
-                                              RowFilter updatedFilter = searcher == null
-                                                                        ? rowFilter()
-                                                                        : index.getPostIndexQueryFilter(rowFilter());
-
-                                              // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
-                                              // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
-                                              // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
-                                              // processing we do on it).
-                                              final UnfilteredPartitionIterator res = limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
-
-                                              // TODO - to be removed after final implementation with MergeFlowable is integrated.
-                                              // Closing the execution controller is too important for it to be buried in a transformation,
-                                              // so I've temporarily wrapped the iterator - I understand that in the final flowable implementation
-                                              // we'll convert a Flowable<Unfiltered> to an iterator or use the Flowable directly, so the idea
-                                              // is to close the controller when the subscription to the flowable is cancelled, i.e. when the
-                                              // iterator is closed.
-                                              // I have checked that all the callers of executeLocally() indeed close the iterator.
-                                              return new UnfilteredPartitionIterator()
-                                              {
-
-                                                  public boolean hasNext()
-                                                  {
-                                                      return res.hasNext();
-                                                  }
-
-                                                  public UnfilteredRowIterator next()
-                                                  {
-                                                      return res.next();
-                                                  }
-
-                                                  public TableMetadata metadata()
-                                                  {
-                                                      return res.metadata();
-                                                  }
-
-                                                  public void close()
-                                                  {
-                                                      controller.close();
-                                                      res.close();
-                                                  }
-                                              };
-                                          });
-            }
-            catch (Throwable t)
-            {
-                controller.close(); // idempotent
-                return Single.error(t);
-            }
-        });
-
-
-        if (this instanceof SinglePartitionReadCommand)
-            s = s.subscribeOn(NettyRxScheduler.getForKey(metadata.keyspace, ((SinglePartitionReadCommand)this).partitionKey(), false));
-
-        return s;
+        // tpc TODO deadlocks ATM (scheduler needs to execute immediately if already same thread)
+        // tpc TODO we also need requests to be done on this thread, as well as cancellation / complete
+//        if (this instanceof SinglePartitionReadCommand)
+//            flowable = flowable.subscribeOn(NettyRxScheduler.getForKey(metadata.keyspace, ((SinglePartitionReadCommand)this).partitionKey(), false));
+        return flowable;
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
     public Single<PartitionIterator> executeInternal()
     {
-        return executeLocally().map(p -> UnfilteredPartitionIterators.filter(p, nowInSec()));
+        // tpc TODO: Do filtering on Flowable.
+        return Single.<PartitionIterator>defer(() -> Single.just(UnfilteredPartitionIterators.filter(FlowablePartitions.toPartitions(executeLocally(), metadata()), nowInSec())));
     }
 
     public ReadExecutionController executionController()
@@ -489,11 +451,11 @@ public abstract class ReadCommand implements ReadQuery
      * off via the pagers, {@link org.apache.cassandra.service.pager.AbstractQueryPager},
      * and the paging state, {@link org.apache.cassandra.service.pager.PagingState}.
      */
-    private UnfilteredPartitionIterator withTracking(UnfilteredPartitionIterator iter,
-                                                     final TableMetrics metric,
-                                                     final long startTimeNanos)
+    private Flowable<FlowableUnfilteredPartition> withTracking(Flowable<FlowableUnfilteredPartition> iter,
+                                                               final TableMetrics metric,
+                                                               final long startTimeNanos)
     {
-        class TrackingTransformation extends StoppingTransformation<UnfilteredRowIterator>
+        class TrackingTransformation extends StoppingTransformation
         {
             private long lastCheckedForAbort = 0;
 
@@ -508,18 +470,22 @@ public abstract class ReadCommand implements ReadQuery
             private DecoratedKey currentKey;
             private Row lastRow = null;
 
-            @Override
-            public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator iter)
+            public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
+            {
+                currentKey = iter.header.partitionKey;
+                lastRow = null;
+                return Transformation.apply(iter, this);
+            }
+
+            public boolean shouldAbort(FlowableUnfilteredPartition partition)
             {
                 if (maybeAbort())
                 {
-                    iter.close();
-                    return null;
+                    partition.unused();
+                    return true;
                 }
 
-                currentKey = iter.partitionKey();
-                lastRow = null;
-                return Transformation.apply(iter, this);
+                return false;
             }
 
             private boolean maybeAbort()
@@ -634,7 +600,8 @@ public abstract class ReadCommand implements ReadQuery
             }
         };
 
-        return Transformation.apply(iter, new TrackingTransformation());
+        TrackingTransformation tt = new TrackingTransformation();
+        return iter.takeUntil(tt::shouldAbort).map(tt::applyToPartition).doFinally(tt::onClose);
     }
 
     private void maybeDelayForTesting()
@@ -654,7 +621,7 @@ public abstract class ReadCommand implements ReadQuery
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
-    protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator, ColumnFamilyStore cfs)
+    protected Flowable<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flowable<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
     {
         class WithoutPurgeableTombstones extends PurgeFunction
         {
@@ -668,7 +635,7 @@ public abstract class ReadCommand implements ReadQuery
                 return time -> true;
             }
         }
-        return Transformation.apply(iterator, new WithoutPurgeableTombstones());
+        return iterator.map(new WithoutPurgeableTombstones());
     }
 
     /**

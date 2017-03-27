@@ -2372,7 +2372,7 @@ public class SASIIndexTest
                                                             range,
                                                             Optional.empty());
 
-        return command.executeLocally().blockingGet();
+        return command.executeForTests();
     }
 
     private static Mutation newMutation(String key, String firstName, String lastName, int age, long timestamp)

@@ -44,7 +44,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         command.monitor(message.constructionTime, message.getTimeout(), message.getSlowQueryTimeout(), message.isCrossNode());
 
         ReadResponse response;
-        try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator iterator = command.executeForTests())  // tpc TODO
         {
             response = command.createResponse(iterator);
         }

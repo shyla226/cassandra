@@ -256,7 +256,7 @@ public class ReadCommandTest
 
             ReadQuery query = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-            try (UnfilteredPartitionIterator iter = query.executeLocally().blockingGet();
+            try (UnfilteredPartitionIterator iter = query.executeForTests();
                  DataOutputBuffer buffer = new DataOutputBuffer())
             {
                 UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter,

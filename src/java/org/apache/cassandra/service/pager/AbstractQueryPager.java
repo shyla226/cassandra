@@ -94,7 +94,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
         internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        Single<UnfilteredPartitionIterator> iter = pageCommand.executeLocally();
+        Single<UnfilteredPartitionIterator> iter = Single.defer(() -> Single.just(pageCommand.executeForTests()));  // tpc TODO
         return iter.map(it -> Transformation.apply(it, internalPager));
     }
 
