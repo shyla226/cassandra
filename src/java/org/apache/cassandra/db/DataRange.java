@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.filter.*;
@@ -27,6 +28,8 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Groups both the range of partitions to query, and the clustering index filter to
@@ -40,7 +43,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  */
 public class DataRange
 {
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     protected final AbstractBounds<PartitionPosition> keyRange;
     protected final ClusteringIndexFilter clusteringIndexFilter;
@@ -400,29 +403,34 @@ public class DataRange
         }
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
-        public void serialize(DataRange range, DataOutputPlus out, int version, TableMetadata metadata) throws IOException
+        private Serializer(ReadVersion version)
         {
-            AbstractBounds.rowPositionSerializer.serialize(range.keyRange, out, version);
-            ClusteringIndexFilter.serializer.serialize(range.clusteringIndexFilter, out, version);
+            super(version);
+        }
+
+        public void serialize(DataRange range, DataOutputPlus out, TableMetadata metadata) throws IOException
+        {
+            AbstractBounds.rowPositionSerializer.serialize(range.keyRange, out, version.boundsVersion);
+            ClusteringIndexFilter.serializers.get(version).serialize(range.clusteringIndexFilter, out);
             boolean isPaging = range instanceof Paging;
             out.writeBoolean(isPaging);
             if (isPaging)
             {
-                Clustering.serializer.serialize(((Paging)range).lastReturned, out, version, metadata.comparator.subtypes());
+                Clustering.serializer.serialize(((Paging)range).lastReturned, out, version.encodingVersion.clusteringVersion, metadata.comparator.subtypes());
                 out.writeBoolean(((Paging)range).inclusive);
             }
         }
 
-        public DataRange deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        public DataRange deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
-            AbstractBounds<PartitionPosition> range = AbstractBounds.rowPositionSerializer.deserialize(in, metadata.partitioner, version);
-            ClusteringIndexFilter filter = ClusteringIndexFilter.serializer.deserialize(in, version, metadata);
+            AbstractBounds<PartitionPosition> range = AbstractBounds.rowPositionSerializer.deserialize(in, metadata.partitioner, version.boundsVersion);
+            ClusteringIndexFilter filter = ClusteringIndexFilter.serializers.get(version).deserialize(in, metadata);
             if (in.readBoolean())
             {
                 ClusteringComparator comparator = metadata.comparator;
-                Clustering lastReturned = Clustering.serializer.deserialize(in, version, comparator.subtypes());
+                Clustering lastReturned = Clustering.serializer.deserialize(in, version.encodingVersion.clusteringVersion, comparator.subtypes());
                 boolean inclusive = in.readBoolean();
                 return new Paging(range, filter, comparator, lastReturned, inclusive);
             }
@@ -432,15 +440,15 @@ public class DataRange
             }
         }
 
-        public long serializedSize(DataRange range, int version, TableMetadata metadata)
+        public long serializedSize(DataRange range, TableMetadata metadata)
         {
-            long size = AbstractBounds.rowPositionSerializer.serializedSize(range.keyRange, version)
-                      + ClusteringIndexFilter.serializer.serializedSize(range.clusteringIndexFilter, version)
-                      + 1; // isPaging boolean
+            long size = AbstractBounds.rowPositionSerializer.serializedSize(range.keyRange, version.boundsVersion)
+                       + ClusteringIndexFilter.serializers.get(version).serializedSize(range.clusteringIndexFilter)
+                       + 1; // isPaging boolean
 
             if (range instanceof Paging)
             {
-                size += Clustering.serializer.serializedSize(((Paging)range).lastReturned, version, metadata.comparator.subtypes());
+                size += Clustering.serializer.serializedSize(((Paging)range).lastReturned, version.encodingVersion.clusteringVersion, metadata.comparator.subtypes());
                 size += 1; // inclusive boolean
             }
             return size;

@@ -1138,7 +1138,16 @@ Table of Contents
                             executing the request to a code representing the reason
                             for the failure. The map is encoded starting with an [int] n
                             followed by n pairs of <endpoint><failurecode> where
-                            <endpoint> is an [inetaddr] and <failurecode> is a [short].
+                            <endpoint> is an [inetaddr] and <failurecode> is a [short]
+                            that has the following meaning:
+                               0x0000  Unknown reason
+                               0x0001  Too many tombstones read (as controlled by the
+                                       yaml tombstone_failure_threshold option)
+                               0x0002  The query uses an index but that index is not available
+                                       (built) on the queried <endpoint>.
+                            Any other value for <failurecode> must be considered as an
+                            Unknown reason (but drivers should not fail) as new <failurecode>
+                            may be added without a bump of the protocol version.
                 <data_present> is a single byte. If its value is 0, it means
                                the replica that was asked for data had not
                                responded. Otherwise, the value is != 0.
@@ -1164,7 +1173,8 @@ Table of Contents
                             executing the request to a code representing the reason
                             for the failure. The map is encoded starting with an [int] n
                             followed by n pairs of <endpoint><failurecode> where
-                            <endpoint> is an [inetaddr] and <failurecode> is a [short].
+                            <endpoint> is an [inetaddr] and <failurecode> is a [short]
+                            whose meaning is the same than in Read_failure (see above).
                 <writeType> is a [string] that describes the type of the write
                             that failed. The value of that string can be one
                             of:

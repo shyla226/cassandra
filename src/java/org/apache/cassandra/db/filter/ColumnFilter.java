@@ -26,12 +26,14 @@ import com.google.common.collect.TreeMultimap;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Represents which (non-PK) columns (and optionally which sub-part of a column for complex columns) are selected
@@ -62,7 +64,7 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public class ColumnFilter
 {
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     // True if _fetched_ includes all regular columns (and any static in _queried_), in which case metadata must not be
     // null. If false, then _fetched_ == _queried_ and we only store _queried_.
@@ -429,11 +431,16 @@ public class ColumnFilter
             sb.append(i++ == 0 ? "" : ", ").append(column.name).append(subSel);
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
         private static final int FETCH_ALL_MASK       = 0x01;
         private static final int HAS_QUERIED_MASK      = 0x02;
         private static final int HAS_SUB_SELECTIONS_MASK = 0x04;
+
+        private Serializer(ReadVersion version)
+        {
+            super(version);
+        }
 
         private static int makeHeaderByte(ColumnFilter selection)
         {
@@ -442,9 +449,9 @@ public class ColumnFilter
                  | (selection.subSelections != null ? HAS_SUB_SELECTIONS_MASK : 0);
         }
 
-        private static ColumnFilter maybeUpdateForBackwardCompatility(ColumnFilter selection, int version)
+        private ColumnFilter maybeUpdateForBackwardCompatility(ColumnFilter selection)
         {
-            if (version > MessagingService.VERSION_30 || !selection.fetchAllRegulars || selection.queried == null)
+            if (version != ReadVersion.OSS_30 || !selection.fetchAllRegulars || selection.queried == null)
                 return selection;
 
             // The meaning of fetchAllRegulars changed (at least when queried != null) due to CASSANDRA-12768: in
@@ -463,9 +470,9 @@ public class ColumnFilter
                                     selection.subSelections);
         }
 
-        public void serialize(ColumnFilter selection, DataOutputPlus out, int version) throws IOException
+        public void serialize(ColumnFilter selection, DataOutputPlus out) throws IOException
         {
-            selection = maybeUpdateForBackwardCompatility(selection, version);
+            selection = maybeUpdateForBackwardCompatility(selection);
 
             out.writeByte(makeHeaderByte(selection));
 
@@ -479,11 +486,11 @@ public class ColumnFilter
             {
                 out.writeUnsignedVInt(selection.subSelections.size());
                 for (ColumnSubselection subSel : selection.subSelections.values())
-                    ColumnSubselection.serializer.serialize(subSel, out, version);
+                    ColumnSubselection.serializers.get(version).serialize(subSel, out);
             }
         }
 
-        public ColumnFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        public ColumnFilter deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             int header = in.readUnsignedByte();
             boolean isFetchAll = (header & FETCH_ALL_MASK) != 0;
@@ -505,7 +512,7 @@ public class ColumnFilter
                 int size = (int)in.readUnsignedVInt();
                 for (int i = 0; i < size; i++)
                 {
-                    ColumnSubselection subSel = ColumnSubselection.serializer.deserialize(in, version, metadata);
+                    ColumnSubselection subSel = ColumnSubselection.serializers.get(version).deserialize(in, metadata);
                     subSelections.put(subSel.column().name, subSel);
                 }
             }
@@ -516,15 +523,15 @@ public class ColumnFilter
             // Note that here again this will make us do a bit more work that necessary, namely we'll _query_ all
             // statics even though we only care about _fetching_ them all, but that's a minor inefficiency, so fine
             // during upgrade.
-            if (version <= MessagingService.VERSION_30 && isFetchAll && queried != null)
+            if (version == ReadVersion.OSS_30 && isFetchAll && queried != null)
                 queried = new RegularAndStaticColumns(metadata.staticColumns(), queried.regulars);
 
             return new ColumnFilter(isFetchAll, isFetchAll ? metadata : null, queried, subSelections);
         }
 
-        public long serializedSize(ColumnFilter selection, int version)
+        public long serializedSize(ColumnFilter selection)
         {
-            selection = maybeUpdateForBackwardCompatility(selection, version);
+            selection = maybeUpdateForBackwardCompatility(selection);
 
             long size = 1; // header byte
 
@@ -539,7 +546,7 @@ public class ColumnFilter
 
                 size += TypeSizes.sizeofUnsignedVInt(selection.subSelections.size());
                 for (ColumnSubselection subSel : selection.subSelections.values())
-                    size += ColumnSubselection.serializer.serializedSize(subSel, version);
+                    size += ColumnSubselection.serializers.get(version).serializedSize(subSel);
             }
 
             return size;

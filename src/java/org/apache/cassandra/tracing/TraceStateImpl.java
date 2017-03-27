@@ -38,7 +38,6 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 /**
  * ThreadLocal state for a tracing session. The presence of an instance of this class as a ThreadLocal denotes that an
@@ -102,7 +101,7 @@ public class TraceStateImpl extends TraceState
 
     void executeMutation(final Mutation mutation)
     {
-        CompletableFuture<Void> fut = CompletableFuture.runAsync(new WrappedRunnable()
+        CompletableFuture<Void> fut = CompletableFuture.runAsync(new Tracing.TracingRunnable()
         {
             protected void runMayThrow()
             {

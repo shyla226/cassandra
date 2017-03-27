@@ -54,7 +54,7 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
     public Kind kind();
     public boolean isMinimum();
 
-    public static class RowPositionSerializer implements IPartitionerDependentSerializer<PartitionPosition>
+    public static class RowPositionSerializer implements IPartitionerDependentSerializer<PartitionPosition, BoundsVersion>
     {
         /*
          * We need to be able to serialize both Token.KeyBound and
@@ -67,7 +67,7 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
          * token is recreated on the other side). In the other cases, we then
          * serialize the token.
          */
-        public void serialize(PartitionPosition pos, DataOutputPlus out, int version) throws IOException
+        public void serialize(PartitionPosition pos, DataOutputPlus out, BoundsVersion version) throws IOException
         {
             Kind kind = pos.kind();
             out.writeByte(kind.ordinal());
@@ -77,7 +77,7 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
                 Token.serializer.serialize(pos.getToken(), out, version);
         }
 
-        public PartitionPosition deserialize(DataInput in, IPartitioner p, int version) throws IOException
+        public PartitionPosition deserialize(DataInput in, IPartitioner p, BoundsVersion version) throws IOException
         {
             Kind kind = Kind.fromOrdinal(in.readByte());
             if (kind == Kind.ROW_KEY)
@@ -92,7 +92,7 @@ public interface PartitionPosition extends RingPosition<PartitionPosition>
             }
         }
 
-        public long serializedSize(PartitionPosition pos, int version)
+        public int serializedSize(PartitionPosition pos, BoundsVersion version)
         {
             Kind kind = pos.kind();
             int size = 1; // 1 byte for enum

@@ -26,42 +26,75 @@ import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 public abstract class ReadResponse
 {
-    // Serializer for single partition read response
-    public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer<ReadResponse>> serializers = ReadVersion.<Serializer<ReadResponse>>versioned(v -> new Serializer<ReadResponse>()
+    {
+        public void serialize(ReadResponse response, DataOutputPlus out) throws IOException
+        {
+            boolean isDigest = response instanceof DigestResponse;
+            ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
+
+            ByteBufferUtil.writeWithVIntLength(digest, out);
+            if (!isDigest)
+            {
+                ByteBuffer data = ((DataResponse)response).data;
+                ByteBufferUtil.writeWithVIntLength(data, out);
+            }
+        }
+
+        public ReadResponse deserialize(DataInputPlus in) throws IOException
+        {
+            ByteBuffer digest = ByteBufferUtil.readWithVIntLength(in);
+            if (digest.hasRemaining())
+                return new DigestResponse(digest);
+
+            ByteBuffer data = ByteBufferUtil.readWithVIntLength(in);
+            return new RemoteDataResponse(data, v.encodingVersion);
+        }
+
+        public long serializedSize(ReadResponse response)
+        {
+            boolean isDigest = response instanceof DigestResponse;
+            ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
+
+            long size = ByteBufferUtil.serializedSizeWithVIntLength(digest);
+            if (!isDigest)
+            {
+                ByteBuffer data = ((DataResponse)response).data;
+                size += ByteBufferUtil.serializedSizeWithVIntLength(data);
+            }
+            return size;
+        }
+    });
 
     protected ReadResponse()
     {
     }
 
-    public static ReadResponse createLocalResponse(UnfilteredPartitionIterator data, ReadCommand command)
-    {
-        return new LocalResponse(data, command);
-    }
-
     public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
     {
-        return new LocalDataResponse(data, command);
+        return new LocalDataResponse(data, EncodingVersion.last(), command);
     }
 
     @VisibleForTesting
     public static ReadResponse createRemoteDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
     {
-        return new RemoteDataResponse(LocalDataResponse.build(data, command.columnFilter()), MessagingService.current_version);
+        return new RemoteDataResponse(LocalDataResponse.build(data, EncodingVersion.last(), command.columnFilter()), EncodingVersion.last());
     }
 
     public static ReadResponse createDigestResponse(UnfilteredPartitionIterator data, ReadCommand command)
@@ -118,6 +151,7 @@ public abstract class ReadResponse
      * the iterator multiple times. We could wrap the incoming iterator and use it directly for
      * added performance but only if the local host host is the only host queried.
      */
+    //TODO - A/497 MERGE: re-implement local optimization to avoid double serdes
     private static class LocalResponse extends ReadResponse
     {
         //private UnfilteredPartitionIterator iter;
@@ -213,16 +247,16 @@ public abstract class ReadResponse
      */
     private static class LocalDataResponse extends DataResponse
     {
-        private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command)
+        private LocalDataResponse(UnfilteredPartitionIterator iter, EncodingVersion version, ReadCommand command)
         {
-            super(build(iter, command.columnFilter()), MessagingService.current_version, SerializationHelper.Flag.LOCAL);
+            super(build(iter, version, command.columnFilter()), version, SerializationHelper.Flag.LOCAL);
         }
 
-        private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
+        private static ByteBuffer build(UnfilteredPartitionIterator iter, EncodingVersion version, ColumnFilter selection)
         {
             try (DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version).blockingAwait();
+                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, selection, buffer).blockingAwait();
                 return buffer.buffer();
             }
             catch (IOException e)
@@ -238,7 +272,7 @@ public abstract class ReadResponse
      */
     private static class RemoteDataResponse extends DataResponse
     {
-        protected RemoteDataResponse(ByteBuffer data, int version)
+        protected RemoteDataResponse(ByteBuffer data, EncodingVersion version)
         {
             super(data, version, SerializationHelper.Flag.FROM_REMOTE);
         }
@@ -253,14 +287,14 @@ public abstract class ReadResponse
         // TODO: can the digest be calculated over the raw bytes now?
         // The response, serialized in the current messaging version
         private final ByteBuffer data;
-        private final int dataSerializationVersion;
+        protected final EncodingVersion version;
         private final SerializationHelper.Flag flag;
 
-        protected DataResponse(ByteBuffer data, int dataSerializationVersion, SerializationHelper.Flag flag)
+        protected DataResponse(ByteBuffer data, EncodingVersion version, SerializationHelper.Flag flag)
         {
             super();
             this.data = data;
-            this.dataSerializationVersion = dataSerializationVersion;
+            this.version = version;
             this.flag = flag;
         }
 
@@ -271,11 +305,8 @@ public abstract class ReadResponse
                 // Note that the command parameter shadows the 'command' field and this is intended because
                 // the later can be null (for RemoteDataResponse as those are created in the serializers and
                 // those don't have easy access to the command). This is also why we need the command as parameter here.
-                return UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in,
-                                                                                         dataSerializationVersion,
-                                                                                         command.metadata(),
-                                                                                         command.columnFilter(),
-                                                                                         flag);
+                return UnfilteredPartitionIterators.serializerForIntraNode(version)
+                                                   .deserialize(in, command.metadata(), command.columnFilter(), flag);
             }
             catch (IOException e)
             {
@@ -295,50 +326,6 @@ public abstract class ReadResponse
         public boolean isDigestResponse()
         {
             return false;
-        }
-    }
-
-    private static class Serializer implements IVersionedSerializer<ReadResponse>
-    {
-        public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
-        {
-            boolean isDigest = response instanceof DigestResponse;
-            ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
-
-            ByteBufferUtil.writeWithVIntLength(digest, out);
-            if (!isDigest)
-            {
-                ByteBuffer data = ((DataResponse)response).data;
-                ByteBufferUtil.writeWithVIntLength(data, out);
-            }
-        }
-
-        public ReadResponse deserialize(DataInputPlus in, int version) throws IOException
-        {
-            ByteBuffer digest = ByteBufferUtil.readWithVIntLength(in);
-            if (digest.hasRemaining())
-                return new DigestResponse(digest);
-
-            ByteBuffer data = ByteBufferUtil.readWithVIntLength(in);
-            return new RemoteDataResponse(data, version);
-        }
-
-        public long serializedSize(ReadResponse response, int version)
-        {
-            boolean isDigest = response instanceof DigestResponse;
-            ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
-
-            long size = ByteBufferUtil.serializedSizeWithVIntLength(digest);
-            if (!isDigest)
-            {
-                // In theory, we should deserialize/re-serialize if the version asked is different from the current
-                // version as the content could have a different serialization format. So far though, we haven't made
-                // change to partition iterators serialization since 3.0 so we skip this.
-                assert version >= MessagingService.VERSION_30;
-                ByteBuffer data = ((DataResponse)response).data;
-                size += ByteBufferUtil.serializedSizeWithVIntLength(data);
-            }
-            return size;
         }
     }
 }

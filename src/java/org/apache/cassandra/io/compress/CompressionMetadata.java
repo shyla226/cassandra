@@ -43,7 +43,6 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -53,6 +52,7 @@ import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -479,7 +479,7 @@ public class CompressionMetadata
      */
     public static class Chunk
     {
-        public static final IVersionedSerializer<Chunk> serializer = new ChunkSerializer();
+        public static final Serializer<Chunk> serializer = new ChunkSerializer();
 
         public final long offset;
         public final int length;
@@ -514,20 +514,20 @@ public class CompressionMetadata
         }
     }
 
-    static class ChunkSerializer implements IVersionedSerializer<Chunk>
+    static class ChunkSerializer implements Serializer<Chunk>
     {
-        public void serialize(Chunk chunk, DataOutputPlus out, int version) throws IOException
+        public void serialize(Chunk chunk, DataOutputPlus out) throws IOException
         {
             out.writeLong(chunk.offset);
             out.writeInt(chunk.length);
         }
 
-        public Chunk deserialize(DataInputPlus in, int version) throws IOException
+        public Chunk deserialize(DataInputPlus in) throws IOException
         {
             return new Chunk(in.readLong(), in.readInt());
         }
 
-        public long serializedSize(Chunk chunk, int version)
+        public long serializedSize(Chunk chunk)
         {
             long size = TypeSizes.sizeof(chunk.offset);
             size += TypeSizes.sizeof(chunk.length);

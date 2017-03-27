@@ -38,6 +38,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.repair.AbstractRepairTest;
+import org.apache.cassandra.net.OneWayRequest;
 import org.apache.cassandra.repair.RepairSessionResult;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizeCommit;
@@ -95,13 +96,14 @@ public class CoordinatorSessionTest extends AbstractRepairTest
 
         Map<InetAddress, List<RepairMessage>> sentMessages = new HashMap<>();
 
-        protected void sendMessage(InetAddress destination, RepairMessage message)
+        @Override
+        protected void send(OneWayRequest<? extends RepairMessage<?>> request)
         {
-            if (!sentMessages.containsKey(destination))
+            if (!sentMessages.containsKey(request.to()))
             {
-                sentMessages.put(destination, new ArrayList<>());
+                sentMessages.put(request.to(), new ArrayList<>());
             }
-            sentMessages.get(destination).add(message);
+            sentMessages.get(request.to()).add(request.payload());
         }
 
         Runnable onSetRepairing = null;

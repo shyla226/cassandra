@@ -41,6 +41,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.net.OneWayRequest;
 import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -119,13 +120,15 @@ public class LocalSessionTest extends AbstractRepairTest
     static class InstrumentedLocalSessions extends LocalSessions
     {
         Map<InetAddress, List<RepairMessage>> sentMessages = new HashMap<>();
-        protected void sendMessage(InetAddress destination, RepairMessage message)
+
+        @Override
+        protected void send(OneWayRequest<? extends RepairMessage<?>> request)
         {
-            if (!sentMessages.containsKey(destination))
+            if (!sentMessages.containsKey(request.to()))
             {
-                sentMessages.put(destination, new ArrayList<>());
+                sentMessages.put(request.to(), new ArrayList<>());
             }
-            sentMessages.get(destination).add(message);
+            sentMessages.get(request.to()).add(request.payload());
         }
 
         SettableFuture<Object> pendingAntiCompactionFuture = null;

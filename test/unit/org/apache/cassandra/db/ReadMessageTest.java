@@ -38,13 +38,13 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.Version;
 
 public class ReadMessageTest
 {
@@ -148,13 +148,13 @@ public class ReadMessageTest
 
     private ReadCommand serializeAndDeserializeReadMessage(ReadCommand rm) throws IOException
     {
-        IVersionedSerializer<ReadCommand> rms = ReadCommand.serializer;
+        Serializer<ReadCommand> rms = ReadCommand.serializers.get(Version.last(ReadVerbs.ReadVersion.class));
         DataOutputBuffer out = new DataOutputBuffer();
 
-        rms.serialize(rm, out, MessagingService.current_version);
+        rms.serialize(rm, out);
 
         DataInputPlus dis = new DataInputBuffer(out.getData());
-        return rms.deserialize(dis, MessagingService.current_version);
+        return rms.deserialize(dis);
     }
 
 

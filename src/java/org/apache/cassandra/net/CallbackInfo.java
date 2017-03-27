@@ -19,53 +19,26 @@ package org.apache.cassandra.net;
 
 import java.net.InetAddress;
 
-import org.apache.cassandra.io.IVersionedSerializer;
-
 /**
- * Encapsulates the callback information.
- * The ability to set the message is useful in cases for when a hint needs 
- * to be written due to a timeout in the response from a replica.
+ * Groups a callback and a target node for the sake of MessagingService expiring
+ * map.
  */
-public class CallbackInfo
+class CallbackInfo<Q>
 {
-    protected final InetAddress target;
-    protected final IAsyncCallback callback;
-    protected final IVersionedSerializer<?> serializer;
-    private final boolean failureCallback;
+    final InetAddress target;
+    final MessageCallback<Q> callback;
+    final Verb<?, Q> verb;
 
-    /**
-     * Create CallbackInfo without sent message
-     *
-     * @param target target to send message
-     * @param callback
-     * @param serializer serializer to deserialize response message
-     * @param failureCallback True when we have a callback to handle failures
-     */
-    public CallbackInfo(InetAddress target, IAsyncCallback callback, IVersionedSerializer<?> serializer, boolean failureCallback)
+    CallbackInfo(InetAddress target, MessageCallback<Q> callback, Verb<?, Q> verb)
     {
         this.target = target;
         this.callback = callback;
-        this.serializer = serializer;
-        this.failureCallback = failureCallback;
+        this.verb = verb;
     }
 
-    public boolean shouldHint()
-    {
-        return false;
-    }
-
-    public boolean isFailureCallback()
-    {
-        return failureCallback;
-    }
-
+    @Override
     public String toString()
     {
-        return "CallbackInfo(" +
-               "target=" + target +
-               ", callback=" + callback +
-               ", serializer=" + serializer +
-               ", failureCallback=" + failureCallback +
-               ')';
+        return String.format("CallbackInfo(target=%s, callback=%s, verb=%s)", target, callback, verb);
     }
 }

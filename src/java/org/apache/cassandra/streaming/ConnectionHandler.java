@@ -45,6 +45,7 @@ import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
 import org.apache.cassandra.net.IncomingStreamingConnection;
 import org.apache.cassandra.streaming.messages.StreamInitMessage;
 import org.apache.cassandra.streaming.messages.StreamMessage;
+import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -98,7 +99,7 @@ public class ConnectionHandler
      * @param version Streaming message version
      * @throws IOException
      */
-    public void initiateOnReceivingSide(IncomingStreamingConnection connection, boolean isForOutgoing, int version) throws IOException
+    public void initiateOnReceivingSide(IncomingStreamingConnection connection, boolean isForOutgoing, StreamVersion version) throws IOException
     {
         if (isForOutgoing)
             outgoing.start(connection, version);
@@ -157,7 +158,7 @@ public class ConnectionHandler
     {
         protected final StreamSession session;
 
-        protected int protocolVersion;
+        protected StreamVersion version;
         private final boolean isOutgoingHandler;
         protected Socket socket;
 
@@ -200,22 +201,22 @@ public class ConnectionHandler
                     session.keepSSTableLevel(),
                     session.isIncremental(),
                     session.getPendingRepair());
-            ByteBuffer messageBuf = message.createMessage(false, protocolVersion);
+            ByteBuffer messageBuf = message.createMessage(false, version);
             DataOutputStreamPlus out = getWriteChannel(socket);
             out.write(messageBuf);
             out.flush();
         }
 
-        public void start(IncomingStreamingConnection connection, int protocolVersion) throws IOException
+        public void start(IncomingStreamingConnection connection, StreamVersion version) throws IOException
         {
             this.incomingConnection = connection;
-            start(connection.socket, protocolVersion, false);
+            start(connection.socket, version, false);
         }
 
-        public void start(Socket socket, int protocolVersion, boolean initiator) throws IOException
+        public void start(Socket socket, StreamVersion version, boolean initiator) throws IOException
         {
             this.socket = socket;
-            this.protocolVersion = protocolVersion;
+            this.version = version;
             if (initiator)
                 sendInitMessage();
 
@@ -282,7 +283,7 @@ public class ConnectionHandler
         }
 
         @Override
-        public void start(Socket socket, int version, boolean initiator) throws IOException
+        public void start(Socket socket, StreamVersion version, boolean initiator) throws IOException
         {
             try
             {
@@ -309,7 +310,7 @@ public class ConnectionHandler
                 while (!isClosed())
                 {
                     // receive message
-                    StreamMessage message = StreamMessage.deserialize(in, protocolVersion, session);
+                    StreamMessage message = StreamMessage.deserialize(in, version, session);
                     logger.debug("[Stream #{}] Received {}", session.planId(), message);
                     // Might be null if there is an error during streaming (see FileMessage.deserialize). It's ok
                     // to ignore here since we'll have asked for a retry.
@@ -406,7 +407,7 @@ public class ConnectionHandler
         {
             try
             {
-                StreamMessage.serialize(message, out, protocolVersion, session);
+                StreamMessage.serialize(message, out, version, session);
                 out.flush();
                 message.sent();
             }

@@ -91,10 +91,10 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
      * @param mutation Mutation to allocate in segment manager
      * @param size total size (overhead + serialized) of mutation
      * @return the created Allocation object
-     * @throws WriteTimeoutException If segment disallows CDC mutations, we throw WTE
+     * @throws CDCSegmentFullException If segment disallows CDC mutations because it is full
      */
     @Override
-    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size) throws WriteTimeoutException
+    public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size) throws CDCSegmentFullException
     {
 
         return Single.defer(() ->
@@ -119,18 +119,12 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
                             }).subscribeOn(Schedulers.io());
     }
 
-    private void throwIfForbidden(Mutation mutation, CommitLogSegment segment) throws WriteTimeoutException
+    private void throwIfForbidden(Mutation mutation, CommitLogSegment segment) throws CDCSegmentFullException
     {
         if (mutation.trackedByCDC() && segment.getCDCState() == CDCState.FORBIDDEN)
         {
             cdcSizeTracker.submitOverflowSizeRecalculation();
-            NoSpamLogger.log(logger,
-                             NoSpamLogger.Level.WARN,
-                             10,
-                             TimeUnit.SECONDS,
-                             "Rejecting Mutation containing CDC-enabled table. Free up space in {}.",
-                             DatabaseDescriptor.getCDCLogLocation());
-            throw new WriteTimeoutException(WriteType.CDC, ConsistencyLevel.LOCAL_ONE, 0, 1);
+            throw new CDCSegmentFullException();
         }
     }
 

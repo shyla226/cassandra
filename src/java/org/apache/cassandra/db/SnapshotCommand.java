@@ -19,68 +19,59 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.Serializer;
 
 public class SnapshotCommand
 {
-    public static final SnapshotCommandSerializer serializer = new SnapshotCommandSerializer();
+    public static final Serializer<SnapshotCommand> serializer = new Serializer<SnapshotCommand>()
+    {
+        public void serialize(SnapshotCommand command, DataOutputPlus out) throws IOException
+        {
+            out.writeUTF(command.keyspace);
+            out.writeUTF(command.table);
+            out.writeUTF(command.snapshotName);
+            out.writeBoolean(command.clearSnapshot);
+        }
+
+        public SnapshotCommand deserialize(DataInputPlus in) throws IOException
+        {
+            String keyspace = in.readUTF();
+            String table = in.readUTF();
+            String snapshotName = in.readUTF();
+            boolean clearSnapshot = in.readBoolean();
+            return new SnapshotCommand(keyspace, table, snapshotName, clearSnapshot);
+        }
+
+        public long serializedSize(SnapshotCommand command)
+        {
+            return TypeSizes.sizeof(command.keyspace)
+                   + TypeSizes.sizeof(command.table)
+                   + TypeSizes.sizeof(command.snapshotName)
+                   + TypeSizes.sizeof(command.clearSnapshot);
+        }
+    };
 
     public final String keyspace;
-    public final String column_family;
-    public final String snapshot_name;
-    public final boolean clear_snapshot;
+    public final String table;
+    public final String snapshotName;
+    public final boolean clearSnapshot;
 
     public SnapshotCommand(String keyspace, String columnFamily, String snapshotName, boolean clearSnapshot)
     {
         this.keyspace = keyspace;
-        this.column_family = columnFamily;
-        this.snapshot_name = snapshotName;
-        this.clear_snapshot = clearSnapshot;
-    }
-
-    public MessageOut createMessage()
-    {
-        return new MessageOut<SnapshotCommand>(MessagingService.Verb.SNAPSHOT, this, serializer);
+        this.table = columnFamily;
+        this.snapshotName = snapshotName;
+        this.clearSnapshot = clearSnapshot;
     }
 
     @Override
     public String toString()
     {
         return "SnapshotCommand{" + "keyspace='" + keyspace + '\'' +
-                                  ", column_family='" + column_family + '\'' +
-                                  ", snapshot_name=" + snapshot_name +
-                                  ", clear_snapshot=" + clear_snapshot + '}';
-    }
-}
-
-class SnapshotCommandSerializer implements IVersionedSerializer<SnapshotCommand>
-{
-    public void serialize(SnapshotCommand snapshot_command, DataOutputPlus out, int version) throws IOException
-    {
-        out.writeUTF(snapshot_command.keyspace);
-        out.writeUTF(snapshot_command.column_family);
-        out.writeUTF(snapshot_command.snapshot_name);
-        out.writeBoolean(snapshot_command.clear_snapshot);
-    }
-
-    public SnapshotCommand deserialize(DataInputPlus in, int version) throws IOException
-    {
-        String keyspace = in.readUTF();
-        String column_family = in.readUTF();
-        String snapshot_name = in.readUTF();
-        boolean clear_snapshot = in.readBoolean();
-        return new SnapshotCommand(keyspace, column_family, snapshot_name, clear_snapshot);
-    }
-
-    public long serializedSize(SnapshotCommand sc, int version)
-    {
-        return TypeSizes.sizeof(sc.keyspace)
-             + TypeSizes.sizeof(sc.column_family)
-             + TypeSizes.sizeof(sc.snapshot_name)
-             + TypeSizes.sizeof(sc.clear_snapshot);
+               ", table='" + table + '\'' +
+               ", snapshotName=" + snapshotName +
+               ", clearSnapshot=" + clearSnapshot + '}';
     }
 }

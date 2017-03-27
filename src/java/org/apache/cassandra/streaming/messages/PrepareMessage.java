@@ -35,31 +35,31 @@ public class PrepareMessage extends StreamMessage
     public static Serializer<PrepareMessage> serializer = new Serializer<PrepareMessage>()
     {
         @SuppressWarnings("resource") // Not closing constructed DataInputPlus's as the channel needs to remain open.
-        public PrepareMessage deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException
+        public PrepareMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException
         {
             DataInputPlus input = new DataInputStreamPlus(Channels.newInputStream(in));
             PrepareMessage message = new PrepareMessage();
             // requests
             int numRequests = input.readInt();
             for (int i = 0; i < numRequests; i++)
-                message.requests.add(StreamRequest.serializer.deserialize(input, version));
+                message.requests.add(StreamRequest.serializers.get(version).deserialize(input));
             // summaries
             int numSummaries = input.readInt();
             for (int i = 0; i < numSummaries; i++)
-                message.summaries.add(StreamSummary.serializer.deserialize(input, version));
+                message.summaries.add(StreamSummary.serializers.get(version).deserialize(input));
             return message;
         }
 
-        public void serialize(PrepareMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+        public void serialize(PrepareMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException
         {
             // requests
             out.writeInt(message.requests.size());
             for (StreamRequest request : message.requests)
-                StreamRequest.serializer.serialize(request, out, version);
+                StreamRequest.serializers.get(version).serialize(request, out);
             // summaries
             out.writeInt(message.summaries.size());
             for (StreamSummary summary : message.summaries)
-                StreamSummary.serializer.serialize(summary, out, version);
+                StreamSummary.serializers.get(version).serialize(summary, out);
         }
     };
 

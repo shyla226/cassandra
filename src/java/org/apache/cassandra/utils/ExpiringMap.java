@@ -23,8 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
-import com.google.common.base.Function;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
@@ -39,21 +39,46 @@ public class ExpiringMap<K, V>
 
     public static class CacheableObject<T>
     {
-        public final T value;
-        public final long timeout;
-        private final long createdAt;
+        private final T value;
+        private final long createdAtNanos;
+        private final long timeout;
 
         private CacheableObject(T value, long timeout)
         {
             assert value != null;
             this.value = value;
             this.timeout = timeout;
-            this.createdAt = Clock.instance.nanoTime();
+            this.createdAtNanos = Clock.instance.nanoTime();
         }
 
         private boolean isReadyToDieAt(long atNano)
         {
-            return atNano - createdAt > TimeUnit.MILLISECONDS.toNanos(timeout);
+            return atNano - createdAtNanos > TimeUnit.MILLISECONDS.toNanos(timeout);
+        }
+
+        /**
+         * The value stored.
+         */
+        public T get()
+        {
+            return value;
+        }
+
+        /**
+         * How long that object has been in the map.
+         *
+         * @param unit the time unit to return the lifetime in.
+         * @return how long the object has beed in the map.
+         */
+        public long lifetime(TimeUnit unit)
+        {
+            long lifetimeNanos = Clock.instance.nanoTime() - createdAtNanos;
+            return unit.convert(lifetimeNanos, TimeUnit.NANOSECONDS);
+        }
+
+        public long timeoutMillis()
+        {
+            return timeout;
         }
     }
 
@@ -72,7 +97,7 @@ public class ExpiringMap<K, V>
      *
      * @param defaultExpiration the TTL for objects in the cache in milliseconds
      */
-    public ExpiringMap(long defaultExpiration, final Function<Pair<K,CacheableObject<V>>, ?> postExpireHook)
+    public ExpiringMap(long defaultExpiration, final Consumer<Pair<K,CacheableObject<V>>> postExpireHook)
     {
         this.defaultExpiration = defaultExpiration;
 
@@ -95,7 +120,7 @@ public class ExpiringMap<K, V>
                         {
                             n++;
                             if (postExpireHook != null)
-                                postExpireHook.apply(Pair.create(entry.getKey(), entry.getValue()));
+                                postExpireHook.accept(Pair.create(entry.getKey(), entry.getValue()));
                         }
                     }
                 }
@@ -143,25 +168,14 @@ public class ExpiringMap<K, V>
         return (previous == null) ? null : previous.value;
     }
 
-    public V get(K key)
+    public CacheableObject<V> get(K key)
     {
-        CacheableObject<V> co = cache.get(key);
-        return co == null ? null : co.value;
+        return cache.get(key);
     }
 
-    public V remove(K key)
+    public CacheableObject<V> remove(K key)
     {
-        CacheableObject<V> co = cache.remove(key);
-        return co == null ? null : co.value;
-    }
-
-    /**
-     * @return System.nanoTime() when key was put into the map.
-     */
-    public long getAge(K key)
-    {
-        CacheableObject<V> co = cache.get(key);
-        return co == null ? 0 : co.createdAt;
+        return cache.remove(key);
     }
 
     public int size()

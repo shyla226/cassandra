@@ -19,6 +19,8 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.util.regex.Pattern;
 
+import org.apache.cassandra.db.EncodingVersion;
+
 
 /**
  * A set of feature flags associated with a SSTable format
@@ -45,7 +47,7 @@ public abstract class Version
 
     public abstract boolean isLatestVersion();
 
-    public abstract int correspondingMessagingVersion(); // Only use by storage that 'storeRows' so far
+    public abstract EncodingVersion encodingVersion(); // Only use by storage that 'storeRows' so far
 
     public abstract boolean hasCommitLogLowerBound();
 

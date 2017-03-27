@@ -66,7 +66,7 @@ public class CoordinatorSessions
         return sessions.get(sessionId);
     }
 
-    public void handlePrepareResponse(PrepareConsistentResponse msg)
+    public void handlePrepareResponse(InetAddress from, PrepareConsistentResponse msg)
     {
         CoordinatorSession session = getSession(msg.parentSession);
         if (session != null)
@@ -75,7 +75,7 @@ public class CoordinatorSessions
         }
     }
 
-    public void handleFinalizePromiseMessage(FinalizePromise msg)
+    public void handleFinalizePromiseMessage(InetAddress from, FinalizePromise msg)
     {
         CoordinatorSession session = getSession(msg.sessionID);
         if (session != null)

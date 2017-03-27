@@ -25,11 +25,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
-public class TruncateResponseHandler implements IAsyncCallback
+public class TruncateResponseHandler implements MessageCallback<EmptyPayload>
 {
     protected static final Logger logger = LoggerFactory.getLogger(TruncateResponseHandler.class);
     protected final SimpleCondition condition = new SimpleCondition();
@@ -66,15 +68,15 @@ public class TruncateResponseHandler implements IAsyncCallback
         }
     }
 
-    public void response(MessageIn message)
+    public void onResponse(Response<EmptyPayload> message)
     {
         responses.incrementAndGet();
         if (responses.get() >= responseCount)
             condition.signalAll();
     }
 
-    public boolean isLatencyForSnitch()
+    public void onFailure(FailureResponse<EmptyPayload> message)
     {
-        return false;
+        // Ignoring which will make us timeout. We could probably do better.
     }
 }

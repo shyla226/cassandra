@@ -17,58 +17,34 @@
  */
 package org.apache.cassandra.service;
 
-import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
-import com.google.common.base.Predicate;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.*;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Completable;
-import io.reactivex.Flowable;
-import io.reactivex.Scheduler;
+import io.reactivex.Observable;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.metrics.CASClientWriteRequestMetrics;
-import org.apache.cassandra.metrics.ClientWriteRequestMetrics;
-import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.*;
-import org.apache.cassandra.utils.AbstractIterator;
+
 import org.apache.commons.lang3.StringUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
@@ -76,34 +52,31 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.view.ViewUtils;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.metrics.*;
 import org.apache.cassandra.net.*;
-import org.apache.cassandra.net.MessagingService.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
-
+import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.concurrent.AsyncLatch;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -152,7 +125,7 @@ public class StorageProxy implements StorageProxyMBean
         HintsService.instance.registerMBean();
         HintedHandOffManager.instance.registerMBean();
 
-        for(ConsistencyLevel level : ConsistencyLevel.values())
+        for (ConsistencyLevel level : ConsistencyLevel.values())
         {
             readMetricsMap.put(level, new ClientRequestMetrics("Read-" + level.name()));
             writeMetricsMap.put(level, new ClientWriteRequestMetrics("Write-" + level.name()));
@@ -164,39 +137,38 @@ public class StorageProxy implements StorageProxyMBean
      * match the provided @param conditions.  The algorithm is "raw" Paxos: that is, Paxos
      * minus leader election -- any node in the cluster may propose changes for any row,
      * which (that is, the row) is the unit of values being proposed, not single columns.
-     *
+     * <p>
      * The Paxos cohort is only the replicas for the given key, not the entire cluster.
      * So we expect performance to be reasonable, but CAS is still intended to be used
      * "when you really need it," not for all your updates.
-     *
+     * <p>
      * There are three phases to Paxos:
-     *  1. Prepare: the coordinator generates a ballot (timeUUID in our case) and asks replicas to (a) promise
-     *     not to accept updates from older ballots and (b) tell us about the most recent update it has already
-     *     accepted.
-     *  2. Accept: if a majority of replicas reply, the coordinator asks replicas to accept the value of the
-     *     highest proposal ballot it heard about, or a new value if no in-progress proposals were reported.
-     *  3. Commit (Learn): if a majority of replicas acknowledge the accept request, we can commit the new
-     *     value.
+     * 1. Prepare: the coordinator generates a ballot (timeUUID in our case) and asks replicas to (a) promise
+     * not to accept updates from older ballots and (b) tell us about the most recent update it has already
+     * accepted.
+     * 2. Accept: if a majority of replicas reply, the coordinator asks replicas to accept the value of the
+     * highest proposal ballot it heard about, or a new value if no in-progress proposals were reported.
+     * 3. Commit (Learn): if a majority of replicas acknowledge the accept request, we can commit the new
+     * value.
+     * <p>
+     * Commit procedure is not covered in "Paxos Made Simple," and only briefly mentioned in "Paxos Made Live,"
+     * so here is our approach:
+     * 3a. The coordinator sends a commit message to all replicas with the ballot and value.
+     * 3b. Because of 1-2, this will be the highest-seen commit ballot.  The replicas will note that,
+     * and send it with subsequent promise replies.  This allows us to discard acceptance records
+     * for successfully committed replicas, without allowing incomplete proposals to commit erroneously
+     * later on.
+     * <p>
+     * Note that since we are performing a CAS rather than a simple update, we perform a read (of committed
+     * values) between the prepare and accept phases.  This gives us a slightly longer window for another
+     * coordinator to come along and trump our own promise with a newer one but is otherwise safe.
      *
-     *  Commit procedure is not covered in "Paxos Made Simple," and only briefly mentioned in "Paxos Made Live,"
-     *  so here is our approach:
-     *   3a. The coordinator sends a commit message to all replicas with the ballot and value.
-     *   3b. Because of 1-2, this will be the highest-seen commit ballot.  The replicas will note that,
-     *       and send it with subsequent promise replies.  This allows us to discard acceptance records
-     *       for successfully committed replicas, without allowing incomplete proposals to commit erroneously
-     *       later on.
-     *
-     *  Note that since we are performing a CAS rather than a simple update, we perform a read (of committed
-     *  values) between the prepare and accept phases.  This gives us a slightly longer window for another
-     *  coordinator to come along and trump our own promise with a newer one but is otherwise safe.
-     *
-     * @param keyspaceName the keyspace for the CAS
-     * @param cfName the column family for the CAS
-     * @param key the row key for the row to CAS
-     * @param request the conditions for the CAS to apply as well as the update to perform if the conditions hold.
-     * @param consistencyForPaxos the consistency for the paxos prepare and propose round. This can only be either SERIAL or LOCAL_SERIAL.
+     * @param keyspaceName         the keyspace for the CAS
+     * @param cfName               the column family for the CAS
+     * @param key                  the row key for the row to CAS
+     * @param request              the conditions for the CAS to apply as well as the update to perform if the conditions hold.
+     * @param consistencyForPaxos  the consistency for the paxos prepare and propose round. This can only be either SERIAL or LOCAL_SERIAL.
      * @param consistencyForCommit the consistency for write done during the commit phase. This can be anything, except SERIAL or LOCAL_SERIAL.
-     *
      * @return null if the operation succeeds in updating the row, or the current values corresponding to conditions.
      * (since, if the CAS doesn't succeed, it means the current value do not match the conditions).
      */
@@ -223,8 +195,8 @@ public class StorageProxy implements StorageProxyMBean
             while (System.nanoTime() - queryStartNanoTime < timeout)
             {
                 // for simplicity, we'll do a single liveness check at the start of each attempt
-                Pair<List<InetAddress>, Integer> p = getPaxosParticipants(metadata, key, consistencyForPaxos);
-                List<InetAddress> liveEndpoints = p.left;
+                Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyForPaxos);
+                List<InetAddress> liveEndpoints = p.left.live();
                 int requiredParticipants = p.right;
 
                 final Pair<UUID, Integer> pair = beginAndRepairPaxos(queryStartNanoTime, key, metadata, liveEndpoints, requiredParticipants, consistencyForPaxos, consistencyForCommit, true, state);
@@ -284,19 +256,19 @@ public class StorageProxy implements StorageProxyMBean
 
             throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(keyspaceName)));
         }
-        catch (WriteTimeoutException|ReadTimeoutException e)
+        catch (WriteTimeoutException | ReadTimeoutException e)
         {
             casWriteMetrics.timeouts.mark();
             writeMetricsMap.get(consistencyForPaxos).timeouts.mark();
             throw e;
         }
-        catch (WriteFailureException|ReadFailureException e)
+        catch (WriteFailureException | ReadFailureException e)
         {
             casWriteMetrics.failures.mark();
             writeMetricsMap.get(consistencyForPaxos).failures.mark();
             throw e;
         }
-        catch(UnavailableException e)
+        catch (UnavailableException e)
         {
             casWriteMetrics.unavailables.mark();
             writeMetricsMap.get(consistencyForPaxos).unavailables.mark();
@@ -313,51 +285,31 @@ public class StorageProxy implements StorageProxyMBean
 
     private static void recordCasContention(int contentions)
     {
-        if(contentions > 0)
+        if (contentions > 0)
             casWriteMetrics.contention.update(contentions);
     }
 
-    private static Predicate<InetAddress> sameDCPredicateFor(final String dc)
+    private static Pair<WriteEndpoints, Integer> getPaxosParticipants(TableMetadata table, DecoratedKey key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
     {
-        final IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        return new Predicate<InetAddress>()
-        {
-            public boolean apply(InetAddress host)
-            {
-                return dc.equals(snitch.getDatacenter(host));
-            }
-        };
-    }
-
-    private static Pair<List<InetAddress>, Integer> getPaxosParticipants(TableMetadata metadata, DecoratedKey key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
-    {
-        Token tk = key.getToken();
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(metadata.keyspace, tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, metadata.keyspace);
+        WriteEndpoints endpoints = WriteEndpoints.compute(table.keyspace, key);
         if (consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL)
-        {
-            // Restrict naturalEndpoints and pendingEndpoints to node in the local DC only
-            String localDc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
-            Predicate<InetAddress> isLocalDc = sameDCPredicateFor(localDc);
-            naturalEndpoints = ImmutableList.copyOf(Iterables.filter(naturalEndpoints, isLocalDc));
-            pendingEndpoints = ImmutableList.copyOf(Iterables.filter(pendingEndpoints, isLocalDc));
-        }
-        int participants = pendingEndpoints.size() + naturalEndpoints.size();
+            endpoints = endpoints.restrictToLocalDC();
+
+        int participants = endpoints.count();
         int requiredParticipants = participants / 2 + 1; // See CASSANDRA-8346, CASSANDRA-833
-        List<InetAddress> liveEndpoints = ImmutableList.copyOf(Iterables.filter(Iterables.concat(naturalEndpoints, pendingEndpoints), IAsyncCallback.isAlive));
-        if (liveEndpoints.size() < requiredParticipants)
-            throw new UnavailableException(consistencyForPaxos, requiredParticipants, liveEndpoints.size());
+        if (endpoints.liveCount() < requiredParticipants)
+            throw new UnavailableException(consistencyForPaxos, requiredParticipants, endpoints.liveCount());
 
         // We cannot allow CAS operations with 2 or more pending endpoints, see #8346.
         // Note that we fake an impossible number of required nodes in the unavailable exception
         // to nail home the point that it's an impossible operation no matter how many nodes are live.
-        if (pendingEndpoints.size() > 1)
-            throw new UnavailableException(String.format("Cannot perform LWT operation as there is more than one (%d) pending range movement", pendingEndpoints.size()),
+        if (endpoints.pendingCount() > 1)
+            throw new UnavailableException(String.format("Cannot perform LWT operation as there is more than one (%d) pending range movement", endpoints.pendingCount()),
                                            consistencyForPaxos,
                                            participants + 1,
-                                           liveEndpoints.size());
+                                           endpoints.liveCount());
 
-        return Pair.create(liveEndpoints, requiredParticipants);
+        return Pair.create(endpoints, requiredParticipants);
     }
 
     /**
@@ -414,7 +366,7 @@ public class StorageProxy implements StorageProxyMBean
             if (!inProgress.update.isEmpty() && inProgress.isAfter(mostRecent))
             {
                 Tracing.trace("Finishing incomplete paxos round {}", inProgress);
-                if(isWrite)
+                if (isWrite)
                     casWriteMetrics.unfinishedCommit.inc();
                 else
                     casReadMetrics.unfinishedCommit.inc();
@@ -445,18 +397,13 @@ public class StorageProxy implements StorageProxyMBean
             // To be able to propose our value on a new round, we need a quorum of replica to have learn the previous one. Why is explained at:
             // https://issues.apache.org/jira/browse/CASSANDRA-5062?focusedCommentId=13619810&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-13619810)
             // Since we waited for quorum nodes, if some of them haven't seen the last commit (which may just be a timing issue, but may also
-            // mean we lost messages), we pro-actively "repair" those nodes, and retry.
+            // mean we lost messages), we pro-actively "repair" those nodes (and wait for them to acknowledge that repair) before continuing.
             int nowInSec = Ints.checkedCast(TimeUnit.MICROSECONDS.toSeconds(ballotMicros));
             Iterable<InetAddress> missingMRC = summary.replicasMissingMostRecentCommit(metadata, nowInSec);
             if (Iterables.size(missingMRC) > 0)
             {
                 Tracing.trace("Repairing replicas that missed the most recent commit");
-                sendCommit(mostRecent, missingMRC);
-                // TODO: provided commits don't invalid the prepare we just did above (which they don't), we could just wait
-                // for all the missingMRC to acknowledge this commit and then move on with proposing our value. But that means
-                // adding the ability to have commitPaxos block, which is exactly CASSANDRA-5442 will do. So once we have that
-                // latter ticket, we can pass CL.ALL to the commit above and remove the 'continue'.
-                continue;
+                commitPaxosAndWaitAll(mostRecent, missingMRC);
             }
 
             return Pair.create(ballot, contentions);
@@ -466,23 +413,11 @@ public class StorageProxy implements StorageProxyMBean
         throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(metadata.keyspace)));
     }
 
-    /**
-     * Unlike commitPaxos, this does not wait for replies
-     */
-    private static void sendCommit(Commit commit, Iterable<InetAddress> replicas)
-    {
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_COMMIT, commit, Commit.serializer);
-        for (InetAddress target : replicas)
-            MessagingService.instance().sendOneWay(message, target);
-    }
-
     private static PrepareCallback preparePaxos(Commit toPrepare, List<InetAddress> endpoints, int requiredParticipants, ConsistencyLevel consistencyForPaxos, long queryStartNanoTime)
     throws WriteTimeoutException
     {
         PrepareCallback callback = new PrepareCallback(toPrepare.update.partitionKey(), toPrepare.update.metadata(), requiredParticipants, consistencyForPaxos, queryStartNanoTime);
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_PREPARE, toPrepare, Commit.serializer);
-        for (InetAddress target : endpoints)
-            MessagingService.instance().sendRR(message, target, callback);
+        MessagingService.instance().send(Verbs.LWT.PREPARE.newDispatcher(endpoints, toPrepare), callback);
         callback.await();
         return callback;
     }
@@ -491,9 +426,7 @@ public class StorageProxy implements StorageProxyMBean
     throws WriteTimeoutException
     {
         ProposeCallback callback = new ProposeCallback(endpoints.size(), requiredParticipants, !timeoutIfPartial, consistencyLevel, queryStartNanoTime);
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_PROPOSE, proposal, Commit.serializer);
-        for (InetAddress target : endpoints)
-            MessagingService.instance().sendRR(message, target, callback);
+        MessagingService.instance().send(Verbs.LWT.PROPOSE.newDispatcher(endpoints, proposal), callback);
 
         callback.await();
 
@@ -506,191 +439,137 @@ public class StorageProxy implements StorageProxyMBean
         return false;
     }
 
+    private static void commitPaxosAndWaitAll(Commit proposal, Iterable<InetAddress> endpoints) throws WriteTimeoutException
+    {
+        commitPaxos(proposal, WriteEndpoints.withLive(Keyspace.open(proposal.update.metadata().keyspace), endpoints), ConsistencyLevel.ALL, false, System.nanoTime());
+    }
+
     private static void commitPaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean shouldHint, long queryStartNanoTime) throws WriteTimeoutException
     {
-        boolean shouldBlock = consistencyLevel != ConsistencyLevel.ANY;
-        Keyspace keyspace = Keyspace.open(proposal.update.metadata().keyspace);
-
-        Token tk = proposal.update.partitionKey().getToken();
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspace.getName(), tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace.getName());
-
-        AbstractWriteResponseHandler<Commit> responseHandler = null;
-        if (shouldBlock)
-        {
-            AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
-            responseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime);
-            responseHandler.setSupportsBackPressure(false);
-        }
-
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_COMMIT, proposal, Commit.serializer);
-        for (InetAddress destination : Iterables.concat(naturalEndpoints, pendingEndpoints))
-        {
-            checkHintOverload(destination);
-
-            if (FailureDetector.instance.isAlive(destination))
-            {
-                if (shouldBlock)
-                {
-                    if (canDoLocalRequest(destination))
-                        commitPaxosLocal(message, responseHandler);
-                    else
-                        MessagingService.instance().sendRR(message, destination, responseHandler, shouldHint);
-                }
-                else
-                {
-                    MessagingService.instance().sendOneWay(message, destination);
-                }
-            }
-            else if (shouldHint)
-            {
-                submitHint(proposal.makeMutation(), destination, null);
-            }
-        }
-
-        if (shouldBlock)
-            responseHandler.get();
+        commitPaxos(proposal, WriteEndpoints.compute(proposal), consistencyLevel, shouldHint, queryStartNanoTime);
     }
 
-    /**
-     * Commit a PAXOS task locally, and if the task times out rather then submitting a real hint
-     * submit a fake one that executes immediately on the mutation stage, but generates the necessary backpressure
-     * signal for hints
-     */
-    private static void commitPaxosLocal(final MessageOut<Commit> message, final AbstractWriteResponseHandler<?> responseHandler)
+    private static void commitPaxos(Commit proposal, WriteEndpoints endpoints, ConsistencyLevel consistencyLevel, boolean shouldHint, long queryStartNanoTime) throws WriteTimeoutException
     {
-        StageManager.getStage(MessagingService.verbStages.get(MessagingService.Verb.PAXOS_COMMIT)).maybeExecuteImmediately(new LocalMutationRunnable()
-        {
-            public void runMayThrow()
-            {
-                try
-                {
-                    PaxosState.commit(message.payload);
-                    if (responseHandler != null)
-                        responseHandler.response(null);
-                }
-                catch (Exception ex)
-                {
-                    if (!(ex instanceof WriteTimeoutException))
-                        logger.error("Failed to apply paxos commit locally", ex);
-                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                }
-            }
+        Mutation mutation = proposal.makeMutation();
+        checkHintOverload(endpoints);
 
-            @Override
-            protected Verb verb()
-            {
-                return MessagingService.Verb.PAXOS_COMMIT;
-            }
-        });
+        if (shouldHint)
+        {
+            // Hint dead nodes first as it's always non-blocking, while sending our message may block (due to the use
+            // of LocalAwareExecutorService.maybeExecuteImmediately for local delivery).
+            Collection<InetAddress> endpointsToHint = Collections2.filter(endpoints.dead(), e -> shouldHint(e));
+            if (!endpointsToHint.isEmpty())
+                submitHint(mutation, endpointsToHint, null);
+        }
+
+
+        WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime);
+        if (shouldHint)
+            builder.hintOnTimeout(mutation);
+
+        WriteHandler handler = builder.build();
+        MessagingService.instance().send(Verbs.LWT.COMMIT.newDispatcher(endpoints.live(), proposal), handler);
+
+        if (consistencyLevel != ConsistencyLevel.ANY)
+            handler.get();
     }
 
     /**
-     * Use this method to have these Mutations applied across all replicas. This method will take care of the
-     * possibility of a replica being down and hint the data across to some other replica.
+     * Use this method to have these Mutations applied across all replicas. This method will take care
+     * of the possibility of a replica being down and hint the data across to some other replica.
      *
-     * @param mutations the mutations to be applied across the replicas
-     * @param consistency_level the consistency level for the operation
+     * @param mutations          the mutations to be applied across the replicas
+     * @param consistencyLevel   the consistency level for the operation
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
-     * @return an Observable that emits a single (null) item when all mutations have completed
      */
-    public static Single<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistency_level, long queryStartNanoTime)
+    public static Single<ResultMessage.Void> mutate(Collection<? extends IMutation> mutations, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    throws UnavailableException, OverloadedException, WriteTimeoutException, WriteFailureException
     {
         Tracing.trace("Determining replicas for mutation");
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
         long startTime = System.nanoTime();
+        List<WriteHandler> responseHandlers = new ArrayList<>(mutations.size());
 
-        Single<ResultMessage.Void> observable = null;
-        List<Single<ResultMessage.Void>> singles = mutations.size() == 1 ? null : new ArrayList<>(mutations.size());
         try
         {
             for (IMutation mutation : mutations)
             {
-                Single<ResultMessage.Void> singleMutationObservable;
                 if (mutation instanceof CounterMutation)
                 {
-                    // TODO this can throw UnavailableException, hence the try/catch.  Should integrate this better with Rx
-                    singleMutationObservable = mutateCounter((CounterMutation) mutation, localDataCenter, queryStartNanoTime).get();
+                    responseHandlers.add(mutateCounter((CounterMutation) mutation, localDataCenter, queryStartNanoTime));
                 }
                 else
                 {
                     WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-                    singleMutationObservable = performWrite(mutation, consistency_level, localDataCenter, wt, queryStartNanoTime).get();
+                    responseHandlers.add(mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, wt, queryStartNanoTime));
                 }
-
-                if (singles == null)
-                    observable = singleMutationObservable;
-                else
-                    singles.add(singleMutationObservable);
             }
         }
-        catch (UnavailableException exc)
+        catch(UnavailableException | OverloadedException ex)
         {
             writeMetrics.unavailables.mark();
-            writeMetricsMap.get(consistency_level).unavailables.mark();
+            writeMetricsMap.get(consistencyLevel).unavailables.mark();
             Tracing.trace("Unavailable");
-            return Single.error(exc);
+            return Single.error(ex);
         }
 
-        if (observable == null)
-            observable = Single.merge(singles).last(new ResultMessage.Void());
+        Completable ret = Completable.merge(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+        return ret.doOnEvent(ex -> {
 
-        // we only want to emit a single item when all mutations have completed
-        return observable.doOnEvent((val, exc) -> {
-            long latency = System.nanoTime() - startTime;
-            writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistency_level).addNano(latency);
-
-            if (exc != null)
+            if (ex != null)
             {
-                if (exc instanceof WriteTimeoutException || exc instanceof WriteFailureException)
+                if (ex instanceof WriteTimeoutException || ex instanceof WriteFailureException)
                 {
-                    if (consistency_level == ConsistencyLevel.ANY)
+                    if (consistencyLevel == ConsistencyLevel.ANY)
                     {
-                        // TODO Rx-ify?
                         hintMutations(mutations);
                     }
                     else
                     {
-                        if (exc instanceof WriteFailureException)
+                        if (ex instanceof WriteFailureException)
                         {
                             writeMetrics.failures.mark();
-                            writeMetricsMap.get(consistency_level).failures.mark();
-                            WriteFailureException fe = (WriteFailureException) exc;
+                            writeMetricsMap.get(consistencyLevel).failures.mark();
+                            WriteFailureException fe = (WriteFailureException) ex;
                             Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                    fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
+                                          fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
                         }
                         else
                         {
                             writeMetrics.timeouts.mark();
-                            writeMetricsMap.get(consistency_level).timeouts.mark();
-                            WriteTimeoutException te = (WriteTimeoutException) exc;
+                            writeMetricsMap.get(consistencyLevel).timeouts.mark();
+                            WriteTimeoutException te = (WriteTimeoutException) ex;
                             Tracing.trace("Write timeout; received {} of {} required replies", te.received, te.blockFor);
                         }
                     }
                 }
-                else if (exc instanceof UnavailableException)
+                else if (ex instanceof UnavailableException)
                 {
                     writeMetrics.unavailables.mark();
-                    writeMetricsMap.get(consistency_level).unavailables.mark();
+                    writeMetricsMap.get(consistencyLevel).unavailables.mark();
                     Tracing.trace("Unavailable");
                 }
-                else if (exc instanceof OverloadedException)
+                else if (ex instanceof OverloadedException)
                 {
                     writeMetrics.unavailables.mark();
-                    writeMetricsMap.get(consistency_level).unavailables.mark();
+                    writeMetricsMap.get(consistencyLevel).unavailables.mark();
                     Tracing.trace("Overloaded");
                 }
             }
-        });
+
+            long latency = System.nanoTime() - startTime;
+            writeMetrics.addNano(latency);
+            writeMetricsMap.get(consistencyLevel).addNano(latency);
+        }).toSingleDefault(new ResultMessage.Void());
     }
 
     /**
      * Hint all the mutations (except counters, which can't be safely retried).  This means
      * we'll re-hint any successful ones; doesn't seem worth it to track individual success
      * just for this unusual case.
-     *
+     * <p>
      * Only used for CL.ANY
      *
      * @param mutations the mutations that require hints
@@ -735,9 +614,9 @@ public class StorageProxy implements StorageProxyMBean
      * Use this method to have these Mutations applied
      * across all replicas.
      *
-     * @param mutations the mutations to be applied across the replicas
-     * @param writeCommitLog if commitlog should be written
-     * @param baseComplete time from epoch in ms that the local base mutation was(or will be) completed
+     * @param mutations          the mutations to be applied across the replicas
+     * @param writeCommitLog     if commitlog should be written
+     * @param baseComplete       time from epoch in ms that the local base mutation was(or will be) completed
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
     public static Completable mutateMV(ByteBuffer dataKey, Collection<Mutation> mutations, boolean writeCommitLog, AtomicLong baseComplete, long queryStartNanoTime)
@@ -747,98 +626,93 @@ public class StorageProxy implements StorageProxyMBean
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
         long startTime = System.nanoTime();
-
-        ArrayList<Completable> completables = new ArrayList<>(mutations.size());
-
-        // if we haven't joined the ring, write everything to batchlog because paired replicas may be stale
         final UUID batchUUID = UUIDGen.getTimeUUID();
 
+        // if we haven't joined the ring, write everything to batchlog because paired replicas may be stale
         if (StorageService.instance.isStarting() || StorageService.instance.isJoining() || StorageService.instance.isMoving())
         {
-            Completable completable = BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
-                                                            mutations), writeCommitLog);
-            completables.add(completable);
+            return BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(),
+                                                           mutations), writeCommitLog);
         }
-        else
+
+        List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
+        Set<Mutation> nonLocalMutations = new HashSet<>(mutations);
+        Token baseToken = StorageService.instance.getTokenMetadata().partitioner.getToken(dataKey);
+
+        //Since the base -> view replication is 1:1 we only need to store the BL locally
+        final List<InetAddress> batchlogEndpoints = Collections.singletonList(FBUtilities.getBroadcastAddress());
+        AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
+
+        ArrayList<Completable> completables = new ArrayList<>(mutations.size() + 1);
+
+        // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
+        for (Mutation mutation : mutations)
         {
-            List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
-            List<Mutation> nonPairedMutations = new LinkedList<>();
-            Token baseToken = StorageService.instance.getTokenMetadata().partitioner.getToken(dataKey);
+            WriteEndpoints endpoints = WriteEndpoints.computeForView(baseToken, mutation);
 
-            ConsistencyLevel consistencyLevel = ConsistencyLevel.ONE;
-
-            //Since the base -> view replication is 1:1 we only need to store the BL locally
-            final Collection<InetAddress> batchlogEndpoints = Collections.singleton(FBUtilities.getBroadcastAddress());
-            BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(),
-                                                                                                          () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
-            // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-            for (Mutation mutation : mutations)
+            if (endpoints.naturalCount() == 0)
             {
-                String keyspaceName = mutation.getKeyspaceName();
-                Token tk = mutation.key().getToken();
-                Optional<InetAddress> pairedEndpoint = ViewUtils.getViewNaturalEndpoint(keyspaceName, baseToken, tk);
-                Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-
-                if (pairedEndpoint.isPresent())
-                {
-                    // When local node is the endpoint and there are no pending nodes we can
-                    // Just apply the mutation locally.
-                    if (pairedEndpoint.get().equals(FBUtilities.getBroadcastAddress())
-                        && pendingEndpoints.isEmpty() && StorageService.instance.isJoined())
-                    {
-                        Completable completable = mutation.applyAsync(writeCommitLog, true);
-                        completable = completable.doOnError(exc ->
-                                logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation, exc));
-                        completables.add(completable);
-                    }
-                    else
-                    {
-                        wrappers.add(wrapViewBatchResponseHandler(mutation,
-                                                                  consistencyLevel,
-                                                                  consistencyLevel,
-                                                                  Collections.singletonList(pairedEndpoint.get()),
-                                                                  baseComplete,
-                                                                  WriteType.BATCH,
-                                                                  cleanup,
-                                                                  queryStartNanoTime));
-                    }
-                }
-                else
-                {
-                    //if there are no paired endpoints there are probably range movements going on,
-                    //so we write to the local batchlog to replay later
-                    if (pendingEndpoints.isEmpty())
-                        logger.warn("Received base materialized view mutation for key {} that does not belong " +
-                                    "to this node. There is probably a range movement happening (move or decommission)," +
-                                    "but this node hasn't updated its ring metadata yet. Adding mutation to " +
-                                    "local batchlog to be replayed later.",
-                                    mutation.key());
-                    nonPairedMutations.add(mutation);
-                }
+                if (endpoints.pendingCount() == 0)
+                    logger.warn("Received base materialized view mutation for key {} that does not belong " +
+                                "to this node. There is probably a range movement happening (move or decommission)," +
+                                "but this node hasn't updated its ring metadata yet. Adding mutation to " +
+                                "local batchlog to be replayed later.",
+                                mutation.key());
+                continue;
             }
 
-            if (!wrappers.isEmpty())
+            InetAddress endpoint = endpoints.natural().get(0);
+            // When local node is the paired endpoint just apply the mutation locally.
+            if (endpoint.equals(FBUtilities.getBroadcastAddress()) && endpoints.pendingCount() == 0 && StorageService.instance.isJoined())
             {
-                // Apply to local batchlog memtable in this thread
-                Completable completable = BatchlogManager.store(
-                        Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), Lists.transform(wrappers, w -> w.mutation)),
-                        writeCommitLog);
+                completables.add(mutation.applyAsync(writeCommitLog, true)
+                                         .doFinally(() -> cleanupLatch.countDown())
+                                         .doOnError(exc -> logger.error("Error applying local view update to keyspace {}: {}", mutation.getKeyspaceName(), mutation)));
 
-                // now actually perform the writes and wait for them to complete
-                completables.add(completable.doOnComplete(() ->
-                    asyncWriteBatchedMutations(wrappers, localDataCenter)));
+                nonLocalMutations.remove(mutation);
+
             }
-
-
-            if (!nonPairedMutations.isEmpty())
+            else
             {
-                completables.add(BatchlogManager.store(
-                        Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonPairedMutations),
-                        writeCommitLog));
+                mutationsAndEndpoints.add(new MutationAndEndpoints(mutation, endpoints));
             }
         }
+
+        // Apply to local batchlog memtable in this thread
+        if (!nonLocalMutations.isEmpty())
+            completables.add(BatchlogManager.store(Batch.createLocal(batchUUID, FBUtilities.timestampMicros(), nonLocalMutations), writeCommitLog));
+
+        if (mutationsAndEndpoints.isEmpty())
+            return Completable.merge(completables);
+
+        // Creates write handlers: each mutation must be acknowledged to clean the batchlog.
+        // We also need to update view metrics.
+        Consumer<Response<EmptyPayload>> onReplicaResponse = r ->
+        {
+            viewWriteMetrics.viewReplicasSuccess.inc();
+            long delay = Math.max(0, System.currentTimeMillis() - baseComplete.get());
+            viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
+        };
+
+        List<WriteHandler> handlers = Lists.transform(mutationsAndEndpoints, mae ->
+        {
+            viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
+            WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime)
+                                               .onResponse(onReplicaResponse)
+                                               .build();
+
+
+            handler.thenRun(cleanupLatch::countDown);
+            return handler;
+        });
+
+        completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+
+        // now actually perform the writes (but don't wait on them)
+        writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.VIEW_WRITE);
+
         return Completable.merge(completables)
-                .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
+                          .doFinally(() -> viewWriteMetrics.addNano(System.nanoTime() - startTime));
     }
 
     @SuppressWarnings("unchecked")
@@ -846,6 +720,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                 ConsistencyLevel consistencyLevel,
                                                                 boolean mutateAtomically,
                                                                 long queryStartNanoTime)
+    throws WriteTimeoutException, WriteFailureException, UnavailableException, OverloadedException, InvalidRequestException
     {
         Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
 
@@ -858,125 +733,118 @@ public class StorageProxy implements StorageProxyMBean
         writeMetricsMap.get(consistencyLevel).mutationSize.update(size);
 
         if (augmented != null)
-        {
             return mutateAtomically(augmented, consistencyLevel, updatesView, queryStartNanoTime)
-                    .toSingleDefault(new ResultMessage.Void());
-        }
+                   .toSingleDefault(new ResultMessage.Void());
         else
         {
             if (mutateAtomically || updatesView)
-            {
                 return mutateAtomically((Collection<Mutation>) mutations, consistencyLevel, updatesView, queryStartNanoTime)
-                        .toSingleDefault(new ResultMessage.Void());
-            }
+                       .toSingleDefault(new ResultMessage.Void());
             else
-            {
                 return mutate(mutations, consistencyLevel, queryStartNanoTime);
-            }
         }
     }
 
     /**
      * See mutate. Adds additional steps before and after writing a batch.
      * Before writing the batch (but after doing availability check against the FD for the row replicas):
-     *      write the entire batch to a batchlog elsewhere in the cluster.
+     * write the entire batch to a batchlog elsewhere in the cluster.
      * After: remove the batchlog entry (after writing hints for the batch rows, if necessary).
      *
-     * @param mutations the Mutations to be applied across the replicas
-     * @param consistency_level the consistency level for the operation
+     * @param mutations              the Mutations to be applied across the replicas
+     * @param consistencyLevel       the consistency level for the operation
      * @param requireQuorumForRemove at least a quorum of nodes will see update before deleting batchlog
-     * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
+     * @param queryStartNanoTime     the value of System.nanoTime() when the query started to be processed
      */
-    public static Completable mutateAtomically(Collection<Mutation> mutations,
-                                               ConsistencyLevel consistency_level,
-                                               boolean requireQuorumForRemove,
-                                               long queryStartNanoTime)
+    private static Completable mutateAtomically(Collection<Mutation> mutations,
+                                         ConsistencyLevel consistencyLevel,
+                                         boolean requireQuorumForRemove,
+                                         long queryStartNanoTime)
+    throws UnavailableException, OverloadedException, WriteTimeoutException
     {
         Tracing.trace("Determining replicas for atomic batch");
         long startTime = System.nanoTime();
 
-        List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
+
+        // Computes the final endpoints right away to check availability before writing the batchlog
+        List<MutationAndEndpoints> mutationsAndEndpoints = new ArrayList<>(mutations.size());
+
+        try
+        {
+            for (Mutation mutation : mutations)
+            {
+                WriteEndpoints endpoints = WriteEndpoints.compute(mutation);
+                endpoints.checkAvailability(consistencyLevel);
+                mutationsAndEndpoints.add(new MutationAndEndpoints(mutation, endpoints));
+            }
+        }
+        catch (UnavailableException e)
+        {
+            writeMetrics.unavailables.mark();
+            writeMetricsMap.get(consistencyLevel).unavailables.mark();
+            Tracing.trace("Unavailable");
+            return Completable.error(e);
+        }
 
         // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
         // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
-        ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove
+        ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove && !consistencyLevel.isAtLeastQuorum()
                                                  ? ConsistencyLevel.QUORUM
-                                                 : consistency_level;
+                                                 : consistencyLevel;
 
-        switch (consistency_level)
-        {
-            case ALL:
-            case EACH_QUORUM:
-                batchConsistencyLevel = consistency_level;
-        }
-
-        final Collection<InetAddress> batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
-        final UUID batchUUID = UUIDGen.getTimeUUID();
-        BatchlogResponseHandler.BatchlogCleanup cleanup = new BatchlogResponseHandler.BatchlogCleanup(mutations.size(),
-                                                                                                      () -> asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID));
-
-        // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-        for (Mutation mutation : mutations)
-        {
-            WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
-                                                                           consistency_level,
-                                                                           batchConsistencyLevel,
-                                                                           WriteType.BATCH,
-                                                                           cleanup,
-                                                                           queryStartNanoTime);
-            // exit early if we can't fulfill the CL at this time.
-            try
-            {
-                wrapper.handler.assureSufficientLiveNodes();
-            }
-            catch (UnavailableException exc)
-            {
-                return Completable.error(exc);
-            }
-            wrappers.add(wrapper);
-        }
+        WriteEndpoints batchlogEndpoints = getBatchlogEndpoints(localDataCenter, batchConsistencyLevel);
+        UUID batchUUID = UUIDGen.getTimeUUID();
 
         // write to the batchlog
-        Completable batchlogCompletable = asyncWriteToBatchlog(mutations, batchlogEndpoints, batchUUID, queryStartNanoTime);
+        Completable batchlogCompletable = writeToBatchlog(mutations, batchlogEndpoints, batchUUID, queryStartNanoTime).toObservable();
 
-        // now actually perform the writes and wait for them to complete
-        Completable completable = batchlogCompletable.andThen(
-                Completable.defer(() -> {
-                    return syncWriteBatchedMutations(wrappers, localDataCenter);
-                }));
-        return completable.onErrorResumeNext(throwable -> {
-            if (throwable instanceof  UnavailableException)
+        AsyncLatch cleanupLatch = new AsyncLatch(mutations.size(), () -> asyncRemoveFromBatchlog(batchlogEndpoints.live(), batchUUID));
+
+        // Creates write handlers: each mutation must be acknowledged to clean the batchlog, and each mutation is
+        // acknowledged once we head back from 'batchConsistencyLevel' nodes.
+        List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
+        {
+            Keyspace keyspace = mae.endpoints.keyspace();
+            AsyncLatch toCleanupLatch = new AsyncLatch(batchConsistencyLevel.blockFor(keyspace), cleanupLatch::countDown);
+            return WriteHandler.builder(mae.endpoints, consistencyLevel, WriteType.BATCH, queryStartNanoTime)
+                               .onResponse(r -> toCleanupLatch.countDown())
+                               .build();
+        }));
+
+        // now actually perform the writes
+        ;
+        Completable ret = batchlogCompletable.andThen(Completable.defer(() -> {
+            writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.WRITE);
+            return Completable.merge(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
+        }));
+
+        return ret.onErrorResumeNext(e -> {
+            if (e instanceof UnavailableException)
             {
                 writeMetrics.unavailables.mark();
-                writeMetricsMap.get(consistency_level).unavailables.mark();
+                writeMetricsMap.get(consistencyLevel).unavailables.mark();
                 Tracing.trace("Unavailable");
-                return Completable.error(throwable);
             }
-            else if (throwable instanceof WriteTimeoutException)
+            else if (e instanceof WriteTimeoutException)
             {
-                WriteTimeoutException e = (WriteTimeoutException) throwable;
                 writeMetrics.timeouts.mark();
-                writeMetricsMap.get(consistency_level).timeouts.mark();
-                Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
-                return Completable.error(throwable);
+                writeMetricsMap.get(consistencyLevel).timeouts.mark();
+                WriteTimeoutException wte = (WriteTimeoutException)e;
+                Tracing.trace("Write timeout; received {} of {} required replies", wte.received, wte.blockFor);
             }
-            else if (throwable instanceof WriteFailureException)
+            else if (e instanceof WriteFailureException)
             {
-                WriteFailureException e = (WriteFailureException) throwable;
                 writeMetrics.failures.mark();
-                writeMetricsMap.get(consistency_level).failures.mark();
-                Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
-                return Completable.error(throwable);
+                writeMetricsMap.get(consistencyLevel).failures.mark();
+                WriteFailureException wfe = (WriteFailureException)e;
+                Tracing.trace("Write failure; received {} of {} required replies", wfe.received, wfe.blockFor);
             }
-            else
-            {
-                return Completable.error(throwable);
-            }
+            return Completable.error(e);
         }).doFinally(() -> {
             long latency = System.nanoTime() - startTime;
             writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistency_level).addNano(latency);
+            writeMetricsMap.get(consistencyLevel).addNano(latency);
         });
     }
 
@@ -1022,202 +890,65 @@ public class StorageProxy implements StorageProxyMBean
         return false;
     }
 
-    public static boolean canDoLocalRequest(InetAddress replica)
+    private static WriteHandler writeToBatchlog(Collection<Mutation> mutations, WriteEndpoints endpoints, UUID uuid, long queryStartNanoTime)
     {
-        return replica.equals(FBUtilities.getBroadcastAddress());
-    }
-
-    private static Completable asyncWriteToBatchlog(Collection<Mutation> mutations, Collection<InetAddress> endpoints, UUID uuid, long queryStartNanoTime)
-    throws WriteTimeoutException, WriteFailureException
-    {
-        WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints,
-                                                                     Collections.<InetAddress>emptyList(),
-                                                                     endpoints.size() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO,
-                                                                     Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
-                                                                     WriteType.BATCH_LOG,
-                                                                     queryStartNanoTime);
+        WriteHandler handler = WriteHandler.create(endpoints,
+                                                   endpoints.liveCount() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO,
+                                                   WriteType.BATCH_LOG,
+                                                   queryStartNanoTime);
 
         Batch batch = Batch.createLocal(uuid, FBUtilities.timestampMicros(), mutations);
-        MessageOut<Batch> message = new MessageOut<>(MessagingService.Verb.BATCH_STORE, batch, Batch.serializer);
-        for (InetAddress target : endpoints)
-        {
-            logger.trace("Sending batchlog store request {} to {} for {} mutations", batch.id, target, batch.size());
-
-            if (canDoLocalRequest(target))
-            {
-                BatchlogManager.store(batch).subscribe(
-                        // onComplete
-                        () -> handler.response(null),
-
-                        // onError
-                        exc -> {
-                            JVMStabilityInspector.inspectThrowable(exc);
-                            if (!(exc instanceof WriteTimeoutException))
-                                logger.error("Failed to store batchlog entry locally:", exc);
-                            handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                        }
-                );
-            }
-            else
-            {
-                MessagingService.instance().sendRR(message, target, handler);
-            }
-        }
-        return handler.get().toCompletable();
+        MessagingService.instance().send(Verbs.WRITES.BATCH_STORE.newDispatcher(endpoints.live(), batch), handler);
+        return handler;
     }
 
-    private static void asyncRemoveFromBatchlog(Collection<InetAddress> endpoints, UUID uuid)
+    private static void asyncRemoveFromBatchlog(List<InetAddress> endpoints, UUID uuid)
     {
-        MessageOut<UUID> message = new MessageOut<>(MessagingService.Verb.BATCH_REMOVE, uuid, UUIDSerializer.serializer);
-        for (InetAddress target : endpoints)
+        MessagingService.instance().send(Verbs.WRITES.BATCH_REMOVE.newDispatcher(endpoints, uuid));
+    }
+
+    private static void writeBatchedMutations(List<MutationAndEndpoints> mutationsAndEndpoints,
+                                              List<WriteHandler> handlers,
+                                              String localDataCenter,
+                                              Verb.AckedRequest<Mutation> verb)
+    throws OverloadedException
+    {
+        for (int i = 0; i < mutationsAndEndpoints.size(); i++)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Sending batchlog remove request {} to {}", uuid, target);
-
-            if (canDoLocalRequest(target))
-            {
-                BatchlogManager.remove(uuid).subscribe(
-                        // onComplete
-                        () -> {
-                        },
-
-                        // onError
-                        exc -> {
-                            JVMStabilityInspector.inspectThrowable(exc);
-                            logger.error("Failed to remove batchlog entry locally:", exc);
-                        });
-            }
-            else
-            {
-                MessagingService.instance().sendOneWay(message, target);
-            }
+            Mutation mutation = mutationsAndEndpoints.get(i).mutation;
+            WriteHandler handler = handlers.get(i);
+            sendToHintedEndpoints(mutation, handler.endpoints(), handler, localDataCenter, verb);
         }
     }
 
-    private static void asyncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, String localDataCenter)
+
+    private static WriteHandler mutateStandard(Mutation mutation,
+                                               ConsistencyLevel consistencyLevel,
+                                               String localDataCenter,
+                                               WriteType writeType,
+                                               long queryStartNanoTime)
     {
-        for (WriteResponseHandlerWrapper wrapper : wrappers)
-        {
-            Iterable<InetAddress> endpoints = Iterables.concat(wrapper.handler.naturalEndpoints, wrapper.handler.pendingEndpoints);
-
-            try
-            {
-                sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter);
-            }
-            catch (OverloadedException | WriteTimeoutException e)
-            {
-                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-            }
-        }
-    }
-
-    private static Completable syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, String localDataCenter)
-    throws WriteTimeoutException, OverloadedException
-    {
-        for (WriteResponseHandlerWrapper wrapper : wrappers)
-        {
-            Iterable<InetAddress> endpoints = Iterables.concat(wrapper.handler.naturalEndpoints, wrapper.handler.pendingEndpoints);
-            sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter);
-        }
-
-        List<Completable> completables = new ArrayList<>(wrappers.size());
-        for (WriteResponseHandlerWrapper wrapper : wrappers)
-            completables.add(wrapper.handler.get().toCompletable());
-        return Completable.concat(completables);
-    }
-
-    /**
-     * Gather the list of write endpoints, apply locally and/or forward the mutation to
-     * said write endpoint and wait for the responses based on consistency level.
-     *
-     * @param mutation the mutation to be applied
-     * @param consistency_level the consistency level for the write operation
-     * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
-     */
-    public static AbstractWriteResponseHandler<IMutation> performWrite(IMutation mutation,
-                                                                       ConsistencyLevel consistency_level,
-                                                                       String localDataCenter,
-                                                                       WriteType writeType,
-                                                                       long queryStartNanoTime)
-    throws UnavailableException, OverloadedException
-    {
-        String keyspaceName = mutation.getKeyspaceName();
-        AbstractReplicationStrategy rs = Keyspace.open(keyspaceName).getReplicationStrategy();
-
-        Token tk = mutation.key().getToken();
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-
-        AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, writeType, queryStartNanoTime);
-
+        WriteEndpoints endpoints = WriteEndpoints.compute(mutation);
         // exit early if we can't fulfill the CL at this time
-        responseHandler.assureSufficientLiveNodes();
+        endpoints.checkAvailability(consistencyLevel);
 
-        Iterable<InetAddress> targets = Iterables.concat(naturalEndpoints, pendingEndpoints);
-        if (writeType == WriteType.COUNTER)
-            executeCounterWrite(mutation, targets, responseHandler, localDataCenter);
-        else
-            sendToHintedEndpoints((Mutation) mutation, targets, responseHandler, localDataCenter);
-
-        return responseHandler;
+        WriteHandler handler = WriteHandler.builder(endpoints, consistencyLevel, writeType, queryStartNanoTime)
+                                           .hintOnTimeout(mutation)
+                                           .build();
+        sendToHintedEndpoints(mutation, handler.endpoints(), handler, localDataCenter, Verbs.WRITES.WRITE);
+        return handler;
     }
 
-    // same as performWrites except does not initiate writes (but does perform availability checks).
-    private static WriteResponseHandlerWrapper wrapBatchResponseHandler(Mutation mutation,
-                                                                        ConsistencyLevel consistency_level,
-                                                                        ConsistencyLevel batchConsistencyLevel,
-                                                                        WriteType writeType,
-                                                                        BatchlogResponseHandler.BatchlogCleanup cleanup,
-                                                                        long queryStartNanoTime)
+    // A simple pair of a mutation and its write endpoints for use by the batchlog code
+    private static class MutationAndEndpoints
     {
-        Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-        AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
-        String keyspaceName = mutation.getKeyspaceName();
-        Token tk = mutation.key().getToken();
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-        AbstractWriteResponseHandler<IMutation> writeHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, writeType, queryStartNanoTime);
-        BatchlogResponseHandler<IMutation> batchHandler = new BatchlogResponseHandler<>(writeHandler, batchConsistencyLevel.blockFor(keyspace), cleanup, queryStartNanoTime);
-        return new WriteResponseHandlerWrapper(batchHandler, mutation);
-    }
-
-    /**
-     * Same as performWrites except does not initiate writes (but does perform availability checks).
-     * Keeps track of ViewWriteMetrics
-     */
-    private static WriteResponseHandlerWrapper wrapViewBatchResponseHandler(Mutation mutation,
-                                                                            ConsistencyLevel consistency_level,
-                                                                            ConsistencyLevel batchConsistencyLevel,
-                                                                            List<InetAddress> naturalEndpoints,
-                                                                            AtomicLong baseComplete,
-                                                                            WriteType writeType,
-                                                                            BatchlogResponseHandler.BatchlogCleanup cleanup,
-                                                                            long queryStartNanoTime)
-    {
-        Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-        AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
-        String keyspaceName = mutation.getKeyspaceName();
-        Token tk = mutation.key().getToken();
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-        AbstractWriteResponseHandler<IMutation> writeHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistency_level, writeType, queryStartNanoTime);
-        writeHandler.get().subscribe(v -> {
-            long delay = Math.max(0, System.currentTimeMillis() - baseComplete.get());
-            viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
-        });
-        BatchlogResponseHandler<IMutation> batchHandler = new ViewWriteMetricsWrapped(writeHandler, batchConsistencyLevel.blockFor(keyspace), cleanup, queryStartNanoTime);
-        return new WriteResponseHandlerWrapper(batchHandler, mutation);
-    }
-
-    // used by atomic_batch_mutate to decouple availability check from the write itself, caches consistency level and endpoints.
-    private static class WriteResponseHandlerWrapper
-    {
-        final BatchlogResponseHandler<IMutation> handler;
         final Mutation mutation;
+        final WriteEndpoints endpoints;
 
-        WriteResponseHandlerWrapper(BatchlogResponseHandler<IMutation> handler, Mutation mutation)
+        MutationAndEndpoints(Mutation mutation, WriteEndpoints endpoints)
         {
-            this.handler = handler;
             this.mutation = mutation;
+            this.endpoints = endpoints;
         }
     }
 
@@ -1225,26 +956,27 @@ public class StorageProxy implements StorageProxyMBean
      * Replicas are picked manually:
      * - replicas should be alive according to the failure detector
      * - replicas should be in the local datacenter
-     * - choose min(2, number of qualifying candiates above)
+     * - choose min(2, number of qualifying candidates above)
      * - allow the local node to be the only replica only if it's a single-node DC
      */
-    private static Collection<InetAddress> getBatchlogEndpoints(String localDataCenter, ConsistencyLevel consistencyLevel)
+    private static WriteEndpoints getBatchlogEndpoints(String localDataCenter, ConsistencyLevel consistencyLevel)
     throws UnavailableException
     {
         TokenMetadata.Topology topology = StorageService.instance.getTokenMetadata().cachedOnlyTokenMap().getTopology();
         Multimap<String, InetAddress> localEndpoints = HashMultimap.create(topology.getDatacenterRacks().get(localDataCenter));
         String localRack = DatabaseDescriptor.getEndpointSnitch().getRack(FBUtilities.getBroadcastAddress());
 
+        Keyspace keyspace = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
         Collection<InetAddress> chosenEndpoints = new BatchlogManager.EndpointFilter(localRack, localEndpoints).filter();
         if (chosenEndpoints.isEmpty())
         {
             if (consistencyLevel == ConsistencyLevel.ANY)
-                return Collections.singleton(FBUtilities.getBroadcastAddress());
+                return WriteEndpoints.withLive(keyspace, Collections.singleton(FBUtilities.getBroadcastAddress()));
 
             throw new UnavailableException(ConsistencyLevel.ONE, 1, 0);
         }
 
-        return chosenEndpoints;
+        return WriteEndpoints.withLive(keyspace, chosenEndpoints);
     }
 
     /**
@@ -1264,169 +996,46 @@ public class StorageProxy implements StorageProxyMBean
      *
      * @throws OverloadedException if the hints cannot be written/enqueued
      */
-    public static void sendToHintedEndpoints(final Mutation mutation,
-                                             Iterable<InetAddress> targets,
-                                             AbstractWriteResponseHandler<IMutation> responseHandler,
-                                             String localDataCenter)
+    private static void sendToHintedEndpoints(final Mutation mutation,
+                                              WriteEndpoints targets,
+                                              WriteHandler handler,
+                                              String localDataCenter,
+                                              Verb.AckedRequest<Mutation> messageDefinition)
     throws OverloadedException
     {
-        int targetsSize = Iterables.size(targets);
+        checkHintOverload(targets);
+        MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout());
 
-        // this dc replicas:
-        Collection<InetAddress> localDc = null;
-        // extra-datacenter replicas, grouped by dc
-        Map<String, Collection<InetAddress>> dcGroups = null;
-        // only need to create a Message for non-local writes
-        MessageOut<Mutation> message = null;
+        // Hint dead nodes first as it's always non-blocking, while sending our message may block (due to the use
+        // of LocalAwareExecutorService.maybeExecuteImmediately for local delivery).
+        Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), e -> shouldHint(e));
+        if (!endpointsToHint.isEmpty())
+            submitHint(mutation, endpointsToHint, handler);
 
-        boolean insertLocal = false;
-        ArrayList<InetAddress> endpointsToHint = null;
-
-        List<InetAddress> backPressureHosts = null;
-
-        for (InetAddress destination : targets)
-        {
-            checkHintOverload(destination);
-
-            if (FailureDetector.instance.isAlive(destination))
-            {
-                if (canDoLocalRequest(destination))
-                {
-                    insertLocal = true;
-                }
-                else
-                {
-                    // belongs on a different server
-                    if (message == null)
-                        message = mutation.createMessage();
-
-                    String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(destination);
-
-                    // direct writes to local DC or old Cassandra versions
-                    // (1.1 knows how to forward old-style String message IDs; updated to int in 2.0)
-                    if (localDataCenter.equals(dc))
-                    {
-                        if (localDc == null)
-                            localDc = new ArrayList<>(targetsSize);
-
-                        localDc.add(destination);
-                    }
-                    else
-                    {
-                        Collection<InetAddress> messages = (dcGroups != null) ? dcGroups.get(dc) : null;
-                        if (messages == null)
-                        {
-                            messages = new ArrayList<>(3); // most DCs will have <= 3 replicas
-                            if (dcGroups == null)
-                                dcGroups = new HashMap<>();
-                            dcGroups.put(dc, messages);
-                        }
-
-                        messages.add(destination);
-                    }
-
-                    if (backPressureHosts == null)
-                        backPressureHosts = new ArrayList<>(targetsSize);
-
-                    backPressureHosts.add(destination);
-                }
-            }
-            else
-            {
-                if (shouldHint(destination))
-                {
-                    if (endpointsToHint == null)
-                        endpointsToHint = new ArrayList<>(targetsSize);
-
-                    endpointsToHint.add(destination);
-                }
-            }
-        }
-
-        if (backPressureHosts != null)
-            MessagingService.instance().applyBackPressure(backPressureHosts, responseHandler.currentTimeout());
-
-        if (endpointsToHint != null)
-            submitHint(mutation, endpointsToHint, responseHandler);
-
-        if (insertLocal)
-        {
-            mutation.applyAsync().subscribe(
-                // On Success
-                () -> responseHandler.response(null),
-
-                // onError
-                exc ->
-                {
-                    if (!(exc instanceof WriteTimeoutException))
-                        logger.error("Failed to apply mutation locally : {}", exc);
-                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                }
-            );
-        }
-
-        if (localDc != null)
-        {
-            for (InetAddress destination : localDc)
-                MessagingService.instance().sendRR(message, destination, responseHandler, true);
-        }
-        if (dcGroups != null)
-        {
-            // for each datacenter, send the message to one node to relay the write to other replicas
-            for (Collection<InetAddress> dcTargets : dcGroups.values())
-                sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
-        }
+        MessagingService.instance().send(messageDefinition.newForwardingDispatcher(targets.live(), localDataCenter, mutation),
+                                         handler);
     }
 
-    private static void checkHintOverload(InetAddress destination)
+    private static void checkHintOverload(WriteEndpoints endpoints)
     {
         // avoid OOMing due to excess hints.  we need to do this check even for "live" nodes, since we can
         // still generate hints for those if it's overloaded or simply dead but not yet known-to-be-dead.
         // The idea is that if we have over maxHintsInProgress hints in flight, this is probably due to
         // a small number of nodes causing problems, so we should avoid shutting down writes completely to
         // healthy nodes.  Any node with no hintsInProgress is considered healthy.
-        if (StorageMetrics.totalHintsInProgress.getCount() > maxHintsInProgress
-                && (getHintsInProgressFor(destination).get() > 0 && shouldHint(destination)))
-        {
-            throw new OverloadedException("Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount() +
-                                          " destination: " + destination +
-                                          " destination hints: " + getHintsInProgressFor(destination).get());
-        }
-    }
+        long totalHintsInProgress = StorageMetrics.totalHintsInProgress.getCount();
+        if (totalHintsInProgress <= maxHintsInProgress)
+            return;
 
-    private static void sendMessagesToNonlocalDC(MessageOut<? extends IMutation> message,
-                                                 Collection<InetAddress> targets,
-                                                 AbstractWriteResponseHandler<IMutation> handler)
-    {
-        Iterator<InetAddress> iter = targets.iterator();
-        InetAddress target = iter.next();
-
-        // Add the other destinations of the same message as a FORWARD_HEADER entry
-        try(DataOutputBuffer out = new DataOutputBuffer())
+        for (InetAddress destination : endpoints)
         {
-            out.writeInt(targets.size() - 1);
-            while (iter.hasNext())
+            int hintsForDestination = getHintsInProgressFor(destination).get();
+            if (hintsForDestination > 0 && shouldHint(destination))
             {
-                InetAddress destination = iter.next();
-                CompactEndpointSerializationHelper.serialize(destination, out);
-                int id = MessagingService.instance().addCallback(handler,
-                                                                 message,
-                                                                 destination,
-                                                                 message.getTimeout(),
-                                                                 handler.consistencyLevel,
-                                                                 true);
-                out.writeInt(id);
-                logger.trace("Adding FWD message to {}@{}", id, destination);
+                throw new OverloadedException(String.format("Too many in flight hints: %d " +
+                                                            " destination: %s destination hints %d",
+                                                            totalHintsInProgress, destination, hintsForDestination));
             }
-            message = message.withParameter(Mutation.FORWARD_TO, out.getData());
-            // send the combined message + forward headers
-            int id = MessagingService.instance().sendRR(message, target, handler, true);
-            logger.trace("Sending message to {}@{}", id, target);
-        }
-        catch (IOException e)
-        {
-            // DataOutputBuffer is in-memory, doesn't throw IOException
-            throw new AssertionError(e);
         }
     }
 
@@ -1444,32 +1053,27 @@ public class StorageProxy implements StorageProxyMBean
      * quicker response and because the WriteResponseHandlers don't make it easy to send back an error. We also always gather
      * the write latencies at the coordinator node to make gathering point similar to the case of standard writes.
      */
-    public static AbstractWriteResponseHandler<IMutation> mutateCounter(CounterMutation cm, String localDataCenter, long queryStartNanoTime) throws UnavailableException, OverloadedException
+    private static WriteHandler mutateCounter(CounterMutation cm, String localDataCenter, long queryStartNanoTime) throws UnavailableException, OverloadedException
     {
-        InetAddress endpoint = findSuitableEndpoint(cm.getKeyspaceName(), cm.key(), localDataCenter, cm.consistency());
+        Keyspace keyspace = Keyspace.open(cm.getKeyspaceName());
+        InetAddress endpoint = findSuitableEndpoint(keyspace, cm.key(), localDataCenter, cm.consistency());
 
-        if (endpoint.equals(FBUtilities.getBroadcastAddress()))
-        {
-            return applyCounterMutation(cm, localDataCenter, queryStartNanoTime);
-        }
-        else
-        {
-            // Exit now if we can't fulfill the CL here instead of forwarding to the leader replica
-            String keyspaceName = cm.getKeyspaceName();
-            AbstractReplicationStrategy rs = Keyspace.open(keyspaceName).getReplicationStrategy();
-            Token tk = cm.key().getToken();
-            List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
-            Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
+        // Check availability for the whole query before forwarding to the leader
+        WriteEndpoints.compute(cm).checkAvailability(cm.consistency());
 
-            rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime).assureSufficientLiveNodes();
+        // Forward the actual update to the chosen leader replica
+        WriteHandler handler = WriteHandler.create(WriteEndpoints.withLive(keyspace, Collections.singletonList(endpoint)),
+                                                   ConsistencyLevel.ONE,
+                                                   WriteType.COUNTER,
+                                                   queryStartNanoTime);
 
-            // Forward the actual update to the chosen leader replica
-            AbstractWriteResponseHandler<IMutation> responseHandler = new WriteResponseHandler<>(endpoint, WriteType.COUNTER, queryStartNanoTime);
+        // While we mostly use the same path whether the leader is the local host or not (we rely on MS doing a simple
+        // local delivery in the former case), only indicate forwarding if we're truly using a remote forwarding
+        if (!endpoint.equals(FBUtilities.getBroadcastAddress()))
+            Tracing.trace("Forwarding counter update to write leader {}", endpoint);
 
-            Tracing.trace("Enqueuing counter update to {}", endpoint);
-            MessagingService.instance().sendRR(cm.makeMutationMessage(), endpoint, responseHandler, false);
-            return responseHandler;
-        }
+        MessagingService.instance().send(Verbs.WRITES.COUNTER_FORWARDING.newRequest(endpoint, cm), handler);
+        return handler;
     }
 
     /**
@@ -1482,16 +1086,15 @@ public class StorageProxy implements StorageProxyMBean
      * is unclear we want to mix those latencies with read latencies, so this
      * may be a bit involved.
      */
-    private static InetAddress findSuitableEndpoint(String keyspaceName, DecoratedKey key, String localDataCenter, ConsistencyLevel cl) throws UnavailableException
+    private static InetAddress findSuitableEndpoint(Keyspace keyspace, DecoratedKey key, String localDataCenter, ConsistencyLevel cl) throws UnavailableException
     {
-        Keyspace keyspace = Keyspace.open(keyspaceName);
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         List<InetAddress> endpoints = StorageService.instance.getLiveNaturalEndpoints(keyspace, key);
         if (endpoints.isEmpty())
             // TODO have a way to compute the consistency level
             throw new UnavailableException(cl, cl.blockFor(keyspace), 0);
 
-        List<InetAddress> localEndpoints = new ArrayList<InetAddress>();
+        List<InetAddress> localEndpoints = new ArrayList<>();
         for (InetAddress endpoint : endpoints)
         {
             if (snitch.getDatacenter(endpoint).equals(localDataCenter))
@@ -1509,37 +1112,40 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    public static AbstractWriteResponseHandler<IMutation> applyCounterMutation(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
+    // Must be called on a replica of the mutation. This replica becomes the leader of this mutation.
+    public static CompletableFuture<Void> applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return performWrite(cm, cm.consistency(), localDataCenter, WriteType.COUNTER, queryStartNanoTime);
-    }
+       CompletableFuture<Void> ret = new CompletableFuture<>();
 
-    private static void executeCounterWrite(IMutation mutation,
-                                            Iterable<InetAddress> targets,
-                                            AbstractWriteResponseHandler<IMutation> responseHandler,
-                                            String localDataCenter)
-    {
-        assert mutation instanceof CounterMutation;
+        cm.applyCounterMutation().subscribe(
+            result -> {
 
-        Single<Mutation> single = ((CounterMutation) mutation).applyCounterMutation();
-        single.subscribe(
-                // onComplete
-                result -> {
-                    responseHandler.response(null);
-                    Set<InetAddress> remotes = Sets.difference(ImmutableSet.copyOf(targets),
-                            ImmutableSet.of(FBUtilities.getBroadcastAddress()));
-                    if (!remotes.isEmpty())
-                        sendToHintedEndpoints(result, remotes, responseHandler, localDataCenter);
-                },
+                WriteEndpoints endpoints = WriteEndpoints.compute(cm.getKeyspaceName(), cm.key());
+                WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
+                                                   .hintOnTimeout(result)
+                                                   .build();
 
-                // onError
-                exc -> {
-                    if (!(exc instanceof WriteTimeoutException))
-                        logger.error("Failed to apply counter update locally:", exc);
-                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                }
-        );
+                // We already wrote locally
+                handler.onLocalResponse();
+
+                WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost();
+                if (!remainingEndpoints.isEmpty())
+                    sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
+
+                handler.whenComplete((r, t) -> {
+                    if (t != null)
+                        ret.completeExceptionally(t);
+                    else
+                        ret.complete(r);
+                });
+            },
+            ex -> {
+                ret.completeExceptionally(ex);
+            });
+
+
+        return ret;
     }
 
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)
@@ -1550,13 +1156,13 @@ public class StorageProxy implements StorageProxyMBean
         return true;
     }
 
-    public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         return readOne(command, consistencyLevel, null, queryStartNanoTime);
     }
 
-    public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
+    private static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state, queryStartNanoTime, false).blockingGet(), command);
@@ -1602,7 +1208,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return forContinuousPaging && consistencyLevel.isSingleNode() && group.queriesOnlyLocalData()
-             ? readLocalContinuous(group, consistencyLevel, queryStartNanoTime)
+             ? readLocalContinuous(group, consistencyLevel)
              : readRegular(group, consistencyLevel, queryStartNanoTime, forContinuousPaging);
     }
 
@@ -1620,23 +1226,28 @@ public class StorageProxy implements StorageProxyMBean
      *
      * @param group - the group of single partition read commands
      * @param consistencyLevel - the consistency level, which should be ONE or LOCAL_ONE.
-     * @param queryStartNanoTime - the client request time in nano seconds
      * @return - the filtered partition iterator
      */
     @SuppressWarnings("resource")
-    private static Single<PartitionIterator> readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
+    private static Single<PartitionIterator> readLocalContinuous(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel)
     throws IsBootstrappingException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
         assert consistencyLevel.isSingleNode();
 
+        // Not using the controller in a try-with-resource is a bit dodgy, but having to pass it all the way down
+        // the execution path when it's used only in this specific path is annoying, we've made it clear in the
+        // javadoc that the returned iterator must be closed, and we have a good track record of using
+        // PartitionIterator in try-with-resource.
+
+        Monitor monitor = Monitor.createAndStartNoReporting(group,
+                                                            System.currentTimeMillis(),
+                                                            DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
         try
         {
-            group.monitorLocal(ApproximateTime.currentTimeMillis());
-
             // We could simply use a close Transformation here. However, we want to make extra sure close() is
             // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
             // framework (which is non trivial code) making that not happen.
-            final PartitionIterator iter = group.executeInternal().blockingGet();
+            final PartitionIterator iter = group.executeInternal(monitor).blockingGet();
             return Single.just(new PartitionIterator()
             {
                 public boolean hasNext()
@@ -1652,7 +1263,7 @@ public class StorageProxy implements StorageProxyMBean
                 public void close()
                 {
                     // Make sure we close this as the first thing so it's always called.
-                    group.complete();
+                    monitor.complete();
                 }
             });
         }
@@ -1680,8 +1291,8 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
-            Pair<List<InetAddress>, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
-            List<InetAddress> liveEndpoints = p.left;
+            Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
+            List<InetAddress> liveEndpoints = p.left.live();
             int requiredParticipants = p.right;
 
             // does the work of applying in-progress writes; throws UAE or timeout if it can't
@@ -1893,11 +1504,11 @@ public class StorageProxy implements StorageProxyMBean
                                              executor.handler.endpoints,
                                              queryStartNanoTime);
 
-            for (InetAddress endpoint : executor.getContactedReplicas())
-            {
-                Tracing.trace("Enqueuing full data read to {}", endpoint);
-                MessagingService.instance().sendRRWithFailure(command.createMessage(), endpoint, repairHandler);
-            }
+
+            List<InetAddress> endpoints = executor.getContactedReplicas();
+            Tracing.trace("Enqueuing full data read to {}", endpoints);
+            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
+
 
             return repairHandler.get().onErrorResumeNext(e -> {
                 if (e instanceof DigestMismatchException)
@@ -1913,64 +1524,6 @@ public class StorageProxy implements StorageProxyMBean
             assert result != null;
             return result;
         }
-    }
-
-    static class LocalReadRunnable extends DroppableRunnable
-    {
-        private final ReadCommand command;
-        private final ReadCallback handler;
-        private final long start = System.nanoTime();
-
-        LocalReadRunnable(ReadCommand command, ReadCallback handler)
-        {
-            super(MessagingService.Verb.READ);
-            this.command = command;
-            this.handler = handler;
-        }
-
-        protected void runMayThrow()
-        {
-            try
-            {
-                command.monitor(constructionTime, verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout(), false);
-
-                ReadResponse response;
-                try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
-                {
-                    response = command.createResponse(iterator);
-                }
-
-                if (command.complete())
-                {
-                    handler.response(response);
-                }
-                else
-                {
-                    MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                }
-
-                MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
-            }
-            catch (Throwable t)
-            {
-                if (t instanceof TombstoneOverwhelmingException)
-                {
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
-                    logger.error(t.getMessage());
-                }
-                else
-                {
-                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
-                    throw t;
-                }
-            }
-        }
-    }
-
-    public static List<InetAddress> getLiveSortedEndpoints(Keyspace keyspace, ByteBuffer key)
-    {
-        return getLiveSortedEndpoints(keyspace, StorageService.instance.getTokenMetadata().decorateKey(key));
     }
 
     public static List<InetAddress> getLiveSortedEndpoints(Keyspace keyspace, RingPosition pos)
@@ -2272,19 +1825,7 @@ public class StorageProxy implements StorageProxyMBean
 
             handler.assureSufficientLiveNodes();
 
-            if (toQuery.filteredEndpoints.size() == 1 && canDoLocalRequest(toQuery.filteredEndpoints.get(0)))
-            {
-                StageManager.getStage(Stage.READ).execute(new LocalReadRunnable(rangeCommand, handler));
-            }
-            else
-            {
-                for (InetAddress endpoint : toQuery.filteredEndpoints)
-                {
-                    Tracing.trace("Enqueuing request to {}", endpoint);
-                    MessagingService.instance().sendRRWithFailure(rangeCommand.createMessage(), endpoint, handler);
-                }
-            }
-
+            MessagingService.instance().send(Verbs.READS.READ.newDispatcher(toQuery.filteredEndpoints, rangeCommand), handler);
             return new SingleRangeResponse(handler);
         }
 
@@ -2412,12 +1953,14 @@ public class StorageProxy implements StorageProxyMBean
 
         Tracing.trace("Querying local ranges");
 
+        Monitor monitor = Monitor.createAndStartNoReporting(command,
+                                                            System.currentTimeMillis(),
+                                                            DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
+
         try
         {
-            command.monitorLocal(ApproximateTime.currentTimeMillis());
-
             // Same reasoning as in readLocalContinuous, see there for details.
-            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal().blockingGet());
+            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(monitor).blockingGet());
             return Single.just(new PartitionIterator()
             {
                 public boolean hasNext()
@@ -2432,7 +1975,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 public void close()
                 {
-                    command.complete();
+                    monitor.complete();
                 }
             });
         }
@@ -2461,24 +2004,23 @@ public class StorageProxy implements StorageProxyMBean
         final Set<InetAddress> liveHosts = Gossiper.instance.getLiveMembers();
         final CountDownLatch latch = new CountDownLatch(liveHosts.size());
 
-        IAsyncCallback<UUID> cb = new IAsyncCallback<UUID>()
+        MessageCallback<UUID> cb = new MessageCallback<UUID>()
         {
-            public void response(MessageIn<UUID> message)
+            public void onResponse(Response<UUID> message)
             {
                 // record the response from the remote node.
-                versions.put(message.from, message.payload);
+                versions.put(message.from(), message.payload());
                 latch.countDown();
             }
 
-            public boolean isLatencyForSnitch()
+            public void onFailure(FailureResponse<UUID> message)
             {
-                return false;
+                // Ignore failure, we'll just timeout
             }
         };
-        // an empty message acts as a request to the SchemaVersionVerbHandler.
-        MessageOut message = new MessageOut(MessagingService.Verb.SCHEMA_CHECK);
+        // an empty message acts as a request to the Schema Version message type.
         for (InetAddress endpoint : liveHosts)
-            MessagingService.instance().sendRR(message, endpoint, cb);
+            MessagingService.instance().send(Verbs.SCHEMA.VERSION.newRequest(endpoint, EmptyPayload.instance), cb);
 
         try
         {
@@ -2667,10 +2209,8 @@ public class StorageProxy implements StorageProxyMBean
 
         // Send out the truncate calls and track the responses with the callbacks.
         Tracing.trace("Enqueuing truncate messages to hosts {}", allEndpoints);
-        final Truncation truncation = new Truncation(keyspace, cfname);
-        MessageOut<Truncation> message = truncation.createMessage();
-        for (InetAddress endpoint : allEndpoints)
-            MessagingService.instance().sendRR(message, endpoint, responseHandler);
+        Truncation truncation = new Truncation(keyspace, cfname);
+        MessagingService.instance().send(Verbs.OPERATIONS.TRUNCATE.newDispatcher(allEndpoints, truncation), responseHandler);
 
         // Wait for all
         try
@@ -2694,117 +2234,10 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     /**
-     * This class captures metrics for views writes.
-     */
-    private static class ViewWriteMetricsWrapped extends BatchlogResponseHandler<IMutation>
-    {
-        public ViewWriteMetricsWrapped(AbstractWriteResponseHandler<IMutation> writeHandler, int i, BatchlogCleanup cleanup, long queryStartNanoTime)
-        {
-            super(writeHandler, i, cleanup, queryStartNanoTime);
-            viewWriteMetrics.viewReplicasAttempted.inc(totalEndpoints());
-        }
-
-        public void response(MessageIn<IMutation> msg)
-        {
-            super.response(msg);
-            viewWriteMetrics.viewReplicasSuccess.inc();
-        }
-    }
-
-    /**
-     * A Runnable that aborts if it doesn't start running before it times out
-     */
-    private static abstract class DroppableRunnable implements Runnable
-    {
-        final long constructionTime;
-        final MessagingService.Verb verb;
-
-        public DroppableRunnable(MessagingService.Verb verb)
-        {
-            this.constructionTime = System.currentTimeMillis();
-            this.verb = verb;
-        }
-
-        public final void run()
-        {
-            long timeTaken = System.currentTimeMillis() - constructionTime;
-            if (timeTaken > verb.getTimeout())
-            {
-                MessagingService.instance().incrementDroppedMessages(verb, timeTaken);
-                return;
-            }
-            try
-            {
-                runMayThrow();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        abstract protected void runMayThrow() throws Exception;
-    }
-
-    /**
-     * Like DroppableRunnable, but if it aborts, it will rerun (on the mutation stage) after
-     * marking itself as a hint in progress so that the hint backpressure mechanism can function.
-     */
-    private static abstract class LocalMutationRunnable implements Runnable
-    {
-        private final long constructionTime = System.currentTimeMillis();
-
-        private final Optional<IMutation> mutationOpt;
-
-        public LocalMutationRunnable(Optional<IMutation> mutationOpt)
-        {
-            this.mutationOpt = mutationOpt;
-        }
-
-        public LocalMutationRunnable()
-        {
-            this.mutationOpt = Optional.empty();
-        }
-
-        public final void run()
-        {
-            final MessagingService.Verb verb = verb();
-            long mutationTimeout = verb.getTimeout();
-            long timeTaken = System.currentTimeMillis() - constructionTime;
-            if (timeTaken > mutationTimeout)
-            {
-                if (MessagingService.DROPPABLE_VERBS.contains(verb))
-                    MessagingService.instance().incrementDroppedMutations(mutationOpt, timeTaken);
-                HintRunnable runnable = new HintRunnable(Collections.singleton(FBUtilities.getBroadcastAddress()))
-                {
-                    protected void runMayThrow() throws Exception
-                    {
-                        LocalMutationRunnable.this.runMayThrow();
-                    }
-                };
-                submitHint(runnable);
-                return;
-            }
-
-            try
-            {
-                runMayThrow();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        abstract protected MessagingService.Verb verb();
-        abstract protected void runMayThrow() throws Exception;
-    }
-
-    /**
      * HintRunnable will decrease totalHintsInProgress and targetHints when finished.
      * It is the caller's responsibility to increment them initially.
      */
-    private abstract static class HintRunnable implements Runnable
+    abstract static class HintRunnable implements Runnable
     {
         public final Collection<InetAddress> targets;
 
@@ -2872,14 +2305,14 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    public static Future<Void> submitHint(Mutation mutation, InetAddress target, AbstractWriteResponseHandler<IMutation> responseHandler)
+    public static Future<Void> submitHint(Mutation mutation, InetAddress target, WriteHandler handler)
     {
-        return submitHint(mutation, Collections.singleton(target), responseHandler);
+        return submitHint(mutation, Collections.singleton(target), handler);
     }
 
     public static Future<Void> submitHint(Mutation mutation,
                                           Collection<InetAddress> targets,
-                                          AbstractWriteResponseHandler<IMutation> responseHandler)
+                                          WriteHandler handler)
     {
         HintRunnable runnable = new HintRunnable(targets)
         {
@@ -2902,15 +2335,15 @@ public class StorageProxy implements StorageProxyMBean
                 HintsService.instance.write(hostIds, Hint.create(mutation, System.currentTimeMillis()));
                 validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
                 // Notify the handler only for CL == ANY
-                if (responseHandler != null && responseHandler.consistencyLevel == ConsistencyLevel.ANY)
-                    responseHandler.response(null);
+                if (handler != null && handler.consistencyLevel() == ConsistencyLevel.ANY)
+                    handler.onLocalResponse();
             }
         };
 
         return submitHint(runnable);
     }
 
-    private static Future<Void> submitHint(HintRunnable runnable)
+    static Future<Void> submitHint(HintRunnable runnable)
     {
         StorageMetrics.totalHintsInProgress.inc(runnable.targets.size());
         for (InetAddress target : runnable.targets)

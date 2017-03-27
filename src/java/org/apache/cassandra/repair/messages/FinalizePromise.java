@@ -25,20 +25,51 @@ import java.util.UUID;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.serializers.InetAddressSerializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class FinalizePromise extends RepairMessage
+public class FinalizePromise extends RepairMessage<FinalizePromise>
 {
+    public static Versioned<RepairVersion, MessageSerializer<FinalizePromise>> serializers = RepairVersion.versioned(v -> new MessageSerializer<FinalizePromise>(v)
+    {
+        private final TypeSerializer<InetAddress> inetSerializer = InetAddressSerializer.instance;
+
+        public void serialize(FinalizePromise msg, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(msg.sessionID, out);
+            ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(msg.participant), out);
+            out.writeBoolean(msg.promised);
+        }
+
+        public FinalizePromise deserialize(DataInputPlus in) throws IOException
+        {
+            return new FinalizePromise(UUIDSerializer.serializer.deserialize(in),
+                                       inetSerializer.deserialize(ByteBufferUtil.readWithShortLength(in)),
+                                       in.readBoolean());
+        }
+
+        public long serializedSize(FinalizePromise msg)
+        {
+            long size = UUIDSerializer.serializer.serializedSize(msg.sessionID);
+            size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(msg.participant));
+            size += TypeSizes.sizeof(msg.promised);
+            return size;
+        }
+    });
+
     public final UUID sessionID;
     public final InetAddress participant;
     public final boolean promised;
 
     public FinalizePromise(UUID sessionID, InetAddress participant, boolean promised)
     {
-        super(Type.FINALIZE_PROMISE, null);
+        super(null);
         assert sessionID != null;
         assert participant != null;
         this.sessionID = sessionID;
@@ -53,9 +84,9 @@ public class FinalizePromise extends RepairMessage
 
         FinalizePromise that = (FinalizePromise) o;
 
-        if (promised != that.promised) return false;
-        if (!sessionID.equals(that.sessionID)) return false;
-        return participant.equals(that.participant);
+        return promised == that.promised
+               && sessionID.equals(that.sessionID)
+               && participant.equals(that.participant);
     }
 
     public int hashCode()
@@ -66,30 +97,13 @@ public class FinalizePromise extends RepairMessage
         return result;
     }
 
-    public static MessageSerializer serializer = new MessageSerializer<FinalizePromise>()
+    public MessageSerializer<FinalizePromise> serializer(RepairVersion version)
     {
-        private TypeSerializer<InetAddress> inetSerializer = InetAddressSerializer.instance;
+        return serializers.get(version);
+    }
 
-        public void serialize(FinalizePromise msg, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(msg.sessionID, out, version);
-            ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(msg.participant), out);
-            out.writeBoolean(msg.promised);
-        }
-
-        public FinalizePromise deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return new FinalizePromise(UUIDSerializer.serializer.deserialize(in, version),
-                                       inetSerializer.deserialize(ByteBufferUtil.readWithShortLength(in)),
-                                       in.readBoolean());
-        }
-
-        public long serializedSize(FinalizePromise msg, int version)
-        {
-            long size = UUIDSerializer.serializer.serializedSize(msg.sessionID, version);
-            size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(msg.participant));
-            size += TypeSizes.sizeof(msg.promised);
-            return size;
-        }
-    };
+    public Verb<FinalizePromise, ?> verb()
+    {
+        return Verbs.REPAIR.FINALIZE_PROMISE;
+    }
 }

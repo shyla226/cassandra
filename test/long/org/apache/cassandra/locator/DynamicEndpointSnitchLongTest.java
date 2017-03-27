@@ -27,6 +27,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.service.StorageService;
 
 import org.apache.cassandra.utils.FBUtilities;
@@ -100,7 +101,7 @@ public class DynamicEndpointSnitchLongTest
             {
                 InetAddress host = hosts.get(random.nextInt(hosts.size()));
                 int score = random.nextInt(SCORE_RANGE);
-                dsnitch.receiveTiming(host, score);
+                dsnitch.receiveTiming(Verbs.READS.READ, host, score);
             }
         }
     }

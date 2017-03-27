@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.Collections;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Before;
@@ -26,7 +25,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -54,40 +52,36 @@ public class MockMessagingServiceTest
     @Test
     public void testRequestResponse() throws InterruptedException, ExecutionException
     {
-        // echo message that we like to mock as incoming reply for outgoing echo message
-        MessageIn<EchoMessage> echoMessageIn = MessageIn.create(FBUtilities.getBroadcastAddress(),
-                EchoMessage.instance,
-                Collections.emptyMap(),
-                MessagingService.Verb.ECHO,
-                MessagingService.current_version);
+        Request<EmptyPayload, EmptyPayload> request = Verbs.GOSSIP.ECHO.newRequest(FBUtilities.getBroadcastAddress(), EmptyPayload.instance);
+        Response<EmptyPayload> response = request.respond(EmptyPayload.instance);
+
         MockMessagingSpy spy = MockMessagingService
                 .when(
                         all(
-                                to(FBUtilities.getBroadcastAddress()),
-                                verb(MessagingService.Verb.ECHO)
+                        to(FBUtilities.getBroadcastAddress()),
+                        verb(Verbs.GOSSIP.ECHO)
                         )
                 )
-                .respond(echoMessageIn);
+                .respond(response);
 
-        MessageOut<EchoMessage> echoMessageOut = new MessageOut<>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
-        MessagingService.instance().sendRR(echoMessageOut, FBUtilities.getBroadcastAddress(), new IAsyncCallback()
+        MessagingService.instance().send(request, new MessageCallback<EmptyPayload>()
         {
-            public void response(MessageIn msg)
+            public void onResponse(Response<EmptyPayload> r)
             {
-                assertEquals(MessagingService.Verb.ECHO, msg.verb);
-                assertEquals(echoMessageIn.payload, msg.payload);
+                assertEquals(Verbs.GOSSIP.ECHO, r.verb());
+                assertEquals(response.payload(), r.payload());
             }
 
-            public boolean isLatencyForSnitch()
+            public void onFailure(FailureResponse<EmptyPayload> response)
             {
-                return false;
+                throw new AssertionError();
             }
         });
 
         // we must have intercepted the outgoing message at this point
-        MessageOut<?> msg = spy.captureMessageOut().get();
+        Request<?, ?> msg = spy.captureRequests().get();
         assertEquals(1, spy.messagesIntercepted);
-        assertTrue(msg == echoMessageOut);
+        assertTrue(msg == request);
 
         // and return a mocked response
         assertEquals(1, spy.mockedMessageResponses);

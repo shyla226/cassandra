@@ -17,9 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import java.util.Arrays;
-
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,7 +39,10 @@ public class ReadExecutionController implements AutoCloseable
     private final OpOrder.Group writeOp;
     private boolean closed;
 
-    private ReadExecutionController(OpOrder.Group baseOp, TableMetadata baseMetadata, ReadExecutionController indexController, OpOrder.Group writeOp)
+    private ReadExecutionController(OpOrder.Group baseOp,
+                                    TableMetadata baseMetadata,
+                                    ReadExecutionController indexController,
+                                    OpOrder.Group writeOp)
     {
         // We can have baseOp == null, but only when empty() is called, in which case the controller will never really be used
         // (which validForReadOn should ensure). But if it's not null, we should have the proper metadata too.
@@ -76,9 +76,6 @@ public class ReadExecutionController implements AutoCloseable
 
     /**
      * Creates an execution controller for the provided command.
-     * <p>
-     * Note: no code should use this method outside of {@link ReadCommand#executionController} (for
-     * consistency sake) and you should use that latter method if you need an execution controller.
      *
      * @param command the command for which to create a controller.
      * @return the created execution controller, which must always be closed.

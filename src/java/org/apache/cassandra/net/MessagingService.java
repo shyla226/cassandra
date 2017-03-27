@@ -24,10 +24,12 @@ import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -36,7 +38,7 @@ import javax.management.ObjectName;
 import javax.net.ssl.SSLHandshakeException;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
@@ -45,44 +47,27 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.IntObjectMap;
-import com.carrotsearch.hppc.IntObjectOpenHashMap;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.gms.EchoMessage;
-import org.apache.cassandra.gms.GossipDigestAck;
-import org.apache.cassandra.gms.GossipDigestAck2;
-import org.apache.cassandra.gms.GossipDigestSyn;
-import org.apache.cassandra.hints.HintMessage;
-import org.apache.cassandra.hints.HintResponse;
-import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.ILatencySubscriber;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ConnectionMetrics;
 import org.apache.cassandra.metrics.DroppedMessageMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
-import org.apache.cassandra.repair.messages.RepairMessage;
-import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
-import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
@@ -92,329 +77,20 @@ public final class MessagingService implements MessagingServiceMBean
 {
     public static final String MBEAN_NAME = "org.apache.cassandra.net:type=MessagingService";
 
-    // 8 bits version, so don't waste versions
-    public static final int VERSION_30 = 10;
-    public static final int VERSION_40 = 11;
-    public static final int current_version = VERSION_40;
-
-    public static final String FAILURE_CALLBACK_PARAM = "CAL_BAC";
-    public static final byte[] ONE_BYTE = new byte[1];
-    public static final String FAILURE_RESPONSE_PARAM = "FAIL";
-    public static final String FAILURE_REASON_PARAM = "FAIL_REASON";
+    public static final MessagingVersion current_version = MessagingVersion.DSE_60;
 
     /**
-     * we preface every message with this number so the recipient can validate the sender is sane
+     * We preface every connection handshake with this number so the recipient can validate
+     * the sender is sane. For legacy OSS protocol, this is done for every message.
      */
     public static final int PROTOCOL_MAGIC = 0xCA552DFA;
 
+    private static final AtomicInteger idGen = new AtomicInteger(0);
+
     public final MessagingMetrics metrics = new MessagingMetrics();
 
-    /* All verb handler identifiers */
-    public enum Verb
-    {
-        MUTATION
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },
-        HINT
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },
-        READ_REPAIR
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },
-        READ
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getReadRpcTimeout();
-            }
-        },
-        REQUEST_RESPONSE, // client-initiated reads and writes
-        BATCH_STORE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },  // was @Deprecated STREAM_INITIATE,
-        BATCH_REMOVE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        }, // was @Deprecated STREAM_INITIATE_DONE,
-        @Deprecated STREAM_REPLY,
-        @Deprecated STREAM_REQUEST,
-        RANGE_SLICE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getRangeRpcTimeout();
-            }
-        },
-        @Deprecated BOOTSTRAP_TOKEN,
-        @Deprecated TREE_REQUEST,
-        @Deprecated TREE_RESPONSE,
-        @Deprecated JOIN,
-        GOSSIP_DIGEST_SYN,
-        GOSSIP_DIGEST_ACK,
-        GOSSIP_DIGEST_ACK2,
-        @Deprecated DEFINITIONS_ANNOUNCE,
-        DEFINITIONS_UPDATE,
-        TRUNCATE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getTruncateRpcTimeout();
-            }
-        },
-        SCHEMA_CHECK,
-        @Deprecated INDEX_SCAN,
-        REPLICATION_FINISHED,
-        INTERNAL_RESPONSE, // responses to internal calls
-        COUNTER_MUTATION
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getCounterWriteRpcTimeout();
-            }
-        },
-        @Deprecated STREAMING_REPAIR_REQUEST,
-        @Deprecated STREAMING_REPAIR_RESPONSE,
-        SNAPSHOT, // Similar to nt snapshot
-        MIGRATION_REQUEST,
-        GOSSIP_SHUTDOWN,
-        _TRACE, // dummy verb so we can use MS.droppedMessagesMap
-        ECHO,
-        REPAIR_MESSAGE,
-        PAXOS_PREPARE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },
-        PAXOS_PROPOSE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },
-        PAXOS_COMMIT
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getWriteRpcTimeout();
-            }
-        },
-        @Deprecated PAGED_RANGE
-        {
-            public long getTimeout()
-            {
-                return DatabaseDescriptor.getRangeRpcTimeout();
-            }
-        },
-        // remember to add new verbs at the end, since we serialize by ordinal
-        UNUSED_1,
-        UNUSED_2,
-        UNUSED_3,
-        UNUSED_4,
-        UNUSED_5,
-        ;
-
-        private int id;
-        Verb()
-        {
-            id = ordinal();
-        }
-
-        /**
-         * Unused, but it is an extension point for adding custom verbs
-         * @param id
-         */
-        Verb(int id)
-        {
-            this.id = id;
-        }
-
-        public long getTimeout()
-        {
-            return DatabaseDescriptor.getRpcTimeout();
-        }
-
-        public int getId()
-        {
-            return id;
-        }
-        private static final IntObjectMap<Verb> idToVerbMap = new IntObjectOpenHashMap<>(values().length);
-        static
-        {
-            for (Verb v : values())
-                idToVerbMap.put(v.getId(), v);
-        }
-
-        public static Verb fromId(int id)
-        {
-            return idToVerbMap.get(id);
-        }
-    }
-
-    public static final EnumMap<MessagingService.Verb, Stage> verbStages = new EnumMap<MessagingService.Verb, Stage>(MessagingService.Verb.class)
-    {{
-        put(Verb.MUTATION, Stage.MUTATION);
-        put(Verb.COUNTER_MUTATION, Stage.COUNTER_MUTATION);
-        put(Verb.READ_REPAIR, Stage.MUTATION);
-        put(Verb.HINT, Stage.MUTATION);
-        put(Verb.TRUNCATE, Stage.MUTATION);
-        put(Verb.PAXOS_PREPARE, Stage.MUTATION);
-        put(Verb.PAXOS_PROPOSE, Stage.MUTATION);
-        put(Verb.PAXOS_COMMIT, Stage.MUTATION);
-        put(Verb.BATCH_STORE, Stage.MUTATION);
-        put(Verb.BATCH_REMOVE, Stage.MUTATION);
-
-        put(Verb.READ, Stage.READ);
-        put(Verb.RANGE_SLICE, Stage.READ);
-        put(Verb.INDEX_SCAN, Stage.READ);
-        put(Verb.PAGED_RANGE, Stage.READ);
-
-        put(Verb.REQUEST_RESPONSE, Stage.REQUEST_RESPONSE);
-        put(Verb.INTERNAL_RESPONSE, Stage.INTERNAL_RESPONSE);
-
-        put(Verb.STREAM_REPLY, Stage.MISC); // actually handled by FileStreamTask and streamExecutors
-        put(Verb.STREAM_REQUEST, Stage.MISC);
-        put(Verb.REPLICATION_FINISHED, Stage.MISC);
-        put(Verb.SNAPSHOT, Stage.MISC);
-
-        put(Verb.TREE_REQUEST, Stage.ANTI_ENTROPY);
-        put(Verb.TREE_RESPONSE, Stage.ANTI_ENTROPY);
-        put(Verb.STREAMING_REPAIR_REQUEST, Stage.ANTI_ENTROPY);
-        put(Verb.STREAMING_REPAIR_RESPONSE, Stage.ANTI_ENTROPY);
-        put(Verb.REPAIR_MESSAGE, Stage.ANTI_ENTROPY);
-        put(Verb.GOSSIP_DIGEST_ACK, Stage.GOSSIP);
-        put(Verb.GOSSIP_DIGEST_ACK2, Stage.GOSSIP);
-        put(Verb.GOSSIP_DIGEST_SYN, Stage.GOSSIP);
-        put(Verb.GOSSIP_SHUTDOWN, Stage.GOSSIP);
-
-        put(Verb.DEFINITIONS_UPDATE, Stage.MIGRATION);
-        put(Verb.SCHEMA_CHECK, Stage.MIGRATION);
-        put(Verb.MIGRATION_REQUEST, Stage.MIGRATION);
-        put(Verb.INDEX_SCAN, Stage.READ);
-        put(Verb.REPLICATION_FINISHED, Stage.MISC);
-        put(Verb.SNAPSHOT, Stage.MISC);
-        put(Verb.ECHO, Stage.GOSSIP);
-
-        put(Verb.UNUSED_1, Stage.INTERNAL_RESPONSE);
-        put(Verb.UNUSED_2, Stage.INTERNAL_RESPONSE);
-        put(Verb.UNUSED_3, Stage.INTERNAL_RESPONSE);
-    }};
-
-    /**
-     * Messages we receive in IncomingTcpConnection have a Verb that tells us what kind of message it is.
-     * Most of the time, this is enough to determine how to deserialize the message payload.
-     * The exception is the REQUEST_RESPONSE verb, which just means "a reply to something you told me to do."
-     * Traditionally, this was fine since each VerbHandler knew what type of payload it expected, and
-     * handled the deserialization itself.  Now that we do that in ITC, to avoid the extra copy to an
-     * intermediary byte[] (See CASSANDRA-3716), we need to wire that up to the CallbackInfo object
-     * (see below).
-     */
-    public static final EnumMap<Verb, IVersionedSerializer<?>> verbSerializers = new EnumMap<Verb, IVersionedSerializer<?>>(Verb.class)
-    {{
-        put(Verb.REQUEST_RESPONSE, CallbackDeterminedSerializer.instance);
-        put(Verb.INTERNAL_RESPONSE, CallbackDeterminedSerializer.instance);
-
-        put(Verb.MUTATION, Mutation.serializer);
-        put(Verb.READ_REPAIR, Mutation.serializer);
-        put(Verb.READ, ReadCommand.serializer);
-        put(Verb.RANGE_SLICE, ReadCommand.serializer);
-        put(Verb.PAGED_RANGE, ReadCommand.serializer);
-        put(Verb.BOOTSTRAP_TOKEN, BootStrapper.StringSerializer.instance);
-        put(Verb.REPAIR_MESSAGE, RepairMessage.serializer);
-        put(Verb.GOSSIP_DIGEST_ACK, GossipDigestAck.serializer);
-        put(Verb.GOSSIP_DIGEST_ACK2, GossipDigestAck2.serializer);
-        put(Verb.GOSSIP_DIGEST_SYN, GossipDigestSyn.serializer);
-        put(Verb.DEFINITIONS_UPDATE, MigrationManager.MigrationsSerializer.instance);
-        put(Verb.TRUNCATE, Truncation.serializer);
-        put(Verb.REPLICATION_FINISHED, null);
-        put(Verb.COUNTER_MUTATION, CounterMutation.serializer);
-        put(Verb.SNAPSHOT, SnapshotCommand.serializer);
-        put(Verb.ECHO, EchoMessage.serializer);
-        put(Verb.PAXOS_PREPARE, Commit.serializer);
-        put(Verb.PAXOS_PROPOSE, Commit.serializer);
-        put(Verb.PAXOS_COMMIT, Commit.serializer);
-        put(Verb.HINT, HintMessage.serializer);
-        put(Verb.BATCH_STORE, Batch.serializer);
-        put(Verb.BATCH_REMOVE, UUIDSerializer.serializer);
-    }};
-
-    /**
-     * A Map of what kind of serializer to wire up to a REQUEST_RESPONSE callback, based on outbound Verb.
-     */
-    public static final EnumMap<Verb, IVersionedSerializer<?>> callbackDeserializers = new EnumMap<Verb, IVersionedSerializer<?>>(Verb.class)
-    {{
-        put(Verb.MUTATION, WriteResponse.serializer);
-        put(Verb.HINT, HintResponse.serializer);
-        put(Verb.READ_REPAIR, WriteResponse.serializer);
-        put(Verb.COUNTER_MUTATION, WriteResponse.serializer);
-        put(Verb.RANGE_SLICE, ReadResponse.serializer);
-        put(Verb.PAGED_RANGE, ReadResponse.serializer);
-        put(Verb.READ, ReadResponse.serializer);
-        put(Verb.TRUNCATE, TruncateResponse.serializer);
-        put(Verb.SNAPSHOT, null);
-
-        put(Verb.MIGRATION_REQUEST, MigrationManager.MigrationsSerializer.instance);
-        put(Verb.SCHEMA_CHECK, UUIDSerializer.serializer);
-        put(Verb.BOOTSTRAP_TOKEN, BootStrapper.StringSerializer.instance);
-        put(Verb.REPLICATION_FINISHED, null);
-
-        put(Verb.PAXOS_PREPARE, PrepareResponse.serializer);
-        put(Verb.PAXOS_PROPOSE, BooleanSerializer.serializer);
-
-        put(Verb.BATCH_STORE, WriteResponse.serializer);
-        put(Verb.BATCH_REMOVE, WriteResponse.serializer);
-    }};
-
     /* This records all the results mapped by message Id */
-    private final ExpiringMap<Integer, CallbackInfo> callbacks;
-
-    /**
-     * a placeholder class that means "deserialize using the callback." We can't implement this without
-     * special-case code in InboundTcpConnection because there is no way to pass the message id to IVersionedSerializer.
-     */
-    static class CallbackDeterminedSerializer implements IVersionedSerializer<Object>
-    {
-        public static final CallbackDeterminedSerializer instance = new CallbackDeterminedSerializer();
-
-        public Object deserialize(DataInputPlus in, int version) throws IOException
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void serialize(Object o, DataOutputPlus out, int version) throws IOException
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public long serializedSize(Object o, int version)
-        {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    /* Lookup table for registering message handlers based on the verb. */
-    private final Map<Verb, IVerbHandler> verbHandlers;
+    private final ExpiringMap<Integer, CallbackInfo<?>> callbacks;
 
     private final ConcurrentMap<InetAddress, OutboundTcpConnectionPool> connectionManagers = new NonBlockingHashMap<>();
 
@@ -424,30 +100,13 @@ public final class MessagingService implements MessagingServiceMBean
     private final List<SocketThread> socketThreads = Lists.newArrayList();
     private final SimpleCondition listenGate;
 
-    /**
-     * Verbs it's okay to drop if the request has been queued longer than the request timeout.  These
-     * all correspond to client requests or something triggered by them; we don't want to
-     * drop internal messages like bootstrap or repair notifications.
-     */
-    public static final EnumSet<Verb> DROPPABLE_VERBS = EnumSet.of(Verb._TRACE,
-                                                                   Verb.MUTATION,
-                                                                   Verb.COUNTER_MUTATION,
-                                                                   Verb.HINT,
-                                                                   Verb.READ_REPAIR,
-                                                                   Verb.READ,
-                                                                   Verb.RANGE_SLICE,
-                                                                   Verb.PAGED_RANGE,
-                                                                   Verb.REQUEST_RESPONSE,
-                                                                   Verb.BATCH_STORE,
-                                                                   Verb.BATCH_REMOVE);
-
     private static final class DroppedMessages
     {
-        final DroppedMessageMetrics metrics;
+        DroppedMessageMetrics metrics; // not final for testing reasons only
         final AtomicInteger droppedInternal;
         final AtomicInteger droppedCrossNode;
 
-        DroppedMessages(Verb verb)
+        DroppedMessages(Verb<?, ?> verb)
         {
             this(new DroppedMessageMetrics(verb));
         }
@@ -458,24 +117,30 @@ public final class MessagingService implements MessagingServiceMBean
             this.droppedInternal = new AtomicInteger(0);
             this.droppedCrossNode = new AtomicInteger(0);
         }
+
+        @VisibleForTesting
+        void reset(String scope)
+        {
+            this.metrics = new DroppedMessageMetrics(metricName -> new CassandraMetricsRegistry.MetricName("DroppedMessages", metricName, scope));
+            this.droppedInternal.getAndSet(0);
+            this.droppedCrossNode.getAndSet(0);
+        }
     }
 
     @VisibleForTesting
     public void resetDroppedMessagesMap(String scope)
     {
-        for (Verb verb : droppedMessagesMap.keySet())
-            droppedMessagesMap.put(verb, new DroppedMessages(new DroppedMessageMetrics(metricName -> {
-                return new CassandraMetricsRegistry.MetricName("DroppedMessages", metricName, scope);
-            })));
+        for (DroppedMessages droppedMessages : droppedMessagesMap.values())
+            droppedMessages.reset(scope);
     }
 
     // total dropped message counts for server lifetime
-    private final Map<Verb, DroppedMessages> droppedMessagesMap = new EnumMap<>(Verb.class);
+    private final Map<Verb<?, ?>, DroppedMessages> droppedMessagesMap;
 
-    private final List<ILatencySubscriber> subscribers = new ArrayList<ILatencySubscriber>();
+    private final List<ILatencySubscriber> subscribers = new ArrayList<>();
 
     // protocol versions of the other nodes in the cluster
-    private final ConcurrentMap<InetAddress, Integer> versions = new NonBlockingHashMap<InetAddress, Integer>();
+    private final ConcurrentMap<InetAddress, MessagingVersion> versions = new NonBlockingHashMap<>();
 
     // message sinks are a testing hook
     private final Set<IMessageSink> messageSinks = new CopyOnWriteArraySet<>();
@@ -505,61 +170,27 @@ public final class MessagingService implements MessagingServiceMBean
 
     private MessagingService(boolean testOnly)
     {
-        for (Verb verb : DROPPABLE_VERBS)
-            droppedMessagesMap.put(verb, new DroppedMessages(verb));
+        this.droppedMessagesMap = initializeDroppedMessageMap();
 
         listenGate = new SimpleCondition();
-        verbHandlers = new EnumMap<>(Verb.class);
+
         if (!testOnly)
+            ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::logDroppedMessages, LOG_DROPPED_INTERVAL_IN_MS, LOG_DROPPED_INTERVAL_IN_MS, TimeUnit.MILLISECONDS);
+
+        Consumer<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo<?>>>> timeoutReporter = pair ->
         {
-            Runnable logDropped = new Runnable()
-            {
-                public void run()
-                {
-                    logDroppedMessages();
-                }
-            };
-            ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(logDropped, LOG_DROPPED_INTERVAL_IN_MS, LOG_DROPPED_INTERVAL_IN_MS, TimeUnit.MILLISECONDS);
-        }
+            CallbackInfo expiredCallbackInfo = pair.right.get();
+            MessageCallback<?> callback = expiredCallbackInfo.callback;
+            InetAddress target = expiredCallbackInfo.target;
 
-        Function<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo>>, ?> timeoutReporter = new Function<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo>>, Object>()
-        {
-            public Object apply(Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo>> pair)
-            {
-                final CallbackInfo expiredCallbackInfo = pair.right.value;
+            addLatency(expiredCallbackInfo.verb, target, pair.right.timeoutMillis());
 
-                maybeAddLatency(expiredCallbackInfo.callback, expiredCallbackInfo.target, pair.right.timeout);
+            ConnectionMetrics.totalTimeouts.mark();
+            getConnectionPool(target).incrementTimeout();
 
-                ConnectionMetrics.totalTimeouts.mark();
-                getConnectionPool(expiredCallbackInfo.target).incrementTimeout();
-
-                if (expiredCallbackInfo.callback.supportsBackPressure())
-                {
-                    updateBackPressureOnReceive(expiredCallbackInfo.target, expiredCallbackInfo.callback, true);
-                }
-
-                if (expiredCallbackInfo.isFailureCallback())
-                {
-                    StageManager.getStage(Stage.INTERNAL_RESPONSE).submit(new Runnable()
-                    {
-                        @Override
-                        public void run()
-                        {
-                            ((IAsyncCallbackWithFailure)expiredCallbackInfo.callback).onFailure(expiredCallbackInfo.target, RequestFailureReason.UNKNOWN);
-                        }
-                    });
-                }
-
-                if (expiredCallbackInfo.shouldHint())
-                {
-                    Mutation mutation = ((WriteCallbackInfo) expiredCallbackInfo).mutation();
-                    return StorageProxy.submitHint(mutation, expiredCallbackInfo.target, null);
-                }
-
-                return null;
-            }
+            updateBackPressureOnReceive(target, expiredCallbackInfo.verb, true);
+            StageManager.getStage(Stage.INTERNAL_RESPONSE).submit(() -> callback.onTimeout(target));
         };
-
         callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(), timeoutReporter);
 
         if (!testOnly)
@@ -574,6 +205,22 @@ public final class MessagingService implements MessagingServiceMBean
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private Map<Verb<?, ?>, DroppedMessages> initializeDroppedMessageMap()
+    {
+        ImmutableMap.Builder<Verb<?, ?>, DroppedMessages> builder = ImmutableMap.builder();
+        for (VerbGroup<?> group : Verbs.allGroups())
+        {
+            for (Verb<?, ?> definition : group)
+            {
+                // One way messages don't timeout and are never dropped.
+                if (!definition.isOneWay())
+                    builder.put(definition, new DroppedMessages(definition));
+            }
+        }
+        builder.put(Tracing.TRACE_MSG_DEF, new DroppedMessages(Tracing.TRACE_MSG_DEF));
+        return builder.build();
     }
 
     public void addMessageSink(IMessageSink sink)
@@ -591,19 +238,229 @@ public final class MessagingService implements MessagingServiceMBean
         messageSinks.clear();
     }
 
-    /**
-     * Updates the back-pressure state on sending to the given host if enabled and the given message callback supports it.
-     *
-     * @param host The replica host the back-pressure state refers to.
-     * @param callback The message callback.
-     * @param message The actual message.
-     */
-    public void updateBackPressureOnSend(InetAddress host, IAsyncCallback callback, MessageOut<?> message)
+    static int newMessageId()
     {
-        if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
+        return idGen.incrementAndGet();
+    }
+
+    /**
+     * Sends a request message, setting the provided callback to be called with the response received.
+     * <p>
+     * As for any other sending method of this class, if the request is local and the stage configured for this
+     * request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a {@link LocalAwareExecutorService}
+     * worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately} and that method silently
+     * assumes it is called on a worker.
+     *
+     * @param request the request to send.
+     * @param callback the callback to set for the response to {@code request}.
+     */
+    public <Q> void send(Request<?, Q> request, MessageCallback<Q> callback)
+    {
+        if (request.isLocal())
         {
-            BackPressureState backPressureState = getConnectionPool(host).getBackPressureState();
-            backPressureState.onMessageSent(message);
+            deliverLocally(request, callback);
+        }
+        else
+        {
+            registerCallback(request, callback);
+            updateBackPressureOnSend(request);
+            sendInternal(request, callback);
+        }
+    }
+
+    /**
+     * Sends the requests for a provided dispatcher, setting the provided callback to be called with received responses.
+     * <p>
+     * As for any other sending method of this class, if the dispatcher includes a local request and the stage configured
+     * for this request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a
+     * {@link LocalAwareExecutorService} worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately}
+     * and that method silently assumes it is called on a worker.
+     *
+     * @param dispatcher the dispatcher to use to generate requests to send.
+     * @param callback the callback to set for responses to the request from {@code dispatcher}.
+     */
+    public <Q> void send(Request.Dispatcher<?, Q> dispatcher, MessageCallback<Q> callback)
+    {
+        assert callback != null && !dispatcher.verb().isOneWay();
+
+        for (Request<?, Q> request : dispatcher.remoteRequests())
+            send(request, callback);
+
+        // It is important to deliver the local request last (after other have been sent) because we use
+        // LocalAwareExecutorService.maybeExecuteImmediately() which might execute on the current thread and would
+        // thus block other messages.
+        if (dispatcher.hasLocalRequest())
+            deliverLocally(dispatcher.localRequest(), callback);
+    }
+
+    private <P, Q> void deliverLocally(Request<P, Q> request, MessageCallback<Q> callback)
+    {
+        Consumer<Response<Q>> onResponse = response ->
+        {
+            addLatency(request.verb(), request.to(), request.lifetimeMillis());
+            response.deliverTo(callback);
+        };
+        Runnable onAborted = () ->
+        {
+            Tracing.trace("Discarding partial local response (timed out)");
+            MessagingService.instance().incrementDroppedMessages(request);
+            callback.onTimeout(FBUtilities.getBroadcastAddress());
+        };
+        Runnable runnable = () ->
+        {
+            if (request.isTimedOut())
+            {
+                onAborted.run();
+                return;
+            }
+            request.execute(onResponse, onAborted);
+        };
+        deliverLocallyInternal(request, callback, runnable);
+    }
+
+    private <P, Q> void registerCallback(Request<P, Q> request, MessageCallback<Q> callback)
+    {
+        long timeout = request.timeoutMillis();
+
+        for (Request.Forward forward : request.forwards())
+            registerCallback(forward.id, forward.to, request.verb(), callback, timeout);
+
+        registerCallback(request.id(), request.to(), request.verb(), callback, timeout);
+    }
+
+    private <Q> void registerCallback(int id, InetAddress to, Verb<?, Q> type, MessageCallback<Q> callback, long timeout)
+    {
+        CallbackInfo previous = callbacks.put(id, new CallbackInfo<>(to, callback, type), timeout);
+        assert previous == null : String.format("Callback already exists for id %d! (%s)", id, previous);
+    }
+
+    /**
+     * Sends a request and returns a future on the reception of the response.
+     * <p>
+     * As for any other sending method of this class, if the request is local and the stage configured for this
+     * request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a {@link LocalAwareExecutorService}
+     * worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately} and that method silently
+     * assumes it is called on a worker.
+     *
+     * @param request the request to send.
+     * @return a future on the reception of the response payload to {@code request}. The future may either complete
+     * sucessfully, complete exceptionally with an {@link InternalRequestExecutionException} if destination sends back
+     * an error, or complete exceptionally with a {@link CallbackExpiredException} if no responses is received before
+     * the timeout on the message.
+     */
+    public <Q> CompletableFuture<Q> sendSingleTarget(Request<?, Q> request)
+    {
+        SingleTargetCallback<Q> callback = new SingleTargetCallback<>();
+        send(request, callback);
+        return callback;
+    }
+
+    /**
+     * Forwards a request to its final destination.
+     * <p>
+     * This doesn't set a callback since the final destination will respond to initial sender (which has set the proper
+     * callbacks).
+     */
+    void forward(ForwardRequest<?, ?> request)
+    {
+        sendInternal(request, null);
+    }
+
+    /**
+     * Sends a one-way request.
+     * <p>
+     * Note that this is a fire-and-forget type of method: the method returns as soon as the request has been set to
+     * be send and there is no way to know if the request has been successfully delivered or not.
+     * <p>
+     * As for any other sending method of this class, if the request is local and the stage configured for this
+     * request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a {@link LocalAwareExecutorService}
+     * worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately} and that method silently
+     * assumes it is called on a worker.
+     *
+     * @param request the request to send.
+     */
+    public void send(OneWayRequest<?> request)
+    {
+        if (request.isLocal())
+            deliverLocallyOneWay(request);
+        else
+            sendInternal(request, null);
+    }
+
+    /**
+     * Sends the one-way requests generated by the provided dispatcher.
+     * <p>
+     * Note that this is a fire-and-forget type of method: the method returns as soon as the requets have been set to
+     * be send and there is no way to know if the requests have been successfully delivered or not.
+     * <p>
+     * As for any other sending method of this class, if the dispatcher includes a local request and the stage configured
+     * for this request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a
+     * {@link LocalAwareExecutorService} worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately}
+     * and that method silently assumes it is called on a worker.
+     *
+     * @param dispatcher the dispatcher to use to generate the one-way requests to send.
+     */
+    public void send(OneWayRequest.Dispatcher<?> dispatcher)
+    {
+        for (OneWayRequest<?> request : dispatcher.remoteRequests())
+            send(request);
+
+        // It is important to deliver the local request last (after other have been sent) because we use
+        // LocalAwareExecutorService.maybeExecuteImmediately() which might execute on the current thread and would
+        // thus block other messages.
+        if (dispatcher.hasLocalRequest())
+            deliverLocallyOneWay(dispatcher.localRequest());
+    }
+
+    private void deliverLocallyOneWay(OneWayRequest<?> request)
+    {
+        deliverLocallyInternal(request, null, request::execute);
+    }
+
+    /**
+     * Sends a response message.
+     */
+    void reply(Response<?> response)
+    {
+        Tracing.trace("Enqueuing {} response to {}", response.verb(), response.from());
+        sendInternal(response, null);
+    }
+
+    private void sendInternal(Message message, MessageCallback<?> callback)
+    {
+        if (logger.isTraceEnabled())
+            logger.trace("Sending {}", message);
+
+        // message sinks are a testing hook
+        for (IMessageSink ms : messageSinks)
+            if (!ms.allowOutgoingMessage(message, callback))
+                return;
+
+        getConnection(message).enqueue(message);
+    }
+
+    private void deliverLocallyInternal(Request<?, ?> request, MessageCallback<?> callback, Runnable runnable)
+    {
+        // message sinks are a testing hook
+        for (IMessageSink ms : messageSinks)
+            if (!ms.allowOutgoingMessage(request, callback))
+                return;
+
+        StageManager.getStage(request.stage()).maybeExecuteImmediately(runnable);
+    }
+
+
+    /**
+     * Updates the back-pressure state on sending the provided message.
+     *
+     * @param request The request sent.
+     */
+    <Q> void updateBackPressureOnSend(Request<?, Q> request)
+    {
+        if (request.verb().supportsBackPressure() && DatabaseDescriptor.backPressureEnabled())
+        {
+            BackPressureState backPressureState = getConnectionPool(request.to()).getBackPressureState();
+            backPressureState.onRequestSent(request);
         }
     }
 
@@ -611,12 +468,12 @@ public final class MessagingService implements MessagingServiceMBean
      * Updates the back-pressure state on reception from the given host if enabled and the given message callback supports it.
      *
      * @param host The replica host the back-pressure state refers to.
-     * @param callback The message callback.
+     * @param verb The message verb.
      * @param timeout True if updated following a timeout, false otherwise.
      */
-    public void updateBackPressureOnReceive(InetAddress host, IAsyncCallback callback, boolean timeout)
+    void updateBackPressureOnReceive(InetAddress host, Verb<?, ?> verb, boolean timeout)
     {
-        if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
+        if (verb.supportsBackPressure() && DatabaseDescriptor.backPressureEnabled())
         {
             BackPressureState backPressureState = getConnectionPool(host).getBackPressureState();
             if (!timeout)
@@ -647,22 +504,16 @@ public final class MessagingService implements MessagingServiceMBean
     }
 
     /**
-     * Track latency information for the dynamic snitch
+     * Track latency information for the dynamic snitch.
      *
-     * @param cb      the callback associated with this message -- this lets us know if it's a message type we're interested in
-     * @param address the host that replied to the message
-     * @param latency
+     * @param verb the verb for which we're adding latency information.
+     * @param address the host that replied to the message for which we're adding latency.
+     * @param latency the latentcy to record in milliseconds
      */
-    public void maybeAddLatency(IAsyncCallback cb, InetAddress address, long latency)
-    {
-        if (cb.isLatencyForSnitch())
-            addLatency(address, latency);
-    }
-
-    public void addLatency(InetAddress address, long latency)
+    void addLatency(Verb<?, ?> verb, InetAddress address, long latency)
     {
         for (ILatencySubscriber subscriber : subscribers)
-            subscriber.receiveTiming(address, latency);
+            subscriber.receiveTiming(verb, address, latency);
     }
 
     /**
@@ -811,171 +662,9 @@ public final class MessagingService implements MessagingServiceMBean
         return cp;
     }
 
-
-    public OutboundTcpConnection getConnection(InetAddress to, MessageOut msg)
+    public OutboundTcpConnection getConnection(Message msg)
     {
-        return getConnectionPool(to).getConnection(msg);
-    }
-
-    /**
-     * Register a verb and the corresponding verb handler with the
-     * Messaging Service.
-     *
-     * @param verb
-     * @param verbHandler handler for the specified verb
-     */
-    public void registerVerbHandlers(Verb verb, IVerbHandler verbHandler)
-    {
-        assert !verbHandlers.containsKey(verb);
-        verbHandlers.put(verb, verbHandler);
-    }
-
-    /**
-     * This method returns the verb handler associated with the registered
-     * verb. If no handler has been registered then null is returned.
-     *
-     * @param type for which the verb handler is sought
-     * @return a reference to IVerbHandler which is the handler for the specified verb
-     */
-    public IVerbHandler getVerbHandler(Verb type)
-    {
-        return verbHandlers.get(type);
-    }
-
-    public int addCallback(IAsyncCallback cb, MessageOut message, InetAddress to, long timeout, boolean failureCallback)
-    {
-        assert message.verb != Verb.MUTATION; // mutations need to call the overload with a ConsistencyLevel
-        int messageId = nextId();
-        CallbackInfo previous = callbacks.put(messageId, new CallbackInfo(to, cb, callbackDeserializers.get(message.verb), failureCallback), timeout);
-        assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
-        return messageId;
-    }
-
-    public int addCallback(IAsyncCallback cb,
-                           MessageOut<?> message,
-                           InetAddress to,
-                           long timeout,
-                           ConsistencyLevel consistencyLevel,
-                           boolean allowHints)
-    {
-        assert message.verb == Verb.MUTATION
-            || message.verb == Verb.COUNTER_MUTATION
-            || message.verb == Verb.PAXOS_COMMIT;
-        int messageId = nextId();
-
-        CallbackInfo previous = callbacks.put(messageId,
-                                              new WriteCallbackInfo(to,
-                                                                    cb,
-                                                                    message,
-                                                                    callbackDeserializers.get(message.verb),
-                                                                    consistencyLevel,
-                                                                    allowHints),
-                                                                    timeout);
-        assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
-        return messageId;
-    }
-
-    private static final AtomicInteger idGen = new AtomicInteger(0);
-
-    private static int nextId()
-    {
-        return idGen.incrementAndGet();
-    }
-
-    public int sendRR(MessageOut message, InetAddress to, IAsyncCallback cb)
-    {
-        return sendRR(message, to, cb, message.getTimeout(), false);
-    }
-
-    public int sendRRWithFailure(MessageOut message, InetAddress to, IAsyncCallbackWithFailure cb)
-    {
-        return sendRR(message, to, cb, message.getTimeout(), true);
-    }
-
-    /**
-     * Send a non-mutation message to a given endpoint. This method specifies a callback
-     * which is invoked with the actual response.
-     *
-     * @param message message to be sent.
-     * @param to      endpoint to which the message needs to be sent
-     * @param cb      callback interface which is used to pass the responses or
-     *                suggest that a timeout occurred to the invoker of the send().
-     * @param timeout the timeout used for expiration
-     * @return an reference to message id used to match with the result
-     */
-    public int sendRR(MessageOut message, InetAddress to, IAsyncCallback cb, long timeout, boolean failureCallback)
-    {
-        int id = addCallback(cb, message, to, timeout, failureCallback);
-        updateBackPressureOnSend(to, cb, message);
-        sendOneWay(failureCallback ? message.withParameter(FAILURE_CALLBACK_PARAM, ONE_BYTE) : message, id, to);
-        return id;
-    }
-
-    /**
-     * Send a mutation message or a Paxos Commit to a given endpoint. This method specifies a callback
-     * which is invoked with the actual response.
-     * Also holds the message (only mutation messages) to determine if it
-     * needs to trigger a hint (uses StorageProxy for that).
-     *
-     * @param message message to be sent.
-     * @param to      endpoint to which the message needs to be sent
-     * @param handler callback interface which is used to pass the responses or
-     *                suggest that a timeout occurred to the invoker of the send().
-     * @return an reference to message id used to match with the result
-     */
-    public int sendRR(MessageOut<?> message,
-                      InetAddress to,
-                      AbstractWriteResponseHandler<?> handler,
-                      boolean allowHints)
-    {
-        int id = addCallback(handler, message, to, message.getTimeout(), handler.consistencyLevel, allowHints);
-        updateBackPressureOnSend(to, handler, message);
-        sendOneWay(message.withParameter(FAILURE_CALLBACK_PARAM, ONE_BYTE), id, to);
-        return id;
-    }
-
-    public void sendOneWay(MessageOut message, InetAddress to)
-    {
-        sendOneWay(message, nextId(), to);
-    }
-
-    public void sendReply(MessageOut message, int id, InetAddress to)
-    {
-        sendOneWay(message, id, to);
-    }
-
-    /**
-     * Send a message to a given endpoint. This method adheres to the fire and forget
-     * style messaging.
-     *
-     * @param message messages to be sent.
-     * @param to      endpoint to which the message needs to be sent
-     */
-    public void sendOneWay(MessageOut message, int id, InetAddress to)
-    {
-        if (logger.isTraceEnabled())
-            logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddress(), message.verb, id, to);
-
-        if (to.equals(FBUtilities.getBroadcastAddress()))
-            logger.trace("Message-to-self {} going over MessagingService", message);
-
-        // message sinks are a testing hook
-        for (IMessageSink ms : messageSinks)
-            if (!ms.allowOutgoingMessage(message, id, to))
-                return;
-
-        // get pooled connection (really, connection queue)
-        OutboundTcpConnection connection = getConnection(to, message);
-
-        // write it
-        connection.enqueue(message, id);
-    }
-
-    public <T> AsyncOneResponse<T> sendRR(MessageOut message, InetAddress to)
-    {
-        AsyncOneResponse<T> iar = new AsyncOneResponse<T>();
-        sendRR(message, to, iar);
-        return iar;
+        return getConnectionPool(msg.to()).getConnection(msg);
     }
 
     public void register(ILatencySubscriber subcriber)
@@ -1021,45 +710,30 @@ public final class MessagingService implements MessagingServiceMBean
         }
     }
 
-    public void receive(MessageIn message, int id)
+    public void receive(Message message)
     {
         TraceState state = Tracing.instance.initializeFromMessage(message);
         if (state != null)
-            state.trace("{} message received from {}", message.verb, message.from);
+            state.trace("{} message received from {}", message.verb(), message.from());
 
         // message sinks are a testing hook
         for (IMessageSink ms : messageSinks)
-            if (!ms.allowIncomingMessage(message, id))
+            if (!ms.allowIncomingMessage(message))
                 return;
 
-        Runnable runnable = new MessageDeliveryTask(message, id);
-        LocalAwareExecutorService stage = StageManager.getStage(message.getMessageType());
-        assert stage != null : "No stage for message type " + message.verb;
-
-        stage.execute(runnable, ExecutorLocals.create(state));
+        StageManager.getStage(message.stage()).execute(new MessageDeliveryTask(message),
+                                                       ExecutorLocals.create(state));
     }
 
-    public void setCallbackForTests(int messageId, CallbackInfo callback)
+    // Only required by legacy serialization. Can inline in previous call when we get rid of that.
+    CallbackInfo<?> getRegisteredCallback(int id)
     {
-        callbacks.put(messageId, callback);
+        return callbacks.get(id).get();
     }
 
-    public CallbackInfo getRegisteredCallback(int messageId)
+    ExpiringMap.CacheableObject<CallbackInfo<?>> removeRegisteredCallback(Response<?> response)
     {
-        return callbacks.get(messageId);
-    }
-
-    public CallbackInfo removeRegisteredCallback(int messageId)
-    {
-        return callbacks.remove(messageId);
-    }
-
-    /**
-     * @return System.nanoTime() when callback was created.
-     */
-    public long getRegisteredCallbackAge(int messageId)
-    {
-        return callbacks.getAge(messageId);
+        return callbacks.remove(response.id());
     }
 
     public static void validateMagic(int magic) throws IOException
@@ -1070,19 +744,19 @@ public final class MessagingService implements MessagingServiceMBean
 
     public static int getBits(int packed, int start, int count)
     {
-        return packed >>> (start + 1) - count & ~(-1 << count);
+        return (packed >>> ((start + 1) - count)) & ~(-1 << count);
     }
 
     /**
      * @return the last version associated with address, or @param version if this is the first such version
      */
-    public int setVersion(InetAddress endpoint, int version)
+    public MessagingVersion setVersion(InetAddress endpoint, MessagingVersion version)
     {
         // We can't talk to someone from the future
-        version = Math.min(version, current_version);
+        version = MessagingVersion.min(version, current_version);
         logger.trace("Setting version {} for {}", version, endpoint);
 
-        Integer v = versions.put(endpoint, version);
+        MessagingVersion v = versions.put(endpoint, version);
         return v == null ? version : v;
     }
 
@@ -1092,9 +766,9 @@ public final class MessagingService implements MessagingServiceMBean
         versions.remove(endpoint);
     }
 
-    public int getVersion(InetAddress endpoint)
+    public MessagingVersion getVersion(InetAddress endpoint)
     {
-        Integer v = versions.get(endpoint);
+        MessagingVersion v = versions.get(endpoint);
         if (v == null)
         {
             // we don't know the version. assume current. we'll know soon enough if that was incorrect.
@@ -1102,17 +776,18 @@ public final class MessagingService implements MessagingServiceMBean
             return MessagingService.current_version;
         }
         else
-            return Math.min(v, MessagingService.current_version);
+            return MessagingVersion.min(v, MessagingService.current_version);
     }
 
+    @Deprecated
     public int getVersion(String endpoint) throws UnknownHostException
     {
-        return getVersion(InetAddress.getByName(endpoint));
+        return getVersion(InetAddress.getByName(endpoint)).protocolVersion().handshakeVersion;
     }
 
-    public int getRawVersion(InetAddress endpoint)
+    public MessagingVersion getRawVersion(InetAddress endpoint)
     {
-        Integer v = versions.get(endpoint);
+        MessagingVersion v = versions.get(endpoint);
         if (v == null)
             throw new IllegalStateException("getRawVersion() was called without checking knowsVersion() result first");
         return v;
@@ -1123,44 +798,32 @@ public final class MessagingService implements MessagingServiceMBean
         return versions.containsKey(endpoint);
     }
 
-    public void incrementDroppedMutations(Optional<IMutation> mutationOpt, long timeTaken)
+    public void incrementDroppedMessages(Message message)
     {
-        if (mutationOpt.isPresent())
+        Verb<?, ?> definition = message.verb();
+        assert !definition.isOneWay() : "Shouldn't drop a one-way message";
+        if (message.isRequest())
         {
-            updateDroppedMutationCount(mutationOpt.get());
+            Object payload = ((Request<?, ?>)message).payload();
+            if (payload instanceof IMutation)
+                updateDroppedMutationCount((IMutation) payload);
         }
-        incrementDroppedMessages(Verb.MUTATION, timeTaken);
+
+        incrementDroppedMessages(definition, message.lifetimeMillis(), message.from().equals(message.to()));
     }
 
-    public void incrementDroppedMessages(Verb verb)
+    @VisibleForTesting
+    void incrementDroppedMessages(Verb<?, ?> definition, long timeTaken, boolean hasCrossedNode)
     {
-        incrementDroppedMessages(verb, false);
-    }
-
-    public void incrementDroppedMessages(Verb verb, long timeTaken)
-    {
-        incrementDroppedMessages(verb, timeTaken, false);
-    }
-
-    public void incrementDroppedMessages(MessageIn message, long timeTaken)
-    {
-        if (message.payload instanceof IMutation)
+        DroppedMessages droppedMessages = droppedMessagesMap.get(definition);
+        if (droppedMessages == null)
         {
-            updateDroppedMutationCount((IMutation) message.payload);
+            // This really shouldn't happen or is a bug, but throwing don't feel necessary either
+            NoSpamLogger.log(logger, NoSpamLogger.Level.ERROR, 5, TimeUnit.MINUTES, "Cannot increment dropped message for unregistered message {}", definition);
+            return;
         }
-        incrementDroppedMessages(message.verb, timeTaken, message.isCrossNode());
-    }
 
-    public void incrementDroppedMessages(Verb verb, long timeTaken, boolean isCrossNode)
-    {
-        assert DROPPABLE_VERBS.contains(verb) : "Verb " + verb + " should not legally be dropped";
-        incrementDroppedMessages(droppedMessagesMap.get(verb), timeTaken, isCrossNode);
-    }
-
-    public void incrementDroppedMessages(Verb verb, boolean isCrossNode)
-    {
-        assert DROPPABLE_VERBS.contains(verb) : "Verb " + verb + " should not legally be dropped";
-        incrementDroppedMessages(droppedMessagesMap.get(verb), isCrossNode);
+        incrementDroppedMessages(droppedMessages, timeTaken, hasCrossedNode);
     }
 
     private void updateDroppedMutationCount(IMutation mutation)
@@ -1177,22 +840,20 @@ public final class MessagingService implements MessagingServiceMBean
         }
     }
 
-    private void incrementDroppedMessages(DroppedMessages droppedMessages, long timeTaken, boolean isCrossNode)
+    private void incrementDroppedMessages(DroppedMessages droppedMessages, long timeTaken, boolean hasCrossedNode)
     {
-        if (isCrossNode)
-            droppedMessages.metrics.crossNodeDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
-        else
-            droppedMessages.metrics.internalDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
-        incrementDroppedMessages(droppedMessages, isCrossNode);
-    }
-
-    private void incrementDroppedMessages(DroppedMessages droppedMessages, boolean isCrossNode)
-    {
-        droppedMessages.metrics.dropped.mark();
-        if (isCrossNode)
+        DroppedMessageMetrics metrics = droppedMessages.metrics;
+        metrics.dropped.mark();
+        if (hasCrossedNode)
+        {
             droppedMessages.droppedCrossNode.incrementAndGet();
+            metrics.crossNodeDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
+        }
         else
+        {
             droppedMessages.droppedInternal.incrementAndGet();
+            metrics.internalDroppedLatency.update(timeTaken, TimeUnit.MILLISECONDS);
+        }
     }
 
     private void logDroppedMessages()
@@ -1209,9 +870,9 @@ public final class MessagingService implements MessagingServiceMBean
     List<String> getDroppedMessagesLogs()
     {
         List<String> ret = new ArrayList<>();
-        for (Map.Entry<Verb, DroppedMessages> entry : droppedMessagesMap.entrySet())
+        for (Map.Entry<Verb<?, ?>, DroppedMessages> entry : droppedMessagesMap.entrySet())
         {
-            Verb verb = entry.getKey();
+            Verb<?, ?> definition = entry.getKey();
             DroppedMessages droppedMessages = entry.getValue();
 
             int droppedInternal = droppedMessages.droppedInternal.getAndSet(0);
@@ -1220,7 +881,7 @@ public final class MessagingService implements MessagingServiceMBean
             {
                 ret.add(String.format("%s messages were dropped in last %d ms: %d internal and %d cross node."
                                      + " Mean internal dropped latency: %d ms and Mean cross-node dropped latency: %d ms",
-                                     verb,
+                                     definition,
                                      LOG_DROPPED_INTERVAL_IN_MS,
                                      droppedInternal,
                                      droppedCrossNode,
@@ -1267,7 +928,7 @@ public final class MessagingService implements MessagingServiceMBean
                     MessagingService.validateMagic(in.readInt());
                     int header = in.readInt();
                     boolean isStream = MessagingService.getBits(header, 3, 1) == 1;
-                    int version = MessagingService.getBits(header, 15, 8);
+                    ProtocolVersion version = ProtocolVersion.fromProtocolHeader(header);
                     logger.trace("Connection version {} from {}", version, socket.getInetAddress());
                     socket.setSoTimeout(0);
 
@@ -1348,86 +1009,80 @@ public final class MessagingService implements MessagingServiceMBean
 
     public Map<String, Integer> getLargeMessagePendingTasks()
     {
-        Map<String, Integer> pendingTasks = new HashMap<String, Integer>(connectionManagers.size());
+        Map<String, Integer> pendingTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            pendingTasks.put(entry.getKey().getHostAddress(), entry.getValue().largeMessages.getPendingMessages());
+            pendingTasks.put(entry.getKey().getHostAddress(), entry.getValue().large().getPendingMessages());
         return pendingTasks;
-    }
-
-    public int getLargeMessagePendingTasks(InetAddress address)
-    {
-        OutboundTcpConnectionPool connection = connectionManagers.get(address);
-        return connection == null ? 0 : connection.largeMessages.getPendingMessages();
     }
 
     public Map<String, Long> getLargeMessageCompletedTasks()
     {
-        Map<String, Long> completedTasks = new HashMap<String, Long>(connectionManagers.size());
+        Map<String, Long> completedTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            completedTasks.put(entry.getKey().getHostAddress(), entry.getValue().largeMessages.getCompletedMesssages());
+            completedTasks.put(entry.getKey().getHostAddress(), entry.getValue().large().getCompletedMesssages());
         return completedTasks;
     }
 
     public Map<String, Long> getLargeMessageDroppedTasks()
     {
-        Map<String, Long> droppedTasks = new HashMap<String, Long>(connectionManagers.size());
+        Map<String, Long> droppedTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            droppedTasks.put(entry.getKey().getHostAddress(), entry.getValue().largeMessages.getDroppedMessages());
+            droppedTasks.put(entry.getKey().getHostAddress(), entry.getValue().large().getDroppedMessages());
         return droppedTasks;
     }
 
     public Map<String, Integer> getSmallMessagePendingTasks()
     {
-        Map<String, Integer> pendingTasks = new HashMap<String, Integer>(connectionManagers.size());
+        Map<String, Integer> pendingTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            pendingTasks.put(entry.getKey().getHostAddress(), entry.getValue().smallMessages.getPendingMessages());
+            pendingTasks.put(entry.getKey().getHostAddress(), entry.getValue().small().getPendingMessages());
         return pendingTasks;
     }
 
     public Map<String, Long> getSmallMessageCompletedTasks()
     {
-        Map<String, Long> completedTasks = new HashMap<String, Long>(connectionManagers.size());
+        Map<String, Long> completedTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            completedTasks.put(entry.getKey().getHostAddress(), entry.getValue().smallMessages.getCompletedMesssages());
+            completedTasks.put(entry.getKey().getHostAddress(), entry.getValue().small().getCompletedMesssages());
         return completedTasks;
     }
 
     public Map<String, Long> getSmallMessageDroppedTasks()
     {
-        Map<String, Long> droppedTasks = new HashMap<String, Long>(connectionManagers.size());
+        Map<String, Long> droppedTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            droppedTasks.put(entry.getKey().getHostAddress(), entry.getValue().smallMessages.getDroppedMessages());
+            droppedTasks.put(entry.getKey().getHostAddress(), entry.getValue().small().getDroppedMessages());
         return droppedTasks;
     }
 
     public Map<String, Integer> getGossipMessagePendingTasks()
     {
-        Map<String, Integer> pendingTasks = new HashMap<String, Integer>(connectionManagers.size());
+        Map<String, Integer> pendingTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            pendingTasks.put(entry.getKey().getHostAddress(), entry.getValue().gossipMessages.getPendingMessages());
+            pendingTasks.put(entry.getKey().getHostAddress(), entry.getValue().gossip().getPendingMessages());
         return pendingTasks;
     }
 
     public Map<String, Long> getGossipMessageCompletedTasks()
     {
-        Map<String, Long> completedTasks = new HashMap<String, Long>(connectionManagers.size());
+        Map<String, Long> completedTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            completedTasks.put(entry.getKey().getHostAddress(), entry.getValue().gossipMessages.getCompletedMesssages());
+            completedTasks.put(entry.getKey().getHostAddress(), entry.getValue().gossip().getCompletedMesssages());
         return completedTasks;
     }
 
     public Map<String, Long> getGossipMessageDroppedTasks()
     {
-        Map<String, Long> droppedTasks = new HashMap<String, Long>(connectionManagers.size());
+        Map<String, Long> droppedTasks = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            droppedTasks.put(entry.getKey().getHostAddress(), entry.getValue().gossipMessages.getDroppedMessages());
+            droppedTasks.put(entry.getKey().getHostAddress(), entry.getValue().gossip().getDroppedMessages());
         return droppedTasks;
     }
 
     public Map<String, Integer> getDroppedMessages()
     {
         Map<String, Integer> map = new HashMap<>(droppedMessagesMap.size());
-        for (Map.Entry<Verb, DroppedMessages> entry : droppedMessagesMap.entrySet())
+        for (Map.Entry<Verb<?, ?>, DroppedMessages> entry : droppedMessagesMap.entrySet())
             map.put(entry.getKey().toString(), (int) entry.getValue().metrics.dropped.getCount());
         return map;
     }

@@ -141,27 +141,27 @@ public abstract class ClusteringBoundOrBoundary extends AbstractBufferClustering
 
     public static class Serializer
     {
-        public void serialize(ClusteringBoundOrBoundary bound, DataOutputPlus out, int version, List<AbstractType<?>> types) throws IOException
+        public void serialize(ClusteringBoundOrBoundary bound, DataOutputPlus out, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             out.writeByte(bound.kind().ordinal());
             out.writeShort(bound.size());
             ClusteringPrefix.serializer.serializeValuesWithoutSize(bound, out, version, types);
         }
 
-        public long serializedSize(ClusteringBoundOrBoundary bound, int version, List<AbstractType<?>> types)
+        public long serializedSize(ClusteringBoundOrBoundary bound, ClusteringVersion version, List<AbstractType<?>> types)
         {
             return 1 // kind ordinal
                  + TypeSizes.sizeof((short)bound.size())
                  + ClusteringPrefix.serializer.valuesWithoutSizeSerializedSize(bound, version, types);
         }
 
-        public ClusteringBoundOrBoundary deserialize(DataInputPlus in, int version, List<AbstractType<?>> types) throws IOException
+        public ClusteringBoundOrBoundary deserialize(DataInputPlus in, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             Kind kind = Kind.values()[in.readByte()];
             return deserializeValues(in, kind, version, types);
         }
 
-        public void skipValues(DataInputPlus in, Kind kind, int version, List<AbstractType<?>> types) throws IOException
+        public void skipValues(DataInputPlus in, Kind kind, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             int size = in.readUnsignedShort();
             if (size == 0)
@@ -170,7 +170,7 @@ public abstract class ClusteringBoundOrBoundary extends AbstractBufferClustering
             ClusteringPrefix.serializer.skipValuesWithoutSize(in, size, version, types);
         }
 
-        public ClusteringBoundOrBoundary deserializeValues(DataInputPlus in, Kind kind, int version, List<AbstractType<?>> types) throws IOException
+        public ClusteringBoundOrBoundary deserializeValues(DataInputPlus in, Kind kind, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             int size = in.readUnsignedShort();
             if (size == 0)

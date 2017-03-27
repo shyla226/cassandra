@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.context.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -43,6 +44,8 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -60,7 +63,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 {
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
 
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
     public static final RowFilter NONE = new CQLFilter(Collections.emptyList());
 
     protected final List<Expression> expressions;
@@ -311,7 +314,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public static abstract class Expression
     {
-        private static final Serializer serializer = new Serializer();
+        private static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
         // Note: the order of this enum matter, it's used for serialization,
         // and this is why we have some UNUSEDX for values we don't use anymore
@@ -446,9 +449,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return Objects.hashCode(column.name, operator, value);
         }
 
-        private static class Serializer
+        private static class Serializer extends VersionDependent<ReadVersion>
         {
-            public void serialize(Expression expression, DataOutputPlus out, int version) throws IOException
+            private Serializer(ReadVersion version)
+            {
+                super(version);
+            }
+
+            public void serialize(Expression expression, DataOutputPlus out) throws IOException
             {
                 out.writeByte(expression.kind().ordinal());
 
@@ -456,7 +464,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 // other expressions do.
                 if (expression.kind() == Kind.CUSTOM)
                 {
-                    IndexMetadata.serializer.serialize(((CustomExpression)expression).targetIndex, out, version);
+                    IndexMetadata.serializer.serialize(((CustomExpression)expression).targetIndex, out);
                     ByteBufferUtil.writeWithShortLength(expression.value, out);
                     return;
                 }
@@ -483,7 +491,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 }
             }
 
-            public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            public Expression deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
             {
                 Kind kind = Kind.values()[in.readByte()];
 
@@ -491,7 +499,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 if (kind == Kind.CUSTOM)
                 {
                     return new CustomExpression(metadata,
-                            IndexMetadata.serializer.deserialize(in, version, metadata),
+                            IndexMetadata.serializer.deserialize(in, metadata),
                             ByteBufferUtil.readWithShortLength(in));
                 }
 
@@ -517,7 +525,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 throw new AssertionError();
             }
 
-            public long serializedSize(Expression expression, int version)
+            public long serializedSize(Expression expression)
             {
                 long size = 1; // kind byte
 
@@ -538,7 +546,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                               + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
                         break;
                     case CUSTOM:
-                        size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex, version)
+                        size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex)
                                + ByteBufferUtil.serializedSizeWithShortLength(expression.value);
                         break;
                     case USER:
@@ -901,7 +909,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         protected static abstract class Deserializer
         {
             protected abstract UserExpression deserialize(DataInputPlus in,
-                                                          int version,
+                                                          ReadVersion version,
                                                           TableMetadata metadata) throws IOException;
         }
 
@@ -910,7 +918,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             deserializers.registerUserExpressionClass(expressionClass, deserializer);
         }
 
-        private static UserExpression deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        private static UserExpression deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata) throws IOException
         {
             int id = in.readInt();
             Deserializer deserializer = deserializers.getDeserializer(id);
@@ -918,7 +926,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return deserializer.deserialize(in, version, metadata);
         }
 
-        private static void serialize(UserExpression expression, DataOutputPlus out, int version) throws IOException
+        private static void serialize(UserExpression expression, DataOutputPlus out, ReadVersion version) throws IOException
         {
             Integer id = deserializers.getId(expression);
             assert id != null : "User defined expression type " + expression.getClass().getName() + " is not registered";
@@ -926,7 +934,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             expression.serialize(out, version);
         }
 
-        private static long serializedSize(UserExpression expression, int version)
+        private static long serializedSize(UserExpression expression, ReadVersion version)
         {   // 4 bytes for the expression type id
             return 4 + expression.serializedSize(version);
         }
@@ -941,38 +949,43 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return Kind.USER;
         }
 
-        protected abstract void serialize(DataOutputPlus out, int version) throws IOException;
-        protected abstract long serializedSize(int version);
+        protected abstract void serialize(DataOutputPlus out, ReadVersion version) throws IOException;
+        protected abstract long serializedSize(ReadVersion version);
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
-        public void serialize(RowFilter filter, DataOutputPlus out, int version) throws IOException
+        private Serializer(ReadVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(RowFilter filter, DataOutputPlus out) throws IOException
         {
             out.writeBoolean(false); // Old "is for thrift" boolean
             out.writeUnsignedVInt(filter.expressions.size());
             for (Expression expr : filter.expressions)
-                Expression.serializer.serialize(expr, out, version);
+                Expression.serializers.get(version).serialize(expr, out);
 
         }
 
-        public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        public RowFilter deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             in.readBoolean(); // Unused
             int size = (int)in.readUnsignedVInt();
             List<Expression> expressions = new ArrayList<>(size);
             for (int i = 0; i < size; i++)
-                expressions.add(Expression.serializer.deserialize(in, version, metadata));
+                expressions.add(Expression.serializers.get(version).deserialize(in, metadata));
 
             return new CQLFilter(expressions);
         }
 
-        public long serializedSize(RowFilter filter, int version)
+        public long serializedSize(RowFilter filter)
         {
             long size = 1 // unused boolean
                       + TypeSizes.sizeofUnsignedVInt(filter.expressions.size());
             for (Expression expr : filter.expressions)
-                size += Expression.serializer.serializedSize(expr, version);
+                size += Expression.serializers.get(version).serializedSize(expr);
             return size;
         }
     }

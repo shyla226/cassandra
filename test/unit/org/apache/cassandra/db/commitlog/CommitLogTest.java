@@ -39,6 +39,7 @@ import org.junit.runners.Parameterized.Parameters;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.commitlog.CommitLogDescriptor.CommitLogVersion;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -57,7 +58,6 @@ import org.apache.cassandra.io.compress.DeflateCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.compress.SnappyCompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
@@ -341,7 +341,7 @@ public class CommitLogTest
         max -= CommitLogSegment.ENTRY_OVERHEAD_SIZE; // log entry overhead
 
         // Note that the size of the value if vint encoded. So we first compute the ovehead of the mutation without the value and it's size
-        int mutationOverhead = (int)Mutation.serializer.serializedSize(rm, MessagingService.current_version) - (VIntCoding.computeVIntSize(allocSize) + allocSize);
+        int mutationOverhead = (int)Mutation.rawSerializers.get(CommitLogDescriptor.current_version.encodingVersion).serializedSize(rm) - (VIntCoding.computeVIntSize(allocSize) + allocSize);
         max -= mutationOverhead;
 
         // Now, max is the max for both the value and it's size. But we want to know how much we can allocate, i.e. the size of the value.
@@ -440,14 +440,14 @@ public class CommitLogTest
         return Collections.singletonMap(EncryptionContext.ENCRYPTION_IV, Hex.bytesToHex(buf));
     }
 
-    protected File tmpFile(int version) throws IOException
+    protected File tmpFile(CommitLogVersion version) throws IOException
     {
-        File logFile = File.createTempFile("CommitLog-" + version + "-", ".log");
+        File logFile = File.createTempFile("CommitLog-" + version.code + "-", ".log");
         assert logFile.length() == 0;
         return logFile;
     }
 
-    protected Void testRecovery(byte[] logData, int version) throws Exception
+    protected Void testRecovery(byte[] logData, CommitLogVersion version) throws Exception
     {
         File logFile = tmpFile(version);
         try (OutputStream lout = new FileOutputStream(logFile))

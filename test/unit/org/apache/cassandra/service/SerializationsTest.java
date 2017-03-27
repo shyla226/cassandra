@@ -20,6 +20,7 @@ package org.apache.cassandra.service;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
@@ -38,20 +39,38 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.repair.NodePair;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.Validator;
 import org.apache.cassandra.repair.messages.*;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
+import org.apache.cassandra.utils.Serializer;
 
 public class SerializationsTest extends AbstractSerializationsTester
 {
+    private static final InetAddress inet;
+    static
+    {
+        try
+        {
+            inet = InetAddress.getByName("127.0.0.1");
+        }
+        catch (UnknownHostException e)
+        {
+            throw new AssertionError();
+        }
+    }
+
     private static PartitionerSwitcher partitionerSwitcher;
     private static UUID RANDOM_UUID;
     private static Range<Token> FULL_RANGE;
     private static RepairJobDesc DESC;
+
+    private static Message.Serializer serializer;
 
     @BeforeClass
     public static void defineSchema() throws Exception
@@ -61,6 +80,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         RANDOM_UUID = UUID.fromString("b5c3d033-75aa-4c2f-a819-947aac7a0c54");
         FULL_RANGE = new Range<>(Util.testPartitioner().getMinimumToken(), Util.testPartitioner().getMinimumToken());
         DESC = new RepairJobDesc(RANDOM_UUID, RANDOM_UUID, "Keyspace1", "Standard1", Arrays.asList(FULL_RANGE));
+        serializer = Message.createSerializer(getVersion(), 0);
     }
 
     @AfterClass
@@ -69,18 +89,25 @@ public class SerializationsTest extends AbstractSerializationsTester
         partitionerSwitcher.close();
     }
 
+    public RepairVersion getRepairVersion()
+    {
+        return getVersion().groupVersion(Verbs.Group.REPAIR);
+    }
+
+    @SuppressWarnings("unchecked")
     private void testRepairMessageWrite(String fileName, RepairMessage... messages) throws IOException
     {
         try (DataOutputStreamPlus out = getOutput(fileName))
         {
             for (RepairMessage message : messages)
             {
-                testSerializedSize(message, RepairMessage.serializer);
-                RepairMessage.serializer.serialize(message, out, getVersion());
+                Serializer<RepairMessage> serializer = message.serializer(getRepairVersion());
+                testSerializedSize(message, serializer);
+                serializer.serialize(message, out);
             }
             // also serialize MessageOut
             for (RepairMessage message : messages)
-                message.createMessage().serialize(out,  getVersion());
+                serializer.serialize(message.verb().newRequest(inet, message), out);
         }
     }
 
@@ -98,12 +125,11 @@ public class SerializationsTest extends AbstractSerializationsTester
 
         try (DataInputStreamPlus in = getInput("service.ValidationRequest.bin"))
         {
-            RepairMessage message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.VALIDATION_REQUEST;
+            ValidationRequest message = ValidationRequest.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
-            assert ((ValidationRequest) message).gcBefore == 1234;
+            assert message.gcBefore == 1234;
 
-            assert MessageIn.read(in, getVersion(), -1) != null;
+            assert serializer.deserialize(in, inet) != null;
         }
     }
 
@@ -141,32 +167,29 @@ public class SerializationsTest extends AbstractSerializationsTester
         try (DataInputStreamPlus in = getInput("service.ValidationComplete.bin"))
         {
             // empty validation
-            RepairMessage message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.VALIDATION_COMPLETE;
+            ValidationComplete message = ValidationComplete.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
 
-            assert ((ValidationComplete) message).success();
-            assert ((ValidationComplete) message).trees != null;
+            assert message.success();
+            assert message.trees != null;
 
             // validation with a tree
-            message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.VALIDATION_COMPLETE;
+            message = ValidationComplete.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
 
-            assert ((ValidationComplete) message).success();
-            assert ((ValidationComplete) message).trees != null;
+            assert message.success();
+            assert message.trees != null;
 
             // failed validation
-            message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.VALIDATION_COMPLETE;
+            message = ValidationComplete.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
 
-            assert !((ValidationComplete) message).success();
-            assert ((ValidationComplete) message).trees == null;
+            assert !message.success();
+            assert message.trees == null;
 
             // MessageOuts
             for (int i = 0; i < 3; i++)
-                assert MessageIn.read(in, getVersion(), -1) != null;
+                assert serializer.deserialize(in, inet) != null;
         }
     }
 
@@ -192,15 +215,14 @@ public class SerializationsTest extends AbstractSerializationsTester
 
         try (DataInputStreamPlus in = getInput("service.SyncRequest.bin"))
         {
-            RepairMessage message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.SYNC_REQUEST;
+            SyncRequest message = SyncRequest.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
-            assert local.equals(((SyncRequest) message).initiator);
-            assert src.equals(((SyncRequest) message).src);
-            assert dest.equals(((SyncRequest) message).dst);
-            assert ((SyncRequest) message).ranges.size() == 1 && ((SyncRequest) message).ranges.contains(FULL_RANGE);
+            assert local.equals(message.initiator);
+            assert src.equals(message.src);
+            assert dest.equals(message.dst);
+            assert message.ranges.size() == 1 && message.ranges.contains(FULL_RANGE);
 
-            assert MessageIn.read(in, getVersion(), -1) != null;
+            assert serializer.deserialize(in, inet) != null;
         }
     }
 
@@ -229,24 +251,22 @@ public class SerializationsTest extends AbstractSerializationsTester
         try (DataInputStreamPlus in = getInput("service.SyncComplete.bin"))
         {
             // success
-            RepairMessage message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.SYNC_COMPLETE;
+            SyncComplete message = SyncComplete.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
 
-            assert nodes.equals(((SyncComplete) message).nodes);
-            assert ((SyncComplete) message).success;
+            assert nodes.equals(message.nodes);
+            assert message.success;
 
             // fail
-            message = RepairMessage.serializer.deserialize(in, getVersion());
-            assert message.messageType == RepairMessage.Type.SYNC_COMPLETE;
+            message = SyncComplete.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
 
-            assert nodes.equals(((SyncComplete) message).nodes);
-            assert !((SyncComplete) message).success;
+            assert nodes.equals(message.nodes);
+            assert !message.success;
 
             // MessageOuts
             for (int i = 0; i < 2; i++)
-                assert MessageIn.read(in, getVersion(), -1) != null;
+                assert serializer.deserialize(in, inet) != null;
         }
     }
 }

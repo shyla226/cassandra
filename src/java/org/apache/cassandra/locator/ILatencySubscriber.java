@@ -19,7 +19,9 @@ package org.apache.cassandra.locator;
 
 import java.net.InetAddress;
 
+import org.apache.cassandra.net.Verb;
+
 public interface ILatencySubscriber
 {
-    public void receiveTiming(InetAddress address, long latency);
+    public void receiveTiming(Verb<?, ?> verb, InetAddress address, long latency);
 }

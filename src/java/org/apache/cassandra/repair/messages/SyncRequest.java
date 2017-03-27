@@ -31,8 +31,12 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.CompactEndpointSerializationHelper;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Body part of SYNC_REQUEST repair message.
@@ -40,9 +44,47 @@ import org.apache.cassandra.repair.RepairJobDesc;
  *
  * @since 2.0
  */
-public class SyncRequest extends RepairMessage
+public class SyncRequest extends RepairMessage<SyncRequest>
 {
-    public static MessageSerializer serializer = new SyncRequestSerializer();
+    public static Versioned<RepairVersion, MessageSerializer<SyncRequest>> serializers = RepairVersion.versioned(v -> new MessageSerializer<SyncRequest>(v)
+    {
+        public void serialize(SyncRequest message, DataOutputPlus out) throws IOException
+        {
+            RepairJobDesc.serializers.get(version).serialize(message.desc, out);
+            CompactEndpointSerializationHelper.serialize(message.initiator, out);
+            CompactEndpointSerializationHelper.serialize(message.src, out);
+            CompactEndpointSerializationHelper.serialize(message.dst, out);
+            out.writeInt(message.ranges.size());
+            for (Range<Token> range : message.ranges)
+            {
+                MessagingService.validatePartitioner(range);
+                AbstractBounds.tokenSerializer.serialize(range, out, version.boundsVersion);
+            }
+        }
+
+        public SyncRequest deserialize(DataInputPlus in) throws IOException
+        {
+            RepairJobDesc desc = RepairJobDesc.serializers.get(version).deserialize(in);
+            InetAddress owner = CompactEndpointSerializationHelper.deserialize(in);
+            InetAddress src = CompactEndpointSerializationHelper.deserialize(in);
+            InetAddress dst = CompactEndpointSerializationHelper.deserialize(in);
+            int rangesCount = in.readInt();
+            List<Range<Token>> ranges = new ArrayList<>(rangesCount);
+            for (int i = 0; i < rangesCount; ++i)
+                ranges.add((Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version.boundsVersion));
+            return new SyncRequest(desc, owner, src, dst, ranges);
+        }
+
+        public long serializedSize(SyncRequest message)
+        {
+            long size = RepairJobDesc.serializers.get(version).serializedSize(message.desc);
+            size += 3 * CompactEndpointSerializationHelper.serializedSize(message.initiator);
+            size += TypeSizes.sizeof(message.ranges.size());
+            for (Range<Token> range : message.ranges)
+                size += AbstractBounds.tokenSerializer.serializedSize(range, version.boundsVersion);
+            return size;
+        }
+    });
 
     public final InetAddress initiator;
     public final InetAddress src;
@@ -51,7 +93,7 @@ public class SyncRequest extends RepairMessage
 
     public SyncRequest(RepairJobDesc desc, InetAddress initiator, InetAddress src, InetAddress dst, Collection<Range<Token>> ranges)
     {
-        super(Type.SYNC_REQUEST, desc);
+        super(desc);
         this.initiator = initiator;
         this.src = src;
         this.dst = dst;
@@ -64,8 +106,7 @@ public class SyncRequest extends RepairMessage
         if (!(o instanceof SyncRequest))
             return false;
         SyncRequest req = (SyncRequest)o;
-        return messageType == req.messageType &&
-               desc.equals(req.desc) &&
+        return desc.equals(req.desc) &&
                initiator.equals(req.initiator) &&
                src.equals(req.src) &&
                dst.equals(req.dst) &&
@@ -75,47 +116,17 @@ public class SyncRequest extends RepairMessage
     @Override
     public int hashCode()
     {
-        return Objects.hash(messageType, desc, initiator, src, dst, ranges);
+        return Objects.hash(desc, initiator, src, dst, ranges);
     }
 
-    public static class SyncRequestSerializer implements MessageSerializer<SyncRequest>
+    public MessageSerializer<SyncRequest> serializer(RepairVersion version)
     {
-        public void serialize(SyncRequest message, DataOutputPlus out, int version) throws IOException
-        {
-            RepairJobDesc.serializer.serialize(message.desc, out, version);
-            CompactEndpointSerializationHelper.serialize(message.initiator, out);
-            CompactEndpointSerializationHelper.serialize(message.src, out);
-            CompactEndpointSerializationHelper.serialize(message.dst, out);
-            out.writeInt(message.ranges.size());
-            for (Range<Token> range : message.ranges)
-            {
-                MessagingService.validatePartitioner(range);
-                AbstractBounds.tokenSerializer.serialize(range, out, version);
-            }
-        }
+        return serializers.get(version);
+    }
 
-        public SyncRequest deserialize(DataInputPlus in, int version) throws IOException
-        {
-            RepairJobDesc desc = RepairJobDesc.serializer.deserialize(in, version);
-            InetAddress owner = CompactEndpointSerializationHelper.deserialize(in);
-            InetAddress src = CompactEndpointSerializationHelper.deserialize(in);
-            InetAddress dst = CompactEndpointSerializationHelper.deserialize(in);
-            int rangesCount = in.readInt();
-            List<Range<Token>> ranges = new ArrayList<>(rangesCount);
-            for (int i = 0; i < rangesCount; ++i)
-                ranges.add((Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version));
-            return new SyncRequest(desc, owner, src, dst, ranges);
-        }
-
-        public long serializedSize(SyncRequest message, int version)
-        {
-            long size = RepairJobDesc.serializer.serializedSize(message.desc, version);
-            size += 3 * CompactEndpointSerializationHelper.serializedSize(message.initiator);
-            size += TypeSizes.sizeof(message.ranges.size());
-            for (Range<Token> range : message.ranges)
-                size += AbstractBounds.tokenSerializer.serializedSize(range, version);
-            return size;
-        }
+    public Verb<SyncRequest, ?> verb()
+    {
+        return Verbs.REPAIR.SYNC_REQUEST;
     }
 
     @Override

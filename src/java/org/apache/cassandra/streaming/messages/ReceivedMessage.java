@@ -32,13 +32,13 @@ public class ReceivedMessage extends StreamMessage
     public static Serializer<ReceivedMessage> serializer = new Serializer<ReceivedMessage>()
     {
         @SuppressWarnings("resource") // Not closing constructed DataInputPlus's as the channel needs to remain open.
-        public ReceivedMessage deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException
+        public ReceivedMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException
         {
             DataInputPlus input = new DataInputStreamPlus(Channels.newInputStream(in));
             return new ReceivedMessage(TableId.deserialize(input), input.readInt());
         }
 
-        public void serialize(ReceivedMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
+        public void serialize(ReceivedMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session) throws IOException
         {
             message.tableId.serialize(out);
             out.writeInt(message.sequenceNumber);

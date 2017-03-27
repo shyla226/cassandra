@@ -290,7 +290,7 @@ public abstract class Slices implements Iterable<Slice>
 
     public static class Serializer
     {
-        public void serialize(Slices slices, DataOutputPlus out, int version) throws IOException
+        public void serialize(Slices slices, DataOutputPlus out, ClusteringVersion version) throws IOException
         {
             int size = slices.size();
             out.writeUnsignedVInt(size);
@@ -306,7 +306,7 @@ public abstract class Slices implements Iterable<Slice>
                 Slice.serializer.serialize(slice, out, version, types);
         }
 
-        public long serializedSize(Slices slices, int version)
+        public long serializedSize(Slices slices, ClusteringVersion version)
         {
             long size = TypeSizes.sizeofUnsignedVInt(slices.size());
 
@@ -323,7 +323,7 @@ public abstract class Slices implements Iterable<Slice>
             return size;
         }
 
-        public Slices deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        public Slices deserialize(DataInputPlus in, ClusteringVersion version, TableMetadata metadata) throws IOException
         {
             int size = (int)in.readUnsignedVInt();
 

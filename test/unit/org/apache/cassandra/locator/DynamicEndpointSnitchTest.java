@@ -28,6 +28,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -48,7 +49,7 @@ public class DynamicEndpointSnitchTest
         for (int round = 0; round < rounds; round++)
         {
             for (int i = 0; i < hosts.size(); i++)
-                dsnitch.receiveTiming(hosts.get(i), scores[i]);
+                dsnitch.receiveTiming(Verbs.READS.READ, hosts.get(i), scores[i]);
         }
 
         dsnitch.updateScores();

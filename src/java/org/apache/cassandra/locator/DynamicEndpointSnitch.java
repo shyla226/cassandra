@@ -42,6 +42,8 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.metrics.Histogram;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -270,8 +272,12 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         throw new UnsupportedOperationException("You shouldn't wrap the DynamicEndpointSnitch (within itself or otherwise)");
     }
 
-    public void receiveTiming(InetAddress host, long latency) // this is cheap
+    public void receiveTiming(Verb<?, ?> verb, InetAddress host, long latency) // this is cheap
     {
+        // We're only tracking reads
+        if (verb != Verbs.READS.READ)
+            return;
+
         // prevent the histogram from overflowing
         if (MAX_LATENCY < latency)
             latency = MAX_LATENCY;

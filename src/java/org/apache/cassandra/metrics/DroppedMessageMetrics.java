@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -35,7 +35,7 @@ public class DroppedMessageMetrics
     /** The cross node dropped latency */
     public final Timer crossNodeDroppedLatency;
 
-    public DroppedMessageMetrics(MessagingService.Verb verb)
+    public DroppedMessageMetrics(Verb<?, ?> verb)
     {
         this(new DefaultNameFactory("DroppedMessage", verb.toString()));
     }

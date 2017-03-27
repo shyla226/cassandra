@@ -23,15 +23,37 @@ import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class StatusRequest extends RepairMessage
+public class StatusRequest extends RepairMessage<StatusRequest>
 {
+    public static Versioned<RepairVersion, MessageSerializer<StatusRequest>> serializers = RepairVersion.versioned(v -> new MessageSerializer<StatusRequest>(v)
+    {
+        public void serialize(StatusRequest msg, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(msg.sessionID, out);
+        }
+
+        public StatusRequest deserialize(DataInputPlus in) throws IOException
+        {
+            return new StatusRequest(UUIDSerializer.serializer.deserialize(in));
+        }
+
+        public long serializedSize(StatusRequest msg)
+        {
+            return UUIDSerializer.serializer.serializedSize(msg.sessionID);
+        }
+    });
+
     public final UUID sessionID;
 
     public StatusRequest(UUID sessionID)
     {
-        super(Type.STATUS_REQUEST, null);
+        super(null);
         this.sessionID = sessionID;
     }
 
@@ -57,21 +79,13 @@ public class StatusRequest extends RepairMessage
                '}';
     }
 
-    public static MessageSerializer serializer = new MessageSerializer<StatusRequest>()
+    public MessageSerializer<StatusRequest> serializer(RepairVersion version)
     {
-        public void serialize(StatusRequest msg, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(msg.sessionID, out, version);
-        }
+        return serializers.get(version);
+    }
 
-        public StatusRequest deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return new StatusRequest(UUIDSerializer.serializer.deserialize(in, version));
-        }
-
-        public long serializedSize(StatusRequest msg, int version)
-        {
-            return UUIDSerializer.serializer.serializedSize(msg.sessionID, version);
-        }
-    };
+    public Verb<StatusRequest, ?> verb()
+    {
+        return Verbs.REPAIR.STATUS_REQUEST;
+    }
 }

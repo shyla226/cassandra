@@ -38,7 +38,6 @@ import net.jpountz.xxhash.XXHashFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.NIODataInputStream;
@@ -49,16 +48,17 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
 
     private static final int BUFFER_SIZE = Integer.getInteger(Config.PROPERTY_PREFIX + ".itc_buffer_size", 1024 * 4);
 
-    private final int version;
+    private final ProtocolVersion protocolVersion;
     private final boolean compressed;
     private final Socket socket;
     private final Set<Closeable> group;
     public InetAddress from;
+    private Message.Serializer messageSerializer;
 
-    public IncomingTcpConnection(int version, boolean compressed, Socket socket, Set<Closeable> group)
+    public IncomingTcpConnection(ProtocolVersion version, boolean compressed, Socket socket, Set<Closeable> group)
     {
         super("MessagingService-Incoming-" + socket.getInetAddress());
-        this.version = version;
+        this.protocolVersion = version;
         this.compressed = compressed;
         this.socket = socket;
         this.group = group;
@@ -85,10 +85,10 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
     {
         try
         {
-            if (version < MessagingService.VERSION_30)
+            if (MessagingVersion.from(protocolVersion) == null)
                 throw new UnsupportedOperationException(String.format("Unable to read obsolete message version %s; "
-                                                                      + "The earliest version supported is 3.0.0",
-                                                                      version));
+                                                                      + "The earliest version supported is %s",
+                                                                      protocolVersion, MessagingVersion.values()[0]));
 
             receiveMessages();
         }
@@ -140,16 +140,29 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
         DataOutputStream out = new DataOutputStream(socket.getOutputStream());
         // if this version is < the MS version the other node is trying
         // to connect with, the other node will disconnect
-        out.writeInt(MessagingService.current_version);
+        out.writeInt(MessagingService.current_version.protocolVersion().handshakeVersion);
         out.flush();
         DataInputPlus in = new DataInputStreamPlus(socket.getInputStream());
-        int maxVersion = in.readInt();
+        ProtocolVersion maxVersion = ProtocolVersion.fromHandshakeVersion(in.readInt());
         // outbound side will reconnect if necessary to upgrade version
-        assert version <= MessagingService.current_version;
+        assert protocolVersion.compareTo(MessagingService.current_version.protocolVersion()) <= 0;
         from = CompactEndpointSerializationHelper.deserialize(in);
         // record the (true) version of the endpoint
-        MessagingService.instance().setVersion(from, maxVersion);
+        MessagingService.instance().setVersion(from, MessagingVersion.from(maxVersion));
         logger.trace("Set version for {} to {} (will use {})", from, maxVersion, MessagingService.instance().getVersion(from));
+
+
+        MessagingVersion version = MessagingVersion.from(protocolVersion);
+
+        // Read connection parameters
+        long baseTimestampMillis = -1; // Unused and unset on pre-4.0
+        if (version.isDSE())
+        {
+            MessageParameters connectionParameters = MessageParameters.serializer().deserialize(in);
+            assert connectionParameters.has(MessageSerializer.BASE_TIMESTAMP_KEY);
+            baseTimestampMillis = connectionParameters.getLong(MessageSerializer.BASE_TIMESTAMP_KEY);
+        }
+        messageSerializer = Message.createSerializer(version, baseTimestampMillis);
 
         if (compressed)
         {
@@ -168,30 +181,20 @@ public class IncomingTcpConnection extends FastThreadLocalThread implements Clos
 
         while (true)
         {
-            MessagingService.validateMagic(in.readInt());
-            receiveMessage(in, version);
+            receiveMessage(in);
         }
     }
 
-    private InetAddress receiveMessage(DataInputPlus input, int version) throws IOException
+    private void receiveMessage(DataInputPlus input) throws IOException
     {
-        int id = input.readInt();
-
-        long currentTime = ApproximateTime.currentTimeMillis();
-        MessageIn message = MessageIn.read(input, version, id, MessageIn.readConstructionTime(from, input, currentTime));
+        messageSerializer.readSerializedSize(input);
+        Message message = messageSerializer.deserialize(input, from);
         if (message == null)
         {
             // callback expired; nothing to do
-            return null;
+            return;
         }
-        if (version <= MessagingService.current_version)
-        {
-            MessagingService.instance().receive(message, id);
-        }
-        else
-        {
-            logger.trace("Received connection from newer protocol version {}. Ignoring message", version);
-        }
-        return message.from;
+
+        MessagingService.instance().receive(message);
     }
 }

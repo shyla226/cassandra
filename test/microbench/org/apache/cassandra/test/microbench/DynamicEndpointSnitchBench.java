@@ -29,11 +29,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.SimpleSnitch;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
@@ -111,7 +111,7 @@ public class DynamicEndpointSnitchBench
         // super stupid pseudo-latency
         long latency = (Thread.currentThread().getId() ^ System.currentTimeMillis()) & 32767;
 
-        ((DynamicEndpointSnitch) snitch).receiveTiming(address, latency);
+        ((DynamicEndpointSnitch) snitch).receiveTiming(Verbs.READS.READ, address, latency);
     }
 
     @Benchmark

@@ -47,12 +47,12 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
         this.helper = helper;
     }
 
-    public static SSTableSimpleIterator create(TableMetadata metadata, DataInputPlus in, SerializationHeader header, SerializationHelper helper, DeletionTime partitionDeletion)
+    public static SSTableSimpleIterator create(TableMetadata metadata, DataInputPlus in, SerializationHeader header, SerializationHelper helper)
     {
         return new CurrentFormatIterator(metadata, in, header, helper);
     }
 
-    public static SSTableSimpleIterator createTombstoneOnly(TableMetadata metadata, DataInputPlus in, SerializationHeader header, SerializationHelper helper, DeletionTime partitionDeletion)
+    public static SSTableSimpleIterator createTombstoneOnly(TableMetadata metadata, DataInputPlus in, SerializationHeader header, SerializationHelper helper)
     {
         return new CurrentFormatTombstoneIterator(metadata, in, header, helper);
     }
@@ -74,14 +74,14 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
 
         public Row readStaticRow() throws IOException
         {
-            return header.hasStatic() ? UnfilteredSerializer.serializer.deserializeStaticRow(in, header, helper) : Rows.EMPTY_STATIC_ROW;
+            return header.hasStatic() ? UnfilteredSerializer.serializers.get(helper.version).deserializeStaticRow(in, header, helper) : Rows.EMPTY_STATIC_ROW;
         }
 
         protected Unfiltered computeNext()
         {
             try
             {
-                Unfiltered unfiltered = UnfilteredSerializer.serializer.deserialize(in, header, helper, builder);
+                Unfiltered unfiltered = UnfilteredSerializer.serializers.get(helper.version).deserialize(in, header, helper, builder);
                 return unfiltered == null ? endOfData() : unfiltered;
             }
             catch (IOException e)
@@ -105,7 +105,7 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
         {
             if (header.hasStatic())
             {
-                Row staticRow = UnfilteredSerializer.serializer.deserializeStaticRow(in, header, helper);
+                Row staticRow = UnfilteredSerializer.serializers.get(helper.version).deserializeStaticRow(in, header, helper);
                 if (!staticRow.deletion().isLive())
                     return BTreeRow.emptyDeletedRow(staticRow.clustering(), staticRow.deletion());
             }
@@ -116,7 +116,7 @@ public abstract class SSTableSimpleIterator extends AbstractIterator<Unfiltered>
         {
             try
             {
-                Unfiltered unfiltered = UnfilteredSerializer.serializer.deserializeTombstonesOnly((FileDataInput) in, header, helper);
+                Unfiltered unfiltered = UnfilteredSerializer.serializers.get(helper.version).deserializeTombstonesOnly((FileDataInput) in, header, helper);
                 return unfiltered == null ? endOfData() : unfiltered;
             }
             catch (IOException e)

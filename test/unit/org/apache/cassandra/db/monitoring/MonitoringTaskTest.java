@@ -39,6 +39,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+
 public class MonitoringTaskTest
 {
     private static final long timeout = 100;
@@ -54,6 +56,7 @@ public class MonitoringTaskTest
     @BeforeClass
     public static void setupClass()
     {
+        DatabaseDescriptor.clientInitialization(false);
         MonitoringTask.instance = MonitoringTask.make(REPORT_INTERVAL_MS, MAX_TIMEDOUT_OPERATIONS);
 
         // The approximate time needs to be ticked forward manually, this is normally done by
@@ -84,58 +87,71 @@ public class MonitoringTaskTest
         MonitoringTask.instance.getFailedOperations();
     }
 
-    private static final class TestMonitor extends MonitorableImpl
+    private static final class FakeOperation implements Monitorable
     {
-        TestMonitor(String name, long timestamp, boolean isCrossNode, long timeout, long slow)
+        private final String name;
+
+        private FakeOperation(String name)
         {
-            this(name, timestamp, isCrossNode, timeout, slow, false);
+            this.name = name;
         }
 
-        TestMonitor(String name, long timestamp, boolean isCrossNode, long timeout, long slow, boolean skipReporting)
+        public String name()
         {
-            super(name, timestamp, timeout, slow, isCrossNode, skipReporting);
-        }
-
-        @Override
-        public String toString()
-        {
-            return name();
+            return name;
         }
     }
 
-    private static void waitForOperationsToComplete(Monitorable... operations) throws InterruptedException
+    private static Monitor monitor(String name, boolean isCrossNode)
+    {
+        return monitor(name, isCrossNode, timeout, slowTimeout);
+    }
+
+    private static Monitor monitor(String name, boolean isCrossNode, long timeoutMillis, long slowTimeoutMillis)
+    {
+        FakeOperation op = new FakeOperation(name);
+        return Monitor.createAndStart(op, System.currentTimeMillis(), timeoutMillis, !isCrossNode, slowTimeoutMillis);
+    }
+
+    private static Monitor noReportingMonitor(String name)
+    {
+        FakeOperation op = new FakeOperation(name);
+        return Monitor.createAndStartNoReporting(op, System.currentTimeMillis(), timeout);
+    }
+
+    private static void waitForOperationsToComplete(Monitor... operations) throws InterruptedException
     {
         waitForOperationsToComplete(Arrays.asList(operations));
     }
 
-    private static void waitForOperationsToComplete(List<Monitorable> operations) throws InterruptedException
+    private static void waitForOperationsToComplete(List<Monitor> operations) throws InterruptedException
     {
-        long timeout = operations.stream().map(Monitorable::timeout).reduce(0L, Long::max);
+        long timeout = operations.stream().map(Monitor::timeoutMillis).reduce(0L, Long::max);
         Thread.sleep(timeout * 2 + ApproximateTime.precision());
 
         long start = System.nanoTime();
-        while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
+        while (System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
         {
-            long numInProgress = operations.stream().filter(Monitorable::isInProgress).count();
+            long numInProgress = operations.stream().filter(Monitor::isInProgress).count();
             if (numInProgress == 0)
                 return;
         }
     }
 
-    private static void waitForOperationsToBeReportedAsSlow(Monitorable... operations) throws InterruptedException
+    private static void waitForOperationsToBeReportedAsSlow(Monitor... operations) throws InterruptedException
     {
         waitForOperationsToBeReportedAsSlow(Arrays.asList(operations));
     }
 
-    private static void waitForOperationsToBeReportedAsSlow(List<Monitorable> operations) throws InterruptedException
+    private static void waitForOperationsToBeReportedAsSlow(List<Monitor> operations) throws InterruptedException
     {
-        long timeout = operations.stream().map(Monitorable::slowTimeout).reduce(0L, Long::max);
+        long timeout = operations.stream().map(Monitor::slowQueryTimeoutMillis).reduce(0L, Long::max);
         Thread.sleep(timeout * 2 + ApproximateTime.precision());
 
         long start = System.nanoTime();
         while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
         {
-            long numSlow = operations.stream().filter(Monitorable::isSlow).count();
+            long numSlow = operations.stream().filter(Monitor::isSlow).count();
             if (numSlow == operations.size())
                 return;
         }
@@ -144,21 +160,8 @@ public class MonitoringTaskTest
     @Test
     public void testAbort() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test abort", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitor operation = monitor("Test abort", false);
         waitForOperationsToComplete(operation);
-
-        assertTrue(operation.isAborted());
-        assertFalse(operation.isCompleted());
-        assertEquals(1, MonitoringTask.instance.getFailedOperations().size());
-    }
-
-    @Test
-    public void testAbortIdemPotent() throws InterruptedException
-    {
-        Monitorable operation = new TestMonitor("Test abort", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
-        waitForOperationsToComplete(operation);
-
-        assertTrue(operation.abort());
 
         assertTrue(operation.isAborted());
         assertFalse(operation.isCompleted());
@@ -168,7 +171,7 @@ public class MonitoringTaskTest
     @Test
     public void testAbortCrossNode() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test for cross node", ApproximateTime.currentTimeMillis(), true, timeout, slowTimeout);
+        Monitor operation = monitor("Test for cross node", true);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isAborted());
@@ -179,7 +182,7 @@ public class MonitoringTaskTest
     @Test
     public void testComplete() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test complete", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitor operation = monitor("Test complete", false);
         operation.complete();
         waitForOperationsToComplete(operation);
 
@@ -191,7 +194,7 @@ public class MonitoringTaskTest
     @Test
     public void testCompleteIdemPotent() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test complete", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitor operation = monitor("Test complete", false);
         operation.complete();
         waitForOperationsToComplete(operation);
 
@@ -205,7 +208,7 @@ public class MonitoringTaskTest
     @Test
     public void testReportSlow() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test report slow", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitor operation = monitor("Test report slow", false);
         waitForOperationsToBeReportedAsSlow(operation);
 
         assertTrue(operation.isSlow());
@@ -219,7 +222,7 @@ public class MonitoringTaskTest
     public void testNoReportSlowIfZeroSlowTimeout() throws InterruptedException
     {
         // when the slow timeout is set to zero then operation won't be reported as slow
-        Monitorable operation = new TestMonitor("Test report slow disabled", ApproximateTime.currentTimeMillis(), false, timeout, 0);
+        Monitor operation = monitor("Test report slow disabled", false, timeout, 0);
         waitForOperationsToBeReportedAsSlow(operation);
 
         assertTrue(operation.isSlow());
@@ -232,7 +235,7 @@ public class MonitoringTaskTest
     @Test
     public void testReport() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test report", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+        Monitor operation = monitor("Test report", false);
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isSlow());
@@ -250,7 +253,7 @@ public class MonitoringTaskTest
     @Test
     public void testSkipReporting() throws InterruptedException
     {
-        Monitorable operation = new TestMonitor("Test skip reporting", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout, true);
+        Monitor operation = noReportingMonitor("Test skip reporting");
         waitForOperationsToComplete(operation);
 
         assertTrue(operation.isSlow());
@@ -272,13 +275,13 @@ public class MonitoringTaskTest
         MonitoringTask.instance = MonitoringTask.make(10, -1);
         try
         {
-            Monitorable operation1 = new TestMonitor("Test report 1", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+            Monitor operation1 = monitor("Test report 1", false);
             waitForOperationsToComplete(operation1);
 
             assertTrue(operation1.isAborted());
             assertFalse(operation1.isCompleted());
 
-            Monitorable operation2 = new TestMonitor("Test report 2", ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout);
+            Monitor operation2 = monitor("Test report 2", false);
             waitForOperationsToBeReportedAsSlow(operation2);
 
             operation2.complete();
@@ -300,12 +303,12 @@ public class MonitoringTaskTest
     {
         final int opCount = 50;
         final ExecutorService executorService = Executors.newFixedThreadPool(20);
-        final List<Monitorable> operations = Collections.synchronizedList(new ArrayList<>(opCount));
+        final List<Monitor> operations = Collections.synchronizedList(new ArrayList<>(opCount));
 
         for (int i = 0; i < opCount; i++)
         {
             executorService.submit(() ->
-                operations.add(new TestMonitor(UUID.randomUUID().toString(), ApproximateTime.currentTimeMillis(), false, timeout, slowTimeout))
+                operations.add(monitor(UUID.randomUUID().toString(), false))
             );
         }
 
@@ -349,18 +352,10 @@ public class MonitoringTaskTest
                     {
                         for (int j = 0; j < numTimes; j++)
                         {
-                            Monitorable operation1 = new TestMonitor(operationName,
-                                                                     ApproximateTime.currentTimeMillis(),
-                                                                     false,
-                                                                     timeout,
-                                                                     slowTimeout);
+                            Monitor operation1 = monitor(operationName,false);
                             waitForOperationsToComplete(operation1);
 
-                            Monitorable operation2 = new TestMonitor(operationName,
-                                                                     ApproximateTime.currentTimeMillis(),
-                                                                     false,
-                                                                     timeout,
-                                                                     slowTimeout);
+                            Monitor operation2 = monitor(operationName, false);
                             waitForOperationsToBeReportedAsSlow(operation2);
                             operation2.complete();
                         }
@@ -395,7 +390,7 @@ public class MonitoringTaskTest
     public void testMultipleThreadsSameNameFailed() throws InterruptedException
     {
         final int threadCount = 50;
-        final List<Monitorable> operations = new ArrayList<>(threadCount);
+        final List<Monitor> operations = new ArrayList<>(threadCount);
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
         final CountDownLatch finished = new CountDownLatch(threadCount);
 
@@ -404,11 +399,7 @@ public class MonitoringTaskTest
             executorService.submit(() -> {
                 try
                 {
-                    Monitorable operation = new TestMonitor("Test testMultipleThreadsSameName failed",
-                                                            ApproximateTime.currentTimeMillis(),
-                                                            false,
-                                                            timeout,
-                                                            slowTimeout);
+                    Monitor operation = monitor("Test testMultipleThreadsSameName failed", false);
                     operations.add(operation);
                 }
                 finally
@@ -429,7 +420,7 @@ public class MonitoringTaskTest
     public void testMultipleThreadsSameNameSlow() throws InterruptedException
     {
         final int threadCount = 50;
-        final List<Monitorable> operations = new ArrayList<>(threadCount);
+        final List<Monitor> operations = new ArrayList<>(threadCount);
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
         final CountDownLatch finished = new CountDownLatch(threadCount);
 
@@ -438,11 +429,7 @@ public class MonitoringTaskTest
             executorService.submit(() -> {
                 try
                 {
-                    Monitorable operation = new TestMonitor("Test testMultipleThreadsSameName slow",
-                                                            ApproximateTime.currentTimeMillis(),
-                                                            false,
-                                                            timeout,
-                                                            slowTimeout);
+                    Monitor operation = monitor("Test testMultipleThreadsSameName slow", false);
                     operations.add(operation);
                 }
                 finally
@@ -456,7 +443,7 @@ public class MonitoringTaskTest
         assertEquals(0, executorService.shutdownNow().size());
 
         waitForOperationsToBeReportedAsSlow(operations);
-        operations.forEach(o -> o.complete());
+        operations.forEach(Monitor::complete);
 
         assertEquals(1, MonitoringTask.instance.getSlowOperations().size());
     }
@@ -465,7 +452,7 @@ public class MonitoringTaskTest
     public void testMultipleThreadsNoFailedOps() throws InterruptedException
     {
         final int threadCount = 50;
-        final List<Monitorable> operations = new ArrayList<>(threadCount);
+        final List<Monitor> operations = new ArrayList<>(threadCount);
         ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
         final CountDownLatch finished = new CountDownLatch(threadCount);
 
@@ -474,11 +461,7 @@ public class MonitoringTaskTest
             executorService.submit(() -> {
                 try
                 {
-                    Monitorable operation = new TestMonitor("Test thread " + Thread.currentThread().getName(),
-                                                            ApproximateTime.currentTimeMillis(),
-                                                            false,
-                                                            timeout,
-                                                            slowTimeout);
+                    Monitor operation = monitor("Test thread " + Thread.currentThread().getName(), false);
                     operations.add(operation);
                     operation.complete();
                 }

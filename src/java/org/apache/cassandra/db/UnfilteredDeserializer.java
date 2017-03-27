@@ -39,6 +39,7 @@ public class UnfilteredDeserializer
 
     private final ClusteringPrefix.Deserializer clusteringDeserializer;
     private final SerializationHeader header;
+    private final UnfilteredSerializer serializer;
 
     private int nextFlags;
     private int nextExtendedFlags;
@@ -56,6 +57,7 @@ public class UnfilteredDeserializer
         this.in = in;
         this.helper = helper;
         this.header = header;
+        this.serializer = UnfilteredSerializer.serializers.get(helper.version);
         this.clusteringDeserializer = new ClusteringPrefix.Deserializer(metadata.comparator, in, header);
         this.builder = BTreeRow.sortedBuilder();
     }
@@ -136,12 +138,12 @@ public class UnfilteredDeserializer
         if (UnfilteredSerializer.kind(nextFlags) == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
         {
             ClusteringBoundOrBoundary bound = clusteringDeserializer.deserializeNextBound();
-            return UnfilteredSerializer.serializer.deserializeMarkerBody(in, header, bound);
+            return serializer.deserializeMarkerBody(in, header, bound);
         }
         else
         {
             builder.newRow(clusteringDeserializer.deserializeNextClustering());
-            return UnfilteredSerializer.serializer.deserializeRowBody(in, header, helper, nextFlags, nextExtendedFlags, builder);
+            return serializer.deserializeRowBody(in, header, helper, nextFlags, nextExtendedFlags, builder);
         }
     }
 
@@ -163,11 +165,11 @@ public class UnfilteredDeserializer
         clusteringDeserializer.skipNext();
         if (UnfilteredSerializer.kind(nextFlags) == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
         {
-            UnfilteredSerializer.serializer.skipMarkerBody(in);
+            serializer.skipMarkerBody(in);
         }
         else
         {
-            UnfilteredSerializer.serializer.skipRowBody(in);
+            serializer.skipRowBody(in);
         }
     }
 }

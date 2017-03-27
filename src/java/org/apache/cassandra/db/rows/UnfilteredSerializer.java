@@ -31,6 +31,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedException;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Serialize/deserialize a single Unfiltered (both on-wire and on-disk).
@@ -91,9 +93,9 @@ import org.apache.cassandra.utils.WrappedException;
  * <p>
  * The serialization of a {@code <cell>} is defined by {@link Cell.Serializer}.
  */
-public class UnfilteredSerializer
+public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
 {
-    public static final UnfilteredSerializer serializer = new UnfilteredSerializer();
+    public static final Versioned<EncodingVersion, UnfilteredSerializer> serializers = EncodingVersion.versioned(UnfilteredSerializer::new);
 
     /*
      * Unfiltered flags constants.
@@ -113,34 +115,39 @@ public class UnfilteredSerializer
     private final static int IS_STATIC               = 0x01; // Whether the encoded row is a static. If there is no extended flag, the row is assumed not static.
     private final static int HAS_SHADOWABLE_DELETION = 0x02; // Whether the row deletion is shadowable. If there is no extended flag (or no row deletion), the deletion is assumed not shadowable.
 
-    public void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out, int version)
+    private UnfilteredSerializer(EncodingVersion version)
+    {
+        super(version);
+    }
+
+    public void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out)
     throws IOException
     {
         assert !header.isForSSTable();
-        serialize(unfiltered, header, out, 0, version);
+        serialize(unfiltered, header, out, 0);
     }
 
-    public void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out, long previousUnfilteredSize, int version)
+    public void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out, long previousUnfilteredSize)
     throws IOException
     {
         if (unfiltered.kind() == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
         {
-            serialize((RangeTombstoneMarker) unfiltered, header, out, previousUnfilteredSize, version);
+            serialize((RangeTombstoneMarker) unfiltered, header, out, previousUnfilteredSize);
         }
         else
         {
-            serialize((Row) unfiltered, header, out, previousUnfilteredSize, version);
+            serialize((Row) unfiltered, header, out, previousUnfilteredSize);
         }
     }
 
-    public void serializeStaticRow(Row row, SerializationHeader header, DataOutputPlus out, int version)
+    public void serializeStaticRow(Row row, SerializationHeader header, DataOutputPlus out)
     throws IOException
     {
         assert row.isStatic();
-        serialize(row, header, out, 0, version);
+        serialize(row, header, out, 0);
     }
 
-    private void serialize(Row row, SerializationHeader header, DataOutputPlus out, long previousUnfilteredSize, int version)
+    private void serialize(Row row, SerializationHeader header, DataOutputPlus out, long previousUnfilteredSize)
     throws IOException
     {
         int flags = 0;
@@ -180,7 +187,7 @@ public class UnfilteredSerializer
             out.writeByte((byte)extendedFlags);
 
         if (!isStatic)
-            Clustering.serializer.serialize(row.clustering(), out, version, header.clusteringTypes());
+            Clustering.serializer.serialize(row.clustering(), out, version.clusteringVersion, header.clusteringTypes());
 
         if (header.isForSSTable())
         {
@@ -270,15 +277,15 @@ public class UnfilteredSerializer
             Cell.serializer.serialize(cell, column, out, rowLiveness, header);
     }
 
-    private void serialize(RangeTombstoneMarker marker, SerializationHeader header, DataOutputPlus out, long previousUnfilteredSize, int version)
+    private void serialize(RangeTombstoneMarker marker, SerializationHeader header, DataOutputPlus out, long previousUnfilteredSize)
     throws IOException
     {
         out.writeByte((byte)IS_MARKER);
-        ClusteringBoundOrBoundary.serializer.serialize(marker.clustering(), out, version, header.clusteringTypes());
+        ClusteringBoundOrBoundary.serializer.serialize(marker.clustering(), out, version.clusteringVersion, header.clusteringTypes());
 
         if (header.isForSSTable())
         {
-            out.writeUnsignedVInt(serializedMarkerBodySize(marker, header, previousUnfilteredSize, version));
+            out.writeUnsignedVInt(serializedMarkerBodySize(marker, header, previousUnfilteredSize));
             out.writeUnsignedVInt(previousUnfilteredSize);
         }
 
@@ -294,20 +301,20 @@ public class UnfilteredSerializer
         }
     }
 
-    public long serializedSize(Unfiltered unfiltered, SerializationHeader header, int version)
+    public long serializedSize(Unfiltered unfiltered, SerializationHeader header)
     {
         assert !header.isForSSTable();
-        return serializedSize(unfiltered, header, 0, version);
+        return serializedSize(unfiltered, header, 0);
     }
 
-    public long serializedSize(Unfiltered unfiltered, SerializationHeader header, long previousUnfilteredSize,int version)
+    public long serializedSize(Unfiltered unfiltered, SerializationHeader header, long previousUnfilteredSize)
     {
         return unfiltered.kind() == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER
-             ? serializedSize((RangeTombstoneMarker) unfiltered, header, previousUnfilteredSize, version)
-             : serializedSize((Row) unfiltered, header, previousUnfilteredSize, version);
+             ? serializedSize((RangeTombstoneMarker) unfiltered, header, previousUnfilteredSize)
+             : serializedSize((Row) unfiltered, header, previousUnfilteredSize);
     }
 
-    private long serializedSize(Row row, SerializationHeader header, long previousUnfilteredSize, int version)
+    private long serializedSize(Row row, SerializationHeader header, long previousUnfilteredSize)
     {
         long size = 1; // flags
 
@@ -315,12 +322,12 @@ public class UnfilteredSerializer
             size += 1; // extended flags
 
         if (!row.isStatic())
-            size += Clustering.serializer.serializedSize(row.clustering(), version, header.clusteringTypes());
+            size += Clustering.serializer.serializedSize(row.clustering(), version.clusteringVersion, header.clusteringTypes());
 
-        return size + serializedRowBodySize(row, header, previousUnfilteredSize, version);
+        return size + serializedRowBodySize(row, header, previousUnfilteredSize);
     }
 
-    private long serializedRowBodySize(Row row, SerializationHeader header, long previousUnfilteredSize, int version)
+    private long serializedRowBodySize(Row row, SerializationHeader header, long previousUnfilteredSize)
     {
         long size = 0;
 
@@ -376,15 +383,15 @@ public class UnfilteredSerializer
         return size;
     }
 
-    private long serializedSize(RangeTombstoneMarker marker, SerializationHeader header, long previousUnfilteredSize, int version)
+    private long serializedSize(RangeTombstoneMarker marker, SerializationHeader header, long previousUnfilteredSize)
     {
         assert !header.isForSSTable();
         return 1 // flags
-             + ClusteringBoundOrBoundary.serializer.serializedSize(marker.clustering(), version, header.clusteringTypes())
-             + serializedMarkerBodySize(marker, header, previousUnfilteredSize, version);
+             + ClusteringBoundOrBoundary.serializer.serializedSize(marker.clustering(), version.clusteringVersion, header.clusteringTypes())
+             + serializedMarkerBodySize(marker, header, previousUnfilteredSize);
     }
 
-    private long serializedMarkerBodySize(RangeTombstoneMarker marker, SerializationHeader header, long previousUnfilteredSize, int version)
+    private long serializedMarkerBodySize(RangeTombstoneMarker marker, SerializationHeader header, long previousUnfilteredSize)
     {
         long size = 0;
         if (header.isForSSTable())
@@ -427,7 +434,7 @@ public class UnfilteredSerializer
 
         if (kind(flags) == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
         {
-            ClusteringBoundOrBoundary bound = ClusteringBoundOrBoundary.serializer.deserialize(in, helper.version, header.clusteringTypes());
+            ClusteringBoundOrBoundary bound = ClusteringBoundOrBoundary.serializer.deserialize(in, helper.version.clusteringVersion, header.clusteringTypes());
             return deserializeMarkerBody(in, header, bound);
         }
         else
@@ -436,7 +443,7 @@ public class UnfilteredSerializer
             if (isStatic(extendedFlags))
                 throw new IOException("Corrupt flags value for unfiltered partition (isStatic flag set): " + flags);
 
-            builder.newRow(Clustering.serializer.deserialize(in, helper.version, header.clusteringTypes()));
+            builder.newRow(Clustering.serializer.deserialize(in, helper.version.clusteringVersion, header.clusteringTypes()));
             Row row = deserializeRowBody(in, header, helper, flags, extendedFlags, builder);
             // we do not write empty rows because Rows.collectStats(), called by BTW.applyToRow(), asserts that rows are not empty
             // if we don't throw here, then later the very same assertion in Rows.collectStats() will fail compactions
@@ -460,7 +467,7 @@ public class UnfilteredSerializer
 
             if (kind(flags) == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
             {
-                ClusteringBoundOrBoundary bound = ClusteringBoundOrBoundary.serializer.deserialize(in, helper.version, header.clusteringTypes());
+                ClusteringBoundOrBoundary bound = ClusteringBoundOrBoundary.serializer.deserialize(in, helper.version.clusteringVersion, header.clusteringTypes());
                 return deserializeMarkerBody(in, header, bound);
             }
             else
@@ -472,7 +479,7 @@ public class UnfilteredSerializer
                     boolean hasTimestamp = (flags & HAS_TIMESTAMP) != 0;
                     boolean hasTTL = (flags & HAS_TTL) != 0;
                     boolean deletionIsShadowable = (extendedFlags & HAS_SHADOWABLE_DELETION) != 0;
-                    Clustering clustering = Clustering.serializer.deserialize(in, helper.version, header.clusteringTypes());
+                    Clustering clustering = Clustering.serializer.deserialize(in, helper.version.clusteringVersion, header.clusteringTypes());
                     long nextPosition = in.readUnsignedVInt() + in.getFilePointer();
                     in.readUnsignedVInt(); // skip previous unfiltered size
                     if (hasTimestamp)
@@ -491,7 +498,7 @@ public class UnfilteredSerializer
                 }
                 else
                 {
-                    Clustering.serializer.skip(in, helper.version, header.clusteringTypes());
+                    Clustering.serializer.skip(in, helper.version.clusteringVersion, header.clusteringTypes());
                     skipRowBody(in);
                     // Continue with next item.
                 }

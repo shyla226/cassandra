@@ -23,12 +23,15 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 
-public class TombstoneOverwhelmingException extends RuntimeException
+public class TombstoneOverwhelmingException extends InternalRequestExecutionException
 {
     public TombstoneOverwhelmingException(int numTombstones, String query, TableMetadata metadata, DecoratedKey lastPartitionKey, ClusteringPrefix lastClustering)
     {
-        super(String.format("Scanned over %d tombstones during query '%s' (last scanned row partion key was (%s)); query aborted",
+        super(RequestFailureReason.READ_TOO_MANY_TOMBSTONES,
+              String.format("Scanned over %d tombstones during query '%s' (last scanned row partion key was (%s)); query aborted",
                             numTombstones, query, makePKString(metadata, lastPartitionKey.getKey(), lastClustering)));
     }
 

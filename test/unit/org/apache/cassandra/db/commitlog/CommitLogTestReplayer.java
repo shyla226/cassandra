@@ -65,7 +65,7 @@ public class CommitLogTestReplayer extends CommitLogReplayer
             Mutation mutation;
             try
             {
-                mutation = Mutation.serializer.deserialize(bufIn, desc.getMessagingVersion(), SerializationHelper.Flag.LOCAL);
+                mutation = Mutation.rawSerializers.get(desc.version.encodingVersion).deserialize(bufIn, SerializationHelper.Flag.LOCAL);
                 Assert.assertTrue(processor.apply(mutation));
             }
             catch (IOException e)

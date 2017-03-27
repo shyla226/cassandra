@@ -19,16 +19,19 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFilter
 {
-    static final Serializer serializer = new FilterSerializer();
+    static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(FilterSerializer::new);
 
     protected final boolean reversed;
 
@@ -42,8 +45,8 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
         return reversed;
     }
 
-    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
-    protected abstract long serializedSizeInternal(int version);
+    protected abstract void serializeInternal(DataOutputPlus out, ReadVersion version) throws IOException;
+    protected abstract long serializedSizeInternal(ReadVersion version);
 
     protected void appendOrderByToCQLString(TableMetadata metadata, StringBuilder sb)
     {
@@ -57,9 +60,14 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
         }
     }
 
-    private static class FilterSerializer implements Serializer
+    public static class FilterSerializer extends VersionDependent<ReadVersion> implements Serializer
     {
-        public void serialize(ClusteringIndexFilter pfilter, DataOutputPlus out, int version) throws IOException
+        private FilterSerializer(ReadVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(ClusteringIndexFilter pfilter, DataOutputPlus out) throws IOException
         {
             AbstractClusteringIndexFilter filter = (AbstractClusteringIndexFilter)pfilter;
 
@@ -69,7 +77,7 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
             filter.serializeInternal(out, version);
         }
 
-        public ClusteringIndexFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+        public ClusteringIndexFilter deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             Kind kind = Kind.values()[in.readUnsignedByte()];
             boolean reversed = in.readBoolean();
@@ -77,7 +85,7 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
             return kind.deserializer.deserialize(in, version, metadata, reversed);
         }
 
-        public long serializedSize(ClusteringIndexFilter pfilter, int version)
+        public long serializedSize(ClusteringIndexFilter pfilter)
         {
             AbstractClusteringIndexFilter filter = (AbstractClusteringIndexFilter)pfilter;
 

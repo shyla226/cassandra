@@ -51,7 +51,6 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -59,7 +58,6 @@ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.net.AsyncOneResponse;
 
 import org.codehaus.jackson.JsonFactory;
 import org.codehaus.jackson.map.ObjectMapper;
@@ -404,12 +402,6 @@ public class FBUtilities
         {
             throw new AssertionError(ie);
         }
-    }
-
-    public static void waitOnFutures(List<AsyncOneResponse> results, long ms) throws TimeoutException
-    {
-        for (AsyncOneResponse result : results)
-            result.get(ms, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -757,25 +749,6 @@ public class FBUtilities
         }
 
         public void close() {}
-    }
-
-    public static <T> byte[] serialize(T object, IVersionedSerializer<T> serializer, int version)
-    {
-        int size = (int) serializer.serializedSize(object, version);
-
-        try (DataOutputBuffer buffer = new DataOutputBufferFixed(size))
-        {
-            serializer.serialize(object, buffer, version);
-            assert buffer.getLength() == size && buffer.getData().length == size
-                : String.format("Final buffer length %s to accommodate data size of %s (predicted %s) for %s",
-                        buffer.getData().length, buffer.getLength(), size, object);
-            return buffer.getData();
-        }
-        catch (IOException e)
-        {
-            // We're doing in-memory serialization...
-            throw new AssertionError(e);
-        }
     }
 
     public static long copy(InputStream from, OutputStream to, long limit) throws IOException

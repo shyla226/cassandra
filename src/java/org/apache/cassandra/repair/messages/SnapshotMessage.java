@@ -22,15 +22,52 @@ import java.util.Objects;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class SnapshotMessage extends RepairMessage
+public class SnapshotMessage extends RepairMessage<SnapshotMessage>
 {
-    public final static MessageSerializer serializer = new SnapshotMessageSerializer();
+    public final static Versioned<RepairVersion, MessageSerializer<SnapshotMessage>> serializers = RepairVersion.versioned(v -> new MessageSerializer<SnapshotMessage>(v)
+    {
+        public void serialize(SnapshotMessage message, DataOutputPlus out) throws IOException
+        {
+            RepairJobDesc.serializers.get(v).serialize(message.desc, out);
+        }
+
+        public SnapshotMessage deserialize(DataInputPlus in) throws IOException
+        {
+            RepairJobDesc desc = RepairJobDesc.serializers.get(v).deserialize(in);
+            return new SnapshotMessage(desc);
+        }
+
+        public long serializedSize(SnapshotMessage message)
+        {
+            return RepairJobDesc.serializers.get(v).serializedSize(message.desc);
+        }
+    });
 
     public SnapshotMessage(RepairJobDesc desc)
     {
-        super(Type.SNAPSHOT, desc);
+        super(desc);
+    }
+
+    public MessageSerializer<SnapshotMessage> serializer(RepairVersion version)
+    {
+        return serializers.get(version);
+    }
+
+    public Verb<SnapshotMessage, ?> verb()
+    {
+        return Verbs.REPAIR.SNAPSHOT;
+    }
+
+    @Override
+    public String toString()
+    {
+        return desc.toString();
     }
 
     @Override
@@ -39,31 +76,12 @@ public class SnapshotMessage extends RepairMessage
         if (!(o instanceof SnapshotMessage))
             return false;
         SnapshotMessage other = (SnapshotMessage) o;
-        return messageType == other.messageType;
+        return desc.equals(other.desc);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(messageType);
-    }
-
-    public static class SnapshotMessageSerializer implements MessageSerializer<SnapshotMessage>
-    {
-        public void serialize(SnapshotMessage message, DataOutputPlus out, int version) throws IOException
-        {
-            RepairJobDesc.serializer.serialize(message.desc, out, version);
-        }
-
-        public SnapshotMessage deserialize(DataInputPlus in, int version) throws IOException
-        {
-            RepairJobDesc desc = RepairJobDesc.serializer.deserialize(in, version);
-            return new SnapshotMessage(desc);
-        }
-
-        public long serializedSize(SnapshotMessage message, int version)
-        {
-            return RepairJobDesc.serializer.serializedSize(message.desc, version);
-        }
+        return Objects.hash(desc);
     }
 }

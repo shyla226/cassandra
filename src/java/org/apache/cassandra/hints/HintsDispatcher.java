@@ -28,18 +28,20 @@ import java.util.function.Function;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.db.monitoring.ApproximateTime;
-import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 /**
  * Dispatches a single hints file to a specified node in a batched manner.
  *
- * Uses either {@link EncodedHintMessage} - when dispatching hints into a node with the same messaging version as the hints file,
- * or {@link HintMessage}, when conversion is required.
+ * Uses an encoded hint (see {@link HintMessage}) when dispatching hints into a node with the same messaging version as the hints file.
  */
 final class HintsDispatcher implements AutoCloseable
 {
@@ -48,26 +50,26 @@ final class HintsDispatcher implements AutoCloseable
     private final HintsReader reader;
     private final UUID hostId;
     private final InetAddress address;
-    private final int messagingVersion;
+    private final HintsVersion version;
     private final BooleanSupplier abortRequested;
 
     private InputPosition currentPagePosition;
 
-    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, BooleanSupplier abortRequested)
+    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, HintsVersion version, BooleanSupplier abortRequested)
     {
         currentPagePosition = null;
 
         this.reader = reader;
         this.hostId = hostId;
         this.address = address;
-        this.messagingVersion = messagingVersion;
+        this.version = version;
         this.abortRequested = abortRequested;
     }
 
     static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, BooleanSupplier abortRequested)
     {
-        int messagingVersion = MessagingService.instance().getVersion(address);
-        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, abortRequested);
+        HintsVersion version = MessagingService.instance().getVersion(address).groupVersion(Verbs.Group.HINTS);
+        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, version, abortRequested);
     }
 
     public void close()
@@ -121,7 +123,7 @@ final class HintsDispatcher implements AutoCloseable
          * If that is not the case, we'll need to perform conversion to a newer (or an older) format, and decoding the hint
          * is an unavoidable intermediate step.
          */
-        Action action = reader.descriptor().messagingVersion() == messagingVersion
+        Action action = reader.descriptor().version == version
                       ? sendHints(page.buffersIterator(), callbacks, this::sendEncodedHint)
                       : sendHints(page.hintsIterator(), callbacks, this::sendHint);
 
@@ -175,9 +177,9 @@ final class HintsDispatcher implements AutoCloseable
     private Callback sendHint(Hint hint)
     {
         Callback callback = new Callback();
-        HintMessage message = new HintMessage(hostId, hint);
-        HintsServiceMetrics.updateDelayMetrics(address , ApproximateTime.currentTimeMillis() - hint.creationTime);
-        MessagingService.instance().sendRRWithFailure(message.createMessageOut(), address, callback);
+        HintMessage message = HintMessage.create(hostId, hint);
+        HintsServiceMetrics.updateDelayMetrics(address , ApproximateTime.currentTimeMillis() - message.getHintCreationTime());
+        MessagingService.instance().send(Verbs.HINTS.HINT.newRequest(address, message), callback);
         return callback;
     }
 
@@ -188,13 +190,13 @@ final class HintsDispatcher implements AutoCloseable
     private Callback sendEncodedHint(ByteBuffer hint)
     {
         Callback callback = new Callback();
-        EncodedHintMessage message = new EncodedHintMessage(hostId, hint, messagingVersion);
+        HintMessage message = HintMessage.createEncoded(hostId, hint, version);
         HintsServiceMetrics.updateDelayMetrics(address, ApproximateTime.currentTimeMillis() - message.getHintCreationTime());
-        MessagingService.instance().sendRRWithFailure(message.createMessageOut(), address, callback);
+        MessagingService.instance().send(Verbs.HINTS.HINT.newRequest(address, message), callback);
         return callback;
     }
 
-    private static final class Callback implements IAsyncCallbackWithFailure
+    private static final class Callback implements MessageCallback<EmptyPayload>
     {
         enum Outcome { SUCCESS, TIMEOUT, FAILURE }
 
@@ -204,7 +206,7 @@ final class HintsDispatcher implements AutoCloseable
 
         Outcome await()
         {
-            long timeout = TimeUnit.MILLISECONDS.toNanos(MessagingService.Verb.HINT.getTimeout()) - (System.nanoTime() - start);
+            long timeout = TimeUnit.MILLISECONDS.toNanos(Verbs.HINTS.HINT.timeoutSupplier().get(null)) - (System.nanoTime() - start);
             boolean timedOut;
 
             try
@@ -219,27 +221,21 @@ final class HintsDispatcher implements AutoCloseable
             return timedOut ? Outcome.TIMEOUT : outcome;
         }
 
-        public void onFailure(InetAddress from, RequestFailureReason failureReason)
+        public void onFailure(FailureResponse<EmptyPayload> responseFailure)
         {
             outcome = Outcome.FAILURE;
             condition.signalAll();
         }
 
-        public void response(MessageIn msg)
+        public void onResponse(Response<EmptyPayload> msg)
         {
             outcome = Outcome.SUCCESS;
             condition.signalAll();
         }
 
-        public boolean isLatencyForSnitch()
+        public void onTimeout(InetAddress host)
         {
-            return false;
-        }
-
-        @Override
-        public boolean supportsBackPressure()
-        {
-            return true;
+            outcome = Outcome.TIMEOUT;
         }
     }
 }

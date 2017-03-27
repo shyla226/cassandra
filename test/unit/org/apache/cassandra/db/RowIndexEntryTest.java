@@ -262,7 +262,7 @@ public class RowIndexEntryTest extends CQLTester
         {
             assert !iterator.isEmpty();
 
-            Builder builder = new Builder(iterator, output, header, observers, version.correspondingMessagingVersion());
+            Builder builder = new Builder(iterator, output, header, observers, version.encodingVersion());
             return builder.build();
         }
 
@@ -280,7 +280,7 @@ public class RowIndexEntryTest extends CQLTester
             private final UnfilteredRowIterator iterator;
             private final SequentialWriter writer;
             private final SerializationHeader header;
-            private final int version;
+            private final EncodingVersion version;
 
             private final List<IndexInfo> columnsIndex = new ArrayList<>();
             private final long initialPosition;
@@ -302,7 +302,7 @@ public class RowIndexEntryTest extends CQLTester
                            SequentialWriter writer,
                            SerializationHeader header,
                            Collection<SSTableFlushObserver> observers,
-                           int version)
+                           EncodingVersion version)
             {
                 this.iterator = iterator;
                 this.writer = writer;
@@ -317,7 +317,7 @@ public class RowIndexEntryTest extends CQLTester
                 ByteBufferUtil.writeWithShortLength(iterator.partitionKey().getKey(), writer);
                 DeletionTime.serializer.serialize(iterator.partitionLevelDeletion(), writer);
                 if (header.hasStatic())
-                    UnfilteredSerializer.serializer.serializeStaticRow(iterator.staticRow(), header, writer, version);
+                    UnfilteredSerializer.serializers.get(version).serializeStaticRow(iterator.staticRow(), header, writer);
             }
 
             public ColumnIndex build() throws IOException
@@ -358,7 +358,7 @@ public class RowIndexEntryTest extends CQLTester
                     startPosition = pos;
                 }
 
-                UnfilteredSerializer.serializer.serialize(unfiltered, header, writer, pos - previousRowStart, version);
+                UnfilteredSerializer.serializers.get(version).serialize(unfiltered, header, writer, pos - previousRowStart);
 
                 // notify observers about each new row
                 if (!observers.isEmpty())
@@ -382,7 +382,7 @@ public class RowIndexEntryTest extends CQLTester
 
             private ColumnIndex close() throws IOException
             {
-                UnfilteredSerializer.serializer.writeEndOfPartition(writer);
+                UnfilteredSerializer.serializers.get(version).writeEndOfPartition(writer);
 
                 // It's possible we add no rows, just a top level deletion
                 if (written == 0)

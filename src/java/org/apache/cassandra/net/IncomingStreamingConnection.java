@@ -31,6 +31,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.streaming.StreamResultFuture;
 import org.apache.cassandra.streaming.messages.StreamInitMessage;
 import org.apache.cassandra.streaming.messages.StreamMessage;
+import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 
 /**
  * Thread to consume stream init messages.
@@ -39,11 +40,11 @@ public class IncomingStreamingConnection extends Thread implements Closeable
 {
     private static final Logger logger = LoggerFactory.getLogger(IncomingStreamingConnection.class);
 
-    private final int version;
+    private final ProtocolVersion version;
     public final Socket socket;
     private final Set<Closeable> group;
 
-    public IncomingStreamingConnection(int version, Socket socket, Set<Closeable> group)
+    public IncomingStreamingConnection(ProtocolVersion version, Socket socket, Set<Closeable> group)
     {
         super("STREAM-INIT-" + socket.getRemoteSocketAddress());
         this.version = version;
@@ -57,13 +58,16 @@ public class IncomingStreamingConnection extends Thread implements Closeable
     {
         try
         {
+            StreamVersion streamVersion = StreamVersion.of(version);
+
             // streaming connections are per-session and have a fixed version.
             // we can't do anything with a wrong-version stream connection, so drop it.
-            if (version != StreamMessage.CURRENT_VERSION)
-                throw new IOException(String.format("Received stream using protocol version %d (my version %d). Terminating connection", version, StreamMessage.CURRENT_VERSION));
+            if (streamVersion == null)
+                throw new IOException(String.format("Received stream using protocol version %d (my version %d). Terminating connection",
+                                                    version.handshakeVersion, StreamMessage.CURRENT_VERSION.handshakeVersion));
 
             DataInputPlus input = new DataInputStreamPlus(socket.getInputStream());
-            StreamInitMessage init = StreamInitMessage.serializer.deserialize(input, version);
+            StreamInitMessage init = StreamInitMessage.serializers.get(streamVersion).deserialize(input);
 
             //Set SO_TIMEOUT on follower side
             if (!init.isForOutgoing)
@@ -73,7 +77,7 @@ public class IncomingStreamingConnection extends Thread implements Closeable
             // The receiving side distinguish two connections by looking at StreamInitMessage#isForOutgoing.
             // Note: we cannot use the same socket for incoming and outgoing streams because we want to
             // parallelize said streams and the socket is blocking, so we might deadlock.
-            StreamResultFuture.initReceivingSide(init.sessionIndex, init.planId, init.description, init.from, this, init.isForOutgoing, version, init.keepSSTableLevel, init.isIncremental, init.pendingRepair);
+            StreamResultFuture.initReceivingSide(init.sessionIndex, init.planId, init.description, init.from, this, init.isForOutgoing, streamVersion, init.keepSSTableLevel, init.isIncremental, init.pendingRepair);
         }
         catch (Throwable t)
         {

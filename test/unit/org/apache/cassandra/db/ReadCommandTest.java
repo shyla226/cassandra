@@ -37,8 +37,12 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.monitoring.AbortedOperationException;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.Row;
@@ -49,20 +53,16 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.versioning.Version;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class ReadCommandTest
 {
-    private static final int abortQueryTimeoutMillis = 10;
-    private static final int slowQueryTimeoutMillis = 500;
-
     private static final String KEYSPACE = "ReadCommandTest";
     private static final String CF1 = "Standard1";
     private static final String CF2 = "Standard2";
@@ -119,10 +119,17 @@ public class ReadCommandTest
         ReadCommand readCommand = Util.cmd(cfs).build();
         assertEquals(2, Util.getAll(readCommand).size());
 
-        readCommand.monitor(System.currentTimeMillis(), abortQueryTimeoutMillis, slowQueryTimeoutMillis, false);
-        readCommand.abort();
+        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        assertEquals(0, Util.getAll(readCommand).size());
+        try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
+        {
+            PartitionIterators.consume(iterator);
+            fail("The command should have been aborted");
+        }
+        catch (AbortedOperationException e)
+        {
+            // Expected
+        }
     }
 
     @Test
@@ -152,10 +159,17 @@ public class ReadCommandTest
         assertEquals(1, partitions.size());
         assertEquals(2, partitions.get(0).rowCount());
 
-        readCommand.monitor(System.currentTimeMillis(), abortQueryTimeoutMillis, slowQueryTimeoutMillis, false);
-        readCommand.abort();
+        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        assertEquals(0, Util.getAll(readCommand).size());
+        try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
+        {
+            PartitionIterators.consume(iterator);
+            fail("The command should have been aborted");
+        }
+        catch (AbortedOperationException e)
+        {
+            // Expected
+        }
     }
 
     @Test
@@ -185,10 +199,17 @@ public class ReadCommandTest
         assertEquals(1, partitions.size());
         assertEquals(2, partitions.get(0).rowCount());
 
-        readCommand.monitor(System.currentTimeMillis(), abortQueryTimeoutMillis, slowQueryTimeoutMillis, false);
-        readCommand.abort();
+        Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        assertEquals(0, Util.getAll(readCommand).size());
+        try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
+        {
+            PartitionIterators.consume(iterator);
+            fail("The command should have been aborted");
+        }
+        catch (AbortedOperationException e)
+        {
+            // Expected
+        }
     }
 
     @Test
@@ -228,6 +249,7 @@ public class ReadCommandTest
         RowFilter rowFilter = RowFilter.create();
         Slice slice = Slice.make(ClusteringBound.BOTTOM, ClusteringBound.TOP);
         ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(Slices.with(cfs.metadata().comparator, slice), false);
+        EncodingVersion version = Version.last(EncodingVersion.class);
 
         for (String[][] group : groups)
         {
@@ -259,10 +281,7 @@ public class ReadCommandTest
             try (UnfilteredPartitionIterator iter = query.executeLocally().blockingGet();
                  DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter,
-                                                                                columnFilter,
-                                                                                buffer,
-                                                                                MessagingService.current_version).blockingAwait();
+                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, columnFilter, buffer).blockingAwait();
                 buffers.add(buffer.buffer());
             }
         }
@@ -274,11 +293,10 @@ public class ReadCommandTest
         {
             try (DataInputBuffer in = new DataInputBuffer(buffer, true))
             {
-                iterators.add(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in,
-                                                                                                MessagingService.current_version,
-                                                                                                cfs.metadata(),
-                                                                                                columnFilter,
-                                                                                                SerializationHelper.Flag.LOCAL));
+                iterators.add(UnfilteredPartitionIterators.serializerForIntraNode(version).deserialize(in,
+                                                                                                       cfs.metadata(),
+                                                                                                       columnFilter,
+                                                                                                       SerializationHelper.Flag.LOCAL));
             }
         }
 

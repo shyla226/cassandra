@@ -19,12 +19,13 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import io.reactivex.Scheduler;
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -40,12 +41,11 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
 
 public class DataResolver extends ResponseResolver
 {
     @VisibleForTesting
-    final List<AsyncOneResponse> repairResults = Collections.synchronizedList(new ArrayList<>());
+    final ReadRepairFuture repairResults = new ReadRepairFuture();
     private final long queryStartNanoTime;
 
     public DataResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount, long queryStartNanoTime)
@@ -56,7 +56,7 @@ public class DataResolver extends ResponseResolver
 
     public PartitionIterator getData()
     {
-        ReadResponse response = responses.iterator().next().payload;
+        ReadResponse response = responses.iterator().next().payload();
         return UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec());
     }
 
@@ -69,9 +69,9 @@ public class DataResolver extends ResponseResolver
         InetAddress[] sources = new InetAddress[count];
         for (int i = 0; i < count; i++)
         {
-            MessageIn<ReadResponse> msg = responses.get(i);
-            iters.add(msg.payload.makeIterator(command));
-            sources[i] = msg.from;
+            Response<ReadResponse> msg = responses.get(i);
+            iters.add(msg.payload().makeIterator(command));
+            sources[i] = msg.from();
         }
 
         // Even though every responses should honor the limit, we might have more than requested post reconciliation,
@@ -157,9 +157,14 @@ public class DataResolver extends ResponseResolver
         {
             try
             {
-                FBUtilities.waitOnFutures(repairResults, DatabaseDescriptor.getWriteRpcTimeout());
+                repairResults.get(DatabaseDescriptor.getWriteRpcTimeout(), TimeUnit.MILLISECONDS);
             }
-            catch (TimeoutException ex)
+            catch (InterruptedException | ExecutionException e)
+            {
+                // Note that we rely on the fact that ReadRepairCallback ignores error and can't throw ExecutionException
+                throw new AssertionError(e);
+            }
+            catch (TimeoutException e)
             {
                 // We got all responses, but timed out while repairing
                 int blockFor = consistency.blockFor(keyspace);
@@ -391,11 +396,12 @@ public class DataResolver extends ResponseResolver
                     if (repairs[i] == null)
                         continue;
 
+                    InetAddress source = sources[i];
                     // use a separate verb here because we don't want these to be get the white glove hint-
                     // on-timeout behavior that a "real" mutation gets
-                    Tracing.trace("Sending read-repair-mutation to {}", sources[i]);
-                    MessageOut<Mutation> msg = new Mutation(repairs[i]).createMessage(MessagingService.Verb.READ_REPAIR);
-                    repairResults.add(MessagingService.instance().sendRR(msg, sources[i]));
+                    Tracing.trace("Sending read-repair-mutation to {}", source);
+                    Request<Mutation, EmptyPayload> request = Verbs.WRITES.READ_REPAIR.newRequest(source, new Mutation(repairs[i]));
+                    MessagingService.instance().send(request, repairResults.newRepairMessageCallback());
                 }
             }
         }
@@ -528,29 +534,13 @@ public class DataResolver extends ResponseResolver
             {
                 DataResolver resolver = new DataResolver(keyspace, retryCommand, ConsistencyLevel.ONE, 1, queryStartNanoTime);
                 ReadCallback handler = new ReadCallback(resolver, ConsistencyLevel.ONE, retryCommand, Collections.singletonList(source), queryStartNanoTime);
-                if (StorageProxy.canDoLocalRequest(source))
-                {
-                    if (command instanceof SinglePartitionReadCommand)
-                    {
-                        SinglePartitionReadCommand singleCommand = (SinglePartitionReadCommand) command;
-
-                        Scheduler scheduler = NettyRxScheduler.getForKey(command.metadata().keyspace, singleCommand.partitionKey(), false);
-
-                        scheduler.scheduleDirect(new StorageProxy.LocalReadRunnable(retryCommand, handler));
-                    }
-                    else
-                    {
-                        NettyRxScheduler.instance().scheduleDirect(() -> new StorageProxy.LocalReadRunnable(retryCommand, handler));
-                    }
-                }
-                else
-                    MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), source, handler);
+                MessagingService.instance().send(Verbs.READS.READ.newRequest(source, retryCommand), handler);
 
                 // We don't call handler.get() because we want to preserve tombstones since we're still in the middle of merging node results.
-                //FIXME: Need to rewrite this for the special tombstone case.
-                // handler.awaitResults();
+                // TODO - FIXME, make this non-blocking
+                handler.observable.blockingGet();
                 assert resolver.responses.size() == 1;
-                return UnfilteredPartitionIterators.getOnlyElement(resolver.responses.get(0).payload.makeIterator(command), retryCommand);
+                return UnfilteredPartitionIterators.getOnlyElement(resolver.responses.get(0).payload().makeIterator(command), retryCommand);
             }
         }
     }

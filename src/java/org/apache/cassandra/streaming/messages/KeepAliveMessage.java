@@ -28,12 +28,12 @@ public class KeepAliveMessage extends StreamMessage
 {
     public static Serializer<KeepAliveMessage> serializer = new Serializer<KeepAliveMessage>()
     {
-        public KeepAliveMessage deserialize(ReadableByteChannel in, int version, StreamSession session) throws IOException
+        public KeepAliveMessage deserialize(ReadableByteChannel in, StreamVersion version, StreamSession session) throws IOException
         {
             return new KeepAliveMessage();
         }
 
-        public void serialize(KeepAliveMessage message, DataOutputStreamPlus out, int version, StreamSession session)
+        public void serialize(KeepAliveMessage message, DataOutputStreamPlus out, StreamVersion version, StreamSession session)
         {}
     };
 

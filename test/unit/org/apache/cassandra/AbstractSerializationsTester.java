@@ -19,13 +19,13 @@
  */
 package org.apache.cassandra;
 
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingVersion;
+import org.apache.cassandra.utils.Serializer;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -36,24 +36,26 @@ import java.util.Map;
 
 public class AbstractSerializationsTester
 {
-    protected static final String CUR_VER = System.getProperty("cassandra.version", "3.0");
-    protected static final Map<String, Integer> VERSION_MAP = new HashMap<String, Integer> ()
+    protected static final String CUR_VER = System.getProperty("cassandra.version", "dse-6.0");
+    protected static final Map<String, MessagingVersion> VERSION_MAP = new HashMap<String, MessagingVersion>()
     {{
-        put("3.0", MessagingService.VERSION_30);
+        put("3.0", MessagingVersion.OSS_30);
+        put("4.0", MessagingVersion.OSS_40);
+        put("dse-6.0", MessagingVersion.DSE_60);
     }};
 
     protected static final boolean EXECUTE_WRITES = Boolean.getBoolean("cassandra.test-serialization-writes");
 
-    protected static int getVersion()
+    protected static MessagingVersion getVersion()
     {
         return VERSION_MAP.get(CUR_VER);
     }
 
-    protected <T> void testSerializedSize(T obj, IVersionedSerializer<T> serializer) throws IOException
+    protected <T> void testSerializedSize(T obj, Serializer<T> serializer) throws IOException
     {
         DataOutputBuffer out = new DataOutputBuffer();
-        serializer.serialize(obj, out, getVersion());
-        assert out.getLength() == serializer.serializedSize(obj, getVersion());
+        serializer.serialize(obj, out);
+        assert out.getLength() == serializer.serializedSize(obj);
     }
 
     protected static DataInputStreamPlus getInput(String name) throws IOException

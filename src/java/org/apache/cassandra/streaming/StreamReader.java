@@ -174,7 +174,7 @@ public class StreamReader
         {
             this.metadata = metadata;
             this.in = new DataInputPlus.DataInputStreamPlus(in);
-            this.helper = new SerializationHelper(metadata, version.correspondingMessagingVersion(), SerializationHelper.Flag.PRESERVE_SIZE);
+            this.helper = new SerializationHelper(metadata, version.encodingVersion(), SerializationHelper.Flag.PRESERVE_SIZE);
             this.header = header;
         }
 
@@ -182,7 +182,7 @@ public class StreamReader
         {
             key = metadata.partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             partitionLevelDeletion = DeletionTime.serializer.deserialize(in);
-            iterator = SSTableSimpleIterator.create(metadata, in, header, helper, partitionLevelDeletion);
+            iterator = SSTableSimpleIterator.create(metadata, in, header, helper);
             staticRow = iterator.readStaticRow();
             return this;
         }

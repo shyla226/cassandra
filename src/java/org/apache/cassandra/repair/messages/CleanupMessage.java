@@ -23,21 +23,43 @@ import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Message to cleanup repair resources on replica nodes.
  *
  * @since 2.1.6
  */
-public class CleanupMessage extends RepairMessage
+public class CleanupMessage extends RepairMessage<CleanupMessage>
 {
-    public static MessageSerializer serializer = new CleanupMessageSerializer();
+    public static Versioned<RepairVersion, MessageSerializer<CleanupMessage>> serializers = RepairVersion.versioned(v -> new MessageSerializer<CleanupMessage>(v)
+    {
+        public void serialize(CleanupMessage message, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(message.parentRepairSession, out);
+        }
+
+        public CleanupMessage deserialize(DataInputPlus in) throws IOException
+        {
+            UUID parentRepairSession = UUIDSerializer.serializer.deserialize(in);
+            return new CleanupMessage(parentRepairSession);
+        }
+
+        public long serializedSize(CleanupMessage message)
+        {
+            return UUIDSerializer.serializer.serializedSize(message.parentRepairSession);
+        }
+    });
+
     public final UUID parentRepairSession;
 
     public CleanupMessage(UUID parentRepairSession)
     {
-        super(Type.CLEANUP, null);
+        super(null);
         this.parentRepairSession = parentRepairSession;
     }
 
@@ -47,32 +69,22 @@ public class CleanupMessage extends RepairMessage
         if (!(o instanceof CleanupMessage))
             return false;
         CleanupMessage other = (CleanupMessage) o;
-        return messageType == other.messageType &&
-               parentRepairSession.equals(other.parentRepairSession);
+        return parentRepairSession.equals(other.parentRepairSession);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(messageType, parentRepairSession);
+        return Objects.hash(parentRepairSession);
     }
 
-    public static class CleanupMessageSerializer implements MessageSerializer<CleanupMessage>
+    public MessageSerializer<CleanupMessage> serializer(RepairVersion version)
     {
-        public void serialize(CleanupMessage message, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(message.parentRepairSession, out, version);
-        }
+        return serializers.get(version);
+    }
 
-        public CleanupMessage deserialize(DataInputPlus in, int version) throws IOException
-        {
-            UUID parentRepairSession = UUIDSerializer.serializer.deserialize(in, version);
-            return new CleanupMessage(parentRepairSession);
-        }
-
-        public long serializedSize(CleanupMessage message, int version)
-        {
-            return UUIDSerializer.serializer.serializedSize(message.parentRepairSession, version);
-        }
+    public Verb<CleanupMessage, ?> verb()
+    {
+        return Verbs.REPAIR.CLEANUP;
     }
 }

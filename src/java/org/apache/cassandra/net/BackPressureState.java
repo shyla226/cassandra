@@ -27,7 +27,7 @@ public interface BackPressureState
     /**
      * Called when a message is sent to a replica.
      */
-    void onMessageSent(MessageOut<?> message);
+    void onRequestSent(Request<?, ?> request);
 
     /**
      * Called when a response is received from a replica.

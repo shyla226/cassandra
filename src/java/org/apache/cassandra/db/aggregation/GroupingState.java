@@ -22,10 +22,13 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * {@code GroupMaker} state.
@@ -43,7 +46,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 public final class GroupingState
 {
-    public static final GroupingState.Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     public static final GroupingState EMPTY_STATE = new GroupingState(null, null);
 
@@ -93,9 +96,14 @@ public final class GroupingState
         return clustering != null;
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
-        public void serialize(GroupingState state, DataOutputPlus out, int version, ClusteringComparator comparator) throws IOException
+        private Serializer(ReadVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(GroupingState state, DataOutputPlus out, ClusteringComparator comparator) throws IOException
         {
             boolean hasPartitionKey = state.partitionKey != null;
             out.writeBoolean(hasPartitionKey);
@@ -105,11 +113,11 @@ public final class GroupingState
                 boolean hasClustering = state.hasClustering();
                 out.writeBoolean(hasClustering);
                 if (hasClustering)
-                    Clustering.serializer.serialize(state.clustering, out, version, comparator.subtypes());
+                    Clustering.serializer.serialize(state.clustering, out, version.encodingVersion.clusteringVersion, comparator.subtypes());
             }
         }
 
-        public GroupingState deserialize(DataInputPlus in, int version, ClusteringComparator comparator) throws IOException
+        public GroupingState deserialize(DataInputPlus in, ClusteringComparator comparator) throws IOException
         {
             if (!in.readBoolean())
                 return GroupingState.EMPTY_STATE;
@@ -117,12 +125,12 @@ public final class GroupingState
             ByteBuffer partitionKey = ByteBufferUtil.readWithVIntLength(in);
             Clustering clustering = null;
             if (in.readBoolean())
-                clustering = Clustering.serializer.deserialize(in, version, comparator.subtypes());
+                clustering = Clustering.serializer.deserialize(in, version.encodingVersion.clusteringVersion, comparator.subtypes());
 
             return new GroupingState(partitionKey, clustering);
         }
 
-        public long serializedSize(GroupingState state, int version, ClusteringComparator comparator)
+        public long serializedSize(GroupingState state, ClusteringComparator comparator)
         {
             boolean hasPartitionKey = state.partitionKey != null;
             long size = TypeSizes.sizeof(hasPartitionKey);
@@ -133,7 +141,7 @@ public final class GroupingState
                 size += TypeSizes.sizeof(hasClustering);
                 if (hasClustering)
                 {
-                    size += Clustering.serializer.serializedSize(state.clustering, version, comparator.subtypes());
+                    size += Clustering.serializer.serializedSize(state.clustering, version.encodingVersion.clusteringVersion, comparator.subtypes());
                 }
             }
             return size;

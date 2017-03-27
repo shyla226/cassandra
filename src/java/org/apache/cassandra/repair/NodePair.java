@@ -22,10 +22,10 @@ import java.net.InetAddress;
 
 import com.google.common.base.Objects;
 
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.CompactEndpointSerializationHelper;
+import org.apache.cassandra.utils.Serializer;
 
 /**
  * NodePair is used for repair message body to indicate the pair of nodes.
@@ -34,7 +34,7 @@ import org.apache.cassandra.net.CompactEndpointSerializationHelper;
  */
 public class NodePair
 {
-    public static IVersionedSerializer<NodePair> serializer = new NodePairSerializer();
+    public static Serializer<NodePair> serializer = new NodePairSerializer();
 
     public final InetAddress endpoint1;
     public final InetAddress endpoint2;
@@ -61,22 +61,22 @@ public class NodePair
         return Objects.hashCode(endpoint1, endpoint2);
     }
 
-    public static class NodePairSerializer implements IVersionedSerializer<NodePair>
+    public static class NodePairSerializer implements Serializer<NodePair>
     {
-        public void serialize(NodePair nodePair, DataOutputPlus out, int version) throws IOException
+        public void serialize(NodePair nodePair, DataOutputPlus out) throws IOException
         {
             CompactEndpointSerializationHelper.serialize(nodePair.endpoint1, out);
             CompactEndpointSerializationHelper.serialize(nodePair.endpoint2, out);
         }
 
-        public NodePair deserialize(DataInputPlus in, int version) throws IOException
+        public NodePair deserialize(DataInputPlus in) throws IOException
         {
             InetAddress ep1 = CompactEndpointSerializationHelper.deserialize(in);
             InetAddress ep2 = CompactEndpointSerializationHelper.deserialize(in);
             return new NodePair(ep1, ep2);
         }
 
-        public long serializedSize(NodePair nodePair, int version)
+        public long serializedSize(NodePair nodePair)
         {
             return 2 * CompactEndpointSerializationHelper.serializedSize(nodePair.endpoint1);
         }

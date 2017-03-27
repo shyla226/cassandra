@@ -33,6 +33,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
@@ -44,9 +46,6 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -161,14 +160,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     GossipDigestSyn digestSynMessage = new GossipDigestSyn(DatabaseDescriptor.getClusterName(),
                                                                            DatabaseDescriptor.getPartitionerName(),
                                                                            gDigests);
-                    MessageOut<GossipDigestSyn> message = new MessageOut<GossipDigestSyn>(MessagingService.Verb.GOSSIP_DIGEST_SYN,
-                                                                                          digestSynMessage,
-                                                                                          GossipDigestSyn.serializer);
+
                     /* Gossip to some random live member */
-                    boolean gossipedToSeed = doGossipToLiveMember(message);
+                    boolean gossipedToSeed = doGossipToLiveMember(digestSynMessage);
 
                     /* Gossip to some unreachable member with some probability to check if he is back up */
-                    maybeGossipToUnreachableMember(message);
+                    maybeGossipToUnreachableMember(digestSynMessage);
 
                     /* Gossip to a seed if we did not do so above, or we have seen less nodes
                        than there are seeds.  This prevents partitions where each group of nodes
@@ -187,7 +184,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
                        See CASSANDRA-150 for more exposition. */
                     if (!gossipedToSeed || liveEndpoints.size() < seeds.size())
-                        maybeGossipToSeed(message);
+                        maybeGossipToSeed(digestSynMessage);
 
                     doStatusCheck();
                 }
@@ -223,9 +220,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
     }
 
-    public void setLastProcessedMessageAt(long timeInMillis)
+    public void onNewMessageProcessed()
     {
-        this.lastProcessedMessageAt = timeInMillis;
+        this.lastProcessedMessageAt = System.currentTimeMillis();
     }
 
     public boolean seenAnySeed()
@@ -646,7 +643,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      * @param epSet   a set of endpoint from which a random endpoint is chosen.
      * @return true if the chosen endpoint is also a seed.
      */
-    private boolean sendGossip(MessageOut<GossipDigestSyn> message, Set<InetAddress> epSet)
+    private boolean sendGossip(GossipDigestSyn message, Set<InetAddress> epSet)
     {
         List<InetAddress> liveEndpoints = ImmutableList.copyOf(epSet);
 
@@ -660,12 +657,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.trace("Sending a GossipDigestSyn to {} ...", to);
         if (firstSynSendAt == 0)
             firstSynSendAt = System.nanoTime();
-        MessagingService.instance().sendOneWay(message, to);
+        MessagingService.instance().send(Verbs.GOSSIP.SYN.newRequest(to, message));
         return seeds.contains(to);
     }
 
     /* Sends a Gossip message to a live member and returns true if the recipient was a seed */
-    private boolean doGossipToLiveMember(MessageOut<GossipDigestSyn> message)
+    private boolean doGossipToLiveMember(GossipDigestSyn message)
     {
         int size = liveEndpoints.size();
         if (size == 0)
@@ -674,7 +671,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     }
 
     /* Sends a Gossip message to an unreachable member */
-    private void maybeGossipToUnreachableMember(MessageOut<GossipDigestSyn> message)
+    private void maybeGossipToUnreachableMember(GossipDigestSyn message)
     {
         double liveEndpointCount = liveEndpoints.size();
         double unreachableEndpointCount = unreachableEndpoints.size();
@@ -689,7 +686,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     }
 
     /* Possibly gossip to a seed for facilitating partition healing */
-    private void maybeGossipToSeed(MessageOut<GossipDigestSyn> prod)
+    private void maybeGossipToSeed(GossipDigestSyn prod)
     {
         int size = seeds.size();
         if (size > 0)
@@ -990,23 +987,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     private void markAlive(final InetAddress addr, final EndpointState localState)
     {
         localState.markDead();
-
-        MessageOut<EchoMessage> echoMessage = new MessageOut<EchoMessage>(MessagingService.Verb.ECHO, EchoMessage.instance, EchoMessage.serializer);
         logger.trace("Sending a EchoMessage to {}", addr);
-        IAsyncCallback echoHandler = new IAsyncCallback()
-        {
-            public boolean isLatencyForSnitch()
-            {
-                return false;
-            }
-
-            public void response(MessageIn msg)
-            {
-                realMarkAlive(addr, localState);
-            }
-        };
-
-        MessagingService.instance().sendRR(echoMessage, addr, echoHandler);
+        MessagingService.instance()
+                        .sendSingleTarget(Verbs.GOSSIP.ECHO.newRequest(addr, EmptyPayload.instance))
+                        .thenAccept(msg -> realMarkAlive(addr, localState));
     }
 
     @VisibleForTesting
@@ -1378,11 +1362,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         // send a completely empty syn
         List<GossipDigest> gDigests = new ArrayList<GossipDigest>();
         GossipDigestSyn digestSynMessage = new GossipDigestSyn(DatabaseDescriptor.getClusterName(),
-                DatabaseDescriptor.getPartitionerName(),
-                gDigests);
-        MessageOut<GossipDigestSyn> message = new MessageOut<GossipDigestSyn>(MessagingService.Verb.GOSSIP_DIGEST_SYN,
-                digestSynMessage,
-                GossipDigestSyn.serializer);
+                                                               DatabaseDescriptor.getPartitionerName(),
+                                                               gDigests);
 
         inShadowRound = true;
         int slept = 0;
@@ -1394,8 +1375,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 { // CASSANDRA-8072, retry at the beginning and every 5 seconds
                     logger.trace("Sending shadow round GOSSIP DIGEST SYN to seeds {}", seeds);
 
-                    for (InetAddress seed : seeds)
-                        MessagingService.instance().sendOneWay(message, seed);
+                    MessagingService.instance().send(Verbs.GOSSIP.SYN.newDispatcher(seeds, digestSynMessage));
                 }
 
                 Thread.sleep(1000);
@@ -1526,9 +1506,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             logger.info("Announcing shutdown");
             addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
-            MessageOut message = new MessageOut(MessagingService.Verb.GOSSIP_SHUTDOWN);
-            for (InetAddress ep : liveEndpoints)
-                MessagingService.instance().sendOneWay(message, ep);
+
+            MessagingService.instance().send(Verbs.GOSSIP.SHUTDOWN.newDispatcher(liveEndpoints, EmptyPayload.instance));
             Uninterruptibles.sleepUninterruptibly(Integer.getInteger("cassandra.shutdown_announce_in_ms", 2000), TimeUnit.MILLISECONDS);
         }
         else

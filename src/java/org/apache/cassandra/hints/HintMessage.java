@@ -19,6 +19,7 @@
 package org.apache.cassandra.hints;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -28,14 +29,15 @@ import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.UnknownTableException;
-import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * The message we use to dispatch and forward hints.
@@ -49,63 +51,96 @@ import org.apache.cassandra.utils.UUIDSerializer;
  * Scenario (2) means that we got a hint from a node that's going through decommissioning and is streaming its hints
  * elsewhere first.
  */
-public final class HintMessage
+public abstract class HintMessage
 {
-    public static final IVersionedSerializer<HintMessage> serializer = new Serializer();
+    public static final Versioned<HintsVersion, Serializer<HintMessage>> serializers = HintsVersion.versioned(HintSerializer::new);
 
     final UUID hostId;
 
-    @Nullable // can be null if we fail do decode the hint because of an unknown table id in it
-    final Hint hint;
-
-    @Nullable // will usually be null, unless a hint deserialization fails due to an unknown table id
-    final TableId unknownTableID;
-
-    HintMessage(UUID hostId, Hint hint)
+    HintMessage(UUID hostId)
     {
         this.hostId = hostId;
-        this.hint = hint;
-        this.unknownTableID = null;
     }
 
-    HintMessage(UUID hostId, TableId unknownTableID)
+    public static HintMessage create(UUID hostId, Hint hint)
     {
-        this.hostId = hostId;
-        this.hint = null;
-        this.unknownTableID = unknownTableID;
+        return new Simple(hostId, hint);
     }
 
-    public MessageOut<HintMessage> createMessageOut()
+    static HintMessage createEncoded(UUID hostId, ByteBuffer hint, HintsVersion version)
     {
-        return new MessageOut<>(MessagingService.Verb.HINT, this, serializer);
+        return new Encoded(hostId, hint, version);
     }
 
-    public static class Serializer implements IVersionedSerializer<HintMessage>
+    /**
+     * The hint sent.
+     *
+     * @return the hint sent.
+     * @throws UnknownTableException if the hint deserialization failed due ot an unknown table.
+     */
+    public abstract Hint hint() throws UnknownTableException;
+
+    abstract long getHintCreationTime();
+
+    protected abstract long serializedSize(HintsVersion version);
+    protected abstract void serialize(DataOutputPlus out, HintsVersion version) throws IOException;
+
+    /**
+     * A vanilla version of an HintMessage that contains a non-encoded hint.
+     */
+    private static class Simple extends HintMessage
     {
-        public long serializedSize(HintMessage message, int version)
+        @Nullable // can be null if we fail do decode the hint because of an unknown table id in it
+        private final Hint hint;
+
+        @Nullable // will usually be null, unless a hint deserialization fails due to an unknown table id
+        private final TableId unknownTableID;
+
+        private Simple(UUID hostId, Hint hint)
         {
-            long size = UUIDSerializer.serializer.serializedSize(message.hostId, version);
-
-            long hintSize = Hint.serializer.serializedSize(message.hint, version);
-            size += TypeSizes.sizeofUnsignedVInt(hintSize);
-            size += hintSize;
-
-            return size;
+            super(hostId);
+            this.hint = hint;
+            this.unknownTableID = null;
         }
 
-        public void serialize(HintMessage message, DataOutputPlus out, int version) throws IOException
+        private Simple(UUID hostId, TableId unknownTableID)
         {
-            Objects.requireNonNull(message.hint); // we should never *send* a HintMessage with null hint
+            super(hostId);
+            this.hint = null;
+            this.unknownTableID = unknownTableID;
+        }
 
-            UUIDSerializer.serializer.serialize(message.hostId, out, version);
+        public Hint hint() throws UnknownTableException
+        {
+            if (unknownTableID != null)
+                throw new UnknownTableException(unknownTableID);
 
+            return hint;
+        }
+
+        long getHintCreationTime()
+        {
+            return hint.creationTime;
+        }
+
+        protected long serializedSize(HintsVersion version)
+        {
+            Objects.requireNonNull(hint); // we should never *send* a HintMessage with null hint
+
+            long hintSize = Hint.serializers.get(version).serializedSize(hint);
+            return TypeSizes.sizeofUnsignedVInt(hintSize) + hintSize;
+        }
+
+        protected void serialize(DataOutputPlus out, HintsVersion version) throws IOException
+        {
+            Objects.requireNonNull(hint); // we should never *send* a HintMessage with null hint
             /*
              * We are serializing the hint size so that the receiver of the message could gracefully handle
              * deserialize failure when a table had been dropped, by simply skipping the unread bytes.
              */
-            out.writeUnsignedVInt(Hint.serializer.serializedSize(message.hint, version));
+            out.writeUnsignedVInt(Hint.serializers.get(version).serializedSize(hint));
 
-            Hint.serializer.serialize(message.hint, out, version);
+            Hint.serializers.get(version).serialize(hint, out);
         }
 
         /*
@@ -113,21 +148,96 @@ public final class HintMessage
          * that don't exist anymore. We want to handle that case gracefully instead of dropping the connection for every
          * one of them.
          */
-        public HintMessage deserialize(DataInputPlus in, int version) throws IOException
+        static Simple deserialize(UUID hostId, DataInputPlus in, HintsVersion version) throws IOException
         {
-            UUID hostId = UUIDSerializer.serializer.deserialize(in, version);
-
             long hintSize = in.readUnsignedVInt();
             TrackedDataInputPlus countingIn = new TrackedDataInputPlus(in);
             try
             {
-                return new HintMessage(hostId, Hint.serializer.deserialize(countingIn, version));
+                return new Simple(hostId, Hint.serializers.get(version).deserialize(countingIn));
             }
             catch (UnknownTableException e)
             {
                 in.skipBytes(Ints.checkedCast(hintSize - countingIn.getBytesRead()));
-                return new HintMessage(hostId, e.id);
+                return new Simple(hostId, e.id);
             }
+        }
+    }
+
+    /**
+     * A specialized version of {@link HintMessage} that takes an already encoded in a bytebuffer hint and sends it verbatim.
+     *
+     * An optimization for when dispatching a hint file of the current messaging version to a node of the same messaging version,
+     * which is the most common case. Saves on extra ByteBuffer allocations one redundant hint deserialization-serialization cycle.
+     *
+     * We never deserialize as an Encoded.
+     */
+    private static class Encoded extends HintMessage
+    {
+        private final ByteBuffer hint;
+        private final HintsVersion version;
+
+        private Encoded(UUID hostId, ByteBuffer hint, HintsVersion version)
+        {
+            super(hostId);
+            this.hint = hint;
+            this.version = version;
+        }
+
+        public Hint hint()
+        {
+            // Encoded is just used during dispatch where we explicitely want to avoid decoding the hint, so calling
+            // this is a misuse and we don't allow it.
+            throw new UnsupportedOperationException();
+        }
+
+        long getHintCreationTime()
+        {
+            return Hint.serializers.get(version).getHintCreationTime(hint);
+        }
+
+        protected long serializedSize(HintsVersion version)
+        {
+            if (this.version != version)
+                throw new IllegalArgumentException("serializedSize() called with non-matching version " + version);
+
+            return TypeSizes.sizeofUnsignedVInt(hint.remaining())
+                   + hint.remaining();
+        }
+
+        protected void serialize(DataOutputPlus out, HintsVersion version) throws IOException
+        {
+            if (this.version != version)
+                throw new IllegalArgumentException("serialize() called with non-matching version " + version);
+
+            out.writeUnsignedVInt(hint.remaining());
+            out.write(hint);
+        }
+    }
+
+    private static class HintSerializer extends VersionDependent<HintsVersion> implements Serializer<HintMessage>
+    {
+        private HintSerializer(HintsVersion version)
+        {
+            super(version);
+        }
+
+        public long serializedSize(HintMessage message)
+        {
+            return UUIDSerializer.serializer.serializedSize(message.hostId)
+                   + message.serializedSize(version);
+        }
+
+        public void serialize(HintMessage message, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(message.hostId, out);
+            message.serialize(out, version);
+        }
+
+        public HintMessage deserialize(DataInputPlus in) throws IOException
+        {
+            UUID hostId = UUIDSerializer.serializer.deserialize(in);
+            return Simple.deserialize(hostId, in, version);
         }
     }
 }

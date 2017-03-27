@@ -18,62 +18,62 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
-import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Single;
-import org.apache.cassandra.db.*;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import io.reactivex.subjects.BehaviorSubject;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.EmptyIterators;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
 
 
-public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
+public class ReadCallback implements MessageCallback<ReadResponse>
 {
-    protected static final Logger logger = LoggerFactory.getLogger( ReadCallback.class );
+    protected static final Logger logger = LoggerFactory.getLogger(ReadCallback.class);
 
-    public final ResponseResolver resolver;
-    private final long queryStartNanoTime;
-    final int blockfor;
+    final ResponseResolver resolver;
     final List<InetAddress> endpoints;
+
+    private final long queryStartNanoTime;
+    private final int blockfor;
     private final ReadCommand command;
     private final ConsistencyLevel consistencyLevel;
-    private volatile int received = 0;
-    private volatile int failures = 0;
+
+    private final AtomicInteger received = new AtomicInteger(0);
+    private final AtomicInteger failures = new AtomicInteger(0);
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
 
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
 
-    final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
+    private final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
     final Single<PartitionIterator> observable;
-
-    // the core on which a local request is scheduled, if any
-    private int localCoreId = -1;
 
     /**
      * Constructor when response count has to be calculated and blocked for.
@@ -101,12 +101,11 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.observable = makeObservable();
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
-        assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
+        //assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
     }
-
 
     private Single<PartitionIterator> makeObservable()
     {
@@ -115,48 +114,24 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                .first(EmptyIterators.partition())
                .onErrorResumeNext(exc ->
                                   {
+                                      int received = this.received.get();
+                                      boolean failed = !(exc instanceof TimeoutException);
+
                                       if (Tracing.isTracing())
                                       {
                                           String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                                          Tracing.trace("{}; received {} of {} responses{}", new Object[]{ (exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
+                                          Tracing.trace("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
                                       }
                                       else if (logger.isDebugEnabled())
                                       {
                                           String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                                          logger.debug("{}; received {} of {} responses{}", new Object[]{ (exc instanceof TimeoutException ? "Timed out" : "Failed"), received, blockfor, gotData });
+                                          logger.debug("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
                                       }
 
-                   if (exc instanceof TimeoutException)
-                   {
-                       if (NettyRxScheduler.isValidCoreId(localCoreId))
-                       {
-                           logger.info("Local request was running on core {}, thread stack:\n{}",
-                                       localCoreId,
-                                       Arrays.stream(NettyRxScheduler.getForCore(localCoreId).cpuThread.getStackTrace())
-                                             .map(e -> String.format("\tat %s\n", e))
-                                             .collect(Collectors.toList()));
-                       }
-                       else
-                       {
-                           logger.debug("Local request was running on unassigned or invalid core ({})", localCoreId);
-                       }
-
-                       return Single.error(new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
-                   }
-
-                                      return Single.error(exc);
+                                      return Single.error(failed
+                                                          ? exc
+                                                          : new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
                                   });
-    }
-
-    /**
-     * Store the information of which core a local request is running on, if any. This is helpful
-     * for debugging local query timeouts.
-     *
-     * @param localCoreId - the core id of the local read request, null if running on a scheduler with unassinged core
-     */
-    public void setLocalCoreId(int localCoreId)
-    {
-        this.localCoreId = localCoreId;
     }
 
     public Single<PartitionIterator> get()
@@ -164,7 +139,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         return observable;
     }
 
-    public boolean hasValue()
+    boolean hasValue()
     {
         return publishSubject.hasValue();
     }
@@ -174,12 +149,10 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         return blockfor;
     }
 
-    public void response(MessageIn<ReadResponse> message)
+    public void onResponse(Response<ReadResponse> message)
     {
         resolver.preprocess(message);
-        int n = waitingFor(message.from)
-              ? ++received
-              : received;
+        int n = waitingFor(message.from()) ? received.incrementAndGet() : received.get();
 
         if (n >= blockfor && resolver.isDataPresent())
         {
@@ -218,36 +191,13 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     private boolean waitingFor(InetAddress from)
     {
         return consistencyLevel.isDatacenterLocal()
-             ? DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from))
-             : true;
+               ? DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from))
+               : true;
     }
 
-    /**
-     * @return the current number of received responses
-     */
-    public int getReceivedCount()
-    {
-        return received;
-    }
-
-    public void response(ReadResponse result)
-    {
-        MessageIn<ReadResponse> message = MessageIn.create(FBUtilities.getBroadcastAddress(),
-                                                           result,
-                                                           Collections.<String, byte[]>emptyMap(),
-                                                           MessagingService.Verb.INTERNAL_RESPONSE,
-                                                           MessagingService.current_version);
-        response(message);
-    }
-
-    public void assureSufficientLiveNodes() throws UnavailableException
+    void assureSufficientLiveNodes() throws UnavailableException
     {
         consistencyLevel.assureSufficientLiveNodes(keyspace, endpoints);
-    }
-
-    public boolean isLatencyForSnitch()
-    {
-        return true;
     }
 
     private class AsyncRepairRunner implements Runnable
@@ -255,7 +205,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         private final TraceState traceState;
         private final long queryStartNanoTime;
 
-        public AsyncRepairRunner(TraceState traceState, long queryStartNanoTime)
+        AsyncRepairRunner(TraceState traceState, long queryStartNanoTime)
         {
             this.traceState = traceState;
             this.queryStartNanoTime = queryStartNanoTime;
@@ -283,23 +233,19 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
                 final DataResolver repairResolver = new DataResolver(keyspace, command, consistencyLevel, endpoints.size(), queryStartNanoTime);
                 AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
-
-                for (InetAddress endpoint : endpoints)
-                    MessagingService.instance().sendRR(command.createMessage(), endpoint, repairHandler);
+                MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
             }
         }
     }
 
     @Override
-    public void onFailure(InetAddress from, RequestFailureReason failureReason)
+    public void onFailure(FailureResponse<ReadResponse> failureResponse)
     {
-        int n = waitingFor(from)
-              ? ++failures
-              : failures;
+        int n = waitingFor(failureResponse.from()) ? failures.incrementAndGet() : failures.get();
 
-        failureReasonByEndpoint.put(from, failureReason);
+        failureReasonByEndpoint.put(failureResponse.from(), failureResponse.reason());
 
         if (blockfor + n > endpoints.size())
-            publishSubject.onError(new ReadFailureException(consistencyLevel, received, blockfor, resolver.isDataPresent(), failureReasonByEndpoint));
+            publishSubject.onError(new ReadFailureException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent(), failureReasonByEndpoint));
     }
 }

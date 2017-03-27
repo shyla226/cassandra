@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.reactivex.Completable;
@@ -27,26 +28,35 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.SerializationHelper;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 // TODO convert this to a Builder pattern instead of encouraging M.add directly,
 // which is less-efficient since we have to keep a mutable HashMap around
 public class Mutation implements IMutation
 {
-    public static final MutationSerializer serializer = new MutationSerializer();
+    /**
+     * The raw serializer is used for local serialization (commit log, hints, schema), we need to expose
+     * MutationSerializer because some callers need to specify the serialization flag, {@link SerializationHelper.Flag}
+     * when calling deserialize().
+     */
+    public static final Versioned<EncodingVersion, MutationSerializer> rawSerializers = EncodingVersion.versioned(MutationSerializer::new);
 
-    public static final String FORWARD_TO = "FWD_TO";
-    public static final String FORWARD_FROM = "FWD_FRM";
+    /**
+     * The serializer returns a raw serializer for callers that prefer to retrieve it by WriteVersion
+     * and do not need to specify the serialization flag, {@link SerializationHelper.Flag} when calling deserialize().
+     */
+    public static final Versioned<WriteVersion, Serializer<Mutation>> serializers = WriteVersion.versioned(v -> rawSerializers.get(v.encodingVersion));
 
     // todo this is redundant
     // when we remove it, also restore SerializationsTest.testMutationRead to not regenerate new Mutations each test
@@ -224,6 +234,13 @@ public class Mutation implements IMutation
         return ks.apply(this, durableWrites, true, isDroppable);
     }
 
+    public CompletableFuture<?> applyFuture()
+    {
+        CompletableFuture<?> ret = new CompletableFuture<>();
+        applyAsync().subscribe(()-> ret.complete(null), ex -> ret.completeExceptionally(ex));
+        return ret;
+    }
+
     public Completable applyAsync()
     {
         return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
@@ -251,16 +268,6 @@ public class Mutation implements IMutation
     public void applyUnsafe()
     {
         apply(false);
-    }
-
-    public MessageOut<Mutation> createMessage()
-    {
-        return createMessage(MessagingService.Verb.MUTATION);
-    }
-
-    public MessageOut<Mutation> createMessage(MessagingService.Verb verb)
-    {
-        return new MessageOut<>(verb, this, serializer);
     }
 
     public long getTimeout()
@@ -375,9 +382,17 @@ public class Mutation implements IMutation
         public Mutation build();
     }
 
-    public static class MutationSerializer implements IVersionedSerializer<Mutation>
+    public static class MutationSerializer extends VersionDependent<EncodingVersion> implements Serializer<Mutation>
     {
-        public void serialize(Mutation mutation, DataOutputPlus out, int version) throws IOException
+        private final PartitionUpdate.PartitionUpdateSerializer partitionUpdateSerializer;
+
+        private MutationSerializer(EncodingVersion version)
+        {
+            super(version);
+            this.partitionUpdateSerializer = PartitionUpdate.serializers.get(version);
+        }
+
+        public void serialize(Mutation mutation, DataOutputPlus out) throws IOException
         {
             /* serialize the modifications in the mutation */
             int size = mutation.modifications.size();
@@ -385,15 +400,15 @@ public class Mutation implements IMutation
 
             assert size > 0;
             for (Map.Entry<TableId, PartitionUpdate> entry : mutation.modifications.entrySet())
-                PartitionUpdate.serializer.serialize(entry.getValue(), out, version);
+                partitionUpdateSerializer.serialize(entry.getValue(), out);
         }
 
-        public Mutation deserialize(DataInputPlus in, int version, SerializationHelper.Flag flag) throws IOException
+        public Mutation deserialize(DataInputPlus in, SerializationHelper.Flag flag) throws IOException
         {
             int size = (int)in.readUnsignedVInt();
             assert size > 0;
 
-            PartitionUpdate update = PartitionUpdate.serializer.deserialize(in, version, flag);
+            PartitionUpdate update = partitionUpdateSerializer.deserialize(in, flag);
             if (size == 1)
                 return new Mutation(update);
 
@@ -403,23 +418,23 @@ public class Mutation implements IMutation
             modifications.put(update.metadata().id, update);
             for (int i = 1; i < size; ++i)
             {
-                update = PartitionUpdate.serializer.deserialize(in, version, flag);
+                update = partitionUpdateSerializer.deserialize(in, flag);
                 modifications.put(update.metadata().id, update);
             }
 
             return new Mutation(update.metadata().keyspace, dk, modifications);
         }
 
-        public Mutation deserialize(DataInputPlus in, int version) throws IOException
+        public Mutation deserialize(DataInputPlus in) throws IOException
         {
-            return deserialize(in, version, SerializationHelper.Flag.FROM_REMOTE);
+            return deserialize(in, SerializationHelper.Flag.FROM_REMOTE);
         }
 
-        public long serializedSize(Mutation mutation, int version)
+        public long serializedSize(Mutation mutation)
         {
-            int size = TypeSizes.sizeofUnsignedVInt(mutation.modifications.size());
+            long size = TypeSizes.sizeofUnsignedVInt(mutation.modifications.size());
             for (Map.Entry<TableId, PartitionUpdate> entry : mutation.modifications.entrySet())
-                size += PartitionUpdate.serializer.serializedSize(entry.getValue(), version);
+                size += partitionUpdateSerializer.serializedSize(entry.getValue());
 
             return size;
         }

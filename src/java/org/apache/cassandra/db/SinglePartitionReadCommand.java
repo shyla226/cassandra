@@ -22,13 +22,13 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 import io.reactivex.*;
 import io.reactivex.schedulers.Schedulers;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
 import org.apache.cassandra.cache.IRowCacheEntry;
@@ -36,10 +36,11 @@ import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.lifecycle.*;
-import org.apache.cassandra.db.monitoring.Monitorable;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -47,8 +48,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -75,31 +74,16 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
-    public SinglePartitionReadCommand(boolean isDigest,
-                                      int digestVersion,
-                                      TableMetadata metadata,
-                                      int nowInSec,
-                                      ColumnFilter columnFilter,
-                                      RowFilter rowFilter,
-                                      DataLimits limits,
-                                      DecoratedKey partitionKey,
-                                      ClusteringIndexFilter clusteringIndexFilter)
+    private SinglePartitionReadCommand(DigestVersion digestVersion,
+                                       TableMetadata metadata,
+                                       int nowInSec,
+                                       ColumnFilter columnFilter,
+                                       RowFilter rowFilter,
+                                       DataLimits limits,
+                                       DecoratedKey partitionKey,
+                                       ClusteringIndexFilter clusteringIndexFilter)
     {
-        this(isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter, null);
-    }
-
-    public SinglePartitionReadCommand(boolean isDigest,
-                                      int digestVersion,
-                                      TableMetadata metadata,
-                                      int nowInSec,
-                                      ColumnFilter columnFilter,
-                                      RowFilter rowFilter,
-                                      DataLimits limits,
-                                      DecoratedKey partitionKey,
-                                      ClusteringIndexFilter clusteringIndexFilter,
-                                      Monitorable optionalMonitor)
-    {
-        super(Kind.SINGLE_PARTITION, isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, optionalMonitor);
+        super(Kind.SINGLE_PARTITION, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits);
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
@@ -126,7 +110,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                     DecoratedKey partitionKey,
                                                     ClusteringIndexFilter clusteringIndexFilter)
     {
-        return new SinglePartitionReadCommand(false, 0, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
+        return new SinglePartitionReadCommand(null, metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
     }
 
     /**
@@ -255,9 +239,9 @@ public class SinglePartitionReadCommand extends ReadCommand
         return create(metadata, nowInSec, key, FBUtilities.singleton(name, metadata.comparator));
     }
 
-    public SinglePartitionReadCommand copy()
+    public SinglePartitionReadCommand createDigestCommand(DigestVersion digestVersion)
     {
-        return new SinglePartitionReadCommand(isDigestQuery(), digestVersion(), metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), partitionKey(), clusteringIndexFilter());
+        return new SinglePartitionReadCommand(digestVersion, metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), partitionKey(), clusteringIndexFilter());
     }
 
     public DecoratedKey partitionKey()
@@ -319,22 +303,19 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         // We shouldn't have set digest yet when reaching that point
         assert !isDigestQuery();
-        return new SinglePartitionReadCommand(false,
-                                              0,
+        return new SinglePartitionReadCommand(null,
                                               metadata(),
                                               nowInSec(),
                                               columnFilter(),
                                               rowFilter(),
                                               limits,
                                               partitionKey(),
-                                              lastReturned == null ? clusteringIndexFilter() : clusteringIndexFilter.forPaging(metadata().comparator, lastReturned, inclusive),
-                                              optionalMonitor);
+                                              lastReturned == null ? clusteringIndexFilter() : clusteringIndexFilter.forPaging(metadata().comparator, lastReturned, inclusive));
     }
 
     public SinglePartitionReadCommand withUpdatedLimit(DataLimits newLimits)
     {
-        return new SinglePartitionReadCommand(isDigestQuery(),
-                                              digestVersion(),
+        return new SinglePartitionReadCommand(digestVersion(),
                                               metadata(),
                                               nowInSec(),
                                               columnFilter(),
@@ -953,11 +934,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                              nowInSec());
     }
 
-    public MessageOut<ReadCommand> createMessage()
-    {
-        return new MessageOut<>(MessagingService.Verb.READ, this, serializer);
-    }
-
     protected void appendCQLWhereClause(StringBuilder sb)
     {
         sb.append(" WHERE ");
@@ -974,16 +950,16 @@ public class SinglePartitionReadCommand extends ReadCommand
             sb.append(" AND ").append(filterString);
     }
 
-    protected void serializeSelection(DataOutputPlus out, int version) throws IOException
+    protected void serializeSelection(DataOutputPlus out, ReadVersion version) throws IOException
     {
         metadata().partitionKeyType.writeValue(partitionKey().getKey(), out);
-        ClusteringIndexFilter.serializer.serialize(clusteringIndexFilter(), out, version);
+        ClusteringIndexFilter.serializers.get(version).serialize(clusteringIndexFilter(), out);
     }
 
-    protected long selectionSerializedSize(int version)
+    protected long selectionSerializedSize(ReadVersion version)
     {
         return metadata().partitionKeyType.writtenLength(partitionKey().getKey())
-             + ClusteringIndexFilter.serializer.serializedSize(clusteringIndexFilter(), version);
+             + ClusteringIndexFilter.serializers.get(version).serializedSize(clusteringIndexFilter());
     }
 
     /**
@@ -994,7 +970,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         public final List<SinglePartitionReadCommand> commands;
         private final DataLimits limits;
         private final int nowInSec;
-        private Monitorable optionalMonitor;
 
         public Group(List<SinglePartitionReadCommand> commands, DataLimits limits)
         {
@@ -1002,7 +977,6 @@ public class SinglePartitionReadCommand extends ReadCommand
             this.commands = commands;
             this.limits = limits;
             this.nowInSec = commands.get(0).nowInSec();
-            this.optionalMonitor = null;
 
             for (int i = 1; i < commands.size(); i++)
                 assert commands.get(i).nowInSec() == nowInSec;
@@ -1045,31 +1019,31 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).executionController();
         }
 
-        public Single<PartitionIterator> executeInternal()
+        public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return executeLocally(false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
+            return executeLocally(monitor, false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally()
+        public Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor)
         {
-            return executeLocally(true);
+            return executeLocally(monitor, true);
         }
 
         /**
          * Implementation of {@link ReadQuery#executeLocally()}.
          *
          * @param sort - whether to sort the inner commands by partition key, required for merging the iterator
-         *               later on. This will be false when called by {@link ReadQuery#executeInternal()}
+         *               later on. This will be false when called by {@link ReadQuery#executeInternal(Monitor)}
          *               because in this case it is safe to do so as there is no merging involved and we don't want to
          *               change the old behavior which was to not sort by partition.
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private Single<UnfilteredPartitionIterator> executeLocally(boolean sort)
+        private Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor, boolean sort)
         {
             List<Pair<DecoratedKey, Single<UnfilteredPartitionIterator>>> partitions = new ArrayList<>(commands.size());
             for (SinglePartitionReadCommand cmd : commands)
-                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally()));
+                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally(monitor)));
 
             if (commands.size() == 1)
                 return partitions.get(0).getValue();
@@ -1077,7 +1051,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             if (sort)
                 Collections.sort(partitions, Comparator.comparing(Pair::getLeft));
 
-            return Single.concat(partitions.stream().map(p -> p.getRight()).collect(Collectors.toList()))
+            return Single.concat(partitions.stream().map(Pair::getRight).collect(Collectors.toList()))
                          .toList()
                          .map(l -> UnfilteredPartitionIterators.concat(l));
         }
@@ -1088,11 +1062,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                 return SinglePartitionReadCommand.getPager(commands.get(0), pagingState, protocolVersion);
 
             return new MultiPartitionPager(this, pagingState, protocolVersion);
-        }
-
-        public Group withUpdatedLimit(DataLimits newLimits)
-        {
-            return new Group(commands, newLimits);
         }
 
         public boolean selectsKey(DecoratedKey key)
@@ -1116,47 +1085,28 @@ public class SinglePartitionReadCommand extends ReadCommand
             return true;
         }
 
+        public String toCQLString()
+        {
+            // A group is really just a SELECT ... IN (x, y, z) where the IN is on the partition key. Rebuilding that
+            // just too much work, so we simply concat the string for each commnand.
+            return Joiner.on("; ").join(Iterables.transform(commands, ReadCommand::toCQLString));
+        }
+
         @Override
         public String toString()
         {
             return commands.toString();
         }
-
-        public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode)
-        {
-            String name = StringUtils.join(commands.stream()
-                                                   .map(SinglePartitionReadCommand::toCQLString)
-                                                   .collect(Collectors.toList()).iterator(),
-                                           '\n');
-            optionalMonitor = Monitorable.forNormalQuery(name, constructionTime, timeout, slowQueryTimeout, isCrossNode);
-        }
-
-        public void monitorLocal(long startTime)
-        {
-            String name = StringUtils.join(commands.stream()
-                                                   .map(SinglePartitionReadCommand::toCQLString)
-                                                   .collect(Collectors.toList()).iterator(),
-                                           '\n');
-            optionalMonitor = Monitorable.forLocalQuery(name, startTime, DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
-        }
-
-        public boolean complete()
-        {
-            if (optionalMonitor == null)
-                return true;
-
-            return optionalMonitor.complete();
-        }
     }
 
     private static class Deserializer extends SelectionDeserializer
     {
-        public ReadCommand deserialize(DataInputPlus in, int version, boolean isDigest, int digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
+        public ReadCommand deserialize(DataInputPlus in, ReadVersion version, DigestVersion digestVersion, TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits, Optional<IndexMetadata> index)
         throws IOException
         {
             DecoratedKey key = metadata.partitioner.decorateKey(metadata.partitionKeyType.readValue(in, DatabaseDescriptor.getMaxValueSize()));
-            ClusteringIndexFilter filter = ClusteringIndexFilter.serializer.deserialize(in, version, metadata);
-            return new SinglePartitionReadCommand(isDigest, digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter);
+            ClusteringIndexFilter filter = ClusteringIndexFilter.serializers.get(version).deserialize(in, metadata);
+            return new SinglePartitionReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter);
         }
     }
 }

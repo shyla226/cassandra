@@ -22,7 +22,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import org.apache.cassandra.config.Config;
-import org.apache.cassandra.net.MessagingService;
 
 /**
  * A primitive pool of {@link HintsBuffer} buffers. Under normal conditions should only hold two buffers - the currently
@@ -55,8 +54,8 @@ final class HintsBufferPool
      */
     void write(Iterable<UUID> hostIds, Hint hint)
     {
-        int hintSize = (int) Hint.serializer.serializedSize(hint, MessagingService.current_version);
-        try (HintsBuffer.Allocation allocation = allocate(hintSize))
+        long hintSize = Hint.serializers.get(HintsDescriptor.CURRENT_VERSION).serializedSize(hint);
+        try (HintsBuffer.Allocation allocation = allocate(Math.toIntExact(hintSize)))
         {
             allocation.write(hostIds, hint);
         }

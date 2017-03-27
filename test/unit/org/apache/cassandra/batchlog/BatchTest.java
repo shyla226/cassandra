@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -37,10 +38,10 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.junit.Assert.assertEquals;
@@ -65,7 +66,7 @@ public class BatchTest
         TableMetadata cfm = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF_STANDARD).metadata();
 
         long now = FBUtilities.timestampMicros();
-        int version = MessagingService.current_version;
+        WriteVersion version = Version.last(WriteVersion.class);
         UUID uuid = UUIDGen.getTimeUUID();
 
         List<Mutation> mutations = new ArrayList<>(10);
@@ -83,12 +84,12 @@ public class BatchTest
         assertEquals(mutations, batch1.decodedMutations);
 
         DataOutputBuffer out = new DataOutputBuffer();
-        Batch.serializer.serialize(batch1, out, version);
+        Batch.serializers.get(version).serialize(batch1, out);
 
-        assertEquals(out.getLength(), Batch.serializer.serializedSize(batch1, version));
+        assertEquals(out.getLength(), Batch.serializers.get(version).serializedSize(batch1));
 
         DataInputPlus dis = new DataInputBuffer(out.getData());
-        Batch batch2 = Batch.serializer.deserialize(dis, version);
+        Batch batch2 = Batch.serializers.get(version).deserialize(dis);
 
         assertEquals(batch1.id, batch2.id);
         assertEquals(batch1.creationTime, batch2.creationTime);
@@ -100,7 +101,7 @@ public class BatchTest
         {
             try (DataInputBuffer in = new DataInputBuffer(it2.next().array()))
             {
-                assertEquals(it1.next().toString(), Mutation.serializer.deserialize(in, version).toString());
+                assertEquals(it1.next().toString(), Mutation.serializers.get(version).deserialize(in).toString());
             }
         }
     }

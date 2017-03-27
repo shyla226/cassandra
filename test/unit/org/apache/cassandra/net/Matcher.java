@@ -17,16 +17,13 @@
  */
 package org.apache.cassandra.net;
 
-import java.net.InetAddress;
-
 /**
- * Predicate based on intercepted, outgoing messange and the message's destination address.
+ * Predicate based on intercepted, outgoing requests.
  */
-public interface Matcher<T>
+public interface Matcher
 {
     /**
-     * @param obj intercepted outgoing message
-     * @param to  destination address
+     * @param request intercepted request
      */
-    public boolean matches(MessageOut<T> obj, InetAddress to);
+    public boolean matches(Request<?, ?> request);
 }

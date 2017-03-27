@@ -299,19 +299,19 @@ public class Slice
 
     public static class Serializer
     {
-        public void serialize(Slice slice, DataOutputPlus out, int version, List<AbstractType<?>> types) throws IOException
+        public void serialize(Slice slice, DataOutputPlus out, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             ClusteringBound.serializer.serialize(slice.start, out, version, types);
             ClusteringBound.serializer.serialize(slice.end, out, version, types);
         }
 
-        public long serializedSize(Slice slice, int version, List<AbstractType<?>> types)
+        public long serializedSize(Slice slice, ClusteringVersion version, List<AbstractType<?>> types)
         {
             return ClusteringBound.serializer.serializedSize(slice.start, version, types)
                  + ClusteringBound.serializer.serializedSize(slice.end, version, types);
         }
 
-        public Slice deserialize(DataInputPlus in, int version, List<AbstractType<?>> types) throws IOException
+        public Slice deserialize(DataInputPlus in, ClusteringVersion version, List<AbstractType<?>> types) throws IOException
         {
             ClusteringBound start = (ClusteringBound) ClusteringBound.serializer.deserialize(in, version, types);
             ClusteringBound end = (ClusteringBound) ClusteringBound.serializer.deserialize(in, version, types);

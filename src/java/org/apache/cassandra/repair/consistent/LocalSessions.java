@@ -50,6 +50,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.BoundsVersion;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.OneWayRequest;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -63,17 +66,8 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.repair.messages.FailSession;
-import org.apache.cassandra.repair.messages.FinalizeCommit;
-import org.apache.cassandra.repair.messages.FinalizePromise;
-import org.apache.cassandra.repair.messages.FinalizePropose;
-import org.apache.cassandra.repair.messages.PrepareConsistentRequest;
-import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
-import org.apache.cassandra.repair.messages.RepairMessage;
-import org.apache.cassandra.repair.messages.StatusRequest;
-import org.apache.cassandra.repair.messages.StatusResponse;
+import org.apache.cassandra.repair.messages.*;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
@@ -183,7 +177,7 @@ public class LocalSessions
         for (InetAddress participant : session.participants)
         {
             if (!participant.equals(getBroadcastAddress()))
-                sendMessage(participant, new FailSession(sessionID));
+                send(Verbs.REPAIR.FAILED_SESSION.newRequest(participant, new FailSession(sessionID)));
         }
     }
 
@@ -270,12 +264,12 @@ public class LocalSessions
 
     private static ByteBuffer serializeRange(Range<Token> range)
     {
-        int size = (int) Token.serializer.serializedSize(range.left, 0);
-        size += (int) Token.serializer.serializedSize(range.right, 0);
+        int size = Token.serializer.serializedSize(range.left, BoundsVersion.OSS_30);
+        size += Token.serializer.serializedSize(range.right, BoundsVersion.OSS_30);
         try (DataOutputBuffer buffer = new DataOutputBuffer(size))
         {
-            Token.serializer.serialize(range.left, buffer, 0);
-            Token.serializer.serialize(range.right, buffer, 0);
+            Token.serializer.serialize(range.left, buffer, BoundsVersion.OSS_30);
+            Token.serializer.serialize(range.right, buffer, BoundsVersion.OSS_30);
             return buffer.buffer();
         }
         catch (IOException e)
@@ -296,8 +290,8 @@ public class LocalSessions
         try (DataInputBuffer in = new DataInputBuffer(bb, false))
         {
             IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
-            Token left = Token.serializer.deserialize(in, partitioner, 0);
-            Token right = Token.serializer.deserialize(in, partitioner, 0);
+            Token left = Token.serializer.deserialize(in, partitioner, BoundsVersion.OSS_30);
+            Token right = Token.serializer.deserialize(in, partitioner, BoundsVersion.OSS_30);
             return new Range<>(left, right);
         }
         catch (IOException e)
@@ -448,11 +442,11 @@ public class LocalSessions
         return ActiveRepairService.instance.getParentRepairSession(sessionID);
     }
 
-    protected void sendMessage(InetAddress destination, RepairMessage message)
+    // Overridden by tests to intercept messages
+    // TODO: the test could probably use the messaging service mocking instead
+    protected void send(OneWayRequest<? extends RepairMessage<?>> request)
     {
-        logger.debug("sending {} to {}", message, destination);
-        MessageOut<RepairMessage> messageOut = new MessageOut<RepairMessage>(MessagingService.Verb.REPAIR_MESSAGE, message, RepairMessage.serializer);
-        MessagingService.instance().sendOneWay(messageOut, destination);
+        MessagingService.instance().send(request);
     }
 
     private void setStateAndSave(LocalSession session, ConsistentSession.State state)
@@ -482,9 +476,7 @@ public class LocalSessions
         {
             setStateAndSave(session, FAILED);
             if (sendMessage)
-            {
-                sendMessage(session.coordinator, new FailSession(sessionID));
-            }
+                send(Verbs.REPAIR.FAILED_SESSION.newRequest(session.coordinator, new FailSession(sessionID)));
         }
     }
 
@@ -529,7 +521,7 @@ public class LocalSessions
         catch (Throwable e)
         {
             logger.debug("Error retrieving ParentRepairSession for session {}, responding with failure", sessionID);
-            sendMessage(coordinator, new FailSession(sessionID));
+            send(Verbs.REPAIR.FAILED_SESSION.newRequest(coordinator, new FailSession(sessionID)));
             return;
         }
 
@@ -546,7 +538,7 @@ public class LocalSessions
             {
                 logger.debug("pending anti-compaction for {} completed", sessionID);
                 setStateAndSave(session, PREPARED);
-                sendMessage(coordinator, new PrepareConsistentResponse(sessionID, getBroadcastAddress(), true));
+                send(Verbs.REPAIR.CONSISTENT_RESPONSE.newRequest(coordinator, new PrepareConsistentResponse(sessionID, getBroadcastAddress(), true)));
                 executor.shutdown();
             }
 
@@ -577,14 +569,14 @@ public class LocalSessions
         if (session == null)
         {
             logger.debug("No LocalSession found for session {}, responding with failure", sessionID);
-            sendMessage(from, new FailSession(sessionID));
+            send(Verbs.REPAIR.FAILED_SESSION.newRequest(from, new FailSession(sessionID)));
             return;
         }
 
         try
         {
             setStateAndSave(session, FINALIZE_PROMISED);
-            sendMessage(from, new FinalizePromise(sessionID, getBroadcastAddress(), true));
+            send(Verbs.REPAIR.FINALIZE_PROMISE.newRequest(from, new FinalizePromise(sessionID, getBroadcastAddress(), true)));
         }
         catch (IllegalArgumentException e)
         {
@@ -626,9 +618,7 @@ public class LocalSessions
         for (InetAddress participant : session.participants)
         {
             if (!getBroadcastAddress().equals(participant) && isAlive(participant))
-            {
-                sendMessage(participant, request);
-            }
+                send(Verbs.REPAIR.STATUS_REQUEST.newRequest(participant, request));
         }
     }
 
@@ -640,11 +630,11 @@ public class LocalSessions
         if (session == null)
         {
             logger.warn("Received status response message for unknown session {}", sessionID);
-            sendMessage(from, new StatusResponse(sessionID, FAILED));
+            send(Verbs.REPAIR.STATUS_RESPONSE.newRequest(from, new StatusResponse(sessionID, FAILED)));
         }
         else
         {
-            sendMessage(from, new StatusResponse(sessionID, session.getState()));
+            send(Verbs.REPAIR.STATUS_RESPONSE.newRequest(from, new StatusResponse(sessionID, session.getState())));
         }
     }
 

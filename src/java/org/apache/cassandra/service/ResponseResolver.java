@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.concurrent.Accumulator;
 
 public abstract class ResponseResolver
@@ -34,7 +34,7 @@ public abstract class ResponseResolver
     protected final ConsistencyLevel consistency;
 
     // Accumulator gives us non-blocking thread-safety with optimal algorithmic constraints
-    protected final Accumulator<MessageIn<ReadResponse>> responses;
+    protected final Accumulator<Response<ReadResponse>> responses;
 
     public ResponseResolver(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistency, int maxResponseCount)
     {
@@ -61,12 +61,12 @@ public abstract class ResponseResolver
 
     public abstract boolean isDataPresent();
 
-    public void preprocess(MessageIn<ReadResponse> message)
+    public void preprocess(Response<ReadResponse> message)
     {
         responses.add(message);
     }
 
-    public Iterable<MessageIn<ReadResponse>> getMessages()
+    public Iterable<Response<ReadResponse>> getMessages()
     {
         return responses;
     }

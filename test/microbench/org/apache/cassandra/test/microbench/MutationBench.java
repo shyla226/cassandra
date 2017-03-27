@@ -26,6 +26,9 @@ import java.util.concurrent.*;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Request;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -34,11 +37,11 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.profile.StackProfiler;
 import org.openjdk.jmh.results.Result;
@@ -73,7 +76,8 @@ public class MutationBench
     static String keyspace = "keyspace1";
 
     private Mutation mutation;
-    private MessageOut<Mutation> messageOut;
+    private Request<Mutation, EmptyPayload> messageOut;
+    private Message.Serializer serializer;
 
     private ByteBuffer buffer;
     private DataOutputBuffer outputBuffer;
@@ -83,7 +87,7 @@ public class MutationBench
     @State(Scope.Thread)
     public static class ThreadState
     {
-        MessageIn<Mutation> in;
+        Message in;
         int counter = 0;
     }
 
@@ -103,19 +107,20 @@ public class MutationBench
         Schema.instance.load(ksm.withSwapped(ksm.tables.with(metadata)));
 
         mutation = (Mutation)UpdateBuilder.create(metadata, 1L).newRow(1L).add("commentid", 32L).makeMutation();
-        messageOut = mutation.createMessage();
-        buffer = ByteBuffer.allocate(messageOut.serializedSize(MessagingService.current_version));
+        messageOut = Verbs.WRITES.WRITE.newRequest(FBUtilities.getBroadcastAddress(), mutation);
+        serializer = Message.createSerializer(MessagingService.current_version, System.currentTimeMillis());
+        buffer = ByteBuffer.allocate(Math.toIntExact(serializer.serializedSize(messageOut)));
         outputBuffer = new DataOutputBufferFixed(buffer);
         inputBuffer = new DataInputBuffer(buffer, false);
 
-        messageOut.serialize(outputBuffer, MessagingService.current_version);
+        serializer.serialize(messageOut, outputBuffer);
     }
 
     @Benchmark
     public void serialize(ThreadState state) throws IOException
     {
         buffer.rewind();
-        messageOut.serialize(outputBuffer, MessagingService.current_version);
+        serializer.serialize(messageOut, outputBuffer);
         state.counter++;
     }
 
@@ -123,7 +128,7 @@ public class MutationBench
     public void deserialize(ThreadState state) throws IOException
     {
         buffer.rewind();
-        state.in = MessageIn.read(inputBuffer, MessagingService.current_version, 0);
+        state.in = serializer.deserialize(inputBuffer, FBUtilities.getBroadcastAddress());
         state.counter++;
     }
 

@@ -21,7 +21,7 @@ package org.apache.cassandra.utils;
 import java.math.BigInteger;
 import java.util.*;
 
-import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -34,17 +34,19 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.MerkleTree.Hashable;
 import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTree.TreeRange;
 import org.apache.cassandra.utils.MerkleTree.TreeRangeIterator;
+import org.apache.cassandra.utils.versioning.Version;
 
 import static org.apache.cassandra.utils.MerkleTree.RECOMMENDED_DEPTH;
 import static org.junit.Assert.*;
 
 public class MerkleTreeTest
 {
+    private static final RepairVersion CURRENT_VERSION = Version.last(RepairVersion.class);
+
     public static byte[] DUMMY = "blah".getBytes();
 
     /**
@@ -397,11 +399,11 @@ public class MerkleTreeTest
         byte[] initialhash = mt.hash(full);
 
         DataOutputBuffer out = new DataOutputBuffer();
-        MerkleTree.serializer.serialize(mt, out, MessagingService.current_version);
+        MerkleTree.serializers.get(CURRENT_VERSION).serialize(mt, out);
         byte[] serialized = out.toByteArray();
 
         DataInputPlus in = new DataInputBuffer(serialized);
-        MerkleTree restored = MerkleTree.serializer.deserialize(in, MessagingService.current_version);
+        MerkleTree restored = MerkleTree.serializers.get(CURRENT_VERSION).deserialize(in);
 
         assertHashEquals(initialhash, restored.hash(full));
     }

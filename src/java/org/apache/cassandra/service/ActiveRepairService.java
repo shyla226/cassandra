@@ -43,9 +43,11 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
@@ -57,13 +59,17 @@ import org.apache.cassandra.gms.IFailureDetectionEventListener;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.FailureResponse;
+import org.apache.cassandra.net.MessageCallback;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Response;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.RepairSession;
+import org.apache.cassandra.repair.StreamingRepairTask;
+import org.apache.cassandra.repair.Validator;
 import org.apache.cassandra.repair.consistent.CoordinatorSessions;
 import org.apache.cassandra.repair.consistent.LocalSessions;
 import org.apache.cassandra.repair.messages.*;
@@ -89,6 +95,19 @@ import org.apache.cassandra.utils.UUIDGen;
  */
 public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFailureDetectionEventListener, ActiveRepairServiceMBean
 {
+    private static class DroppedTableException extends InternalRequestExecutionException
+    {
+        DroppedTableException(TableId tableId)
+        {
+            super(RequestFailureReason.UNKNOWN, String.format("Table with id %s was dropped during repair", tableId));
+        }
+
+        DroppedTableException(String keyspace, String table)
+        {
+            super(RequestFailureReason.UNKNOWN, String.format("Table %s.%s was dropped during repair", keyspace, table));
+        }
+    }
+
     /**
      * @deprecated this statuses are from the previous JMX notification service,
      * which will be deprecated on 4.0. For statuses of the new notification
@@ -335,22 +354,17 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         final CountDownLatch prepareLatch = new CountDownLatch(endpoints.size());
         final AtomicBoolean status = new AtomicBoolean(true);
         final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
-        IAsyncCallbackWithFailure callback = new IAsyncCallbackWithFailure()
+        MessageCallback<EmptyPayload> callback = new MessageCallback<EmptyPayload>()
         {
-            public void response(MessageIn msg)
+            public void onResponse(Response<EmptyPayload> msg)
             {
                 prepareLatch.countDown();
             }
 
-            public boolean isLatencyForSnitch()
-            {
-                return false;
-            }
-
-            public void onFailure(InetAddress from, RequestFailureReason failureReason)
+            public void onFailure(FailureResponse<EmptyPayload> failureResponse)
             {
                 status.set(false);
-                failedNodes.add(from.getHostAddress());
+                failedNodes.add(failureResponse.from().getHostAddress());
                 prepareLatch.countDown();
             }
         };
@@ -364,8 +378,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             if (FailureDetector.instance.isAlive(neighbour))
             {
                 PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal());
-                MessageOut<RepairMessage> msg = message.createMessage();
-                MessagingService.instance().sendRR(msg, neighbour, callback, DatabaseDescriptor.getRpcTimeout(), true);
+                MessagingService.instance().send(Verbs.REPAIR.PREPARE.newRequest(neighbour, message), callback);
             }
             else
             {
@@ -436,25 +449,105 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         return parentRepairSessions.remove(parentSessionId);
     }
 
-    public void handleMessage(InetAddress endpoint, RepairMessage message)
+    private boolean isConsistent(UUID sessionID)
     {
-        RepairJobDesc desc = message.desc;
+        return consistent.local.isSessionInProgress(sessionID);
+    }
+
+    public void handleValidationRequest(InetAddress from, ValidationRequest request)
+    {
+        RepairJobDesc desc = request.desc;
+        logger.debug("Validating {}", request);
+        // trigger read-only compaction
+        ColumnFamilyStore store = ColumnFamilyStore.getIfExists(desc.keyspace, desc.columnFamily);
+        if (store == null)
+        {
+            logger.error("Table {}.{} was dropped during snapshot phase of repair", desc.keyspace, desc.columnFamily);
+            MessagingService.instance().send(Verbs.REPAIR.VALIDATION_COMPLETE.newRequest(from, new ValidationComplete(desc)));
+            return;
+        }
+
+        ActiveRepairService.instance.consistent.local.maybeSetRepairing(desc.parentSessionId);
+        Validator validator = new Validator(desc, from, request.gcBefore, isConsistent(desc.parentSessionId));
+        CompactionManager.instance.submitValidation(store, validator);
+    }
+
+    public void handleValidationComplete(InetAddress from, ValidationComplete validation)
+    {
+        RepairJobDesc desc = validation.desc;
         RepairSession session = sessions.get(desc.sessionId);
         if (session == null)
             return;
-        switch (message.messageType)
+
+        session.validationComplete(desc, from, validation.trees);
+    }
+
+    public void handleSyncRequest(InetAddress from, SyncRequest sync)
+    {
+        RepairJobDesc desc = sync.desc;
+        // forwarded sync request
+        logger.debug("Syncing {}", sync);
+        long repairedAt = ActiveRepairService.UNREPAIRED_SSTABLE;
+        if (desc.parentSessionId != null && ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId) != null)
+            repairedAt = ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId).getRepairedAt();
+
+        StreamingRepairTask task = new StreamingRepairTask(desc, sync, repairedAt, isConsistent(desc.parentSessionId));
+        task.run();
+    }
+
+    public void handleSyncComplete(InetAddress from, SyncComplete sync)
+    {
+        RepairJobDesc desc = sync.desc;
+        RepairSession session = sessions.get(desc.sessionId);
+        if (session == null)
+            return;
+
+        session.syncComplete(desc, sync.nodes, sync.success);
+    }
+
+    public void handlePrepare(InetAddress from, PrepareMessage prepareMessage)
+    {
+        logger.debug("Preparing, {}", prepareMessage);
+        List<ColumnFamilyStore> columnFamilyStores = new ArrayList<>(prepareMessage.tableIds.size());
+        for (TableId id : prepareMessage.tableIds)
         {
-            case VALIDATION_COMPLETE:
-                ValidationComplete validation = (ValidationComplete) message;
-                session.validationComplete(desc, endpoint, validation.trees);
-                break;
-            case SYNC_COMPLETE:
-                // one of replica is synced.
-                SyncComplete sync = (SyncComplete) message;
-                session.syncComplete(desc, sync.nodes, sync.success);
-                break;
-            default:
-                break;
+            ColumnFamilyStore columnFamilyStore = ColumnFamilyStore.getIfExists(id);
+            if (columnFamilyStore == null)
+                throw new DroppedTableException(id);
+            columnFamilyStores.add(columnFamilyStore);
+        }
+
+        registerParentRepairSession(prepareMessage.parentRepairSession,
+                                    from,
+                                    columnFamilyStores,
+                                    prepareMessage.ranges,
+                                    prepareMessage.isIncremental,
+                                    prepareMessage.timestamp,
+                                    prepareMessage.isGlobal);
+    }
+
+    public void handleSnapshot(InetAddress from, SnapshotMessage snapshotMessage)
+    {
+        RepairJobDesc desc = snapshotMessage.desc;
+        logger.debug("Snapshotting {}", desc);
+        final ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(desc.keyspace, desc.columnFamily);
+        if (cfs == null)
+            throw new DroppedTableException(desc.keyspace, desc.columnFamily);
+
+        ActiveRepairService.ParentRepairSession prs = getParentRepairSession(desc.parentSessionId);
+        if (prs.isGlobal)
+        {
+            prs.maybeSnapshot(cfs.metadata.id, desc.parentSessionId);
+        }
+        else
+        {
+            cfs.snapshot(desc.sessionId.toString(),
+                         sstable -> sstable != null
+                                    && !sstable.metadata().isIndex() // exclude SSTables from 2i
+                                    && new Bounds<>(sstable.first.getToken(), sstable.last.getToken()).intersects(desc.ranges),
+                         true,
+                         false,
+                         new HashSet<>()); //ephemeral snapshot, if repair fails, it will be cleaned next startup
         }
     }
 

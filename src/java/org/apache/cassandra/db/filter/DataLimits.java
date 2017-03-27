@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
@@ -36,6 +37,8 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Object in charge of tracking if we have fetch enough data for a given query.
@@ -47,7 +50,7 @@ public abstract class DataLimits
 {
     private static final Logger logger = LoggerFactory.getLogger(DataLimits.class);
 
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     public static final int NO_LIMIT = Integer.MAX_VALUE;
 
@@ -1110,9 +1113,14 @@ public abstract class DataLimits
         }
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
-        public void serialize(DataLimits limits, DataOutputPlus out, int version, ClusteringComparator comparator) throws IOException
+        private Serializer(ReadVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(DataLimits limits, DataOutputPlus out, ClusteringComparator comparator) throws IOException
         {
             out.writeByte(limits.kind().ordinal());
             switch (limits.kind())
@@ -1138,9 +1146,9 @@ public abstract class DataLimits
                     out.writeUnsignedVInt(groupByLimits.rowLimit);
 
                     AggregationSpecification groupBySpec = groupByLimits.groupBySpec;
-                    AggregationSpecification.serializer.serialize(groupBySpec, out, version);
+                    AggregationSpecification.serializers.get(version).serialize(groupBySpec, out);
 
-                    GroupingState.serializer.serialize(groupByLimits.state, out, version, comparator);
+                    GroupingState.serializers.get(version).serialize(groupByLimits.state, out, comparator);
 
                     if (limits.kind() == Kind.CQL_GROUP_BY_PAGING_LIMIT)
                     {
@@ -1152,7 +1160,7 @@ public abstract class DataLimits
             }
         }
 
-        public DataLimits deserialize(DataInputPlus in, int version, ClusteringComparator comparator) throws IOException
+        public DataLimits deserialize(DataInputPlus in, ClusteringComparator comparator) throws IOException
         {
             Kind kind = Kind.values()[in.readUnsignedByte()];
             switch (kind)
@@ -1176,9 +1184,9 @@ public abstract class DataLimits
                     int groupPerPartitionLimit = (int) in.readUnsignedVInt();
                     int rowLimit = (int) in.readUnsignedVInt();
 
-                    AggregationSpecification groupBySpec = AggregationSpecification.serializer.deserialize(in, version, comparator);
+                    AggregationSpecification groupBySpec = AggregationSpecification.serializers.get(version).deserialize(in, comparator);
 
-                    GroupingState state = GroupingState.serializer.deserialize(in, version, comparator);
+                    GroupingState state = GroupingState.serializers.get(version).deserialize(in, comparator);
 
                     if (kind == Kind.CQL_GROUP_BY_LIMIT)
                         return new CQLGroupByLimits(groupLimit,
@@ -1201,7 +1209,7 @@ public abstract class DataLimits
             throw new AssertionError();
         }
 
-        public long serializedSize(DataLimits limits, int version, ClusteringComparator comparator)
+        public long serializedSize(DataLimits limits, ClusteringComparator comparator)
         {
             long size = TypeSizes.sizeof((byte) limits.kind().ordinal());
             switch (limits.kind())
@@ -1227,9 +1235,9 @@ public abstract class DataLimits
                     size += TypeSizes.sizeofUnsignedVInt(groupByLimits.rowLimit);
 
                     AggregationSpecification groupBySpec = groupByLimits.groupBySpec;
-                    size += AggregationSpecification.serializer.serializedSize(groupBySpec, version);
+                    size += AggregationSpecification.serializers.get(version).serializedSize(groupBySpec);
 
-                    size += GroupingState.serializer.serializedSize(groupByLimits.state, version, comparator);
+                    size += GroupingState.serializers.get(version).serializedSize(groupByLimits.state, comparator);
 
                     if (limits.kind() == Kind.CQL_GROUP_BY_PAGING_LIMIT)
                     {

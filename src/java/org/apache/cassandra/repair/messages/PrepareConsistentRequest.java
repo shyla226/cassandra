@@ -29,20 +29,64 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.serializers.InetAddressSerializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.utils.versioning.Versioned;
 
-public class PrepareConsistentRequest extends RepairMessage
+public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentRequest>
 {
+    public static Versioned<RepairVersion, MessageSerializer<PrepareConsistentRequest>> serializers = RepairVersion.versioned(v -> new MessageSerializer<PrepareConsistentRequest>(v)
+    {
+        private final TypeSerializer<InetAddress> inetSerializer = InetAddressSerializer.instance;
+
+        public void serialize(PrepareConsistentRequest request, DataOutputPlus out) throws IOException
+        {
+            UUIDSerializer.serializer.serialize(request.parentSession, out);
+            ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(request.coordinator), out);
+            out.writeInt(request.participants.size());
+            for (InetAddress peer : request.participants)
+            {
+                ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(peer), out);
+            }
+        }
+
+        public PrepareConsistentRequest deserialize(DataInputPlus in) throws IOException
+        {
+            UUID sessionId = UUIDSerializer.serializer.deserialize(in);
+            InetAddress coordinator = inetSerializer.deserialize(ByteBufferUtil.readWithShortLength(in));
+            int numPeers = in.readInt();
+            Set<InetAddress> peers = new HashSet<>(numPeers);
+            for (int i = 0; i < numPeers; i++)
+            {
+                InetAddress peer = inetSerializer.deserialize(ByteBufferUtil.readWithShortLength(in));
+                peers.add(peer);
+            }
+            return new PrepareConsistentRequest(sessionId, coordinator, peers);
+        }
+
+        public long serializedSize(PrepareConsistentRequest request)
+        {
+            long size = UUIDSerializer.serializer.serializedSize(request.parentSession);
+            size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(request.coordinator));
+            size += TypeSizes.sizeof(request.participants.size());
+            for (InetAddress peer : request.participants)
+                size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(peer));
+            return size;
+        }
+    });
+
     public final UUID parentSession;
     public final InetAddress coordinator;
     public final Set<InetAddress> participants;
 
     public PrepareConsistentRequest(UUID parentSession, InetAddress coordinator, Set<InetAddress> participants)
     {
-        super(Type.CONSISTENT_REQUEST, null);
+        super(null);
         assert parentSession != null;
         assert coordinator != null;
         assert participants != null && !participants.isEmpty();
@@ -58,9 +102,9 @@ public class PrepareConsistentRequest extends RepairMessage
 
         PrepareConsistentRequest that = (PrepareConsistentRequest) o;
 
-        if (!parentSession.equals(that.parentSession)) return false;
-        if (!coordinator.equals(that.coordinator)) return false;
-        return participants.equals(that.participants);
+        return parentSession.equals(that.parentSession)
+               && coordinator.equals(that.coordinator)
+               && participants.equals(that.participants);
     }
 
     public int hashCode()
@@ -80,45 +124,13 @@ public class PrepareConsistentRequest extends RepairMessage
                '}';
     }
 
-    public static MessageSerializer serializer = new MessageSerializer<PrepareConsistentRequest>()
+    public MessageSerializer<PrepareConsistentRequest> serializer(RepairVersion version)
     {
-        private TypeSerializer<InetAddress> inetSerializer = InetAddressSerializer.instance;
+        return serializers.get(version);
+    }
 
-        public void serialize(PrepareConsistentRequest request, DataOutputPlus out, int version) throws IOException
-        {
-            UUIDSerializer.serializer.serialize(request.parentSession, out, version);
-            ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(request.coordinator), out);
-            out.writeInt(request.participants.size());
-            for (InetAddress peer : request.participants)
-            {
-                ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(peer), out);
-            }
-        }
-
-        public PrepareConsistentRequest deserialize(DataInputPlus in, int version) throws IOException
-        {
-            UUID sessionId = UUIDSerializer.serializer.deserialize(in, version);
-            InetAddress coordinator = inetSerializer.deserialize(ByteBufferUtil.readWithShortLength(in));
-            int numPeers = in.readInt();
-            Set<InetAddress> peers = new HashSet<>(numPeers);
-            for (int i = 0; i < numPeers; i++)
-            {
-                InetAddress peer = inetSerializer.deserialize(ByteBufferUtil.readWithShortLength(in));
-                peers.add(peer);
-            }
-            return new PrepareConsistentRequest(sessionId, coordinator, peers);
-        }
-
-        public long serializedSize(PrepareConsistentRequest request, int version)
-        {
-            long size = UUIDSerializer.serializer.serializedSize(request.parentSession, version);
-            size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(request.coordinator));
-            size += TypeSizes.sizeof(request.participants.size());
-            for (InetAddress peer : request.participants)
-            {
-                size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(peer));
-            }
-            return size;
-        }
-    };
+    public Verb<PrepareConsistentRequest, ?> verb()
+    {
+        return Verbs.REPAIR.CONSISTENT_REQUEST;
+    }
 }

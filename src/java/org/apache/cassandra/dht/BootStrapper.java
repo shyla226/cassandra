@@ -29,14 +29,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.tokenallocator.TokenAllocation;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.StorageService;
@@ -237,25 +233,5 @@ public class BootStrapper extends ProgressEventNotifierSupport
 
         logger.info("Generated random tokens. tokens are {}", tokens);
         return tokens;
-    }
-
-    public static class StringSerializer implements IVersionedSerializer<String>
-    {
-        public static final StringSerializer instance = new StringSerializer();
-
-        public void serialize(String s, DataOutputPlus out, int version) throws IOException
-        {
-            out.writeUTF(s);
-        }
-
-        public String deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return in.readUTF();
-        }
-
-        public long serializedSize(String s, int version)
-        {
-            return TypeSizes.sizeof(s);
-        }
     }
 }

@@ -19,7 +19,6 @@ package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RepairException;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.tracing.Tracing;
@@ -75,7 +75,7 @@ public class RemoteSyncTask extends SyncTask
                                        request.dst);
         logger.info("[repair #{}] {}", desc.sessionId, message);
         Tracing.traceRepair(message);
-        MessagingService.instance().sendOneWay(request.createMessage(), request.src);
+        MessagingService.instance().send(Verbs.REPAIR.SYNC_REQUEST.newRequest(request.src, request));
     }
 
     public void syncComplete(boolean success)

@@ -77,63 +77,63 @@ public class ConnectionMetrics
         {
             public Integer getValue()
             {
-                return connectionPool.largeMessages.getPendingMessages();
+                return connectionPool.large().getPendingMessages();
             }
         });
         largeMessageCompletedTasks = Metrics.register(factory.createMetricName("LargeMessageCompletedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return connectionPool.largeMessages.getCompletedMesssages();
+                return connectionPool.large().getCompletedMesssages();
             }
         });
         largeMessageDroppedTasks = Metrics.register(factory.createMetricName("LargeMessageDroppedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return connectionPool.largeMessages.getDroppedMessages();
+                return connectionPool.large().getDroppedMessages();
             }
         });
         smallMessagePendingTasks = Metrics.register(factory.createMetricName("SmallMessagePendingTasks"), new Gauge<Integer>()
         {
             public Integer getValue()
             {
-                return connectionPool.smallMessages.getPendingMessages();
+                return connectionPool.small().getPendingMessages();
             }
         });
         smallMessageCompletedTasks = Metrics.register(factory.createMetricName("SmallMessageCompletedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return connectionPool.smallMessages.getCompletedMesssages();
+                return connectionPool.small().getCompletedMesssages();
             }
         });
         smallMessageDroppedTasks = Metrics.register(factory.createMetricName("SmallMessageDroppedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return connectionPool.smallMessages.getDroppedMessages();
+                return connectionPool.small().getDroppedMessages();
             }
         });
         gossipMessagePendingTasks = Metrics.register(factory.createMetricName("GossipMessagePendingTasks"), new Gauge<Integer>()
         {
             public Integer getValue()
             {
-                return connectionPool.gossipMessages.getPendingMessages();
+                return connectionPool.gossip().getPendingMessages();
             }
         });
         gossipMessageCompletedTasks = Metrics.register(factory.createMetricName("GossipMessageCompletedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return connectionPool.gossipMessages.getCompletedMesssages();
+                return connectionPool.gossip().getCompletedMesssages();
             }
         });
         gossipMessageDroppedTasks = Metrics.register(factory.createMetricName("GossipMessageDroppedTasks"), new Gauge<Long>()
         {
             public Long getValue()
             {
-                return connectionPool.gossipMessages.getDroppedMessages();
+                return connectionPool.gossip().getDroppedMessages();
             }
         });
         timeouts = Metrics.meter(factory.createMetricName("Timeouts"));

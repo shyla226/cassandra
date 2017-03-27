@@ -31,10 +31,12 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DigestVersion;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.ValidationComplete;
 import org.apache.cassandra.tracing.Tracing;
@@ -42,6 +44,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTrees;
+import org.apache.cassandra.utils.versioning.Version;
 
 /**
  * Handles the building of a merkle tree for a column family.
@@ -54,6 +57,8 @@ import org.apache.cassandra.utils.MerkleTrees;
 public class Validator implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(Validator.class);
+
+    private static DigestVersion DIGEST_VERSION = Version.last(DigestVersion.class);
 
     public final RepairJobDesc desc;
     public final InetAddress initiator;
@@ -225,7 +230,7 @@ public class Validator implements Runnable
         validated++;
         // MerkleTree uses XOR internally, so we want lots of output bits here
         CountingDigest digest = new CountingDigest(FBUtilities.newMessageDigest("SHA-256"));
-        UnfilteredRowIterators.digest(partition, digest, MessagingService.current_version);
+        UnfilteredRowIterators.digest(partition, digest, DIGEST_VERSION);
         // only return new hash for merkle tree in case digest was updated - see CASSANDRA-8979
         return digest.count > 0
              ? new MerkleTree.RowHash(partition.partitionKey().getToken(), digest.digest(), digest.count)
@@ -273,8 +278,8 @@ public class Validator implements Runnable
     public void fail()
     {
         logger.error("Failed creating a merkle tree for {}, {} (see log for details)", desc, initiator);
-        // send fail message only to nodes >= version 2.0
-        MessagingService.instance().sendOneWay(new ValidationComplete(desc).createMessage(), initiator);
+
+        MessagingService.instance().send(Verbs.REPAIR.VALIDATION_COMPLETE.newRequest(initiator, new ValidationComplete(desc)));
     }
 
     /**
@@ -288,6 +293,6 @@ public class Validator implements Runnable
             logger.info("[repair #{}] Sending completed merkle tree to {} for {}.{}", desc.sessionId, initiator, desc.keyspace, desc.columnFamily);
             Tracing.traceRepair("Sending completed merkle tree to {} for {}.{}", initiator, desc.keyspace, desc.columnFamily);
         }
-        MessagingService.instance().sendOneWay(new ValidationComplete(desc, trees).createMessage(), initiator);
+        MessagingService.instance().send(Verbs.REPAIR.VALIDATION_COMPLETE.newRequest(initiator, new ValidationComplete(desc, trees)));
     }
 }

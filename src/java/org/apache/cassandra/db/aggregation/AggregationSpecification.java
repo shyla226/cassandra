@@ -20,16 +20,19 @@ package org.apache.cassandra.db.aggregation;
 import java.io.IOException;
 
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.versioning.VersionDependent;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * Defines how rows should be grouped for creating aggregates.
  */
 public abstract class AggregationSpecification
 {
-    public static final Serializer serializer = new Serializer();
+    public static final Versioned<ReadVersion, Serializer> serializers = ReadVersion.versioned(Serializer::new);
 
     /**
      * <code>AggregationSpecification</code> that group all the row together.
@@ -131,9 +134,14 @@ public abstract class AggregationSpecification
         }
     }
 
-    public static class Serializer
+    public static class Serializer extends VersionDependent<ReadVersion>
     {
-        public void serialize(AggregationSpecification aggregationSpec, DataOutputPlus out, int version) throws IOException
+        private Serializer(ReadVersion version)
+        {
+            super(version);
+        }
+
+        public void serialize(AggregationSpecification aggregationSpec, DataOutputPlus out) throws IOException
         {
             out.writeByte(aggregationSpec.kind().ordinal());
             switch (aggregationSpec.kind())
@@ -148,7 +156,7 @@ public abstract class AggregationSpecification
             }
         }
 
-        public AggregationSpecification deserialize(DataInputPlus in, int version, ClusteringComparator comparator) throws IOException
+        public AggregationSpecification deserialize(DataInputPlus in, ClusteringComparator comparator) throws IOException
         {
             Kind kind = Kind.values()[in.readUnsignedByte()];
             switch (kind)
@@ -163,7 +171,7 @@ public abstract class AggregationSpecification
             }
         }
 
-        public long serializedSize(AggregationSpecification aggregationSpec, int version)
+        public long serializedSize(AggregationSpecification aggregationSpec)
         {
             long size = TypeSizes.sizeof((byte) aggregationSpec.kind().ordinal());
             switch (aggregationSpec.kind())

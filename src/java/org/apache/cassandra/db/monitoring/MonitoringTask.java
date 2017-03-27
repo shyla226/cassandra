@@ -102,14 +102,14 @@ class MonitoringTask
         reportingTask.cancel(false);
     }
 
-    static void addFailedOperation(Monitorable operation, long now)
+    static void addFailedOperation(Monitor monitor, long now)
     {
-        instance.failedOperationsQueue.offer(new FailedOperation(operation, now));
+        instance.failedOperationsQueue.offer(new FailedOperation(monitor, now));
     }
 
-    static void addSlowOperation(Monitorable operation, long now)
+    static void addSlowOperation(Monitor monitor, long now)
     {
-        instance.slowOperationsQueue.offer(new SlowOperation(operation, now));
+        instance.slowOperationsQueue.offer(new SlowOperation(monitor, now));
     }
 
     @VisibleForTesting
@@ -307,8 +307,8 @@ class MonitoringTask
      */
     protected abstract static class Operation
     {
-        /** The operation that was reported as slow or timed out */
-        final Monitorable operation;
+        /** The monitor of the operation that was reported as slow or timed out */
+        final Monitor monitor;
 
         /** The number of times the operation was reported */
         int numTimesReported;
@@ -326,11 +326,11 @@ class MonitoringTask
          * this is set lazily as it takes time to build the query CQL */
         private String name;
 
-        Operation(Monitorable operation, long failedAt)
+        Operation(Monitor monitor, long failedAt)
         {
-            this.operation = operation;
+            this.monitor = monitor;
             numTimesReported = 1;
-            totalTime = failedAt - operation.constructionTime();
+            totalTime = failedAt - monitor.operationCreationTimeMillis;
             minTime = totalTime;
             maxTime = totalTime;
         }
@@ -338,7 +338,7 @@ class MonitoringTask
         public String name()
         {
             if (name == null)
-                name = operation.name();
+                name = monitor.operation.name();
             return name;
         }
 
@@ -358,9 +358,9 @@ class MonitoringTask
      */
     private final static class FailedOperation extends Operation
     {
-        FailedOperation(Monitorable operation, long failedAt)
+        FailedOperation(Monitor monitor, long failedAt)
         {
-            super(operation, failedAt);
+            super(monitor, failedAt);
         }
 
         public String getLogMessage()
@@ -369,8 +369,8 @@ class MonitoringTask
                 return String.format("<%s>, total time %d msec, timeout %d %s",
                                      name(),
                                      totalTime,
-                                     operation.timeout(),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     monitor.timeoutMillis,
+                                     monitor.isLocalOperation ? "msec" : "msec/cross-node");
             else
                 return String.format("<%s> timed out %d times, avg/min/max %d/%d/%d msec, timeout %d %s",
                                      name(),
@@ -378,8 +378,8 @@ class MonitoringTask
                                      totalTime / numTimesReported,
                                      minTime,
                                      maxTime,
-                                     operation.timeout(),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     monitor.timeoutMillis,
+                                     monitor.isLocalOperation ? "msec" : "msec/cross-node");
         }
     }
 
@@ -388,9 +388,9 @@ class MonitoringTask
      */
     private final static class SlowOperation extends Operation
     {
-        SlowOperation(Monitorable operation, long failedAt)
+        SlowOperation(Monitor monitor, long failedAt)
         {
-            super(operation, failedAt);
+            super(monitor, failedAt);
         }
 
         public String getLogMessage()
@@ -399,8 +399,8 @@ class MonitoringTask
                 return String.format("<%s>, time %d msec - slow timeout %d %s",
                                      name(),
                                      totalTime,
-                                     operation.slowTimeout(),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     monitor.slowQueryTimeoutMillis,
+                                     monitor.isLocalOperation ?  "msec" : "msec/cross-node");
             else
                 return String.format("<%s>, was slow %d times: avg/min/max %d/%d/%d msec - slow timeout %d %s",
                                      name(),
@@ -408,8 +408,8 @@ class MonitoringTask
                                      totalTime / numTimesReported,
                                      minTime,
                                      maxTime,
-                                     operation.slowTimeout(),
-                                     operation.isCrossNode() ? "msec/cross-node" : "msec");
+                                     monitor.slowQueryTimeoutMillis,
+                                     monitor.isLocalOperation ? "msec" : "msec/cross-node");
         }
     }
 }

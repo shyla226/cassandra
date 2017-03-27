@@ -17,98 +17,38 @@
  */
 package org.apache.cassandra.repair.messages;
 
-import java.io.IOException;
+import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.versioning.VersionDependent;
 
 /**
  * Base class of all repair related request/response messages.
  *
  * @since 2.0
  */
-public abstract class RepairMessage
+public abstract class RepairMessage<T extends RepairMessage>
 {
-    public static final IVersionedSerializer<RepairMessage> serializer = new RepairMessageSerializer();
-
-    public static interface MessageSerializer<T extends RepairMessage> extends IVersionedSerializer<T> {}
-
-    public enum Type
+    public abstract static class MessageSerializer<T extends RepairMessage> extends VersionDependent<RepairVersion> implements Serializer<T>
     {
-        VALIDATION_REQUEST(0, ValidationRequest.serializer),
-        VALIDATION_COMPLETE(1, ValidationComplete.serializer),
-        SYNC_REQUEST(2, SyncRequest.serializer),
-        SYNC_COMPLETE(3, SyncComplete.serializer),
-        PREPARE_MESSAGE(5, PrepareMessage.serializer),
-        SNAPSHOT(6, SnapshotMessage.serializer),
-        CLEANUP(7, CleanupMessage.serializer),
-
-        CONSISTENT_REQUEST(8, PrepareConsistentRequest.serializer),
-        CONSISTENT_RESPONSE(9, PrepareConsistentResponse.serializer),
-        FINALIZE_PROPOSE(10, FinalizePropose.serializer),
-        FINALIZE_PROMISE(11, FinalizePromise.serializer),
-        FINALIZE_COMMIT(12, FinalizeCommit.serializer),
-        FAILED_SESSION(13, FailSession.serializer),
-        STATUS_REQUEST(14, StatusRequest.serializer),
-        STATUS_RESPONSE(15, StatusResponse.serializer);
-
-        private final byte type;
-        private final MessageSerializer<RepairMessage> serializer;
-
-        private Type(int type, MessageSerializer<RepairMessage> serializer)
+        protected MessageSerializer(RepairVersion version)
         {
-            this.type = (byte) type;
-            this.serializer = serializer;
-        }
-
-        public static Type fromByte(byte b)
-        {
-            for (Type t : values())
-            {
-               if (t.type == b)
-                   return t;
-            }
-            throw new IllegalArgumentException("Unknown RepairMessage.Type: " + b);
+            super(version);
         }
     }
 
-    public final Type messageType;
     public final RepairJobDesc desc;
 
-    protected RepairMessage(Type messageType, RepairJobDesc desc)
+    protected RepairMessage(RepairJobDesc desc)
     {
-        this.messageType = messageType;
         this.desc = desc;
     }
 
-    public MessageOut<RepairMessage> createMessage()
-    {
-        return new MessageOut<>(MessagingService.Verb.REPAIR_MESSAGE, this, RepairMessage.serializer);
-    }
-
-    public static class RepairMessageSerializer implements MessageSerializer<RepairMessage>
-    {
-        public void serialize(RepairMessage message, DataOutputPlus out, int version) throws IOException
-        {
-            out.write(message.messageType.type);
-            message.messageType.serializer.serialize(message, out, version);
-        }
-
-        public RepairMessage deserialize(DataInputPlus in, int version) throws IOException
-        {
-            RepairMessage.Type messageType = RepairMessage.Type.fromByte(in.readByte());
-            return messageType.serializer.deserialize(in, version);
-        }
-
-        public long serializedSize(RepairMessage message, int version)
-        {
-            long size = 1; // for messageType byte
-            size += message.messageType.serializer.serializedSize(message, version);
-            return size;
-        }
-    }
+    @VisibleForTesting
+    public abstract MessageSerializer<T> serializer(RepairVersion version);
+    @VisibleForTesting
+    public abstract Verb<T, ?> verb();
 }

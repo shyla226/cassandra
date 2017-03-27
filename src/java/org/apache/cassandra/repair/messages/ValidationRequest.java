@@ -22,22 +22,45 @@ import java.io.IOException;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * ValidationRequest
  *
  * @since 2.0
  */
-public class ValidationRequest extends RepairMessage
+public class ValidationRequest extends RepairMessage<ValidationRequest>
 {
-    public static MessageSerializer serializer = new ValidationRequestSerializer();
+    public static Versioned<RepairVersion, MessageSerializer<ValidationRequest>> serializers = RepairVersion.versioned(v -> new MessageSerializer<ValidationRequest>(v)
+    {
+        public void serialize(ValidationRequest message, DataOutputPlus out) throws IOException
+        {
+            RepairJobDesc.serializers.get(version).serialize(message.desc, out);
+            out.writeInt(message.gcBefore);
+        }
+
+        public ValidationRequest deserialize(DataInputPlus dis) throws IOException
+        {
+            RepairJobDesc desc = RepairJobDesc.serializers.get(version).deserialize(dis);
+            return new ValidationRequest(desc, dis.readInt());
+        }
+
+        public long serializedSize(ValidationRequest message)
+        {
+            return RepairJobDesc.serializers.get(version).serializedSize(message.desc)
+                   + TypeSizes.sizeof(message.gcBefore);
+        }
+    });
 
     public final int gcBefore;
 
     public ValidationRequest(RepairJobDesc desc, int gcBefore)
     {
-        super(Type.VALIDATION_REQUEST, desc);
+        super(desc);
         this.gcBefore = gcBefore;
     }
 
@@ -65,25 +88,13 @@ public class ValidationRequest extends RepairMessage
         return gcBefore;
     }
 
-    public static class ValidationRequestSerializer implements MessageSerializer<ValidationRequest>
+    public MessageSerializer<ValidationRequest> serializer(RepairVersion version)
     {
-        public void serialize(ValidationRequest message, DataOutputPlus out, int version) throws IOException
-        {
-            RepairJobDesc.serializer.serialize(message.desc, out, version);
-            out.writeInt(message.gcBefore);
-        }
+        return serializers.get(version);
+    }
 
-        public ValidationRequest deserialize(DataInputPlus dis, int version) throws IOException
-        {
-            RepairJobDesc desc = RepairJobDesc.serializer.deserialize(dis, version);
-            return new ValidationRequest(desc, dis.readInt());
-        }
-
-        public long serializedSize(ValidationRequest message, int version)
-        {
-            long size = RepairJobDesc.serializer.serializedSize(message.desc, version);
-            size += TypeSizes.sizeof(message.gcBefore);
-            return size;
-        }
+    public Verb<ValidationRequest, ?> verb()
+    {
+        return Verbs.REPAIR.VALIDATION_REQUEST;
     }
 }

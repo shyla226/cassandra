@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.DatabaseDescriptor.*;
@@ -70,18 +70,12 @@ public class StageManager
 
     private static LocalAwareExecutorService tracingExecutor()
     {
-        RejectedExecutionHandler reh = new RejectedExecutionHandler()
-        {
-            public void rejectedExecution(Runnable r, ThreadPoolExecutor executor)
-            {
-                MessagingService.instance().incrementDroppedMessages(MessagingService.Verb._TRACE);
-            }
-        };
+        RejectedExecutionHandler reh = (r, executor) -> Tracing.onDroppedTask(r);
         return new TracingExecutor(1,
                                    1,
                                    KEEPALIVE,
                                    TimeUnit.SECONDS,
-                                   new ArrayBlockingQueue<Runnable>(1000),
+                                   new ArrayBlockingQueue<>(1000),
                                    new NamedThreadFactory(Stage.TRACING.getJmxName()),
                                    reh);
     }

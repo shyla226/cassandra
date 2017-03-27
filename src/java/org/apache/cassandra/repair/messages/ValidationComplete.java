@@ -23,30 +23,76 @@ import java.util.Objects;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Verbs;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairJobDesc;
+import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.MerkleTrees;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
  * ValidationComplete message is sent when validation compaction completed successfully.
  *
  * @since 2.0
  */
-public class ValidationComplete extends RepairMessage
+public class ValidationComplete extends RepairMessage<ValidationComplete>
 {
-    public static MessageSerializer serializer = new ValidationCompleteSerializer();
+    public static Versioned<RepairVersion, MessageSerializer<ValidationComplete>> serializers = RepairVersion.versioned(v -> new MessageSerializer<ValidationComplete>(v)
+    {
+        public void serialize(ValidationComplete message, DataOutputPlus out) throws IOException
+        {
+            RepairJobDesc.serializers.get(version).serialize(message.desc, out);
+            out.writeBoolean(message.success());
+            if (message.trees != null)
+                MerkleTrees.serializers.get(version).serialize(message.trees, out);
+        }
+
+        public ValidationComplete deserialize(DataInputPlus in) throws IOException
+        {
+            RepairJobDesc desc = RepairJobDesc.serializers.get(version).deserialize(in);
+            boolean success = in.readBoolean();
+
+            if (success)
+            {
+                MerkleTrees trees = MerkleTrees.serializers.get(version).deserialize(in);
+                return new ValidationComplete(desc, trees);
+            }
+
+            return new ValidationComplete(desc);
+        }
+
+        public long serializedSize(ValidationComplete message)
+        {
+            long size = RepairJobDesc.serializers.get(version).serializedSize(message.desc);
+            size += TypeSizes.sizeof(message.success());
+            if (message.trees != null)
+                size += MerkleTrees.serializers.get(version).serializedSize(message.trees);
+            return size;
+        }
+    });
 
     /** Merkle hash tree response. Null if validation failed. */
     public final MerkleTrees trees;
 
     public ValidationComplete(RepairJobDesc desc)
     {
-        super(Type.VALIDATION_COMPLETE, desc);
+        super(desc);
         trees = null;
+    }
+
+    public MessageSerializer<ValidationComplete> serializer(RepairVersion version)
+    {
+        return serializers.get(version);
+    }
+
+    public Verb<ValidationComplete, ?> verb()
+    {
+        return Verbs.REPAIR.VALIDATION_COMPLETE;
     }
 
     public ValidationComplete(RepairJobDesc desc, MerkleTrees trees)
     {
-        super(Type.VALIDATION_COMPLETE, desc);
+        super(desc);
         assert trees != null;
         this.trees = trees;
     }
@@ -63,47 +109,12 @@ public class ValidationComplete extends RepairMessage
             return false;
 
         ValidationComplete other = (ValidationComplete)o;
-        return messageType == other.messageType &&
-               desc.equals(other.desc);
+        return desc.equals(other.desc);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(messageType, desc);
-    }
-
-    private static class ValidationCompleteSerializer implements MessageSerializer<ValidationComplete>
-    {
-        public void serialize(ValidationComplete message, DataOutputPlus out, int version) throws IOException
-        {
-            RepairJobDesc.serializer.serialize(message.desc, out, version);
-            out.writeBoolean(message.success());
-            if (message.trees != null)
-                MerkleTrees.serializer.serialize(message.trees, out, version);
-        }
-
-        public ValidationComplete deserialize(DataInputPlus in, int version) throws IOException
-        {
-            RepairJobDesc desc = RepairJobDesc.serializer.deserialize(in, version);
-            boolean success = in.readBoolean();
-
-            if (success)
-            {
-                MerkleTrees trees = MerkleTrees.serializer.deserialize(in, version);
-                return new ValidationComplete(desc, trees);
-            }
-
-            return new ValidationComplete(desc);
-        }
-
-        public long serializedSize(ValidationComplete message, int version)
-        {
-            long size = RepairJobDesc.serializer.serializedSize(message.desc, version);
-            size += TypeSizes.sizeof(message.success());
-            if (message.trees != null)
-                size += MerkleTrees.serializer.serializedSize(message.trees, version);
-            return size;
-        }
+        return Objects.hash(desc);
     }
 }

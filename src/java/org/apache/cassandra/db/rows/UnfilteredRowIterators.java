@@ -148,9 +148,9 @@ public abstract class UnfilteredRowIterators
      *
      * @param iterator the iterator to digest.
      * @param digest the {@code MessageDigest} to use for the digest.
-     * @param version the messaging protocol to use when producing the digest.
+     * @param version the version to use when producing the digest.
      */
-    public static void digest(UnfilteredRowIterator iterator, MessageDigest digest, int version)
+    public static void digest(UnfilteredRowIterator iterator, MessageDigest digest, DigestVersion version)
     {
         digest.update(iterator.partitionKey().getKey().duplicate());
         iterator.partitionLevelDeletion().digest(digest);

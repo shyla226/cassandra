@@ -51,7 +51,6 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.CommitLogMetrics;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.security.EncryptionContext;
@@ -256,7 +255,7 @@ public class CommitLog implements CommitLogMBean
 
         try (DataOutputBuffer dob = DataOutputBuffer.RECYCLER.get())
         {
-            Mutation.serializer.serialize(mutation, dob, MessagingService.current_version);
+            Mutation.rawSerializers.get(CommitLogDescriptor.current_version.encodingVersion).serialize(mutation, dob);
             int size = dob.getLength();
 
             int totalSize = size + ENTRY_OVERHEAD_SIZE;

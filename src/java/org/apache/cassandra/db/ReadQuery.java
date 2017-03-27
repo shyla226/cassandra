@@ -17,8 +17,11 @@
  */
 package org.apache.cassandra.db;
 
+import javax.annotation.Nullable;
+
 import io.reactivex.Single;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -37,7 +40,7 @@ import org.apache.cassandra.service.pager.QueryPager;
  * {@link SinglePartitionReadCommand.Group} is also consider as a "read query" but is not a
  * {@code ReadCommand}.
  */
-public interface ReadQuery
+public interface ReadQuery extends Monitorable
 {
     final static class EmptyQuery implements ReadQuery
     {
@@ -61,12 +64,12 @@ public interface ReadQuery
             return Single.just(EmptyIterators.partition());
         }
 
-        public Single<PartitionIterator> executeInternal()
+        public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
             return Single.just(EmptyIterators.partition());
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally()
+        public Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor)
         {
             return Single.just(EmptyIterators.unfilteredPartition(metadata));
         }
@@ -99,18 +102,14 @@ public interface ReadQuery
             return FBUtilities.nowInSeconds();
         }
 
-        public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode) { }
-
-        public void monitorLocal(long startTime) { }
-
-        public boolean complete()
+        public boolean queriesOnlyLocalData()
         {
             return true;
         }
 
-        public boolean queriesOnlyLocalData()
+        public String toCQLString()
         {
-            return true;
+            return "<EMPTY>";
         }
 
         public TableMetadata metadata()
@@ -164,11 +163,16 @@ public interface ReadQuery
      *
      * @return the result of the query.
      */
-    public Single<PartitionIterator> executeInternal();
+    public Single<PartitionIterator> executeInternal(@Nullable Monitor monitor);
+
+    public default Single<PartitionIterator> executeInternal()
+    {
+        return executeInternal(null);
+    }
 
     /**
      * Execute the query locally. This is where the reading actually happens, typically this method
-     * would be invoked by the read verb handlers, {@link org.apache.cassandra.service.StorageProxy.LocalReadRunnable}
+     * would be invoked by the read verb handlers, {@link ReadVerbs}
      * and {@link ReadQuery#executeInternal()}, or whenever we need to read local data
      * and we need an unfiltered partition iterator, rather than a filtered one. The main difference with
      * {@link ReadQuery#executeInternal()} is the filtering, only unfiltered iterators can
@@ -176,7 +180,12 @@ public interface ReadQuery
      *
      * @return the result of the read query.
      */
-    public Single<UnfilteredPartitionIterator> executeLocally();
+    public Single<UnfilteredPartitionIterator> executeLocally(@Nullable Monitor monitor);
+
+    public default Single<UnfilteredPartitionIterator> executeLocally()
+    {
+        return executeLocally(null);
+    }
 
     /**
      * Returns a pager for the query.
@@ -220,43 +229,25 @@ public interface ReadQuery
     public int nowInSec();
 
     /**
-     * Monitor a normal query, either originating cross node or not. Report this query as failed
-     * or slow, if timeout or slowQueryTimeout milliseconds elapse.
-     * <p>
-     * Note that normal queries may be running locally too, via
-     * {@link org.apache.cassandra.service.StorageProxy.LocalReadRunnable}. The difference with local
-     * queries monitored by {@link ReadQuery#monitorLocal(long)}, is that these local queries run <b>only</b>
-     * locally, and tend to take much longer as they usually retrieve more data.
-     *
-     * @param constructionTime - the approximate time at which the query message was received, if cross node, or
-     *                         the query was started, if running locally.
-     * @param timeout - the timeout after which the query should be aborted and reported as failed.
-     * @param slowQueryTimeout - the timeout after which the query should be reported slow.
-     * @param isCrossNode - true when the query originated in another node.
-     */
-    public void monitor(long constructionTime, long timeout, long slowQueryTimeout, boolean isCrossNode);
-
-    /**
-     * Monitor a local query. These are queries that never go cross node, and tend to be long running queries
-     * (continuous paging). Therefore, they should not be reported as failed or slow, but they should
-     * be aborted after {@link org.apache.cassandra.config.ContinuousPagingConfig#max_local_query_time_ms}
-     * in order to release resources. They then get restarted later on.
-     *
-     * @param startTime - the approximate time at which the query was started.
-     */
-    public void monitorLocal(long startTime);
-
-    /**
-     * @return true if there was no monitoring, otherwise return {@link Monitorable#complete()}.
-     */
-    public boolean complete();
-
-    /**
      * Check if this query can be performed with local data only.
      *
      * @return true if we can perform this query only with local data, false otherwise.
      */
     public boolean queriesOnlyLocalData();
+
+    /**
+     * Recreate a rough CQL string corresponding to this query.
+     * <p>
+     * Note that this is meant for debugging purpose and the goal is mainly to provide a user-understandable representation
+     * of the operation. There is absolutely not guarantee the string will be valid CQL (and it won't be in some case).
+     */
+    public String toCQLString();
+
+    // Monitorable interface
+    default public String name()
+    {
+        return toCQLString();
+    }
 
     /**
      * Return the table metadata of this query.

@@ -29,10 +29,10 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.commons.lang3.StringUtils;
 
@@ -56,7 +56,7 @@ import org.apache.commons.lang3.StringUtils;
 public class VersionedValue implements Comparable<VersionedValue>
 {
 
-    public static final IVersionedSerializer<VersionedValue> serializer = new VersionedValueSerializer();
+    public static final Serializer<VersionedValue> serializer = new ValueSerializer();
 
     // this must be a char that cannot be present in any token
     public final static char DELIMITER = ',';
@@ -255,7 +255,7 @@ public class VersionedValue implements Comparable<VersionedValue>
 
         public VersionedValue networkVersion()
         {
-            return new VersionedValue(String.valueOf(MessagingService.current_version));
+            return new VersionedValue(String.valueOf(MessagingService.current_version.protocolVersion().handshakeVersion));
         }
 
         public VersionedValue internalIP(String private_ip)
@@ -269,29 +269,24 @@ public class VersionedValue implements Comparable<VersionedValue>
         }
     }
 
-    private static class VersionedValueSerializer implements IVersionedSerializer<VersionedValue>
+    private static class ValueSerializer implements Serializer<VersionedValue>
     {
-        public void serialize(VersionedValue value, DataOutputPlus out, int version) throws IOException
+        public void serialize(VersionedValue value, DataOutputPlus out) throws IOException
         {
-            out.writeUTF(outValue(value, version));
+            out.writeUTF(value.value);
             out.writeInt(value.version);
         }
 
-        private String outValue(VersionedValue value, int version)
-        {
-            return value.value;
-        }
-
-        public VersionedValue deserialize(DataInputPlus in, int version) throws IOException
+        public VersionedValue deserialize(DataInputPlus in) throws IOException
         {
             String value = in.readUTF();
             int valVersion = in.readInt();
             return new VersionedValue(value, valVersion);
         }
 
-        public long serializedSize(VersionedValue value, int version)
+        public long serializedSize(VersionedValue value)
         {
-            return TypeSizes.sizeof(outValue(value, version)) + TypeSizes.sizeof(value.version);
+            return TypeSizes.sizeof(value.value) + TypeSizes.sizeof(value.version);
         }
     }
 }

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.schema;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.*;
@@ -41,10 +40,7 @@ import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.*;
-import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -384,26 +380,23 @@ public class MigrationManager
      */
     private static Completable announce(Mutation.SimpleBuilder schema, boolean announceLocally)
     {
-        List<Mutation> mutations = Collections.singletonList(schema.build());
+        SchemaMigration migration = new SchemaMigration(Collections.singletonList(schema.build()));
 
         if (announceLocally)
-            return Completable.fromRunnable(() -> Schema.instance.merge(mutations))
+            return Completable.fromRunnable(() -> Schema.instance.merge(migration))
                               .subscribeOn(NettyRxScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
                                            ImmediateThinScheduler.INSTANCE);
         else
-            return announce(mutations);
+            return announce(migration);
     }
 
-    private static void pushSchemaMutation(InetAddress endpoint, Collection<Mutation> schema)
+    private static void pushSchemaMutation(InetAddress endpoint, SchemaMigration schema)
     {
-        MessageOut<Collection<Mutation>> msg = new MessageOut<>(MessagingService.Verb.DEFINITIONS_UPDATE,
-                                                                schema,
-                                                                MigrationsSerializer.instance);
-        MessagingService.instance().sendOneWay(msg, endpoint);
+        MessagingService.instance().send(Verbs.SCHEMA.PUSH.newRequest(endpoint, schema));
     }
 
     // Returns a future on the local application of the schema
-    private static Completable announce(final Collection<Mutation> schema)
+    private static Completable announce(final SchemaMigration schema)
     {
         return Completable.defer(() ->
                                  {
@@ -470,34 +463,4 @@ public class MigrationManager
         logger.info("Local schema reset is complete.");
     }
 
-    public static class MigrationsSerializer implements IVersionedSerializer<Collection<Mutation>>
-    {
-        public static MigrationsSerializer instance = new MigrationsSerializer();
-
-        public void serialize(Collection<Mutation> schema, DataOutputPlus out, int version) throws IOException
-        {
-            out.writeInt(schema.size());
-            for (Mutation mutation : schema)
-                Mutation.serializer.serialize(mutation, out, version);
-        }
-
-        public Collection<Mutation> deserialize(DataInputPlus in, int version) throws IOException
-        {
-            int count = in.readInt();
-            Collection<Mutation> schema = new ArrayList<>(count);
-
-            for (int i = 0; i < count; i++)
-                schema.add(Mutation.serializer.deserialize(in, version));
-
-            return schema;
-        }
-
-        public long serializedSize(Collection<Mutation> schema, int version)
-        {
-            int size = TypeSizes.sizeof(schema.size());
-            for (Mutation mutation : schema)
-                size += Mutation.serializer.serializedSize(mutation, version);
-            return size;
-        }
-    }
 }

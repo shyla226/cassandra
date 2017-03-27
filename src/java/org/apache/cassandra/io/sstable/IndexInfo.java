@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.List;
 
 import org.apache.cassandra.db.ClusteringPrefix;
+import org.apache.cassandra.db.ClusteringVersion;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.SerializationHeader;
@@ -95,12 +96,12 @@ public class IndexInfo
         // size so using the default is almost surely better than using no base at all.
         public static final long WIDTH_BASE = 64 * 1024;
 
-        private final int version;
+        private final ClusteringVersion version;
         private final List<AbstractType<?>> clusteringTypes;
 
         public Serializer(Version version, List<AbstractType<?>> clusteringTypes)
         {
-            this.version = version.correspondingMessagingVersion();
+            this.version = version.encodingVersion().clusteringVersion;
             this.clusteringTypes = clusteringTypes;
         }
 
