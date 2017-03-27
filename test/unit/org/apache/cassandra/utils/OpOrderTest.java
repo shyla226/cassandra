@@ -31,7 +31,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.LongOpOrderTest;
+import org.apache.cassandra.concurrent.LongOpOrderTester;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
  */
 public class OpOrderTest
 {
-    private static final Logger logger = LoggerFactory.getLogger(LongOpOrderTest.class);
+    private static final Logger logger = LoggerFactory.getLogger(LongOpOrderTester.class);
 
     static final int PRODUCERS_PER_THREAD = 16;
     static final int CONSUMERS = 2;
@@ -71,8 +71,8 @@ public class OpOrderTest
         NettyRxScheduler.register();
         Thread.setDefaultUncaughtExceptionHandler(handler);
 
-        order = new OpOrder();
-        //order = NettyRxScheduler.newOpOrderThreaded(this);
+//        order = new OpOrderSimple();
+        order = NettyRxScheduler.newOpOrderThreaded(this);
         currentState = new State();
 
         ExecutorService consumerExec = Executors.newFixedThreadPool(CONSUMERS);

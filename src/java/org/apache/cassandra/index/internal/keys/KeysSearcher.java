@@ -20,7 +20,6 @@ package org.apache.cassandra.index.internal.keys;
 import java.nio.ByteBuffer;
 
 import io.reactivex.Single;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -30,6 +29,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class KeysSearcher extends CassandraIndexSearcher
 {

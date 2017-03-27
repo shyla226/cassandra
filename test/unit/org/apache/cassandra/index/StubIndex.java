@@ -24,7 +24,6 @@ import java.util.function.BiFunction;
 
 import io.reactivex.Completable;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;

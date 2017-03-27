@@ -36,6 +36,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
@@ -70,7 +71,7 @@ final class HintsBuffer
 
         position = new AtomicInteger();
         offsets = new ConcurrentHashMap<>();
-        appendOrder = new OpOrder();
+        appendOrder = new OpOrderSimple();
     }
 
     static HintsBuffer create(int slabSize)

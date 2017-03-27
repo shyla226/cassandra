@@ -113,11 +113,6 @@ public class NettyRxScheduler extends Scheduler
 
     final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
     {
-        public int idLimit()
-        {
-            return NUM_NETTY_THREADS + 1;
-        }
-
         public int idFor(Thread t)
         {
             if (t instanceof NettyRxThread)
@@ -145,7 +140,7 @@ public class NettyRxScheduler extends Scheduler
 
     public static OpOrderThreaded newOpOrderThreaded(Object creator)
     {
-        return new OpOrderThreaded(creator, threadIdentifier);
+        return new OpOrderThreaded(creator, threadIdentifier, NUM_NETTY_THREADS + 1);
     }
 
     private final static class NettyRxThread extends FastThreadLocalThread

@@ -1,7 +1,6 @@
 package org.apache.cassandra.index.internal;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -16,6 +15,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import java.util.Optional;
 import java.util.concurrent.Callable;

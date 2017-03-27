@@ -1,6 +1,6 @@
 package org.apache.cassandra.concurrent;
 /*
- * 
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -8,16 +8,16 @@ package org.apache.cassandra.concurrent;
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
- * 
+ *
  */
 
 
@@ -30,27 +30,27 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.junit.Assert.assertTrue;
 
-// TODO: we don't currently test SAFE functionality at all!
 // TODO: should also test markBlocking and SyncOrdered
-public class LongOpOrderTest
+@Ignore
+public class LongOpOrderTester
 {
-    private static final Logger logger = LoggerFactory.getLogger(LongOpOrderTest.class);
+
+    private static final Logger logger = LoggerFactory.getLogger(LongOpOrderTester.class);
 
     static final int CONSUMERS = 4;
-    static final int PRODUCERS = NettyRxScheduler.NUM_NETTY_THREADS;
+    static final int PRODUCERS = 32;
 
-    static final long RUNTIME = TimeUnit.SECONDS.toMillis(20);
-    static final long REPORT_INTERVAL = TimeUnit.SECONDS.toMillis(5);
+    static final long RUNTIME = TimeUnit.MINUTES.toMillis(5);
+    static final long REPORT_INTERVAL = TimeUnit.SECONDS.toMillis(20);
 
     static final Thread.UncaughtExceptionHandler handler = new Thread.UncaughtExceptionHandler()
     {
@@ -62,28 +62,31 @@ public class LongOpOrderTest
         }
     };
 
-    final OpOrder order = new OpOrder();
+    final OpOrder order;
     final AtomicInteger errors = new AtomicInteger();
+    final ExecutorService exec;
+
+    LongOpOrderTester(OpOrder order, ExecutorService exec)
+    {
+        this.order = order;
+        this.exec = exec;
+    }
 
     class TestOrdering implements Runnable
     {
+
         final int[] waitNanos = new int[1 << 16];
         volatile State state = new State();
         final ScheduledExecutorService sched;
 
-        TestOrdering(ExecutorService exec, ScheduledExecutorService sched, int startOffset)
+        TestOrdering(ExecutorService exec, ScheduledExecutorService sched)
         {
             this.sched = sched;
             final ThreadLocalRandom rnd = ThreadLocalRandom.current();
             for (int i = 0 ; i < waitNanos.length ; i++)
                 waitNanos[i] = rnd.nextInt(5000);
-
-            int producers = PRODUCERS / CONSUMERS;
-
-            for (int i = startOffset * producers ; i < (startOffset * producers) + producers ; i++)
-            {
-                NettyRxScheduler.getForCore(i).scheduleDirect(new Producer(i));
-            }
+            for (int i = 0 ; i < PRODUCERS / CONSUMERS ; i++)
+                exec.execute(new Producer());
             exec.execute(this);
         }
 
@@ -97,14 +100,14 @@ public class LongOpOrderTest
             while (true)
             {
                 long now = System.currentTimeMillis();
-                if (now > until)
-                    break;
                 if (now > lastReport + REPORT_INTERVAL)
                 {
-                    lastReport = now;
-                    logger.info(String.format("%s: Executed %d barriers with %d operations. %.0f%% complete.",
-                            Thread.currentThread().getName(), count, opCount, 100 * (1 - ((until - now) / (double) RUNTIME))));
+                    lastReport += REPORT_INTERVAL;
+                    logger.info(String.format("%s: Executed %,d barriers with %,d operations. %.0f%% complete.",
+                                              Thread.currentThread().getName(), count, opCount, 100 * (1 - ((until - now) / (double) RUNTIME))));
                 }
+                if (now > until)
+                    break;
                 try
                 {
                     Thread.sleep(0, waitNanos[((int) (count & (waitNanos.length - 1)))]);
@@ -182,8 +185,7 @@ public class LongOpOrderTest
                 }
                 for (Map.Entry<OpOrder.Group, AtomicInteger> e : count.entrySet())
                 {
-                    OpOrder.Group group = e.getKey();
-                    if (group.compareTo(barrier.getSyncPoint()) > 0)
+                    if (!barrier.isAfter(e.getKey()))
                     {
                         errors.incrementAndGet();
                         logger.error("Received an operation that was created after the barrier was issued.");
@@ -204,36 +206,24 @@ public class LongOpOrderTest
 
         class Producer implements Runnable
         {
-            int core;
-            OpOrder.Group current;
-
-            public Producer(int core)
-            {
-                this.core = core;
-                current = order.start();
-            }
-
             public void run()
             {
-                for (int i = 0; i < 1; ++i)
+                while (true)
                 {
                     AtomicInteger c;
-                    if (null == (c = count.get(current)))
+                    try (OpOrder.Group opGroup = order.start())
                     {
-                        count.putIfAbsent(current, new AtomicInteger());
-                        c = count.get(current);
+                        if (null == (c = count.get(opGroup)))
+                        {
+                            count.putIfAbsent(opGroup, new AtomicInteger());
+                            c = count.get(opGroup);
+                        }
+                        c.incrementAndGet();
+                        State s = state;
+                        while (!s.accept(opGroup))
+                            s = s.replacement;
                     }
-                    c.incrementAndGet();
-                    State s = state;
-                    while (!s.accept(current))
-                        s = s.replacement;
-                    current.close();
-
-                    current = order.start();
                 }
-
-                //Reschedule, keeping an oporder open
-                NettyRxScheduler.getForCore(core).scheduleDirect(this);
             }
         }
 
@@ -242,22 +232,14 @@ public class LongOpOrderTest
     @Test
     public void testOrdering() throws InterruptedException
     {
-        DatabaseDescriptor.daemonInitialization();
-        NativeTransportService server = new NativeTransportService();
-        NettyRxScheduler.register();
-        server.start();
-
         errors.set(0);
         Thread.setDefaultUncaughtExceptionHandler(handler);
-
-        final ExecutorService exec = Executors.newCachedThreadPool(new NamedThreadFactory("checker"));
         final ScheduledExecutorService checker = Executors.newScheduledThreadPool(1, new NamedThreadFactory("checker"));
         for (int i = 0 ; i < CONSUMERS ; i++)
-            new TestOrdering(exec, checker, i);
+            new TestOrdering(exec, checker);
         exec.shutdown();
         exec.awaitTermination((long) (RUNTIME * 1.1), TimeUnit.MILLISECONDS);
         assertTrue(exec.isShutdown());
-
         assertTrue(errors.get() == 0);
     }
 

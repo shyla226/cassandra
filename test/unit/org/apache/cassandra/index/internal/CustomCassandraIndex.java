@@ -29,7 +29,6 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -20,7 +20,6 @@ package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 

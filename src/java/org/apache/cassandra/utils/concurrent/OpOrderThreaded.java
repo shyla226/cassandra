@@ -18,46 +18,52 @@
 
 package org.apache.cassandra.utils.concurrent;
 
+import java.util.Arrays;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
-
 /**
- * A relaxed OpOrder variation with less overhead when called from specific highly-used threads.
- * It effectively consists of OpOrder per thread (so that the group start overhead is minimal)
- * and provides a mechanism of making sure prior operations have completed.
- *
- * Unlike OpOrder, this does not provide true barriers, in the sense that operations on some threads may have
- * started after the barrier point of another. The only guarantee this gives is that any operation started before
- * the beginning of the threaded barrier issue call will have completed after the await returns. The await may require
- * for some operations started after that point in time to complete.
+ * A threaded version of OpOrder which uses thread-specific groups so that the cost of starting and closing an
+ * order group is much lower (due to the lack of contention) at the expense of maintaining multiple groups and
+ * having to duplicate and check all when applying barrier operations.
  */
-public class OpOrderThreaded
+public class OpOrderThreaded implements OpOrder
 {
     private static final Logger logger = LoggerFactory.getLogger(OpOrderThreaded.class);
 
+    /**
+     * Thread identifier used to select the per-thread group.
+     */
     public interface ThreadIdentifier
     {
-        int idLimit();
+        /**
+         * Return the id (between 0 and idLimit) that is associated with this thread.
+         */
         int idFor(Thread d);
 
+        /**
+         * Diagnostic method.
+         *
+         * Called (via an assertion) to make sure barriers are permitted. Used to prevent some types of deadlock
+         * (e.g. thread-per-core thread awaiting barriers which can only be fulfilled by the same thread).
+         */
         boolean barrierPermitted();
     }
 
-    final OpOrder threadOpOrders[];
     final ThreadIdentifier mapper;
     final Object creator;
+    private volatile OpOrderSimple.Group current[];
 
-    public OpOrderThreaded(Object creator, ThreadIdentifier mapper)
+    public OpOrderThreaded(Object creator, ThreadIdentifier mapper, int idLimit)
     {
         this.mapper = mapper;
-        int size = mapper.idLimit();
-        threadOpOrders = new OpOrder[size];
-        for (int i = 0; i < threadOpOrders.length; i++)
-            threadOpOrders[i] = new OpOrder();
-
         this.creator = creator;
+
+        OpOrderSimple.Group[] groups = new OpOrderSimple.Group[idLimit];
+        for (int i = 0; i < idLimit; ++i)
+            groups[i] = new OpOrderSimple.Group();
+        current = groups;
     }
 
     /**
@@ -66,25 +72,24 @@ public class OpOrderThreaded
      *
      * @return the Ordered instance that manages this OpOrder
      */
-    public OpOrder.Group start()
+    public Group start()
     {
         int coreId = mapper.idFor(Thread.currentThread());
-        return threadOpOrders[coreId].start();
+
+        while (true)
+        {
+            OpOrderSimple.Group current = this.current[coreId];
+            if (current.register())
+                return current;
+        }
     }
 
     /**
      * Creates a new barrier. The barrier is only a placeholder until barrier.issue() is called on it.
      */
-    public Barrier newThreadedBarrier()
+    public Barrier newBarrier()
     {
         return new Barrier();
-    }
-
-    public void awaitNewThreadedBarrier()
-    {
-        Barrier barrier = newThreadedBarrier();
-        barrier.issue();
-        barrier.await();
     }
 
     @Override
@@ -99,9 +104,26 @@ public class OpOrderThreaded
      * Barrier provides a means of guaranteeing all operations started before that point in time to have
      * completed.
      */
-    public final class Barrier
+    public final class Barrier implements OpOrder.Barrier
     {
-        private final OpOrder.Barrier threadBarriers[] = new OpOrder.Barrier[threadOpOrders.length];
+        // this Barrier was issued after all Group operations started against orderOnOrBefore
+        private OpOrderSimple.Group orderOnOrBefore[] = null;
+
+        /**
+         * @return true if @param group was started prior to the issuing of the barrier.
+         *
+         * (Until issue is called, always returns true, but if you rely on this behavior you are probably
+         * Doing It Wrong.)
+         */
+        public boolean isAfter(OpOrder.Group group)
+        {
+            if (orderOnOrBefore == null)
+                return true;
+            // we subtract to permit wrapping round the full range of Long - so we only need to ensure
+            // there are never Long.MAX_VALUE * 2 total Group objects in existence at any one timem which will
+            // take care of itself
+            return orderOnOrBefore[0].id - ((OpOrderSimple.Group) group).id >= 0;
+        }
 
         /**
          * Issues (seals) the barrier, meaning no new operations may be issued against it, and expires the current
@@ -109,11 +131,66 @@ public class OpOrderThreaded
          */
         public void issue()
         {
-            for (int i = 0; i < threadBarriers.length; i++)
+            if (orderOnOrBefore != null)
+                throw new IllegalStateException("Can only call issue() once on each Barrier");
+
+            final OpOrderSimple.Group[] current;
+            synchronized (OpOrderThreaded.this)
             {
-                threadBarriers[i] = threadOpOrders[i].newBarrier();
-                threadBarriers[i].issue();
-            };
+                current = OpOrderThreaded.this.current;
+                orderOnOrBefore = current;
+                OpOrderSimple.Group[] groups = new OpOrderSimple.Group[current.length];
+                for (int i = 0; i < current.length; ++i)
+                    groups[i] = current[i].next = new OpOrderSimple.Group(current[i]);
+                OpOrderThreaded.this.current = groups;
+            }
+
+            for (OpOrderSimple.Group g : current)
+                g.expire();
+        }
+
+        /**
+         * Mark all prior operations as blocking, potentially signalling them to more aggressively make progress
+         */
+        public void markBlocking()
+        {
+            for (OpOrderSimple.Group g : orderOnOrBefore)
+                markBlocking(g);
+        }
+
+        private void markBlocking(OpOrderSimple.Group current)
+        {
+            while (current != null)
+            {
+                current.isBlocking = true;
+                current.isBlockingSignal.signalAll();
+                current = current.prev;
+            }
+        }
+
+        /**
+         * Register to be signalled once allPriorOpsAreFinished() or allPriorOpsAreFinishedOrSafe() may return true
+         */
+        public WaitQueue.Signal register()
+        {
+            WaitQueue.Signal[] signals = new WaitQueue.Signal[orderOnOrBefore.length];
+            for (int i = 0; i < orderOnOrBefore.length; ++i)
+                signals[i] = orderOnOrBefore[i].waiting.register();
+            return WaitQueue.any(signals);
+        }
+
+        /**
+         * @return true if all operations started prior to barrier.issue() have completed
+         */
+        public boolean allPriorOpsAreFinished()
+        {
+            OpOrderSimple.Group[] current = orderOnOrBefore;
+            if (current == null)
+                throw new IllegalStateException("This barrier needs to have issue() called on it before prior operations can complete");
+            for (OpOrderSimple.Group g : current)
+                if (g.next.prev != null)
+                    return false;
+            return true;
         }
 
         /**
@@ -123,30 +200,21 @@ public class OpOrderThreaded
         {
             assert mapper.barrierPermitted();
 
-            for (int i = 0; i < threadBarriers.length; i++)
+            OpOrderSimple.Group[] current = orderOnOrBefore;
+            if (current == null)
+                throw new IllegalStateException("This barrier needs to have issue() called on it before prior operations can complete");
+
+            for (OpOrderSimple.Group g : current)
             {
-                threadBarriers[i].await();
+                if (g.next.prev != null)
+                {
+                    WaitQueue.Signal signal = g.waiting.register();
+                    if (g.next.prev != null)
+                        signal.awaitUninterruptibly();
+                    else
+                        signal.cancel();
+                }
             }
-        }
-
-        /**
-         * Mark all prior operations as blocking, potentially signalling them to more aggressively make progress
-         */
-        public void markBlocking()
-        {
-            for (int i = 0; i < threadBarriers.length; i++)
-            {
-                if (threadBarriers[i] != null)
-                    threadBarriers[i].markBlocking();
-            };
-        }
-
-        /**
-         * Check if the barrier is after the given opGroup _for the specified thread_.
-         */
-        public boolean isAfter(Thread thread, OpOrder.Group opGroup)
-        {
-            return threadBarriers[mapper.idFor(thread)].isAfter(opGroup);
         }
     }
 }
