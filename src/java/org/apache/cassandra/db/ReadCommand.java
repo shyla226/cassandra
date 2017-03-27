@@ -555,7 +555,7 @@ public abstract class ReadCommand implements ReadQuery
             if (version.compareTo(ReadVersion.DSE_60) >= 0)
                 return DigestVersion.values()[digestVersion];
 
-            MessagingVersion ms = MessagingVersion.from(ProtocolVersion.fromHandshakeVersion(digestVersion));
+            MessagingVersion ms = MessagingVersion.fromHandshakeVersion(digestVersion);
             return ms.<ReadVersion>groupVersion(Verbs.Group.READS).digestVersion;
         }
 

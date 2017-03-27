@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
+import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -228,6 +229,13 @@ public class BatchlogManager implements BatchlogManagerMBean
         return (int) Math.max(1, Math.min(DEFAULT_PAGE_SIZE, 4 * 1024 * 1024 / averageRowSize));
     }
 
+    private WriteVersion getVersion(UntypedResultSet.Row row, String name)
+    {
+        int messagingVersion = row.getInt(name);
+        MessagingVersion version = MessagingVersion.fromHandshakeVersion(messagingVersion);
+        return version.groupVersion(Verbs.Group.WRITES);
+    }
+
     private void processBatchlogEntries(UntypedResultSet batches, int pageSize, RateLimiter rateLimiter)
     {
         int positionInPage = 0;
@@ -240,7 +248,7 @@ public class BatchlogManager implements BatchlogManagerMBean
         for (UntypedResultSet.Row row : batches)
         {
             UUID id = row.getUUID("id");
-            int version = row.getInt("version");
+            WriteVersion version = getVersion(row, "version");
             try
             {
                 ReplayingBatch batch = new ReplayingBatch(id, version, row.getList("mutations", BytesType.instance));
@@ -305,7 +313,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
         private List<ReplayWriteHandler> replayHandlers;
 
-        ReplayingBatch(UUID id, int version, List<ByteBuffer> serializedMutations) throws IOException
+        ReplayingBatch(UUID id, WriteVersion version, List<ByteBuffer> serializedMutations) throws IOException
         {
             this.id = id;
             this.writtenAt = UUIDGen.unixTimestamp(id);
@@ -351,7 +359,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
         }
 
-        private int addMutations(int version, List<ByteBuffer> serializedMutations) throws IOException
+        private int addMutations(WriteVersion version, List<ByteBuffer> serializedMutations) throws IOException
         {
             int ret = 0;
             for (ByteBuffer serializedMutation : serializedMutations)
@@ -359,7 +367,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 ret += serializedMutation.remaining();
                 try (DataInputBuffer in = new DataInputBuffer(serializedMutation, true))
                 {
-                    addMutation(Mutation.serializers.get(CURRENT_VERSION).deserialize(in));
+                    addMutation(Mutation.serializers.get(version).deserialize(in));
                 }
             }
 
