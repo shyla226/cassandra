@@ -74,7 +74,6 @@ import static java.util.Collections.singletonMap;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalAsync;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
-import static org.apache.cassandra.net.ProtocolVersion.fromHandshakeVersion;
 
 public final class SystemKeyspace
 {
@@ -1098,7 +1097,7 @@ public final class SystemKeyspace
     private static EncodingVersion getVersion(UntypedResultSet.Row row, String name)
     {
         int messagingVersion = row.getInt(name);
-        MessagingVersion version = MessagingVersion.from(fromHandshakeVersion(messagingVersion));
+        MessagingVersion version = MessagingVersion.fromHandshakeVersion(messagingVersion);
         return version.<WriteVersion>groupVersion(Verbs.Group.WRITES).encodingVersion;
     }
 

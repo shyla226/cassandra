@@ -114,6 +114,14 @@ public enum MessagingVersion
         return previous;
     }
 
+    /**
+     * A shortcut for {@code from(ProtocolVersion.fromHandshakeVersion(handshakeVersion))}.
+     */
+    public static MessagingVersion fromHandshakeVersion(int handshakeVersion)
+    {
+        return from(ProtocolVersion.fromHandshakeVersion(handshakeVersion));
+    }
+
     @SuppressWarnings("unchecked")
     public <V extends Enum<V> & Version<V>> V groupVersion(Verbs.Group groupId)
     {
