@@ -172,7 +172,7 @@ public class CassandraDaemon
 
         logSystemInfo();
 
-        CLibrary.tryMlockall();
+        NativeLibrary.tryMlockall();
 
         try
         {
@@ -671,12 +671,12 @@ public class CassandraDaemon
     {
         public boolean isAvailable()
         {
-            return CLibrary.jnaAvailable();
+            return NativeLibrary.isAvailable();
         }
 
         public boolean isMemoryLockable()
         {
-            return CLibrary.jnaMemoryLockable();
+            return NativeLibrary.jnaMemoryLockable();
         }
     }
 
