@@ -30,8 +30,6 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -789,8 +787,6 @@ public final class MessagingService implements MessagingServiceMBean
      */
     public MessagingVersion setVersion(InetAddress endpoint, MessagingVersion version)
     {
-        // We can't talk to someone from the future
-        version = MessagingVersion.min(version, current_version);
         logger.trace("Setting version {} for {}", version, endpoint);
 
         MessagingVersion v = versions.put(endpoint, version);
@@ -803,6 +799,10 @@ public final class MessagingService implements MessagingServiceMBean
         versions.remove(endpoint);
     }
 
+    /**
+     * Returns the messaging-version as announced by the given node but capped
+     * to the min of the version as announced by the node and {@link #current_version}.
+     */
     public MessagingVersion getVersion(InetAddress endpoint)
     {
         MessagingVersion v = versions.get(endpoint);
@@ -822,6 +822,9 @@ public final class MessagingService implements MessagingServiceMBean
         return getVersion(InetAddress.getByName(endpoint)).protocolVersion().handshakeVersion;
     }
 
+    /**
+     * Returns the messaging-version exactly as announced by the given endpoint.
+     */
     public MessagingVersion getRawVersion(InetAddress endpoint)
     {
         MessagingVersion v = versions.get(endpoint);

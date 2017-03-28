@@ -47,6 +47,7 @@
 
 
 3.11.0
+ * DataOutputBuffer.asNewBuffer broken (CASSANDRA-13298)
  * unittest CipherFactoryTest failed on MacOS (CASSANDRA-13370)
  * Forbid SELECT restrictions and CREATE INDEX over non-frozen UDT columns (CASSANDRA-13247)
  * Default logging we ship will incorrectly print "?:?" for "%F:%L" pattern (CASSANDRA-13317)
@@ -62,6 +63,7 @@
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
  * Address message coalescing regression (CASSANDRA-12676)
 Merged from 3.0:
+ * Fix code to not exchange schema across major versions (CASSANDRA-13274)
  * Dropping column results in "corrupt" SSTable (CASSANDRA-13337)
  * Bugs handling range tombstones in the sstable iterators (CASSANDRA-13340)
  * Fix CONTAINS filtering for null collections (CASSANDRA-13246)
