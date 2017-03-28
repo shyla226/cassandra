@@ -91,13 +91,8 @@ public final class AuthConfig
 
         // authenticator
 
-        IInternodeAuthenticator internodeAuthenticator;
         if (conf.internode_authenticator != null)
-            internodeAuthenticator = FBUtilities.construct(conf.internode_authenticator, "internode_authenticator");
-        else
-            internodeAuthenticator = new AllowAllInternodeAuthenticator();
-
-        DatabaseDescriptor.setInternodeAuthenticator(internodeAuthenticator);
+            DatabaseDescriptor.setInternodeAuthenticator(FBUtilities.construct(conf.internode_authenticator, "internode_authenticator"));
 
         // Validate at last to have authenticator, authorizer, role-manager and internode-auth setup
         // in case these rely on each other.
@@ -105,7 +100,8 @@ public final class AuthConfig
         authenticator.validateConfiguration();
         authorizer.validateConfiguration();
         roleManager.validateConfiguration();
-        internodeAuthenticator.validateConfiguration();
+
+        DatabaseDescriptor.getInternodeAuthenticator().validateConfiguration();
 
         if (!authenticator.requireAuthentication() && authorizer.requireAuthorization())
             throw new ConfigurationException(conf.authenticator + " does not currently require authentication, so it " +

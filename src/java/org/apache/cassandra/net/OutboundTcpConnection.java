@@ -244,6 +244,12 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                         break inner;
                     }
                 }
+                catch (InternodeAuthFailed e)
+                {
+                    logger.warn("Internode auth failed connecting to " + poolReference.endPoint());
+                    //Remove the connection pool and other thread so messages aren't queued
+                    MessagingService.instance().destroyConnectionPool(poolReference.endPoint());
+                }
                 catch (Exception e)
                 {
                     JVMStabilityInspector.inspectThrowable(e);
@@ -345,20 +351,27 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     }
 
     @SuppressWarnings("resource")
-    private boolean connect()
+    private boolean connect() throws InternodeAuthFailed
     {
-        logger.debug("Attempting to connect to {}", poolReference.endPoint());
+        InetAddress endpoint = poolReference.endPoint();
+        if (!DatabaseDescriptor.getInternodeAuthenticator().authenticate(endpoint, poolReference.portFor(endpoint)))
+        {
+            throw new InternodeAuthFailed();
+        }
+
+        logger.debug("Attempting to connect to {}", endpoint);
+
 
         long start = System.nanoTime();
         long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getRpcTimeout());
         while (System.nanoTime() - start < timeout)
         {
-            targetVersion = MessagingService.instance().getVersion(poolReference.endPoint());
+            targetVersion = MessagingService.instance().getVersion(endpoint);
             try
             {
                 socket = poolReference.newSocket();
                 socket.setKeepAlive(true);
-                if (isLocalDC(poolReference.endPoint()))
+                if (isLocalDC(endpoint))
                 {
                     socket.setTcpNoDelay(INTRADC_TCP_NODELAY);
                 }
@@ -399,7 +412,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 }
                 else
                 {
-                    MessagingService.instance().setVersion(poolReference.endPoint(),
+                    MessagingService.instance().setVersion(endpoint,
                                                            MessagingVersion.from(maxTargetVersion));
                 }
 
@@ -408,7 +421,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                     logger.trace("Target max version is {}; will reconnect with that version", maxTargetVersion);
                     try
                     {
-                        if (DatabaseDescriptor.getSeeds().contains(poolReference.endPoint()))
+                        if (DatabaseDescriptor.getSeeds().contains(endpoint))
                             logger.warn("Seed gossip version is {}; will not connect with that version", maxTargetVersion);
                     }
                     catch (Throwable e)
@@ -452,7 +465,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 if (shouldCompressConnection())
                 {
                     out.flush();
-                    logger.trace("Upgrading OutputStream to {} to be compressed", poolReference.endPoint());
+                    logger.trace("Upgrading OutputStream to {} to be compressed", endpoint);
 
                     // TODO: custom LZ4 OS that supports BB write methods
                     LZ4Compressor compressor = LZ4Factory.fastestInstance().fastCompressor();
@@ -463,7 +476,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                                                                         checksum,
                                                                         true)); // no async flushing
                 }
-                logger.debug("Done connecting to {}", poolReference.endPoint());
+                logger.debug("Done connecting to {}", endpoint);
                 return true;
             }
             catch (SSLHandshakeException e)
@@ -482,7 +495,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             catch (IOException e)
             {
                 socket = null;
-                logger.debug("Unable to connect to {}", poolReference.endPoint(), e);
+                logger.debug("Unable to connect to {}", endpoint, e);
                 Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
         }
@@ -575,4 +588,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             return false;
         }
     }
+
+    private static class InternodeAuthFailed extends Exception {}
 }

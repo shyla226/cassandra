@@ -92,7 +92,8 @@ public final class MessagingService implements MessagingServiceMBean
     /* This records all the results mapped by message Id */
     private final ExpiringMap<Integer, CallbackInfo<?>> callbacks;
 
-    private final ConcurrentMap<InetAddress, OutboundTcpConnectionPool> connectionManagers = new NonBlockingHashMap<>();
+    @VisibleForTesting
+    final ConcurrentMap<InetAddress, OutboundTcpConnectionPool> connectionManagers = new NonBlockingHashMap<>();
 
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
     private static final int LOG_DROPPED_INTERVAL_IN_MS = 5000;
@@ -186,7 +187,9 @@ public final class MessagingService implements MessagingServiceMBean
             addLatency(expiredCallbackInfo.verb, target, pair.right.timeoutMillis());
 
             ConnectionMetrics.totalTimeouts.mark();
-            getConnectionPool(target).incrementTimeout();
+            OutboundTcpConnectionPool cp = getConnectionPool(expiredCallbackInfo.target);
+            if (cp != null)
+                cp.incrementTimeout();
 
             updateBackPressureOnReceive(target, expiredCallbackInfo.verb, true);
             StageManager.getStage(Stage.INTERNAL_RESPONSE).submit(() -> callback.onTimeout(target));
@@ -459,8 +462,12 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (request.verb().supportsBackPressure() && DatabaseDescriptor.backPressureEnabled())
         {
-            BackPressureState backPressureState = getConnectionPool(request.to()).getBackPressureState();
-            backPressureState.onRequestSent(request);
+            OutboundTcpConnectionPool cp = getConnectionPool(request.to());
+            if (cp != null)
+            {
+                BackPressureState backPressureState = cp.getBackPressureState();
+                backPressureState.onRequestSent(request);
+            }
         }
     }
 
@@ -475,11 +482,15 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (verb.supportsBackPressure() && DatabaseDescriptor.backPressureEnabled())
         {
-            BackPressureState backPressureState = getConnectionPool(host).getBackPressureState();
-            if (!timeout)
-                backPressureState.onResponseReceived();
-            else
-                backPressureState.onResponseTimeout();
+            OutboundTcpConnectionPool cp = getConnectionPool(host);
+            if (cp != null)
+            {
+                BackPressureState backPressureState = cp.getBackPressureState();
+                if (!timeout)
+                    backPressureState.onResponseReceived();
+                else
+                    backPressureState.onResponseTimeout();
+            }
         }
     }
 
@@ -496,10 +507,16 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
-            backPressure.apply(StreamSupport.stream(hosts.spliterator(), false)
-                    .filter(h -> !h.equals(FBUtilities.getBroadcastAddress()))
-                    .map(h -> getConnectionPool(h).getBackPressureState())
-                    .collect(Collectors.toSet()), timeoutInNanos, TimeUnit.NANOSECONDS);
+            Set<BackPressureState> states = new HashSet<BackPressureState>();
+            for (InetAddress host : hosts)
+            {
+                if (host.equals(FBUtilities.getBroadcastAddress()))
+                    continue;
+                OutboundTcpConnectionPool cp = getConnectionPool(host);
+                if (cp != null)
+                    states.add(cp.getBackPressureState());
+            }
+            backPressure.apply(states, timeoutInNanos, TimeUnit.NANOSECONDS);
         }
     }
 
@@ -521,8 +538,16 @@ public final class MessagingService implements MessagingServiceMBean
      */
     public void convict(InetAddress ep)
     {
-        logger.trace("Resetting pool for {}", ep);
-        getConnectionPool(ep).reset();
+        OutboundTcpConnectionPool cp = getConnectionPool(ep);
+        if (cp != null)
+        {
+            logger.trace("Resetting pool for {}", ep);
+            cp.reset();
+        }
+        else
+        {
+            logger.debug("Not resetting pool for {} because internode authenticator said not to connect", ep);
+        }
     }
 
     public void listen()
@@ -646,11 +671,22 @@ public final class MessagingService implements MessagingServiceMBean
         connectionManagers.remove(to);
     }
 
+    /**
+     * Get a connection pool to the specified endpoint. Constructs one if none exists.
+     *
+     * Can return null if the InternodeAuthenticator fails to authenticate the node.
+     * @param to
+     * @return The connection pool or null if internode authenticator says not to
+     */
     public OutboundTcpConnectionPool getConnectionPool(InetAddress to)
     {
         OutboundTcpConnectionPool cp = connectionManagers.get(to);
         if (cp == null)
         {
+            //Don't attempt to connect to nodes that won't (or shouldn't) authenticate anyways
+            if (!DatabaseDescriptor.getInternodeAuthenticator().authenticate(to, OutboundTcpConnectionPool.portFor(to)))
+                return null;
+
             cp = new OutboundTcpConnectionPool(to, backPressure.newState(to));
             OutboundTcpConnectionPool existingPool = connectionManagers.putIfAbsent(to, cp);
             if (existingPool != null)
@@ -664,7 +700,8 @@ public final class MessagingService implements MessagingServiceMBean
 
     public OutboundTcpConnection getConnection(Message msg)
     {
-        return getConnectionPool(msg.to()).getConnection(msg);
+        OutboundTcpConnectionPool cp = getConnectionPool(msg.to());
+        return cp == null ? null : cp.getConnection(msg);
     }
 
     public void register(ILatencySubscriber subcriber)
