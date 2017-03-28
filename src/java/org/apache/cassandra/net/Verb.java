@@ -22,7 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 
-import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.VerbExecutor;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;
 
@@ -56,25 +56,25 @@ public abstract class Verb<P, Q>
      * A simple utility class that groups most infos of the verb to avoid code repetition in the subclass definitions
      * at the end of this class and in {@link VerbGroup}. This can be ignored otherwise.
      */
-    public static class Info
+    public static class Info<P>
     {
         private final VerbGroup<?> group;
         private final int groupIdx;
         private final String name;
-        private final Stage requestStage;
+        private final VerbExecutor.Builder<P> executorBuilder;
         private final boolean supportsBackPressure;
 
         Info(VerbGroup<?> group,
              int groupIdx,
              String name,
-             Stage requestStage,
+             VerbExecutor.Builder<P> executorBuilder,
              boolean supportsBackPressure)
         {
-            assert group != null && name != null && requestStage != null;
+            assert group != null && name != null && executorBuilder != null;
             this.group = group;
             this.groupIdx = groupIdx;
             this.name = name;
-            this.requestStage = requestStage;
+            this.executorBuilder = executorBuilder;
             this.supportsBackPressure = supportsBackPressure;
         }
 
@@ -85,11 +85,11 @@ public abstract class Verb<P, Q>
         }
     }
 
-    private final Info info;
+    private final Info<P> info;
     private final TimeoutSupplier<P> timeoutSupplier;
     private final VerbHandler<P, Q> handler;
 
-    protected Verb(Info info,
+    protected Verb(Info<P> info,
                    TimeoutSupplier<P> timeoutSupplier,
                    VerbHandler<P, Q> handler)
     {
@@ -139,9 +139,9 @@ public abstract class Verb<P, Q>
     /**
      * The stage on which the request must be executed.
      */
-    Stage requestStage()
+    VerbExecutor.Builder executorBuilder()
     {
-        return info.requestStage;
+        return info.executorBuilder;
     }
 
     /**
@@ -279,7 +279,7 @@ public abstract class Verb<P, Q>
      */
     public static class OneWay<P> extends Verb<P, NoResponse>
     {
-        OneWay(Info info,
+        OneWay(Info<P> info,
                VerbHandler<P, NoResponse> handler)
         {
             super(info, null, handler);
@@ -332,7 +332,7 @@ public abstract class Verb<P, Q>
      */
     public static class RequestResponse<P, Q> extends Verb<P, Q>
     {
-        RequestResponse(Info info,
+        RequestResponse(Info<P> info,
                         TimeoutSupplier<P> timeoutSupplier,
                         VerbHandler<P, Q> handler)
         {
@@ -356,7 +356,7 @@ public abstract class Verb<P, Q>
      */
     public static class AckedRequest<P> extends RequestResponse<P, EmptyPayload>
     {
-        protected AckedRequest(Info info,
+        protected AckedRequest(Info<P> info,
                                TimeoutSupplier<P> timeoutSupplier,
                                VerbHandler<P, EmptyPayload> handler)
         {

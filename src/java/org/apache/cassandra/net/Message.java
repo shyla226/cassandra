@@ -23,6 +23,7 @@ import java.net.InetAddress;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.VerbExecutor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.tracing.Tracing;
@@ -282,11 +283,9 @@ public abstract class Message<P>
         return System.currentTimeMillis() - operationStartMillis();
     }
 
-    Stage stage()
+    VerbExecutor executor()
     {
-        return isRequest()
-               ? verb().requestStage()
-               : (group().isInternal() ? Stage.INTERNAL_RESPONSE : Stage.REQUEST_RESPONSE);
+        return verb().executorBuilder().build(this);
     }
 
     /**

@@ -56,6 +56,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -270,6 +271,21 @@ public class NettyRxScheduler extends Scheduler
     public static int getCoreId(Thread t)
     {
         return t instanceof NettyRxThread ? ((NettyRxThread)t).getCpuId() : perCoreSchedulers.length;
+    }
+
+    /**
+     * If the specified scheduler is a Netty rx scheduler, return its core id. Otherwise return an
+     * invalid core id.
+     *
+     * @param scheduler - the scheduer for which we want to know the core id
+     * @return - the core id of the scheduler or Integer.MAX_VALUE
+     */
+    public static int getCoreId(Scheduler scheduler)
+    {
+        if (scheduler instanceof NettyRxScheduler)
+            return ((NettyRxScheduler)scheduler).cpuId;
+
+        return Integer.MAX_VALUE;
     }
 
     public static boolean isTPCThread()
@@ -550,12 +566,10 @@ public class NettyRxScheduler extends Scheduler
          * see APOLLO-488 for more details.
          */
         RxJavaPlugins.setScheduleHandler((runnable) -> {
-            final ExecutorLocals locals = ExecutorLocals.create(); // store the thread local state of the calling thread
-            return () ->
-            {
-                ExecutorLocals.set(locals); // apply the thread local state of the calling thread
-                runnable.run();
-            };
+            if (runnable instanceof ExecutorLocals.WrappedRunnable)
+                return runnable;
+
+            return new ExecutorLocals.WrappedRunnable(runnable);
         });
 
         //RxSubscriptionDebugger.enable();

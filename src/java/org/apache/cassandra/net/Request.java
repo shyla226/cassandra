@@ -154,7 +154,9 @@ public class Request<P, Q> extends Message<P>
 
     Data<Q> responseData(Q payload)
     {
-        long serializedSize = MessagingService.current_version.serializer(verb()).responseSerializer.serializedSize(payload);
+        long serializedSize = from().equals(local)
+                              ? -1 // payload size not used for local responses, which may not be serializable, e.g. ReadResponse.LocalResponse
+                              : MessagingService.current_version.serializer(verb()).responseSerializer.serializedSize(payload);
         return messageData.withPayload(payload, serializedSize);
     }
 

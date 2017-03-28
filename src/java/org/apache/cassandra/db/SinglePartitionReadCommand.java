@@ -962,6 +962,11 @@ public class SinglePartitionReadCommand extends ReadCommand
              + ClusteringIndexFilter.serializers.get(version).serializedSize(clusteringIndexFilter());
     }
 
+    public Scheduler getScheduler()
+    {
+        return NettyRxScheduler.getForKey(metadata().keyspace, partitionKey(), false);
+    }
+
     /**
      * Groups multiple single partition read commands.
      */

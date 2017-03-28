@@ -25,8 +25,10 @@ import java.util.Optional;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Flowable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -52,7 +54,6 @@ import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * A read command that selects a (part of a) range of partitions.
@@ -331,6 +332,11 @@ public class PartitionRangeReadCommand extends ReadCommand
     protected long selectionSerializedSize(ReadVersion version)
     {
         return DataRange.serializers.get(version).serializedSize(dataRange(), metadata());
+    }
+
+    public Scheduler getScheduler()
+    {
+        return NettyRxScheduler.instance();
     }
 
     private static class Deserializer extends SelectionDeserializer

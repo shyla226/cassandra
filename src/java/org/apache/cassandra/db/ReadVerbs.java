@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
@@ -70,14 +71,16 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
         RegistrationHelper helper = helper();
 
         READ = helper.monitoredRequestResponse("READ", ReadCommand.class, ReadResponse.class)
-                     .stage(Stage.READ)
+                     .executor(Stage.READ, ReadCommand::getScheduler)
                      .timeout(command -> command instanceof SinglePartitionReadCommand
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
                      .handler((from, command, monitor) ->
                                   {
+                                      final boolean isLocal = from.equals(local);
+
                                       // Note that we want to allow locally delivered reads no matter what
-                                      if (StorageService.instance.isBootstrapMode() && !from.equals(local))
+                                      if (StorageService.instance.isBootstrapMode() && !isLocal)
                                           throw new RuntimeException("Cannot service reads while bootstrapping!");
 
                                       // Monitoring tests want to artificially slow down their reads, but we don't want this
@@ -88,7 +91,7 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                       CompletableFuture<ReadResponse> ret = new CompletableFuture<>();
                                       command.executeLocally(monitor).subscribe(
                                         (it) -> {
-                                            ret.complete(command.createResponse(it));
+                                            ret.complete(command.createResponse(it, isLocal));
                                             it.close();
                                         },
                                         ex -> {

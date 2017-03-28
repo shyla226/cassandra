@@ -140,7 +140,7 @@ public class SinglePartitionSliceCommandTest
         // check (de)serialized iterator for memtable static cell
         try (UnfilteredPartitionIterator pi = cmd.executeLocally().blockingGet())
         {
-            response = ReadResponse.createDataResponse(pi, cmd);
+            response = ReadResponse.createDataResponse(pi, cmd, false);
         }
 
         ReadVersion version = Version.last(ReadVersion.class);
@@ -158,7 +158,7 @@ public class SinglePartitionSliceCommandTest
         Schema.instance.getColumnFamilyStoreInstance(metadata.id).forceBlockingFlush();
         try (UnfilteredPartitionIterator pi = cmd.executeLocally().blockingGet())
         {
-            response = ReadResponse.createDataResponse(pi, cmd);
+            response = ReadResponse.createDataResponse(pi, cmd, false);
         }
         out = new DataOutputBuffer(Math.toIntExact(ReadResponse.serializers.get(version).serializedSize(response)));
         ReadResponse.serializers.get(version).serialize(response, out);

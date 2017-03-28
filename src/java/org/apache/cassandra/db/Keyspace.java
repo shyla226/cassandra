@@ -482,11 +482,11 @@ public class Keyspace
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Testing write failures"));
 
-        Scheduler schedulerForPartition = NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false);
+        Scheduler schedulerForPartition = mutation.getScheduler();
 
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
-        return Completable.using(
+        Completable c = Completable.using(
             () -> requiresViewUpdate ? new Lock[mutation.getTableIds().size()] : null,
 
             // completable source
@@ -649,7 +649,18 @@ public class Keyspace
                                                          });
                 }
             }
-        ).subscribeOn(schedulerForPartition); // route to the correct core
+        );
+
+        // Switch to the correct core - normally verb handlers already execute on the correct core but
+        // other callers may not ensure this and so we must check again here. However, we don't want to pay
+        // the price of a double schedule if we are already running on the right core and this check should
+        // avoid that. Note that this check should be postponed to when the subscriber subscribes because
+        // there is a small chance that the caller may change thread after creating the single but we know
+        // this is not currently the case.
+        if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(schedulerForPartition))
+            c.subscribeOn(schedulerForPartition);
+
+        return c;
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

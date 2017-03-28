@@ -446,7 +446,7 @@ public final class MessagingService implements MessagingServiceMBean
             if (!ms.allowOutgoingMessage(request, callback))
                 return;
 
-        StageManager.getStage(request.stage()).maybeExecuteImmediately(runnable);
+        request.executor().maybeExecuteImmediately(runnable);
     }
 
 
@@ -721,8 +721,7 @@ public final class MessagingService implements MessagingServiceMBean
             if (!ms.allowIncomingMessage(message))
                 return;
 
-        StageManager.getStage(message.stage()).execute(new MessageDeliveryTask(message),
-                                                       ExecutorLocals.create(state));
+        message.executor().execute(new MessageDeliveryTask(message), state);
     }
 
     // Only required by legacy serialization. Can inline in previous call when we get rid of that.

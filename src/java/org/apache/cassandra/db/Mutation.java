@@ -23,7 +23,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.reactivex.Completable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.commons.lang3.StringUtils;
 
@@ -226,6 +228,11 @@ public class Mutation implements IMutation
             updates.clear();
         }
         return new Mutation(ks, key, modifications);
+    }
+
+    public Scheduler getScheduler()
+    {
+        return NettyRxScheduler.getForKey(getKeyspaceName(), key(), false);
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

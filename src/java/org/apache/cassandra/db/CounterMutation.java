@@ -115,9 +115,14 @@ public class CounterMutation implements IMutation
         return applyCounterMutation(System.nanoTime());
     }
 
+    public Scheduler getScheduler()
+    {
+        return mutation.getScheduler();
+    }
+
     private Single<Mutation> applyCounterMutation(long startTime)
     {
-        Scheduler scheduler = NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false);
+        Scheduler scheduler = getScheduler();
 
         return Single.defer(() ->
         {

@@ -86,9 +86,11 @@ public abstract class ReadResponse
     {
     }
 
-    public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command, boolean forLocalDelivery)
     {
-        return new LocalDataResponse(data, EncodingVersion.last(), command);
+        return forLocalDelivery
+               ? new LocalResponse(data, command)
+               : new LocalDataResponse(data, EncodingVersion.last(), command);
     }
 
     @VisibleForTesting
@@ -147,11 +149,9 @@ public abstract class ReadResponse
 
     /**
      * A local response that is not meant to be serialized. Currently we use an in-memory list of
-     * ImmutableBTreePartition because if more than one replica was queries it may have to return
-     * the iterator multiple times. We could wrap the incoming iterator and use it directly for
-     * added performance but only if the local host host is the only host queried.
+     * ImmutableBTreePartition, a possible optimization would be to use the iterator directly, provided
+     * it is not closed and we don't need to iterate more than once (CL.ONE).
      */
-    //TODO - A/497 MERGE: re-implement local optimization to avoid double serdes
     private static class LocalResponse extends ReadResponse
     {
         //private UnfilteredPartitionIterator iter;

@@ -27,7 +27,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.apache.cassandra.concurrent.SchedulerSupplier;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.VerbExecutor;
 import org.apache.cassandra.db.WriteVerbs;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
@@ -231,7 +233,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             private final boolean isOneWay;
 
             private TimeoutSupplier<P> timeoutSupplier;
-            private Stage requestStage = defaultStage;
+            private VerbExecutor.Builder<P> executorBuilder = defaultStage == null ? null : new VerbExecutor.Builder<>(defaultStage);
 
             private Serializer<P> requestSerializer;
             private Serializer<Q> responseSerializer;
@@ -281,7 +283,13 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
             public T stage(Stage stage)
             {
-                this.requestStage = stage;
+                this.executorBuilder = new VerbExecutor.Builder<>(stage);
+                return us();
+            }
+
+            public T executor(Stage stage, SchedulerSupplier<P> schedulerSupplier)
+            {
+                this.executorBuilder = new VerbExecutor.Builder<>(stage, schedulerSupplier);
                 return us();
             }
 
@@ -339,14 +347,14 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 return us();
             }
 
-            protected Verb.Info info()
+            protected Verb.Info<P> info()
             {
-                if (requestStage == null)
+                if (executorBuilder == null)
                     throw new IllegalStateException("Should specify a request stage (either at the RegistrationHelper lever or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
 
-                return new Verb.Info(VerbGroup.this, groupIdx, name, requestStage, supportsBackPressure);
+                return new Verb.Info(VerbGroup.this, groupIdx, name, executorBuilder, supportsBackPressure);
             }
 
             TimeoutSupplier<P> timeoutSupplier()

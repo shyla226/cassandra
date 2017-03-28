@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.Callable;
 import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
@@ -27,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 
 import org.apache.cassandra.concurrent.NettyRxScheduler;
@@ -46,7 +48,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingVersion;
-import org.apache.cassandra.net.ProtocolVersion;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -272,15 +273,16 @@ public abstract class ReadCommand implements ReadQuery
      * Digest responses calculate the digest in the construstor and close the iterator immediately,
      * whilst data responses may keep it open until the iterator is closed by the final handler, e.g.
      * {@link org.apache.cassandra.cql3.statements.SelectStatement#processPartition(RowIterator, QueryOptions, ResultBuilder, int)}
-     * @param iterator - the iterator containing the results, the response will take ownership
      *
+     * @param iterator - the iterator containing the results, the response will take ownership
+     * @param forLocalDelivery - if the response is to be delivered locally (optimized path)
      * @return An appropriate response, either of type digest or data.
      */
-    public ReadResponse createResponse(UnfilteredPartitionIterator iterator)
+    public ReadResponse createResponse(UnfilteredPartitionIterator iterator, boolean forLocalDelivery)
     {
         return isDigestQuery()
              ? ReadResponse.createDigestResponse(iterator, this)
-             : ReadResponse.createDataResponse(iterator, this);
+             : ReadResponse.createDataResponse(iterator, this, forLocalDelivery);
     }
 
     public long indexSerializedSize()
@@ -427,9 +429,16 @@ public abstract class ReadCommand implements ReadQuery
             }
         });
 
-
-        if (this instanceof SinglePartitionReadCommand)
-            s = s.subscribeOn(NettyRxScheduler.getForKey(metadata.keyspace, ((SinglePartitionReadCommand)this).partitionKey(), false));
+        // Get the scheduler for this read command and, unless we are already executing on it,
+        // switch to this scheduler - normally verb handlers already execute on the correct scheduler but
+        // other callers may not ensure this and so we must check again here. However, we don't want to pay
+        // the price of a double schedule if we are already running on the right core and this check should
+        // avoid that. Note that this check should be postponed to when the subscriber subscribes because
+        // there is a small chance that the caller may change thread after creating the single but we know
+        // this is not currently the case.
+        Scheduler scheduler = getScheduler();
+        if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(scheduler))
+            s = s.subscribeOn(scheduler);
 
         return s;
     }
@@ -557,6 +566,11 @@ public abstract class ReadCommand implements ReadQuery
         }
         return Transformation.apply(iterator, new WithoutPurgeableTombstones());
     }
+
+    /**
+     * @return the prefer Netty RX scheduler for executing this command.
+     */
+    public abstract Scheduler getScheduler();
 
     /**
      * Recreate the CQL string corresponding to this query.
