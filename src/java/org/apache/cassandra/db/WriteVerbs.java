@@ -138,10 +138,10 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
                             .stage(Stage.MUTATION)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                             .withBackPressure()
-                            .syncHandler((from, batch) -> BatchlogManager.store(batch));
+                            .syncHandler((from, batch) -> BatchlogManager.store(batch).blockingAwait());
         BATCH_REMOVE = helper.oneWay("BATCH_REMOVE", UUID.class)
                              .stage(Stage.MUTATION)
                              .withRequestSerializer(UUIDSerializer.serializer)
-                             .handler((from, batchId) -> BatchlogManager.remove(batchId));
+                             .handler((from, batchId) -> BatchlogManager.remove(batchId).blockingAwait());
     }
 }

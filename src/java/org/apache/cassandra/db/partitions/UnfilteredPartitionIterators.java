@@ -21,18 +21,10 @@ import java.io.IOError;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.concurrent.Callable;
-
-import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
-import io.reactivex.CompletableObserver;
-import io.reactivex.Flowable;
-import io.reactivex.Single;
-import io.reactivex.SingleSource;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
@@ -309,23 +301,20 @@ public abstract class UnfilteredPartitionIterators
             super(version);
         }
 
-        public Completable serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out) throws IOException
+        public void serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out) throws IOException
         {
             // Previously, a boolean indicating if this was for a thrift query.
             // Unused since 4.0 but kept on wire for compatibility.
-            return Completable.fromAction(() ->
-              {
-                  out.writeBoolean(false);
-                  while (iter.hasNext())
-                  {
-                      out.writeBoolean(true);
-                      try (UnfilteredRowIterator partition = iter.next())
-                      {
-                          UnfilteredRowIteratorSerializer.serializers.get(version).serialize(partition, selection, out);
-                      }
-                  }
-                  out.writeBoolean(false);
-              });
+            out.writeBoolean(false);
+            while (iter.hasNext())
+            {
+                out.writeBoolean(true);
+                try (UnfilteredRowIterator partition = iter.next())
+                {
+                    UnfilteredRowIteratorSerializer.serializers.get(version).serialize(partition, selection, out);
+                }
+            }
+            out.writeBoolean(false);
         }
 
         public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final TableMetadata metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException

@@ -281,7 +281,7 @@ public class ReadCommandTest
             try (UnfilteredPartitionIterator iter = query.executeLocally().blockingGet();
                  DataOutputBuffer buffer = new DataOutputBuffer())
             {
-                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, columnFilter, buffer).blockingAwait();
+                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, columnFilter, buffer);
                 buffers.add(buffer.buffer());
             }
         }
