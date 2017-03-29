@@ -41,10 +41,7 @@ import io.netty.util.concurrent.EventExecutorGroup;
 import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.concurrent.FastThreadLocalThread;
 import io.netty.util.concurrent.GlobalEventExecutor;
-import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
-import io.reactivex.Single;
-import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.Disposables;
 import io.reactivex.internal.disposables.DisposableContainer;
@@ -56,6 +53,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
@@ -66,8 +64,6 @@ import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -324,18 +320,22 @@ public class NettyRxScheduler extends Scheduler
     }
 
     @Inline
-    public static int coreForKey(String keyspaceName, DecoratedKey key)
+    public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
     {
         // nothing we can do until we have the local ranges
         if (!StorageService.instance.isInitialized())
-            return 0;
+            return ImmediateThinScheduler.INSTANCE;
+
+        int callerCoreId = -1;
+        if (useImmediateForLocal)
+            callerCoreId = getCoreId();
 
         // Convert OP partitions to top level partitioner for secondary indexes; always route
         // system table mutations through core 0
         if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
         {
             if (SchemaConstants.isSystemKeyspace(keyspaceName))
-                return 0;
+                return getForCore(0);
 
             key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
         }
@@ -351,22 +351,16 @@ public class NettyRxScheduler extends Scheduler
             {
                 //logger.info("Read moving to {} from {}", i-1, getCoreId());
 
-                return i - 1;
+                if (useImmediateForLocal)
+                    return callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
+
+                return getForCore(i - 1);
             }
 
             rangeStart = next;
         }
 
         throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
-    }
-
-    @Inline
-    public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
-    {
-        // nothing we can do until we have the local ranges
-        if (!StorageService.instance.isInitialized())
-            return ImmediateThinScheduler.INSTANCE;
-        return getForCore(coreForKey(keyspaceName, key));
     }
 
     public static List<Token> getRangeList(String keyspaceName, boolean persist)
@@ -559,174 +553,5 @@ public class NettyRxScheduler extends Scheduler
         });
 
         //RxSubscriptionDebugger.enable();
-    }
-
-    /**
-     * Execute on. Makes sure subscription and all requests on a flowable are carried out on the given netty core thread.
-     * Unlike subscribeOn and equivalents, this acts like an immediate thin scheduler if we are already on the required
-     * thread (which solves some getBlocking() deadlocks).
-     */
-    static public <T> Flowable<T> executeOnCore(Flowable<T> flowable, int coreId)
-    {
-        return new ExecuteOnFlowable<>(flowable, coreId);
-    }
-
-    private static class ExecuteOnFlowable<T> extends Flowable<T>
-    {
-        final Flowable<T> source;
-        final int coreId;
-
-        public ExecuteOnFlowable(Flowable<T> flowable, int coreId)
-        {
-            this.source = flowable;
-            this.coreId = coreId;
-        }
-
-        protected void subscribeActual(Subscriber<? super T> subscriber)
-        {
-            ExecuteOnSubscription us = new ExecuteOnSubscription(subscriber);
-            subscriber.onSubscribe(us);
-            if (coreId == getCoreId())
-                us.run();
-            else
-                getForCore(coreId).scheduleDirect(us);
-            // no disposal support needed
-        }
-
-        private class ExecuteOnSubscription implements Runnable, Subscription, Subscriber<T>
-        {
-            final Subscriber<? super T> downstream;
-            Subscription sub;
-
-            private ExecuteOnSubscription(Subscriber<? super T> subscriber)
-            {
-                this.downstream = subscriber;
-            }
-
-            public void run()
-            {
-                source.subscribe(this);
-            }
-
-            public void onSubscribe(Subscription subscription)
-            {
-                sub = subscription;
-            }
-
-            public void onNext(T t)
-            {
-                // We don't switch threads to observe -- if needed, observeOn must be used.
-                downstream.onNext(t);
-            }
-
-            public void onError(Throwable throwable)
-            {
-                downstream.onError(throwable);
-            }
-
-            public void onComplete()
-            {
-                downstream.onComplete();
-            }
-
-            public void request(long l)
-            {
-                if (coreId == getCoreId())
-                    sub.request(l);
-                else
-                    getForCore(coreId).scheduleDirect(() -> sub.request(l));
-            }
-
-            public void cancel()
-            {
-                if (coreId == getCoreId())
-                    sub.cancel();
-                else
-                    getForCore(coreId).scheduleDirect(sub::cancel);
-            }
-        }
-    }
-
-    /**
-     * Execute on. Makes sure subscription and all requests on a flowable are carried out on the given netty core thread.
-     * Unlike subscribeOn and equivalents, this acts like an immediate thin scheduler if we are already on the required
-     * thread (which solves some getBlocking() deadlocks).
-     */
-    static public <T> Single<T> executeOnCore(Single<T> flowable, int coreId)
-    {
-        return new ExecuteOnSingle<>(flowable, coreId);
-    }
-
-    private static class ExecuteOnSingle<T> extends Single<T>
-    {
-        final Single<T> source;
-        final int coreId;
-
-        public ExecuteOnSingle(Single<T> flowable, int coreId)
-        {
-            this.source = flowable;
-            this.coreId = coreId;
-        }
-
-        protected void subscribeActual(SingleObserver<? super T> subscriber)
-        {
-            ExecuteOnSubscription us = new ExecuteOnSubscription(subscriber);
-            subscriber.onSubscribe(us);
-            if (coreId == getCoreId())
-                us.run();
-            else
-                getForCore(coreId).scheduleDirect(us);
-            // limited disposal support -- we don't cancel scheduled task, just pass on request
-        }
-
-        private class ExecuteOnSubscription implements Runnable, Disposable, SingleObserver<T>
-        {
-            final SingleObserver<? super T> downstream;
-            Disposable d = null;
-            boolean alreadyDisposed;
-
-            private ExecuteOnSubscription(SingleObserver<? super T> subscriber)
-            {
-                this.downstream = subscriber;
-            }
-
-            public void run()
-            {
-                source.subscribe(this);
-            }
-
-            public synchronized void onSubscribe(Disposable d)
-            {
-                this.d = d;
-                if (alreadyDisposed)
-                    d.dispose();
-            }
-
-            public void onSuccess(T t)
-            {
-                // We don't switch threads to observe -- if needed, observeOn must be used.
-                downstream.onSuccess(t);
-            }
-
-            public void onError(Throwable throwable)
-            {
-                downstream.onError(throwable);
-            }
-
-            public synchronized void dispose()
-            {
-                if (d != null)
-                    d.dispose();
-                else
-                    alreadyDisposed = true;
-            }
-
-            public boolean isDisposed()
-            {
-                if (d == null)
-                    return false;
-                return d.isDisposed();
-            }
-        }
     }
 }

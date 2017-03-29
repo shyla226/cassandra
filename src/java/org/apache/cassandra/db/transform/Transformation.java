@@ -190,18 +190,6 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return to;
     }
 
-//    public static Flowable<FlowableUnfilteredPartition> apply(Flowable<FlowableUnfilteredPartition> src, Transformation transformation)
-//    {
-//        Flowable<FlowableUnfilteredPartition> content = FlowableUtils.skippingMap(src, transformation::applyToPartition));
-//        if (transformation instanceof StoppingTransformation)
-//        {
-//            StoppingTransformation s = (StoppingTransformation) transformation;
-//            s.stop = new BaseIterator.Stop();
-//            content = content.takeUntil(row -> s.stop.isSignalled);
-//        }
-//        return content.doFinally(transformation::onClose);
-//    }
-//
     public static FlowableUnfilteredPartition apply(FlowableUnfilteredPartition src, Transformation transformation)
     {
         Flowable<Unfiltered> content = FlowableUtils.skippingMap(src.content, transformation::applyToUnfiltered);
@@ -216,34 +204,6 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return new FlowableUnfilteredPartition(apply(src.header, transformation),
                                                src.staticRow.map(transformation::applyToStatic),
                                                content);
-    }
-
-    public static Flowable<FlowablePartition> applyFiltered(Flowable<FlowablePartition> src, Transformation transformation)
-    {
-        Flowable<FlowablePartition> content = src.map(partition -> applyFiltered(partition, transformation))
-                                                 .filter(u -> u != null);
-        if (transformation instanceof StoppingTransformation)
-        {
-            StoppingTransformation s = (StoppingTransformation) transformation;
-            content = content.takeUntil(row -> s.stop.isSignalled);
-        }
-        return content.doFinally(transformation::onClose);
-    }
-
-    public static FlowablePartition applyFiltered(FlowablePartition src, Transformation transformation)
-    {
-        Flowable<Row> content = src.content.map(transformation::applyToRow)
-                                           .filter(u -> u != null);
-        if (transformation instanceof StoppingTransformation)
-        {
-            StoppingTransformation s = (StoppingTransformation) transformation;
-            content = content.takeUntil(row -> s.stopInPartition.isSignalled);
-        }
-        content = content.doFinally(transformation::onPartitionClose);
-
-        return new FlowablePartition(apply(src.header, transformation),
-                                     src.staticRow.map(transformation::applyToStatic),
-                                     content);
     }
 
     private static PartitionHeader apply(PartitionHeader header, Transformation transformation)
