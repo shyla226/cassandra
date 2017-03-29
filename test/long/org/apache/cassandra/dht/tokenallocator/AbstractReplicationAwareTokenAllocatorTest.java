@@ -421,13 +421,6 @@ abstract class AbstractReplicationAwareTokenAllocatorTest extends TokenAllocator
 
     protected void testNewCluster(IPartitioner partitioner, int maxVNodeCount)
     {
-        // This test is flaky because the selection of the tokens for the first RF nodes (which is random, with an
-        // uncontrolled seed) can sometimes cause a pathological situation where the algorithm will find a (close to)
-        // ideal distribution of tokens for some number of nodes, which in turn will inevitably cause it to go into a
-        // bad (unacceptable to the test criteria) distribution after adding one more node.
-
-        // This should happen very rarely, unless something is broken in the token allocation code.
-
         for (int rf = 2; rf <= 5; ++rf)
         {
             for (int perUnitCount = 1; perUnitCount <= maxVNodeCount; perUnitCount *= 4)
@@ -523,12 +516,12 @@ abstract class AbstractReplicationAwareTokenAllocatorTest extends TokenAllocator
         SummaryStatistics unitStat = new SummaryStatistics();
         for (Map.Entry<Unit, Double> en : ownership.entrySet())
             unitStat.addValue(en.getValue() * inverseAverage / t.unitToTokens.get(en.getKey()).size());
-        su.update(unitStat);
+        su.update(unitStat, t.unitCount());
 
         SummaryStatistics tokenStat = new SummaryStatistics();
         for (Token tok : t.sortedTokens.keySet())
             tokenStat.addValue(replicatedTokenOwnership(tok, t.sortedTokens, t.strategy) * inverseAverage);
-        st.update(tokenStat);
+        st.update(tokenStat, t.unitCount());
 
         if (print)
         {

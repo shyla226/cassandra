@@ -38,8 +38,8 @@ import org.apache.cassandra.dht.Token;
 
 public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
 {
-    PriorityQueue<Weighted<UnitInfo>> sortedUnits = Queues.newPriorityQueue();
-    Map<Unit, PriorityQueue<Weighted<TokenInfo>>> tokensInUnits = Maps.newHashMap();
+    PriorityQueue<Weighted<UnitInfo<Unit>>> sortedUnits = Queues.newPriorityQueue();
+    Map<Unit, PriorityQueue<Weighted<TokenInfo<Unit>>>> tokensInUnits = Maps.newHashMap();
 
     private static final double MAX_TAKEOVER_RATIO = 0.90;
     private static final double MIN_TAKEOVER_RATIO = 1.0 - MAX_TAKEOVER_RATIO;
@@ -83,7 +83,7 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
 
         for (UnitInfo<Unit> unitInfo : units.values())
         {
-            sortedUnits.add(new Weighted<UnitInfo>(unitInfo.ownership, unitInfo));
+            sortedUnits.add(new Weighted<UnitInfo<Unit>>(unitInfo.ownership, unitInfo));
         }
 
         return first;
@@ -104,13 +104,13 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         token.replicatedOwnership = token.replicationStart.size(token.token);
         token.owningUnit.ownership += token.replicatedOwnership;
 
-        PriorityQueue<Weighted<TokenInfo>> unitTokens = tokensInUnits.get(token.owningUnit.unit);
+        PriorityQueue<Weighted<TokenInfo<Unit>>> unitTokens = tokensInUnits.get(token.owningUnit.unit);
         if (unitTokens == null)
         {
             unitTokens = Queues.newPriorityQueue();
             tokensInUnits.put(token.owningUnit.unit, unitTokens);
         }
-        unitTokens.add(new Weighted<TokenInfo>(token.replicatedOwnership, token));
+        unitTokens.add(new Weighted<TokenInfo<Unit>>(token.replicatedOwnership, token));
     }
 
     private Collection<Token> generateRandomTokens(UnitInfo<Unit> newUnit, int numTokens, Map<Unit, UnitInfo<Unit>> unitInfos)
@@ -149,11 +149,11 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         // Select the nodes we will work with, extract them from sortedUnits and calculate targetAverage
         double targetAverage = 0.0;
         double sum = 0.0;
-        List<Weighted<UnitInfo>> unitsToChange = new ArrayList<>();
+        List<Weighted<UnitInfo<Unit>>> unitsToChange = new ArrayList<>();
 
         for (int i = 0; i < numTokens; i++)
         {
-            Weighted<UnitInfo> unit = sortedUnits.peek();
+            Weighted<UnitInfo<Unit>> unit = sortedUnits.peek();
 
             if (unit == null)
                 break;
@@ -173,19 +173,19 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
 
         int nr = 0;
         // calculate the tokens
-        for (Weighted<UnitInfo> unit : unitsToChange)
+        for (Weighted<UnitInfo<Unit>> unit : unitsToChange)
         {
             // TODO: Any better ways to assign how many tokens to change in each node?
             int tokensToChange = numTokens / unitsToChange.size() + (nr < numTokens % unitsToChange.size() ? 1 : 0);
 
-            Queue<Weighted<TokenInfo>> unitTokens = tokensInUnits.get(unit.value.unit);
-            List<Weighted<TokenInfo>> tokens = Lists.newArrayListWithCapacity(tokensToChange);
+            Queue<Weighted<TokenInfo<Unit>>> unitTokens = tokensInUnits.get(unit.value.unit);
+            List<Weighted<TokenInfo<Unit>>> tokens = Lists.newArrayListWithCapacity(tokensToChange);
 
             double workWeight = 0;
             // Extract biggest vnodes and calculate how much weight we can work with.
             for (int i = 0; i < tokensToChange; i++)
             {
-                Weighted<TokenInfo> wt = unitTokens.remove();
+                Weighted<TokenInfo<Unit>> wt = unitTokens.remove();
                 tokens.add(wt);
                 workWeight += wt.weight;
                 unit.value.ownership -= wt.weight;
@@ -193,7 +193,7 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
 
             double toTakeOver = unit.weight - targetAverage;
             // Split toTakeOver proportionally between the vnodes.
-            for (Weighted<TokenInfo> wt : tokens)
+            for (Weighted<TokenInfo<Unit>> wt : tokens)
             {
                 double slice;
                 Token token;
@@ -240,7 +240,7 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
      */
     void removeUnit(Unit n)
     {
-        Iterator<Weighted<UnitInfo>> it = sortedUnits.iterator();
+        Iterator<Weighted<UnitInfo<Unit>>> it = sortedUnits.iterator();
         while (it.hasNext())
         {
             if (it.next().value.unit.equals(n))
@@ -250,9 +250,9 @@ public class NoReplicationTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
             }
         }
 
-        PriorityQueue<Weighted<TokenInfo>> tokenInfos = tokensInUnits.remove(n);
+        PriorityQueue<Weighted<TokenInfo<Unit>>> tokenInfos = tokensInUnits.remove(n);
         Collection<Token> tokens = Lists.newArrayListWithCapacity(tokenInfos.size());
-        for (Weighted<TokenInfo> tokenInfo : tokenInfos)
+        for (Weighted<TokenInfo<Unit>> tokenInfo : tokenInfos)
         {
             tokens.add(tokenInfo.value.token);
         }
