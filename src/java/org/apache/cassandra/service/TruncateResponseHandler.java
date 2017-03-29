@@ -31,7 +31,7 @@ import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
-public class TruncateResponseHandler implements MessageCallback<EmptyPayload>
+public class TruncateResponseHandler implements MessageCallback<TruncateResponse>
 {
     protected static final Logger logger = LoggerFactory.getLogger(TruncateResponseHandler.class);
     protected final SimpleCondition condition = new SimpleCondition();
@@ -39,7 +39,7 @@ public class TruncateResponseHandler implements MessageCallback<EmptyPayload>
     protected final AtomicInteger responses = new AtomicInteger(0);
     private final long start;
 
-    public TruncateResponseHandler(int responseCount)
+    TruncateResponseHandler(int responseCount)
     {
         // at most one node per range can bootstrap at a time, and these will be added to the write until
         // bootstrap finishes (at which point we no longer need to write to the old ones).
@@ -68,14 +68,14 @@ public class TruncateResponseHandler implements MessageCallback<EmptyPayload>
         }
     }
 
-    public void onResponse(Response<EmptyPayload> message)
+    public void onResponse(Response<TruncateResponse> message)
     {
         responses.incrementAndGet();
         if (responses.get() >= responseCount)
             condition.signalAll();
     }
 
-    public void onFailure(FailureResponse<EmptyPayload> message)
+    public void onFailure(FailureResponse<TruncateResponse> message)
     {
         // Ignoring which will make us timeout. We could probably do better.
     }

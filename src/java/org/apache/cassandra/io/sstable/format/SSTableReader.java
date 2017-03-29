@@ -108,11 +108,11 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.CLibrary;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
@@ -2289,8 +2289,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 obsoletion.run();
 
             // don't ideally want to dropPageCache for the file until all instances have been released
-            CLibrary.trySkipCache(desc.filenameFor(Component.DATA), 0, 0);
-            CLibrary.trySkipCache(desc.filenameFor(Component.PRIMARY_INDEX), 0, 0);
+            NativeLibrary.trySkipCache(desc.filenameFor(Component.DATA), 0, 0);
+            NativeLibrary.trySkipCache(desc.filenameFor(Component.PRIMARY_INDEX), 0, 0);
         }
 
         public String name()

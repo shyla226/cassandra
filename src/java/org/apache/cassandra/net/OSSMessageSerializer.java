@@ -384,22 +384,14 @@ public class OSSMessageSerializer implements Message.Serializer
         OSSVerb ossVerb = LEGACY_VERB_VALUES[in.readInt()];
 
         int parameterCount = in.readInt();
-        Map<String, byte[]> rawParameters;
-        if (parameterCount == 0)
+        // Creating an immutable map as we'll remove some below.
+        Map<String, byte[]> rawParameters = new HashMap<>();
+        for (int i = 0; i < parameterCount; i++)
         {
-            rawParameters = Collections.emptyMap();
-        }
-        else
-        {
-            ImmutableMap.Builder<String, byte[]> builder = ImmutableMap.builder();
-            for (int i = 0; i < parameterCount; i++)
-            {
-                String key = in.readUTF();
-                byte[] value = new byte[in.readInt()];
-                in.readFully(value);
-                builder.put(key, value);
-            }
-            rawParameters = builder.build();
+            String key = in.readUTF();
+            byte[] value = new byte[in.readInt()];
+            in.readFully(value);
+            rawParameters.put(key, value);
         }
 
         Tracing.SessionInfo tracingInfo = extractAndRemoveTracingInfo(rawParameters);
@@ -505,12 +497,10 @@ public class OSSMessageSerializer implements Message.Serializer
                                                  timeoutMillis,
                                                  MessageParameters.from(rawParameters),
                                                  tracingInfo);
-            return new Request(from,
-                               FBUtilities.getBroadcastAddress(),
-                               id,
-                               verb,
-                               data,
-                               forwards);
+
+            return verb.isOneWay()
+                   ? new OneWayRequest<>(from, Request.local, (Verb.OneWay) verb, data, forwards)
+                   : new Request(from, Request.local, id, verb, data, forwards);
         }
     }
 

@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.service;
 
+import java.util.function.Function;
+
 import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,11 +31,13 @@ import org.apache.cassandra.db.SnapshotCommand;
 import org.apache.cassandra.db.Truncation;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.net.EmptyPayload;
+import org.apache.cassandra.net.Verb.RequestResponse;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb.AckedRequest;
 import org.apache.cassandra.net.VerbGroup;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.versioning.Version;
+import org.apache.cassandra.utils.versioning.Versioned;
 
 public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion>
 {
@@ -41,10 +45,18 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
 
     public enum OperationsVersion implements Version<OperationsVersion>
     {
-        OSS_30
+        OSS_30,
+        DSE_60; // Don't send anything with a TruncateResponse (we use to send back the table truncated and a success
+                // boolean but it was completly ignored on the receiving side. And 1) we don't need the table, we know it
+                // and 2) errors are sent back as failure response now).
+
+        public static <T> Versioned<OperationsVersion, T> versioned(Function<OperationsVersion, ? extends T> function)
+        {
+            return new Versioned<>(OperationsVersion.class, function);
+        }
     }
 
-    public AckedRequest<Truncation> TRUNCATE;
+    public RequestResponse<Truncation, TruncateResponse> TRUNCATE;
     public AckedRequest<SnapshotCommand> SNAPSHOT;
     public AckedRequest<EmptyPayload> REPLICATION_FINISHED;
 
@@ -54,7 +66,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
 
         RegistrationHelper helper = helper();
 
-        TRUNCATE = helper.ackedRequest("TRUNCATE", Truncation.class)
+        TRUNCATE = helper.requestResponse("TRUNCATE", Truncation.class, TruncateResponse.class)
                          .stage(Stage.MUTATION)
                          .timeout(DatabaseDescriptor::getTruncateRpcTimeout)
                          .syncHandler((from, t) ->
@@ -64,6 +76,7 @@ public class OperationsVerbs extends VerbGroup<OperationsVerbs.OperationsVersion
                                           {
                                               ColumnFamilyStore cfs = Keyspace.open(t.keyspace).getColumnFamilyStore(t.columnFamily);
                                               cfs.truncateBlocking();
+                                              return new TruncateResponse(t.keyspace, t.columnFamily);
                                           }
                                           catch (Exception e)
                                           {

@@ -2,6 +2,7 @@ dse 6.0.0
  * Refactor messaging service code (APOLLO-497)
 
 dse 5.2.0
+ * Bump default client protocol version from V4 to DSE_V1 (APOLLO-553)
  * Fix build due to "ow2" repository issues (apollo-master follow-up of CASSANDRA-13278) (APOLLO-494)
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)

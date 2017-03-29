@@ -56,6 +56,8 @@ public interface Unfiltered extends Clusterable
      */
     public void validateData(TableMetadata metadata);
 
+    public boolean isEmpty();
+
     public String toString(TableMetadata metadata);
     public String toString(TableMetadata metadata, boolean fullDetails);
     public String toString(TableMetadata metadata, boolean includeClusterKeys, boolean fullDetails);

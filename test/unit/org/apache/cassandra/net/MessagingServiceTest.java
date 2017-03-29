@@ -36,11 +36,21 @@ import com.google.common.collect.Iterables;
 import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.metrics.Timer;
-
+import org.apache.cassandra.schema.SchemaMigration;
+import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
+
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.gms.GossipDigestAck;
+import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
+import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
+
+
 import org.junit.AfterClass;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -50,6 +60,20 @@ import static org.junit.Assert.*;
 public class MessagingServiceTest
 {
     private final static long ONE_SECOND = TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS);
+    public static final IInternodeAuthenticator ALLOW_NOTHING_AUTHENTICATOR = new IInternodeAuthenticator()
+    {
+        public boolean authenticate(InetAddress remoteAddress, int remotePort)
+        {
+            return false;
+        }
+
+        public void validateConfiguration() throws ConfigurationException
+        {
+
+        }
+    };
+    static final IInternodeAuthenticator originalAuthenticator = DatabaseDescriptor.getInternodeAuthenticator();
+
     private final MessagingService messagingService = MessagingService.test();
     private static int defaultMetricsHistogramUpdateInterval;
 
