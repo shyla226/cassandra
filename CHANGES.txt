@@ -74,6 +74,7 @@
 
 
 3.11.0
+ * Replace string comparison with regex/number checks in MessagingService test (CASSANDRA-13216)
  * Fix formatting of duration columns in CQLSH (CASSANDRA-13549)
  * Fix the problem with duplicated rows when using paging with SASI (CASSANDRA-13302)
  * Allow CONTAINS statements filtering on the partition key and it’s parts (CASSANDRA-13275)
@@ -111,6 +112,7 @@
  * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
  * Fix secondary index queries on COMPACT tables (CASSANDRA-13627)
+ * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
  * Ensure int overflow doesn't occur when calculating large partition warning size (CASSANDRA-13172)
  * Ensure consistent view of partition columns between coordinator and replica in ColumnFilter (CASSANDRA-13004)
  * Failed unregistering mbean during drop keyspace (CASSANDRA-13346)
