@@ -19,10 +19,7 @@ package org.apache.cassandra.dht.tokenallocator;
 
 import java.util.*;
 
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.*;
 
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -38,6 +35,9 @@ import org.apache.cassandra.dht.Token;
  */
 class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
 {
+    static final double MIN_INITIAL_SPLITS_RATIO = 1.0 - 1.0 / Math.sqrt(5.0);
+    static final double MAX_INITIAL_SPLITS_RATIO = MIN_INITIAL_SPLITS_RATIO + 0.075;
+
     final Multimap<Unit, Token> unitToTokens;
     final int replicas;
 
@@ -60,11 +60,14 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         assert !unitToTokens.containsKey(newUnit);
 
         if (unitCount() < replicas)
-            // Allocation does not matter; everything replicates everywhere.
-            return generateRandomTokens(newUnit, numTokens);
+            // Allocation does not matter for now; everything replicates everywhere. However, at this point it is
+            // important to start the cluster/datacenter with suitably varied token range sizes so that the algorithm
+            // can maintain good balance for any number of nodes.
+            return generateSplits(newUnit, numTokens, MIN_INITIAL_SPLITS_RATIO, MAX_INITIAL_SPLITS_RATIO);
         if (numTokens > sortedTokens.size())
-            // Some of the heuristics below can't deal with this case. Use random for now, later allocations can fix any problems this may cause.
-            return generateRandomTokens(newUnit, numTokens);
+            // Some of the heuristics below can't deal with this very unlikely case. Use splits for now, later
+            // allocations can fix any problems this may cause.
+            return generateSplits(newUnit, numTokens, MIN_INITIAL_SPLITS_RATIO, MAX_INITIAL_SPLITS_RATIO);
 
         // ============= construct our initial token ring state =============
 
@@ -74,10 +77,10 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         if (groups.size() < replicas)
         {
             // We need at least replicas groups to do allocation correctly. If there aren't enough, 
-            // use random allocation.
+            // use splits as above.
             // This part of the code should only be reached via the RATATest. StrategyAdapter should disallow
             // token allocation in this case as the algorithm is not able to cover the behavior of NetworkTopologyStrategy.
-            return generateRandomTokens(newUnit, numTokens);
+            return generateSplits(newUnit, numTokens, MIN_INITIAL_SPLITS_RATIO, MAX_INITIAL_SPLITS_RATIO);
         }
 
         // initialise our new unit's state (with an idealised ownership)
@@ -135,18 +138,53 @@ class ReplicationAwareTokenAllocator<Unit> extends TokenAllocatorBase<Unit>
         return ImmutableList.copyOf(unitToTokens.get(newUnit));
     }
 
-    private Collection<Token> generateRandomTokens(Unit newUnit, int numTokens)
+    /**
+     * Selects tokens by repeatedly splitting the largest range in the ring at the given ratio.
+     *
+     * This is used to choose tokens for the first nodes in the ring where the algorithm cannot be applied (e.g. when
+     * number of nodes < RF). It generates a reasonably chaotic initial token split, after which the algorithm behaves
+     * well for an unbounded number of nodes.
+     */
+    private Collection<Token> generateSplits(Unit newUnit, int numTokens, double minRatio, double maxRatio)
     {
-        Set<Token> tokens = new HashSet<>(numTokens);
+        Random random = new Random(sortedTokens.size());
+
+        double potentialRatioGrowth = maxRatio - minRatio;
+
+        List<Token> tokens = Lists.newArrayListWithExpectedSize(numTokens);
+
+        if (sortedTokens.isEmpty())
+        {
+            // Select a random start token. This has no effect on distribution, only on where the local ring is "centered".
+            // Using a random start decreases the chances of clash with the tokens of other datacenters in the ring.
+            Token t = partitioner.getRandomToken();
+            tokens.add(t);
+            sortedTokens.put(t, newUnit);
+            unitToTokens.put(newUnit, t);
+        }
+
         while (tokens.size() < numTokens)
         {
-            Token token = partitioner.getRandomToken();
-            if (!sortedTokens.containsKey(token))
+            // split max span using given ratio
+            Token prev = sortedTokens.lastKey();
+            double maxsz = 0;
+            Token t1 = null;
+            Token t2 = null;
+            for (Token curr : sortedTokens.keySet())
             {
-                tokens.add(token);
-                sortedTokens.put(token, newUnit);
-                unitToTokens.put(newUnit, token);
+                double sz = prev.size(curr);
+                if (sz > maxsz)
+                {
+                    maxsz = sz;
+                    t1 = prev; t2 = curr;
+                }
+                prev = curr;
             }
+            assert t1 != null;
+            Token t = partitioner.split(t1, t2, minRatio + potentialRatioGrowth * random.nextDouble());
+            tokens.add(t);
+            sortedTokens.put(t, newUnit);
+            unitToTokens.put(newUnit, t);
         }
         return tokens;
     }

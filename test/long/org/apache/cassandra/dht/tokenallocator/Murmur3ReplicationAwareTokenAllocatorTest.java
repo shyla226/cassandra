@@ -20,7 +20,6 @@ package org.apache.cassandra.dht.tokenallocator;
 
 import org.junit.Test;
 
-import org.apache.cassandra.Util;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 
 public class Murmur3ReplicationAwareTokenAllocatorTest extends AbstractReplicationAwareTokenAllocatorTest
@@ -35,13 +34,6 @@ public class Murmur3ReplicationAwareTokenAllocatorTest extends AbstractReplicati
 
     @Test
     public void testNewCluster()
-    {
-        Util.flakyTest(this::flakyTestNewCluster,
-                       2,
-                       "It tends to fail sometimes due to the random selection of the tokens in the first few nodes.");
-    }
-
-    private void flakyTestNewCluster()
     {
         testNewCluster(new Murmur3Partitioner(), MAX_VNODE_COUNT);
     }
