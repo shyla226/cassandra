@@ -64,7 +64,6 @@ import static org.junit.Assert.fail;
 
 public class CustomIndexTest extends CQLTester
 {
-    /*
     @Test
     public void testInsertsOnCfsBackedIndex() throws Throwable
     {
@@ -1099,7 +1098,6 @@ public class CustomIndexTest extends CQLTester
             };
         }
     }
-    */
 
     @Test
     public void testApollo290() throws Throwable
