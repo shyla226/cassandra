@@ -1,3 +1,6 @@
+DSE 5.1.1
+ * Fix version check to enable streaming keep-alive (backport CASSANDRA-12929)
+
 DSE 5.1.0
  * Only perform drop below RF check on decommission for non-partitioned keyspaces (APOLLO-589)
  * Fix SmallInt and TinyInt serialization (APOLLO-542)
