@@ -197,7 +197,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         {
             StoppingTransformation s = (StoppingTransformation) transformation;
             s.stopInPartition = new BaseIterator.Stop();
-            content = content.takeUntil(row -> s.stopInPartition.isSignalled);
+            content = content.takeUntil(row -> s.stopInPartition != null && s.stopInPartition.isSignalled);
         }
         content = content.doFinally(transformation::onPartitionClose);
 

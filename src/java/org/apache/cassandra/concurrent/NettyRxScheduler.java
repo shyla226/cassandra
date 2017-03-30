@@ -92,11 +92,6 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         }
     };
 
-    /**
-     * A scheduler that executes events immediately, on the caller's thread.
-     */
-    public final static NettyRxScheduler immediateScheduler = new NettyRxScheduler(ImmediateEventExecutor.INSTANCE, Integer.MAX_VALUE);
-
     final static Map<String, List<Token>> keyspaceToRangeMapping = new HashMap<>();
 
     public static final int NUM_NETTY_THREADS = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", String.valueOf(FBUtilities.getAvailableProcessors())));
@@ -110,6 +105,12 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
+
+    /**
+     * A scheduler that executes events immediately, on the caller's thread.
+     */
+    public final static NettyRxScheduler immediateScheduler = new NettyRxScheduler(ImmediateEventExecutor.INSTANCE, Integer.MAX_VALUE);
+
 
     final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
     {
