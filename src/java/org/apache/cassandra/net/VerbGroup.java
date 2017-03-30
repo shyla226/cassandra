@@ -28,6 +28,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.concurrent.ExecutorSupplier;
+import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.WriteVerbs;
@@ -147,6 +148,15 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
     }
 
     @SuppressWarnings("unchecked")
+    private static <T> ExecutorSupplier<T> maybeGetRequestExecutor(Class<T> requestClass, Stage defaultStage)
+    {
+        if (Scheduleable.class.isAssignableFrom(requestClass))
+            return (p) -> ((Scheduleable)p).getScheduler();
+
+        return defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
+    }
+
+    @SuppressWarnings("unchecked")
     private static <T> Serializer<T> maybeGetSerializer(Class<T> klass)
     {
         try
@@ -251,7 +261,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 this.name = name;
                 this.groupIdx = groupIdx;
                 this.isOneWay = isOneWay;
-                this.requestExecutor = defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
+                this.requestExecutor = maybeGetRequestExecutor(requestClass, defaultStage);
                 this.requestSerializer = maybeGetSerializer(requestClass);
                 this.responseSerializer = maybeGetSerializer(responseClass);
                 this.requestSerializerFct = maybeGetVersionedSerializers(requestClass);
@@ -285,12 +295,6 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             public T stage(Stage stage)
             {
                 this.requestExecutor = (p) -> StageManager.getStage(stage);
-                return us();
-            }
-
-            public T scheduler(ExecutorSupplier<P> schedulerSupplier)
-            {
-                this.requestExecutor = schedulerSupplier;
                 return us();
             }
 
@@ -351,7 +355,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             protected Verb.Info<P> info()
             {
                 if (requestExecutor == null)
-                    throw new IllegalStateException("Should specify a request scheduler or stage (either at the RegistrationHelper lever or at the VerbBuilder one)");
+                    throw new IllegalStateException("Unless the request payload implements the Scheduleable interface, a request stage is required (either at the RegistrationHelper lever or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
 

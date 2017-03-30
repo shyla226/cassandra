@@ -116,17 +116,14 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
         RegistrationHelper helper = helper();
 
         WRITE = helper.ackedRequest("WRITE", Mutation.class)
-                      .scheduler(Mutation::getScheduler)
                       .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                       .withBackPressure()
                       .handler(WRITE_HANDLER);
         VIEW_WRITE = helper.ackedRequest("VIEW_WRITE", Mutation.class)
-                           .scheduler(Mutation::getScheduler)
                            .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                            .withBackPressure()
                            .handler(WRITE_HANDLER);
         COUNTER_FORWARDING = helper.ackedRequest("COUNTER_FORWARDING", CounterMutation.class)
-                                   .scheduler(CounterMutation::getScheduler)
                                    .timeout(DatabaseDescriptor::getCounterWriteRpcTimeout)
                                    .withBackPressure()
                                    .handler(COUNTER_FORWARDING_HANDLER);

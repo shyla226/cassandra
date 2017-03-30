@@ -33,6 +33,7 @@ import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.rows.*;
@@ -50,7 +51,7 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class CounterMutation implements IMutation
+public class CounterMutation implements IMutation, Scheduleable
 {
     public static final Versioned<WriteVersion, Serializer<CounterMutation>> serializers = WriteVersion.versioned(CounterMutationSerializer::new);
 

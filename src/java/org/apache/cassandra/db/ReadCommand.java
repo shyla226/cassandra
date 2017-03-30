@@ -33,6 +33,7 @@ import io.reactivex.Single;
 import io.reactivex.functions.Action;
 import io.reactivex.functions.Function;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -67,7 +68,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
  * <p>
  * This contains all the information needed to do a local read.
  */
-public abstract class ReadCommand implements ReadQuery
+public abstract class ReadCommand implements ReadQuery, Scheduleable
 {
     protected static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
 
@@ -531,11 +532,6 @@ public abstract class ReadCommand implements ReadQuery
         }
         return iterator.map(new WithoutPurgeableTombstones());
     }
-
-    /**
-     * @return the prefer Netty RX scheduler for executing this command.
-     */
-    public abstract NettyRxScheduler getScheduler();
 
     /**
      * Recreate the CQL string corresponding to this query.

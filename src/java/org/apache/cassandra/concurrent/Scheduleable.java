@@ -18,7 +18,13 @@
 
 package org.apache.cassandra.concurrent;
 
-public interface ExecutorSupplier<P>
+/**
+ * An interface defining the ability to select a Netty Rx scheduler
+ * for operations involving the concrete implementations of this interface,
+ * see {@link org.apache.cassandra.db.ReadCommand} and {@link org.apache.cassandra.db.Mutation}
+ * as examples.
+ */
+public interface Scheduleable
 {
-    TracingAwareExecutor get(P value);
+    NettyRxScheduler getScheduler();
 }

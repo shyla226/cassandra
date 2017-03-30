@@ -24,7 +24,28 @@ package org.apache.cassandra.concurrent;
  */
 public interface TracingAwareExecutor
 {
+    /**
+     * Schedule the runnable for execution in a separate thread.
+     * Before executing the runnable, the {@link ExecutorLocals#set(ExecutorLocals)}
+     * will be invoked, so that the thread local values received in the locals
+     * parameter will be available in the thread local of the executing thread.
+     * <p>
+     * This method is currently called by {@link org.apache.cassandra.net.MessagingService}
+     * when a remote message is received.
+     *
+     * @param runnable - the runnable to execute
+     * @param locals - the thread local value to set in the thread local of the executing thread
+     */
     void execute(Runnable runnable, ExecutorLocals locals);
 
+    /**
+     * Either schedule the runnable in a remote thread or in the very same calling thread,
+     * blocking the caller.
+     * <p>
+     * This method is currently called by {@link org.apache.cassandra.net.MessagingService}
+     * when executing requests locally.
+     *
+     *  @param runnable - the runnable to execute
+     */
     void maybeExecuteImmediately(Runnable runnable);
 }

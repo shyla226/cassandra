@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 import java.net.InetAddress;
 import java.util.function.Function;
 
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -71,7 +70,6 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
         RegistrationHelper helper = helper();
 
         READ = helper.monitoredRequestResponse("READ", ReadCommand.class, ReadResponse.class)
-                     .scheduler(ReadCommand::getScheduler)
                      .timeout(command -> command instanceof SinglePartitionReadCommand
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
