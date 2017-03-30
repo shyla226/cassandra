@@ -66,14 +66,13 @@ import static org.junit.Assert.fail;
 
 public class CustomIndexTest extends CQLTester
 {
-    /*
     @Test
     public void testInsertsOnCfsBackedIndex() throws Throwable
     {
         // test to ensure that we don't deadlock when flushing CFS backed custom indexers
         // see CASSANDRA-10181
         createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
-        createIndex("CREATE CUSTOM INDEX myindex ON %s(c) USING 'org.apache.cassandra.index.internal.CustomCassandraIndex'");
+        createIndex("CREATE CUSTOM INDEX inserts_on_cfs_backed_index ON %s(c) USING 'org.apache.cassandra.index.internal.CustomCassandraIndex'");
 
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 2);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 1);
@@ -571,11 +570,10 @@ public class CustomIndexTest extends CQLTester
         assertEquals(0, index.partitionDeletions.size());
 
         ReadCommand cmd = Util.cmd(cfs, 0).build();
-        try (ReadExecutionController executionController = cmd.executionController();
-             UnfilteredPartitionIterator iterator = cmd.executeLocally(executionController).blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
         {
             assertTrue(iterator.hasNext());
-            cfs.indexManager.deletePartition(iterator.next().blockingGet(), FBUtilities.nowInSeconds());
+            cfs.indexManager.deletePartition(iterator.next(), FBUtilities.nowInSeconds());
         }
 
         assertEquals(1, index.partitionDeletions.size());
@@ -1056,7 +1054,7 @@ public class CustomIndexTest extends CQLTester
                                   IndexTransaction.Type transactionType)
         {
             if (readOrderingAtStart == null)
-                readOrderingAtStart = baseCfs.readOrdering.getCurrent(opGroup.coreId);
+                readOrderingAtStart = baseCfs.readOrdering.getCurrent();
 
             writeGroups.add(opGroup);
 
@@ -1088,7 +1086,7 @@ public class CustomIndexTest extends CQLTester
                     // grab the read OpOrder.Group for the base CFS so
                     // we can compare it with the starting group
                     if (indexedRowCount.get() < ROWS_IN_PARTITION)
-                        readOrderingAtFinish = baseCfs.readOrdering.getCurrent(opGroup.coreId);
+                        readOrderingAtFinish = baseCfs.readOrdering.getCurrent();
 
                     return Completable.complete();
                 }
@@ -1116,14 +1114,13 @@ public class CustomIndexTest extends CQLTester
             };
         }
     }
-    */
 
     @Test
     public void testApollo290() throws Throwable
     {
         schemaChange("CREATE KEYSPACE index_keyspace WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
         createTable("CREATE TABLE %s (a int, b int, c int, d int, PRIMARY KEY (a, b))");
-        createIndex("CREATE CUSTOM INDEX myindex ON %s(c) USING 'org.apache.cassandra.index.internal.TableBackedCustomIndex'");
+        createIndex("CREATE CUSTOM INDEX apollo_290_index ON %s(c) USING 'org.apache.cassandra.index.internal.TableBackedCustomIndex'");
 
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 0, 0, 2);
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, 1, 0, 1);

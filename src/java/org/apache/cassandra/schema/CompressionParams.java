@@ -56,7 +56,9 @@ public final class CompressionParams
     private static volatile boolean hasLoggedCrcCheckChanceWarning;
 
     public static final int DEFAULT_CHUNK_LENGTH = 65536;
-    public static final double DEFAULT_MIN_COMPRESS_RATIO = 1.1;
+    public static final double DEFAULT_MIN_COMPRESS_RATIO = 0.0;        // Since pre-4.0 versions do not understand the
+                                                                        // new compression parameter we can't use a
+                                                                        // different default value.
     public static final Versioned<StreamVersion, Serializer<CompressionParams>> serializers = StreamVersion.versioned(CompressionParmsSerializer::new);
 
     public static final String CLASS = "class";
@@ -501,7 +503,8 @@ public final class CompressionParams
         Map<String, String> options = new HashMap<>(otherOptions);
         options.put(CLASS, sstableCompressor.getClass().getName());
         options.put(CHUNK_LENGTH_IN_KB, chunkLengthInKB());
-        options.put(MIN_COMPRESS_RATIO, String.valueOf(minCompressRatio));
+        if (minCompressRatio != DEFAULT_MIN_COMPRESS_RATIO)
+            options.put(MIN_COMPRESS_RATIO, String.valueOf(minCompressRatio));
 
         return options;
     }
