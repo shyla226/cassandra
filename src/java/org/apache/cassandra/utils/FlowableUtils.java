@@ -1,15 +1,17 @@
 package org.apache.cassandra.utils;
 
+import java.io.Closeable;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Flowable;
-import io.reactivex.functions.Consumer;
+import io.reactivex.FlowableOperator;
 import io.reactivex.functions.Function;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -338,39 +340,93 @@ public class FlowableUtils
     }
 
     /**
-     * Like Flowable.map, but permits mapper to return null, which is treated as an intention to skip the item.
+     * Helper class implementing once-only closing.
      */
-    public static <I, O> Flowable<O> skippingMap(Flowable<I> source, Function<I, O> mapper)
+    public static abstract class OnceCloseable implements Closeable
     {
-        return new SkippingMap<>(source, mapper);
-    }
+        /**
+         * Called once the first time {@code close} is called.
+         */
+        abstract public void onClose();
 
-    private static class SkippingMap<I, O> extends Flowable<O>
-    {
-        final Flowable<I> source;
-        final Function<I, O> mapper;
+        private volatile int closed = 0;
+        AtomicIntegerFieldUpdater closedUpdater = AtomicIntegerFieldUpdater.newUpdater(OnceCloseable.class, "closed");
 
-        public SkippingMap(Flowable<I> source, Function<I, O> mapper)
+        public void close()
         {
-            this.source = source;
-            this.mapper = mapper;
+            if (closedUpdater.compareAndSet(this, 0, 1))
+                onClose();
         }
 
-        protected void subscribeActual(Subscriber<? super O> subscriber)
+    }
+
+    public interface FlowableOp<I, O> extends FlowableOperator<O, I>
+    {
+        /**
+         * Called on next item. Normally calls subscriber.onNext, but could instead finish the stream by calling
+         * complete, throw an error using error, or decide to ignore input and request another.
+         */
+        void onNext(Subscriber<? super O> subscriber, Subscription source, I next);
+
+        /**
+         * Call this when onNext needs to terminate the subscription early.
+         */
+        default void complete(Subscriber<? super O> subscriber, Subscription source)
         {
-            source.subscribe(new SkippingMapSubscription(subscriber, mapper));
+            source.cancel();
+            close();
+            subscriber.onComplete();
+        }
+
+        /**
+         * Call this when onNext identifies an error.
+         */
+        default void error(Subscriber<? super O> subscriber, Subscription source, Throwable t)
+        {
+            source.cancel();
+            close();
+            subscriber.onError(t);
+        }
+
+        /**
+         * Called on cancel, completion or error.
+         * Often called more than once; derive from {@link CloseableFlowableOp} below and override onClose if you need
+         * this to be done only once.
+         */
+        default void close()
+        {
+        }
+
+        /**
+         * Implementation of FlowableOperator to enable direct usage through Flowable.lift().
+         */
+        default Subscriber<I> apply(Subscriber<? super O> sub)
+        {
+            return new ApplyOpSubscription<>(sub, this);
         }
     }
 
-    private static class SkippingMapSubscription<I, O>
-        implements Subscription, Subscriber<I>
+    /**
+     * Convenience class for use case where we need exactly one final onClose() call.
+     */
+    public abstract static class CloseableFlowableOp<I, O> extends OnceCloseable implements FlowableOp<I, O>
+    {
+    }
+
+    public static <I, O> Flowable<O> apply(Flowable<I> source, FlowableOp<I, O> op)
+    {
+        return source.lift(op);
+    }
+
+    private static class ApplyOpSubscription<I, O>
+    implements Subscription, Subscriber<I>
     {
         final Subscriber<? super O> subscriber;
-        final Function<I, O> mapper;
+        final FlowableOp<I, O> mapper;
         Subscription source;
         boolean alreadyCancelled;
 
-        public SkippingMapSubscription(Subscriber<? super O> subscriber, Function<I, O> mapper)
+        public ApplyOpSubscription(Subscriber<? super O> subscriber, FlowableOp<I, O> mapper)
         {
             this.subscriber = subscriber;
             this.mapper = mapper;
@@ -378,36 +434,29 @@ public class FlowableUtils
 
         public void onSubscribe(Subscription subscription)
         {
-            subscriber.onSubscribe(this);
             source = subscription;
+            subscriber.onSubscribe(this);
             if (alreadyCancelled)
+            {
                 source.cancel();
+                mapper.close();
+            }
         }
 
-        public void onNext(I i)
+        public void onNext(I item)
         {
-            try
-            {
-                O out = mapper.apply(i);
-                if (out != null)
-                    subscriber.onNext(out);
-                else
-                    source.request(1);
-            }
-            catch (Exception e)
-            {
-                source.cancel();
-                subscriber.onError(e);
-            }
+            mapper.onNext(subscriber, source, item);
         }
 
         public void onError(Throwable throwable)
         {
+            mapper.close();
             subscriber.onError(throwable);
         }
 
         public void onComplete()
         {
+            mapper.close();
             subscriber.onComplete();
         }
 
@@ -419,8 +468,41 @@ public class FlowableUtils
         public void cancel()
         {
             if (source != null)
+            {
                 source.cancel();
+                mapper.close();
+            }
             alreadyCancelled = true;
         }
+        // TODO: This could be a TransformationSubscription...
+    }
+
+    // Wrapper allowing simple transformations to extend all the way to FlowableOperator without extra objects being
+    // created.
+    public interface SkippingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
+    {
+        default void onNext(Subscriber<? super O> subscriber, Subscription source, I next)
+        {
+            try
+            {
+                O out = apply(next);
+                if (out != null)
+                    subscriber.onNext(out);
+                else
+                    source.request(1);
+            }
+            catch (Throwable t)
+            {
+                error(subscriber, source, t);
+            }
+        }
+    }
+
+    /**
+     * Like Flowable.map, but permits mapper to return null, which is treated as an intention to skip the item.
+     */
+    public static <I, O> Flowable<O> skippingMap(Flowable<I> source, SkippingOp<I, O> mapper)
+    {
+        return source.lift(mapper);
     }
 }

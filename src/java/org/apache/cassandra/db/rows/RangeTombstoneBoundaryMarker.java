@@ -146,6 +146,26 @@ public class RangeTombstoneBoundaryMarker extends AbstractRangeTombstoneMarker<C
         startDeletion.digest(digest);
     }
 
+    public RangeTombstoneMarker purge(DeletionPurger purger, int nowInSec)
+    {
+        // We can only skip the whole marker if both deletion time are purgeable.
+        // If only one of them is, filterTombstoneMarker will deal with it.
+        boolean shouldPurgeEnd = purger.shouldPurge(endDeletion);
+        boolean shouldPurgeStart = purger.shouldPurge(startDeletion);
+
+        if (shouldPurgeEnd)
+        {
+            if (shouldPurgeStart)
+                return null;
+
+            return createCorrespondingOpenMarker(false);
+        }
+
+        return shouldPurgeStart
+               ? createCorrespondingCloseMarker(false)
+               : this;
+    }
+
     public String toString(TableMetadata metadata)
     {
         return String.format("Marker %s@%d-%d", bound.toString(metadata), endDeletion.markedForDeleteAt(), startDeletion.markedForDeleteAt());

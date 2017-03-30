@@ -28,6 +28,8 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.FlowableUtils;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
 /**
  * We have a single common superclass for all Transformations to make implementation efficient.
@@ -70,19 +72,20 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
     }
 
     /**
+     * Applied to any partition we encounter in a partitions iterator.
+     * Normally includes a transformation of the partition through Transformation.apply(partition, this).
+     */
+    protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+    {
+        throw new AssertionError("Transformation used on flowable without implementing flowable applyToPartition");
+    }
+
+    /**
      * Applied to any row we encounter in a rows iterator
      */
     protected Row applyToRow(Row row)
     {
         return row;
-    }
-
-    protected Unfiltered applyToUnfiltered(Unfiltered unfiltered)
-    {
-        if (unfiltered.isRow())
-            return applyToRow((Row) unfiltered);
-        else
-            return applyToMarker((RangeTombstoneMarker) unfiltered);
     }
 
     /**
@@ -129,6 +132,33 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
     protected RegularAndStaticColumns applyToPartitionColumns(RegularAndStaticColumns columns)
     {
         return columns;
+    }
+
+
+    // FlowableOp interpretation of transformation
+    public void onNextUnfiltered(Subscriber<? super Unfiltered> subscriber, Subscription source, Unfiltered item)
+    {
+        Unfiltered next;
+        if (item.isRow())
+            next = applyToRow((Row) item);
+        else
+            next = applyToMarker((RangeTombstoneMarker) item);
+
+        if (next != null)
+            subscriber.onNext(next);
+        else
+            source.request(1);
+    }
+
+    // FlowableOp interpretation of transformation
+    public void onNextPartition(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition item)
+    {
+        FlowableUnfilteredPartition next = applyToPartition(item);
+
+        if (next != null)
+            subscriber.onNext(next);
+        else
+            source.request(1);
     }
 
 
@@ -190,20 +220,86 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return to;
     }
 
+    static class FlowableRowOp extends FlowableUtils.CloseableFlowableOp<Unfiltered, Unfiltered>
+    {
+        final Transformation transformation;
+
+        FlowableRowOp(Transformation transformation)
+        {
+            this.transformation = transformation;
+        }
+
+        public void onNext(Subscriber<? super Unfiltered> subscriber, Subscription source, Unfiltered next)
+        {
+            try
+            {
+                transformation.onNextUnfiltered(subscriber, source, next);
+            }
+            catch (Throwable t)
+            {
+                error(subscriber, source, t);
+            }
+        }
+
+        public void onClose()
+        {
+            transformation.onPartitionClose();
+        }
+    }
+
     public static FlowableUnfilteredPartition apply(FlowableUnfilteredPartition src, Transformation transformation)
     {
-        Flowable<Unfiltered> content = FlowableUtils.skippingMap(src.content, transformation::applyToUnfiltered);
+        Flowable<Unfiltered> content = src.content.lift(new FlowableRowOp(transformation));
+
         if (transformation instanceof StoppingTransformation)
         {
             StoppingTransformation s = (StoppingTransformation) transformation;
             s.stopInPartition = new BaseIterator.Stop();
-            content = content.takeUntil(row -> s.stopInPartition.isSignalled);
         }
-        content = content.doFinally(transformation::onPartitionClose);
 
         return new FlowableUnfilteredPartition(apply(src.header, transformation),
-                                               src.staticRow.map(transformation::applyToStatic),
+                                               transformation.applyToStatic(src.staticRow),
                                                content);
+    }
+
+    static class FlowablePartitionOp extends FlowableUtils.CloseableFlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>
+    {
+        final Transformation transformation;
+
+        FlowablePartitionOp(Transformation transformation)
+        {
+            this.transformation = transformation;
+        }
+
+        public void onNext(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition next)
+        {
+            try
+            {
+                transformation.onNextPartition(subscriber, source, next);
+            }
+            catch (Throwable t)
+            {
+                error(subscriber, source, t);
+            }
+        }
+
+        public void onClose()
+        {
+            transformation.onClose();
+        }
+    }
+
+    public static Flowable<FlowableUnfilteredPartition> apply(Flowable<FlowableUnfilteredPartition> src, Transformation transformation)
+    {
+        Flowable<FlowableUnfilteredPartition> content = src.lift(new FlowablePartitionOp(transformation));
+
+        if (transformation instanceof StoppingTransformation)
+        {
+            StoppingTransformation s = (StoppingTransformation) transformation;
+            s.stop = new BaseIterator.Stop();
+        }
+
+        return content;
     }
 
     private static PartitionHeader apply(PartitionHeader header, Transformation transformation)

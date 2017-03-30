@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
-import io.reactivex.functions.Function;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.context.*;
@@ -261,9 +260,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     rowLevelExpressions.add(e);
             }
 
-            long numberOfRegularColumnExpressions = rowLevelExpressions.size();
-            final boolean filterNonStaticColumns = numberOfRegularColumnExpressions > 0;
-
             return FlowableUtils.skippingMap(
                 iter,
                 partition ->
@@ -272,16 +268,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
                     // Short-circuit all partitions that won't match based on static and partition keys
                     for (Expression e : partitionLevelExpressions)
-                        if (!e.isSatisfiedBy(metadata, pk, partition.staticRow.blockingGet()))  // tpc TODO blockingGet should disappear
+                        if (!e.isSatisfiedBy(metadata, pk, partition.staticRow))
                         {
                             partition.unused();
                             return null;
                         }
 
-                    FlowableUnfilteredPartition iterator = new FlowableUnfilteredPartition(
-                        partition.header,
-                        partition.staticRow,
-                        FlowableUtils.skippingMap(partition.content, unfiltered ->
+                    Flowable<Unfiltered> content = FlowableUtils.skippingMap(
+                        partition.content, unfiltered ->
                         {
                             if (unfiltered.isRow())
                             {
@@ -295,15 +289,28 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                             }
 
                             return unfiltered;
-                        }
-                    ));
-                    //Transformation.apply(partition, this);
-                    // tpc maybe TODO: No emptiness check for Flowables
-//                    if (filterNonStaticColumns && !iterator.hasNext())
-//                    {
-//                        iterator.close();
-//                        return null;
-//                    }
+                        });
+
+                    // Note: The old code would reject a partition here if it did not have rows and
+                    //          rowLevelExpressions.size() > 0
+                    // This makes a material difference if the partition has a static row, as that static row will
+                    // disappear in this case.
+                    // I do not believe removing a static row at this point, before merging the data from all replicas,
+                    // can be correct. If one replica happened to get a static row update, while another got the content,
+                    // the removal here would hide the static row update from the combined view.
+                    // I believe a more correct treatment is to not count static rows in DataLimits if that's at all
+                    // possible, though this may require specific treatment for synchronization between nodes for this
+                    // case (so that digests do not include static rows for non-matches, but they are included on
+                    // full reads after digest mismatch).
+                    // Should I turn out to be mistaken, it is not impossible to do the removal here, but it is
+                    // incredibly complex (we need to get first item of content; cache that item; delay doing
+                    // onNext/onComplete on the _partition_ iterator until this happens) and needs a complete rewrite
+                    // of RowLimit to Flowable.
+
+                    FlowableUnfilteredPartition iterator = new FlowableUnfilteredPartition(
+                        partition.header,
+                        partition.staticRow,
+                        content);
 
                     return iterator;
                 });

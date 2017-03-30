@@ -22,6 +22,10 @@ package org.apache.cassandra.db.transform;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
 // A Transformation that can stop an iterator earlier than its natural exhaustion
 public abstract class StoppingTransformation<I extends BaseRowIterator<?>> extends Transformation<I>
@@ -77,4 +81,36 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     {
         stopInPartition = null;
     }
+
+    // FlowableOp interpretation of transformation
+    @Override
+    public void onNextUnfiltered(Subscriber<? super Unfiltered> subscriber, Subscription source, Unfiltered item)
+    {
+        if (stopInPartition.isSignalled)
+        {
+            source.cancel();
+            onPartitionClose();
+            subscriber.onComplete();
+            return;
+        }
+
+        super.onNextUnfiltered(subscriber, source, item);
+    }
+
+    // FlowableOp interpretation of transformation
+    @Override
+    public void onNextPartition(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition item)
+    {
+        if (stop.isSignalled)
+        {
+            item.unused();
+            source.cancel();
+            onClose();
+            subscriber.onComplete();
+            return;
+        }
+
+        super.onNextPartition(subscriber, source, item);
+    }
+
 }

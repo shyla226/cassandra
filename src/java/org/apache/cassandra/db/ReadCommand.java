@@ -19,7 +19,6 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -27,9 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
 import io.reactivex.Single;
-import io.reactivex.functions.Action;
-import io.reactivex.functions.Function;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
@@ -37,12 +33,9 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.StoppingTransformation;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -59,6 +52,9 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
 /**
  * General interface for storage-engine read commands (common to both range and
@@ -455,7 +451,7 @@ public abstract class ReadCommand implements ReadQuery
                                                                final TableMetrics metric,
                                                                final long startTimeNanos)
     {
-        class TrackingTransformation extends StoppingTransformation
+        class TrackingOp implements FlowableUtils.FlowableOp<Unfiltered, Unfiltered>
         {
             private long lastCheckedForAbort = 0;
 
@@ -474,21 +470,30 @@ public abstract class ReadCommand implements ReadQuery
             {
                 currentKey = iter.header.partitionKey;
                 lastRow = null;
-                return Transformation.apply(iter, this);
+                countRow(iter.staticRow);
+
+                return new FlowableUnfilteredPartition(iter.header,
+                                                       iter.staticRow,
+                                                       iter.content.lift(this));
             }
 
-            public boolean shouldAbort(FlowableUnfilteredPartition partition)
+            public void onNext(Subscriber<? super Unfiltered> subscriber, Subscription src, Unfiltered unfiltered)
             {
-                if (maybeAbort())
+                if (shouldAbort())
                 {
-                    partition.unused();
-                    return true;
+                    complete(subscriber, src);
+                    return;
                 }
 
-                return false;
+                if (unfiltered.isRow())
+                    countRow((Row) unfiltered);
+                else
+                    countTombstone(unfiltered.clustering());
+
+                subscriber.onNext(unfiltered);
             }
 
-            private boolean maybeAbort()
+            private boolean shouldAbort()
             {
                 if (optionalMonitor == null)
                     return false;
@@ -524,27 +529,16 @@ public abstract class ReadCommand implements ReadQuery
                     if (logger.isTraceEnabled())
                         logger.trace("Stopping {}.{} with monitorable {}", metadata.keyspace, metadata.name, optionalMonitor);
 
-                    stop();
                     return true;
                 }
 
                 return false;
             }
 
-            @Override
-            public Row applyToStatic(Row row)
-            {
-                return applyToRow(row);
-            }
-
-            @Override
-            public Row applyToRow(Row row)
+            public void countRow(Row row)
             {
                 if (TEST_ITERATION_DELAY_MILLIS > 0)
                     maybeDelayForTesting();
-
-                if (maybeAbort())
-                    return null;
 
                 lastRow = row;
                 boolean hasLiveCells = false;
@@ -558,15 +552,6 @@ public abstract class ReadCommand implements ReadQuery
 
                 if (hasLiveCells || row.primaryKeyLivenessInfo().isLive(nowInSec))
                     ++ liveRows;
-
-                return row;
-            }
-
-            @Override
-            public RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
-            {
-                countTombstone(marker.clustering());
-                return marker;
             }
 
             private void countTombstone(ClusteringPrefix clustering)
@@ -580,8 +565,7 @@ public abstract class ReadCommand implements ReadQuery
                 }
             }
 
-            @Override
-            public void onClose()
+            public void onComplete()
             {
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 
@@ -600,8 +584,27 @@ public abstract class ReadCommand implements ReadQuery
             }
         };
 
-        TrackingTransformation tt = new TrackingTransformation();
-        return iter.takeUntil(tt::shouldAbort).map(tt::applyToPartition).doFinally(tt::onClose);
+        TrackingOp trackingOp = new TrackingOp();
+        return iter.lift(new FlowableUtils.CloseableFlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        {
+            @Override
+            public void onNext(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition next)
+            {
+                if (trackingOp.shouldAbort())
+                {
+                    next.unused();
+                    complete(subscriber, source);
+                }
+                else
+                    subscriber.onNext(trackingOp.applyToPartition(next));
+            }
+
+            @Override
+            public void onClose()
+            {
+                trackingOp.onComplete();
+            }
+        });
     }
 
     private void maybeDelayForTesting()
@@ -618,24 +621,55 @@ public abstract class ReadCommand implements ReadQuery
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 
+    static class PurgeOp implements FlowableUtils.SkippingOp<Unfiltered, Unfiltered>
+    {
+        private final DeletionPurger purger;
+        private int nowInSec;
+
+        public PurgeOp(int nowInSec, int gcBefore, int oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
+        {
+            this.nowInSec = nowInSec;
+            this.purger = (timestamp, localDeletionTime) ->
+                          !(onlyPurgeRepairedTombstones && localDeletionTime >= oldestUnrepairedTombstone)
+                          && localDeletionTime < gcBefore;
+        }
+
+        public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+        {
+            PartitionHeader header = partition.header;
+            if (purger.shouldPurge(header.partitionLevelDeletion))
+                header = new PartitionHeader(header.metadata, header.partitionKey, header.partitionLevelDeletion, header.columns, header.isReverseOrder, header.stats);
+
+            FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
+                                                                                 applyToStatic(partition.staticRow),
+                                                                                 partition.content.lift(this));
+            // We don't have partition emptiness test on flowables.
+            // tpc TODO If necessary, implement an isEmpty tester that caches first entry. Prefer not to!
+            return purged;
+        }
+
+        public Unfiltered apply(Unfiltered next)
+        {
+            return next.purge(purger, nowInSec);
+        }
+
+        protected Row applyToStatic(Row row)
+        {
+            Row purged = row.purge(purger, nowInSec);
+            return purged != null ? purged : Rows.EMPTY_STATIC_ROW;
+        }
+    }
+
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
     protected Flowable<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flowable<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
     {
-        class WithoutPurgeableTombstones extends PurgeFunction
-        {
-            public WithoutPurgeableTombstones()
-            {
-                super(nowInSec(), cfs.gcBefore(nowInSec()), oldestUnrepairedTombstone(), cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
-            }
-
-            protected Predicate<Long> getPurgeEvaluator()
-            {
-                return time -> true;
-            }
-        }
-        return iterator.map(new WithoutPurgeableTombstones());
+        return iterator.map(new PurgeOp(nowInSec(),
+                                        cfs.gcBefore(nowInSec()),
+                                        oldestUnrepairedTombstone(),
+                                        cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
+                            ::applyToPartition);
     }
 
     /**

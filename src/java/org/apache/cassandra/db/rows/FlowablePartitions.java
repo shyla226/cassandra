@@ -54,7 +54,7 @@ public class FlowablePartitions
 {
     public static UnfilteredRowIterator toIterator(FlowableUnfilteredPartition source)
     {
-        IteratorSubscription subscr = new IteratorSubscription(source.header, source.staticRow.blockingGet());
+        IteratorSubscription subscr = new IteratorSubscription(source.header, source.staticRow);
         source.content.subscribe(subscr);
         return subscr;
     }
@@ -127,14 +127,14 @@ public class FlowablePartitions
             data = data.subscribeOn(callOn);
         Row staticRow = iter.staticRow();
         return new FlowableUnfilteredPartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), iter.partitionLevelDeletion(), iter.columns(), iter.isReverseOrder(), iter.stats()),
-                                               staticRow.isEmpty() ? Rows.EMPTY_STATIC_ROW_SINGLE : Single.just(staticRow),
+                                               staticRow,
                                                data);
     }
 
     public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
     {
         return new FlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS),
-                                               Rows.EMPTY_STATIC_ROW_SINGLE,
+                                               Rows.EMPTY_STATIC_ROW,
                                                Flowable.empty());
     }
 
@@ -150,12 +150,11 @@ public class FlowablePartitions
         PartitionHeader header = first.header.mergeWith(flowables.stream().skip(1).map(x -> x.header).iterator());
         MergeReducer reducer = new MergeReducer(flowables.size(), nowInSec, header, null);
 
-        Single<Row> staticRow;
+        Row staticRow;
         if (!header.columns.statics.isEmpty())
-            staticRow = Single.zip(ImmutableList.copyOf(Lists.transform(flowables, x -> x.staticRow)),
-                                   list -> mergeStaticRows(list, header.partitionLevelDeletion, header.columns.statics, nowInSec));
+            staticRow = mergeStaticRows(flowables, header.partitionLevelDeletion, header.columns.statics, nowInSec);
         else
-            staticRow = Rows.EMPTY_STATIC_ROW_SINGLE;
+            staticRow = Rows.EMPTY_STATIC_ROW;
 
         Comparator<Clusterable> comparator = header.metadata.comparator;
         if (header.isReverseOrder)
@@ -169,12 +168,12 @@ public class FlowablePartitions
                                     reducer));
     }
 
-    public static Row mergeStaticRows(Object[] sources, DeletionTime activeDeletion, Columns columns, int nowInSec)
+    public static Row mergeStaticRows(List<FlowableUnfilteredPartition> sources, DeletionTime activeDeletion, Columns columns, int nowInSec)
     {
-        Row.Merger rowMerger = new Row.Merger(sources.length, nowInSec, columns.size(), columns.hasComplex());
+        Row.Merger rowMerger = new Row.Merger(sources.size(), nowInSec, columns.size(), columns.hasComplex());
         int i = 0;
-        for (Object source : sources)
-            rowMerger.add(i++, (Row) source);
+        for (FlowableUnfilteredPartition source : sources)
+            rowMerger.add(i++, source.staticRow);
         Row merged = rowMerger.merge(activeDeletion);
 
         if (merged == null)
@@ -213,7 +212,7 @@ public class FlowablePartitions
         Flowable<FlowableUnfilteredPartition> flowable = FlowableUtils.fromCloseableIterator(iter)
                                                                       .map(i -> fromIterator(i, scheduler));
         if (scheduler != null)
-            flowable.subscribeOn(scheduler);
+            flowable.subscribeOn(scheduler);    // tpc TODO needs to be requestOn
         return flowable;
     }
 
@@ -317,13 +316,14 @@ public class FlowablePartitions
     {
         return new FlowablePartition(data.header,
                                      data.staticRow,
-                                     data.content.ofType(Row.class)
-                                                 .map(r -> r.purge(DeletionPurger.PURGE_ALL, nowInSec))
-                                                 .filter(x -> x != null));
+                                     FlowableUtils.skippingMap(data.content,
+                                                               unfiltered -> unfiltered.isRow()
+                                                                             ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec)
+                                                                             : null));
     }
 
     public static Flowable<FlowablePartition> filter(Flowable<FlowableUnfilteredPartition> data, int nowInSec)
     {
-        return data.map(p -> filter(p, nowInSec)); // TODO: can we filter empty ones?
+        return data.map(p -> filter(p, nowInSec)); // tpc TODO: can we filter empty ones?
     }
 }

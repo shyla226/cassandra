@@ -48,6 +48,8 @@ public interface RangeTombstoneMarker extends Unfiltered
 
     public RangeTombstoneMarker copy(AbstractAllocator allocator);
 
+    public RangeTombstoneMarker purge(DeletionPurger purge, int nowInSec);
+
     /**
      * Utility class to help merging range tombstone markers coming from multiple inputs (UnfilteredRowIterators).
      * <p>

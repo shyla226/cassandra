@@ -23,18 +23,18 @@ import io.reactivex.Single;
 /**
  * Base class for the flowable versions of partitions.
  */
-public abstract class FlowablePartitionBase<T, Header>
+public abstract class FlowablePartitionBase<T>
 {
     /**
      * The header contains information about the partition: key, metadata etc.
      * Normally reused through transformations, merging, filtering etc.
      */
-    public final Header header;
+    public final PartitionHeader header;
 
     /**
      * The static part corresponding to this partition.
      */
-    public final Single<Row> staticRow;
+    public final Row staticRow;
 
     /**
      * The partition's contents as a Flowable. This must be subscribed to exactly once, and will close all
@@ -42,8 +42,8 @@ public abstract class FlowablePartitionBase<T, Header>
      */
     public final Flowable<T> content;
 
-    public FlowablePartitionBase(Header header,
-                                 Single<Row> staticRow,
+    public FlowablePartitionBase(PartitionHeader header,
+                                 Row staticRow,
                                  Flowable<T> content)
     {
         this.header = header;

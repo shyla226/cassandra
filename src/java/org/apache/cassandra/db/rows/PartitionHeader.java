@@ -79,6 +79,11 @@ public class PartitionHeader
         return merger.merge();
     }
 
+    public boolean isEmpty()
+    {
+        return partitionLevelDeletion.isLive();
+    }
+
     static class Merger
     {
         /**
