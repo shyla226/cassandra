@@ -963,7 +963,7 @@ public class SinglePartitionReadCommand extends ReadCommand
              + ClusteringIndexFilter.serializers.get(version).serializedSize(clusteringIndexFilter());
     }
 
-    public Scheduler getScheduler()
+    public NettyRxScheduler getScheduler()
     {
         return NettyRxScheduler.getForKey(metadata().keyspace, partitionKey(), false);
     }

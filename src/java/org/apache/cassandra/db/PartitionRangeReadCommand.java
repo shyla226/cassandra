@@ -334,7 +334,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DataRange.serializers.get(version).serializedSize(dataRange(), metadata());
     }
 
-    public Scheduler getScheduler()
+    public NettyRxScheduler getScheduler()
     {
         return NettyRxScheduler.instance();
     }

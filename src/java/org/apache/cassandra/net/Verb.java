@@ -22,7 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 
-import org.apache.cassandra.concurrent.VerbExecutor;
+import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;
 
@@ -61,20 +61,20 @@ public abstract class Verb<P, Q>
         private final VerbGroup<?> group;
         private final int groupIdx;
         private final String name;
-        private final VerbExecutor.Builder<P> executorBuilder;
+        private final ExecutorSupplier<P> requestExecutor;
         private final boolean supportsBackPressure;
 
         Info(VerbGroup<?> group,
              int groupIdx,
              String name,
-             VerbExecutor.Builder<P> executorBuilder,
+             ExecutorSupplier<P> requestExecutor,
              boolean supportsBackPressure)
         {
-            assert group != null && name != null && executorBuilder != null;
+            assert group != null && name != null && requestExecutor != null;
             this.group = group;
             this.groupIdx = groupIdx;
             this.name = name;
-            this.executorBuilder = executorBuilder;
+            this.requestExecutor = requestExecutor;
             this.supportsBackPressure = supportsBackPressure;
         }
 
@@ -137,11 +137,11 @@ public abstract class Verb<P, Q>
     }
 
     /**
-     * The stage on which the request must be executed.
+     * The factory method to return the executor that will execute the request.
      */
-    VerbExecutor.Builder executorBuilder()
+    ExecutorSupplier<P> requestExecutor()
     {
-        return info.executorBuilder;
+        return info.requestExecutor;
     }
 
     /**

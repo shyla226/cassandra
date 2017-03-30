@@ -756,7 +756,7 @@ public final class MessagingService implements MessagingServiceMBean
             if (!ms.allowIncomingMessage(message))
                 return;
 
-        message.executor().execute(new MessageDeliveryTask(message), state);
+        message.executor().execute(new MessageDeliveryTask(message), ExecutorLocals.create(state));
     }
 
     // Only required by legacy serialization. Can inline in previous call when we get rid of that.

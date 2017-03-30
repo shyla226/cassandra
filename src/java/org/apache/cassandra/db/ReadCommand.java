@@ -535,7 +535,7 @@ public abstract class ReadCommand implements ReadQuery
     /**
      * @return the prefer Netty RX scheduler for executing this command.
      */
-    public abstract Scheduler getScheduler();
+    public abstract NettyRxScheduler getScheduler();
 
     /**
      * Recreate the CQL string corresponding to this query.

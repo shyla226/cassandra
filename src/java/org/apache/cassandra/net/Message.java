@@ -22,8 +22,7 @@ import java.net.InetAddress;
 
 import javax.annotation.Nullable;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.VerbExecutor;
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.tracing.Tracing;
@@ -140,6 +139,11 @@ public abstract class Message<P>
         long payloadSerializedSize(MessagingVersion version)
         {
             return 0;
+        }
+
+        TracingAwareExecutor executor()
+        {
+            throw new UnsupportedOperationException();
         }
     };
 
@@ -283,10 +287,7 @@ public abstract class Message<P>
         return System.currentTimeMillis() - operationStartMillis();
     }
 
-    VerbExecutor executor()
-    {
-        return verb().executorBuilder().build(this);
-    }
+    abstract TracingAwareExecutor executor();
 
     /**
      * Whether the message is a locally delivered one, meaning if {@code to() == from()}.

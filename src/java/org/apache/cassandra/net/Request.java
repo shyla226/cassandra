@@ -30,6 +30,7 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.utils.FBUtilities;
@@ -179,6 +180,11 @@ public class Request<P, Q> extends Message<P>
                                      verb,
                                      reason,
                                      messageData.withPayload(null, -1));
+    }
+
+    TracingAwareExecutor executor()
+    {
+        return verb().requestExecutor().get(payload());
     }
 
     /**

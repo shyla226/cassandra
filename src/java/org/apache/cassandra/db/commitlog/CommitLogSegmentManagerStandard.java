@@ -58,7 +58,7 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
 
         if (alloc == null)
         {
-            Scheduler scheduler = NettyRxScheduler.getForKey(mutation.getKeyspaceName(), mutation.key(), false);
+            Scheduler scheduler = mutation.getScheduler();
 
             // failed to allocate, so move to a new segment with enough room
             return Single.fromCallable(() ->

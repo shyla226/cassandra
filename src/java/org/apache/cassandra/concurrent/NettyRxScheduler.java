@@ -41,22 +41,20 @@ import io.netty.util.concurrent.EventExecutorGroup;
 import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.concurrent.FastThreadLocalThread;
 import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.ImmediateEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.Disposables;
 import io.reactivex.internal.disposables.DisposableContainer;
 import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.disposables.ListCompositeDisposable;
-import io.reactivex.internal.schedulers.ImmediateThinScheduler;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -82,7 +80,7 @@ import org.slf4j.LoggerFactory;
  * and locks.
  *
  */
-public class NettyRxScheduler extends Scheduler
+public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 {
     private static final Logger logger = LoggerFactory.getLogger(NettyRxScheduler.class);
 
@@ -93,6 +91,11 @@ public class NettyRxScheduler extends Scheduler
             return new NettyRxScheduler(GlobalEventExecutor.INSTANCE, Integer.MAX_VALUE);
         }
     };
+
+    /**
+     * A scheduler that executes events immediately, on the caller's thread.
+     */
+    public final static NettyRxScheduler immediateScheduler = new NettyRxScheduler(ImmediateEventExecutor.INSTANCE, Integer.MAX_VALUE);
 
     final static Map<String, List<Token>> keyspaceToRangeMapping = new HashMap<>();
 
@@ -138,6 +141,18 @@ public class NettyRxScheduler extends Scheduler
     public static OpOrderThreaded newOpOrderThreaded(Object creator)
     {
         return new OpOrderThreaded(creator, threadIdentifier, NUM_NETTY_THREADS + 1);
+    }
+
+    @Override // TracingAwareExecutor
+    public void execute(Runnable runnable, ExecutorLocals locals)
+    {
+        scheduleDirect(new ExecutorLocals.WrappedRunnable(runnable, locals));
+    }
+
+    @Override // TracingAwareExecutor
+    public void maybeExecuteImmediately(Runnable runnable)
+    {
+        scheduleDirect(runnable);
     }
 
     private final static class NettyRxThread extends FastThreadLocalThread
@@ -336,11 +351,11 @@ public class NettyRxScheduler extends Scheduler
     }
 
     @Inline
-    public static Scheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
+    public static NettyRxScheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
     {
         // nothing we can do until we have the local ranges
         if (!StorageService.instance.isInitialized())
-            return ImmediateThinScheduler.INSTANCE;
+            return immediateScheduler;
 
         int callerCoreId = -1;
         if (useImmediateForLocal)
@@ -368,7 +383,7 @@ public class NettyRxScheduler extends Scheduler
                 //logger.info("Read moving to {} from {}", i-1, getCoreId());
 
                 if (useImmediateForLocal)
-                    return callerCoreId == i - 1 ? ImmediateThinScheduler.INSTANCE : getForCore(i - 1);
+                    return callerCoreId == i - 1 ? immediateScheduler : getForCore(i - 1);
 
                 return getForCore(i - 1);
             }

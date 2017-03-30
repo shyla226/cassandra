@@ -27,9 +27,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.apache.cassandra.concurrent.SchedulerSupplier;
+import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.VerbExecutor;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.WriteVerbs;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
@@ -233,7 +233,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
             private final boolean isOneWay;
 
             private TimeoutSupplier<P> timeoutSupplier;
-            private VerbExecutor.Builder<P> executorBuilder = defaultStage == null ? null : new VerbExecutor.Builder<>(defaultStage);
+            private ExecutorSupplier<P> requestExecutor;
 
             private Serializer<P> requestSerializer;
             private Serializer<Q> responseSerializer;
@@ -251,6 +251,7 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
                 this.name = name;
                 this.groupIdx = groupIdx;
                 this.isOneWay = isOneWay;
+                this.requestExecutor = defaultStage == null ? null : (p) -> StageManager.getStage(defaultStage);
                 this.requestSerializer = maybeGetSerializer(requestClass);
                 this.responseSerializer = maybeGetSerializer(responseClass);
                 this.requestSerializerFct = maybeGetVersionedSerializers(requestClass);
@@ -283,13 +284,13 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
             public T stage(Stage stage)
             {
-                this.executorBuilder = new VerbExecutor.Builder<>(stage);
+                this.requestExecutor = (p) -> StageManager.getStage(stage);
                 return us();
             }
 
-            public T executor(Stage stage, SchedulerSupplier<P> schedulerSupplier)
+            public T scheduler(ExecutorSupplier<P> schedulerSupplier)
             {
-                this.executorBuilder = new VerbExecutor.Builder<>(stage, schedulerSupplier);
+                this.requestExecutor = schedulerSupplier;
                 return us();
             }
 
@@ -349,12 +350,12 @@ public abstract class VerbGroup<V extends Enum<V> & Version<V>> implements Itera
 
             protected Verb.Info<P> info()
             {
-                if (executorBuilder == null)
-                    throw new IllegalStateException("Should specify a request stage (either at the RegistrationHelper lever or at the VerbBuilder one)");
+                if (requestExecutor == null)
+                    throw new IllegalStateException("Should specify a request scheduler or stage (either at the RegistrationHelper lever or at the VerbBuilder one)");
                 if (isOneWay && supportsBackPressure)
                     throw new IllegalStateException("Back pressure doesn't make sense for one-way message (no response is sent so we can't keep track of in-flight requests to an host)");
 
-                return new Verb.Info(VerbGroup.this, groupIdx, name, executorBuilder, supportsBackPressure);
+                return new Verb.Info(VerbGroup.this, groupIdx, name, requestExecutor, supportsBackPressure);
             }
 
             TimeoutSupplier<P> timeoutSupplier()

@@ -18,14 +18,13 @@
 
 package org.apache.cassandra.concurrent;
 
-import io.reactivex.Scheduler;
-
 /**
- * Given a request payload, return an appropriate RX scheduler.
- *
- * @param <P> - the request payload, for example a ReadCommand for a ReadRequest etc.
+ * A common interface for executing a runnable after having
+ * installed the thread local values of the calling thread.
  */
-public interface SchedulerSupplier<P>
+public interface TracingAwareExecutor
 {
-    public Scheduler get(P requestPayload);
+    void execute(Runnable runnable, ExecutorLocals locals);
+
+    void maybeExecuteImmediately(Runnable runnable);
 }

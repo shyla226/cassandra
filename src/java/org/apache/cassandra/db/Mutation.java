@@ -230,7 +230,7 @@ public class Mutation implements IMutation
         return new Mutation(ks, key, modifications);
     }
 
-    public Scheduler getScheduler()
+    public NettyRxScheduler getScheduler()
     {
         return NettyRxScheduler.getForKey(getKeyspaceName(), key(), false);
     }
