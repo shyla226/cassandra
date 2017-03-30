@@ -413,7 +413,8 @@ public class FlowableUtils
 
         public void request(long l)
         {
-            source.request(l);
+            if (source != null)
+                source.request(l);
         }
 
         public void cancel()

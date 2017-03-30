@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.dht;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;

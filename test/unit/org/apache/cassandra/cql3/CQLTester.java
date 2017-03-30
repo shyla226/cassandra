@@ -25,12 +25,13 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.*;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
-import io.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -59,7 +59,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.AbstractEndpointSnitch;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.QueryState;
@@ -71,6 +70,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Base class for CQL tests.
@@ -99,7 +99,8 @@ public abstract class CQLTester
     private static final Map<ProtocolVersion, Cluster> clusters = new HashMap<>();
     private static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
 
-    private static boolean isServerPrepared = false;
+    private static AtomicBoolean serverPrepared = new AtomicBoolean(false);
+    private static CountDownLatch serverReady = new CountDownLatch(1);
 
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
 
@@ -114,6 +115,7 @@ public abstract class CQLTester
                ? ProtocolVersion.CURRENT
                : PROTOCOL_VERSIONS.get(PROTOCOL_VERSIONS.size() - 1);
     }
+
     static
     {
         DatabaseDescriptor.daemonInitialization();
@@ -167,8 +169,17 @@ public abstract class CQLTester
 
     public static void prepareServer()
     {
-        if (isServerPrepared)
+        if (!serverPrepared.compareAndSet(false, true))
+        {   // Once per-JVM is enough, the first test to execute gets to initialize the server,
+            // unless sub-classes call this method from static initialization methods such as
+            // requireNetwork(). Note that this method cannot be called by the base class setUp
+            // static method because this would make it impossible to change the partitioner in
+            // sub-classed. Noramally we run tests sequentially but, to be safe, this ensures
+            // that if 2 tests execute in paralell only one test initializes the server and the
+            // other test waits.
+            assertTrue(Uninterruptibles.awaitUninterruptibly(serverReady, 1, TimeUnit.MINUTES));
             return;
+        }
 
         DatabaseDescriptor.daemonInitialization();
 
@@ -208,7 +219,9 @@ public abstract class CQLTester
         //TPC requires local vnodes to be generated so we need to
         //put the SS through join.
         StorageService.instance.initServer();
-        isServerPrepared = true;
+
+        // signal to any other waiting test that the server is ready
+        serverReady.countDown();
     }
 
     public static void cleanupAndLeaveDirs() throws IOException
@@ -270,10 +283,7 @@ public abstract class CQLTester
         if (ROW_CACHE_SIZE_IN_MB > 0)
             DatabaseDescriptor.setRowCacheSizeInMB(ROW_CACHE_SIZE_IN_MB);
 
-        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
-
-        // Once per-JVM is enough
-        prepareServer();
+        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
     @AfterClass
@@ -296,6 +306,11 @@ public abstract class CQLTester
     @Before
     public void beforeTest() throws Throwable
     {
+        // this call is idempotent and will only prepare the server on the first call
+        // we cannot prepare the server in setUpClass() because otherwise it would
+        // be impossible to change the partitioner in sub-classes, e.g. SelectOrderedPartitionerTest
+        prepareServer();
+
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE));
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE_PER_TEST));
     }
@@ -383,6 +398,8 @@ public abstract class CQLTester
 
     public static void requireNetwork(boolean initClientClusters) throws ConfigurationException
     {
+        prepareServer();
+
         if (server != null)
         {
             if (initClientClusters && sessions.isEmpty())
@@ -745,7 +762,7 @@ public abstract class CQLTester
                                           String keyspace, String name,
                                           String... argTypes)
     {
-        Assert.assertTrue(lastSchemaChangeResult instanceof ResultMessage.SchemaChange);
+        assertTrue(lastSchemaChangeResult instanceof ResultMessage.SchemaChange);
         ResultMessage.SchemaChange schemaChange = (ResultMessage.SchemaChange) lastSchemaChangeResult;
         Assert.assertSame(change, schemaChange.change.change);
         Assert.assertSame(target, schemaChange.change.target);
@@ -929,7 +946,7 @@ public abstract class CQLTester
                                               i, protocolVersion),
                                 meta.size(), rows[i].length);
 
-            Assert.assertTrue(String.format("Got fewer rows than epected. Expected %d but got %d", rows.length, i), iter.hasNext());
+            assertTrue(String.format("Got fewer rows than epected. Expected %d but got %d", rows.length, i), iter.hasNext());
             Row actual = iter.next();
 
             List<ByteBuffer> expectedRow = new ArrayList<>(meta.size());
@@ -1074,7 +1091,7 @@ public abstract class CQLTester
             Assert.fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
         }
 
-        Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
+        assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
     }
 
     /**
@@ -1209,7 +1226,7 @@ public abstract class CQLTester
             Assert.fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
         }
 
-        Assert.assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
+        assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
     }
 
     protected Object[][] getRows(UntypedResultSet result)
@@ -1377,7 +1394,7 @@ public abstract class CQLTester
      */
     private static void assertMessageContains(String text, Exception e)
     {
-        Assert.assertTrue("Expected error message to contain '" + text + "', but got '" + e.getMessage() + "'",
+        assertTrue("Expected error message to contain '" + text + "', but got '" + e.getMessage() + "'",
                 e.getMessage().contains(text));
     }
 
