@@ -25,6 +25,8 @@ import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.RequestResponse;
@@ -75,7 +77,7 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                      .timeout(command -> command instanceof SinglePartitionReadCommand
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
-                     .handler((from, command, monitor) ->
+                     .syncHandler((from, command, monitor) ->
                                   {
                                       final boolean isLocal = from.equals(local);
 
@@ -88,16 +90,10 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                       if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
                                           monitor = null;
 
-                                      CompletableFuture<ReadResponse> ret = new CompletableFuture<>();
-                                      command.executeLocally(monitor).subscribe(
-                                        (it) -> {
-                                            ret.complete(command.createResponse(it, isLocal));
-                                            it.close();
-                                        },
-                                        ex -> {
-                                            ret.completeExceptionally(ex);
-                                        });
-                                      return ret;
+                                      try (UnfilteredPartitionIterator it = FlowablePartitions.toPartitions(command.executeLocally(monitor), command.metadata()))
+                                      { //TODO - fixme, this should become non-blocking and the response should be built from the flowable
+                                          return command.createResponse(it, isLocal);
+                                      }
                                   });
     }
 }

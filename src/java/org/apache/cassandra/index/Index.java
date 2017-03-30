@@ -27,9 +27,7 @@ import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
 import io.reactivex.Completable;
-import io.reactivex.Observable;
 import io.reactivex.Single;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
@@ -40,7 +38,6 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
 import org.apache.cassandra.index.transactions.IndexTransaction;
@@ -49,6 +46,7 @@ import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * Consisting of a top level Index interface and two sub-interfaces which handle read and write operations,

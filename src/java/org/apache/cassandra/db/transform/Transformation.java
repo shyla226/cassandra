@@ -20,12 +20,14 @@
  */
 package org.apache.cassandra.db.transform;
 
+import io.reactivex.Flowable;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.utils.FlowableUtils;
 
 /**
  * We have a single common superclass for all Transformations to make implementation efficient.
@@ -73,6 +75,14 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
     protected Row applyToRow(Row row)
     {
         return row;
+    }
+
+    protected Unfiltered applyToUnfiltered(Unfiltered unfiltered)
+    {
+        if (unfiltered.isRow())
+            return applyToRow((Row) unfiltered);
+        else
+            return applyToMarker((RangeTombstoneMarker) unfiltered);
     }
 
     /**
@@ -180,4 +190,29 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return to;
     }
 
+    public static FlowableUnfilteredPartition apply(FlowableUnfilteredPartition src, Transformation transformation)
+    {
+        Flowable<Unfiltered> content = FlowableUtils.skippingMap(src.content, transformation::applyToUnfiltered);
+        if (transformation instanceof StoppingTransformation)
+        {
+            StoppingTransformation s = (StoppingTransformation) transformation;
+            s.stopInPartition = new BaseIterator.Stop();
+            content = content.takeUntil(row -> s.stopInPartition.isSignalled);
+        }
+        content = content.doFinally(transformation::onPartitionClose);
+
+        return new FlowableUnfilteredPartition(apply(src.header, transformation),
+                                               src.staticRow.map(transformation::applyToStatic),
+                                               content);
+    }
+
+    private static PartitionHeader apply(PartitionHeader header, Transformation transformation)
+    {
+        DecoratedKey key = transformation.applyToPartitionKey(header.partitionKey);
+        RegularAndStaticColumns columns = transformation.applyToPartitionColumns(header.columns);
+        DeletionTime dt = transformation.applyToDeletion(header.partitionLevelDeletion);
+        if (dt != header.partitionLevelDeletion || columns != header.columns || key != header.partitionKey)
+            return new PartitionHeader(header.metadata, key, dt, columns, header.isReverseOrder, header.stats);
+        return header;
+    }
 }

@@ -26,8 +26,8 @@ import org.apache.cassandra.db.rows.BaseRowIterator;
 // A Transformation that can stop an iterator earlier than its natural exhaustion
 public abstract class StoppingTransformation<I extends BaseRowIterator<?>> extends Transformation<I>
 {
-    private BaseIterator.Stop stop;
-    private BaseIterator.Stop stopInPartition;
+    BaseIterator.Stop stop;
+    BaseIterator.Stop stopInPartition;
 
     /**
      * If invoked by a subclass, any partitions iterator this transformation has been applied to will terminate
@@ -67,7 +67,7 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     }
 
     @Override
-    protected void onClose()
+    public void onClose()
     {
         stop = null;
     }

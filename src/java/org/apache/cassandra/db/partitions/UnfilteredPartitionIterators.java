@@ -23,6 +23,8 @@ import java.security.MessageDigest;
 import java.util.*;
 
 import io.reactivex.Completable;
+import io.reactivex.Single;
+
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
@@ -129,6 +131,25 @@ public abstract class UnfilteredPartitionIterators
         return MorePartitions.extend(iterators.get(0), new Extend());
     }
 
+    public static Single<UnfilteredPartitionIterator> concat(final Iterable<Single<UnfilteredPartitionIterator>> iterators)
+    {
+        Iterator<Single<UnfilteredPartitionIterator>> it = iterators.iterator();
+        assert it.hasNext();
+        Single<UnfilteredPartitionIterator> it0 = it.next();
+        if (!it.hasNext())
+            return it0;
+
+        class Extend implements MorePartitions<UnfilteredPartitionIterator>
+        {
+            public UnfilteredPartitionIterator moreContents()
+            {
+                if (!it.hasNext())
+                    return null;
+                return it.next().blockingGet();
+            }
+        }
+        return it0.map(i -> MorePartitions.extend(i, new Extend()));
+    }
 
     public static PartitionIterator mergeAndFilter(List<UnfilteredPartitionIterator> iterators, int nowInSec, MergeListener listener)
     {

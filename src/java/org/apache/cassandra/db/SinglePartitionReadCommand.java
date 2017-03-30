@@ -58,6 +58,7 @@ import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.btree.BTreeSet;
@@ -357,7 +358,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     public Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         return Flowable.defer(() -> Flowable.just(queryMemtableAndDisk(cfs, executionController)))
-                       .subscribeOn(NettyRxScheduler.getForKey(cfs.metadata().keyspace, partitionKey(), true));
+                       ;//.subscribeOn(NettyRxScheduler.getForKey(cfs.metadata().keyspace, partitionKey(), true));  // tpc TODO deadlocks ATM (scheduler needs to execute immediately if already same thread)
     }
 
     /**
@@ -1026,10 +1027,11 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return executeLocally(monitor, false).map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
+            return Single.defer(() -> Single.just(FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata())))  // tpc TODO do filtering on Flowable
+                         .map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor)
+        public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
             return executeLocally(monitor, true);
         }
@@ -1044,21 +1046,19 @@ public class SinglePartitionReadCommand extends ReadCommand
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor, boolean sort)
+        private Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor, boolean sort)
         {
-            List<Pair<DecoratedKey, Single<UnfilteredPartitionIterator>>> partitions = new ArrayList<>(commands.size());
-            for (SinglePartitionReadCommand cmd : commands)
-                partitions.add(Pair.of(cmd.partitionKey(), cmd.executeLocally(monitor)));
-
             if (commands.size() == 1)
-                return partitions.get(0).getValue();
+                return commands.get(0).executeLocally(monitor);
 
+            List<SinglePartitionReadCommand> commands = this.commands;
             if (sort)
-                Collections.sort(partitions, Comparator.comparing(Pair::getLeft));
+            {
+                commands = new ArrayList<SinglePartitionReadCommand>(commands);
+                commands.sort(Comparator.comparing(SinglePartitionReadCommand::partitionKey));
+            }
 
-            return Single.concat(partitions.stream().map(Pair::getRight).collect(Collectors.toList()))
-                         .toList()
-                         .map(l -> UnfilteredPartitionIterators.concat(l));
+            return FlowableUtils.concatLazy(Iterables.transform(commands, cmd -> cmd.executeLocally(monitor)));
         }
 
         public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

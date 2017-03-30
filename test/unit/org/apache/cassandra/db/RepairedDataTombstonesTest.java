@@ -178,7 +178,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         Thread.sleep(1000);
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
         int partitionsFound = 0;
-        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
             while (iterator.hasNext())
             {
@@ -243,7 +243,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
              includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
-                                cmd.executeLocally().blockingGet())
+                                cmd.executeForTests())
         {
             while (iterator.hasNext())
             {
@@ -286,7 +286,7 @@ public class RepairedDataTombstonesTest extends CQLTester
         try (ReadExecutionController executionController = cmd.executionController();
              UnfilteredPartitionIterator iterator =
              includePurgeable ? FlowablePartitions.toPartitions(cmd.queryStorage(getCurrentColumnFamilyStore(), executionController), cmd.metadata()) :
-                                cmd.executeLocally().blockingGet())
+                                cmd.executeForTests())
         {
             while (iterator.hasNext())
             {

@@ -24,7 +24,6 @@ import java.util.function.BiFunction;
 import com.googlecode.concurrenttrees.common.Iterables;
 
 import io.reactivex.Completable;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.IndexTarget;

@@ -18,10 +18,13 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import io.reactivex.Flowable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -233,17 +236,18 @@ public class Monitor
             abort();
     }
 
-    public UnfilteredPartitionIterator withMonitoring(UnfilteredPartitionIterator iter)
+    public Flowable<FlowableUnfilteredPartition> withMonitoring(Flowable<FlowableUnfilteredPartition> iter)
     {
-        return Transformation.apply(iter, new CheckForAbort());
+        CheckForAbort tt = new CheckForAbort();
+        return iter.map(tt::applyToPartition).doFinally(tt::onClose);
     }
 
-    private class CheckForAbort extends Transformation<UnfilteredRowIterator>
+    private class CheckForAbort extends StoppingTransformation
     {
-        protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
+        protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
         {
             check();
-            return Transformation.apply(partition, this);
+            return Transformation.apply(iter, this);
         }
 
         protected Row applyToRow(Row row)
@@ -255,4 +259,5 @@ public class Monitor
             return row;
         }
     }
+
 }

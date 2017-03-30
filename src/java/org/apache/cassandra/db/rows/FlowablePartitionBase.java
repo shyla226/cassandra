@@ -50,4 +50,13 @@ public abstract class FlowablePartitionBase<T, Header>
         this.staticRow = staticRow;
         this.content = content;
     }
+
+    /**
+     * Only to be called on requested but unused partitions (e.g. when aborting).
+     * Since we usually verify one use only, this will throw if the partition was already used.
+     */
+    public void unused()
+    {
+        content.subscribe().dispose();
+    }
 }

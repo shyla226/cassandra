@@ -65,6 +65,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
@@ -681,7 +682,7 @@ public class Memtable implements Comparable<Memtable>
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead
-        try (final OpOrder.Group group = new OpOrder().start())
+        try (final OpOrder.Group group = new OpOrderSimple().start())
         {
             int rowOverhead;
             MemtableAllocator allocator = MEMORY_POOL.newAllocator();

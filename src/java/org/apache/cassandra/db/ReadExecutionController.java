@@ -20,11 +20,11 @@ package org.apache.cassandra.db;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class ReadExecutionController implements AutoCloseable
 {

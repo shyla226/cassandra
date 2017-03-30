@@ -27,8 +27,9 @@ import org.junit.Test;
 
 import junit.framework.Assert;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 
 public class NativeAllocatorTest
 {
@@ -45,7 +46,7 @@ public class NativeAllocatorTest
     {
         {
             final ScheduledExecutorService exec = Executors.newScheduledThreadPool(2);
-            final OpOrder order = new OpOrder();
+            final OpOrder order = new OpOrderSimple();
             final OpOrder.Group group = order.start();
             final CountDownLatch canClean = new CountDownLatch(1);
             final CountDownLatch isClean = new CountDownLatch(1);

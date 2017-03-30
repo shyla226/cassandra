@@ -20,10 +20,9 @@ package org.apache.cassandra.utils.memory;
 
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.concurrent.WaitQueue;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public abstract class MemtableAllocator
 {

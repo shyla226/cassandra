@@ -30,7 +30,8 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
-
+import io.reactivex.functions.Action;
+import io.reactivex.functions.Function;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -343,111 +344,71 @@ public abstract class ReadCommand implements ReadQuery
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     @SuppressWarnings("resource")
     @Override
-    public Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor)
+    public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
     {
-        Single s = Single.defer(
-        () ->
+        long startTimeNanos = System.nanoTime();
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
+        Index index = getIndex(cfs);
+
+        Index.Searcher pickSearcher = null;
+        if (index != null)
         {
-            long startTimeNanos = System.nanoTime();
-            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
-            Index index = getIndex(cfs);
+            if (!cfs.indexManager.isIndexQueryable(index))
+                throw new IndexNotAvailableException(index);
 
-            Index.Searcher pickSearcher = null;
-            if (index != null)
+            pickSearcher = index.searcherFor(this);
+            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+        }
+
+        Index.Searcher searcher = pickSearcher;
+        Flowable<FlowableUnfilteredPartition> flowable = Flowable.<FlowableUnfilteredPartition, ReadExecutionController>using(
+            () -> ReadExecutionController.forCommand(this),
+            controller ->
             {
-                if (!cfs.indexManager.isIndexQueryable(index))
-                    throw new IndexNotAvailableException(index);
+                Flowable<FlowableUnfilteredPartition> r = searcher == null
+                                                          ? queryStorage(cfs, controller)
+                                                          : FlowablePartitions.fromPartitions(searcher.search(controller).blockingGet(), null);
 
-                pickSearcher = index.searcherFor(this);
-                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
-            }
+                if (monitor != null)
+                    r = monitor.withMonitoring(r);
 
-            Index.Searcher searcher = pickSearcher;
-            ReadExecutionController controller = ReadExecutionController.forCommand(this);
-            try
-            {
-                Single<UnfilteredPartitionIterator> resultIterator = searcher == null
-                                                                   ? Single.just(FlowablePartitions.toPartitions(queryStorage(cfs, controller), cfs.metadata()))
-                                                                   : searcher.search(controller);
+                r = withMetricsRecording(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos);
 
-                return resultIterator.map(r ->
-                                          {
-                                              if (monitor != null)
-                                                  r = monitor.withMonitoring(r);
+                // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+                // no point in checking it again.
+                RowFilter updatedFilter = searcher == null
+                                          ? rowFilter()
+                                          : index.getPostIndexQueryFilter(rowFilter());
 
-                                              r = withMetricsRecording(withoutPurgeableTombstones(r, cfs), cfs.metric, startTimeNanos);
+                // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+                // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+                // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+                // processing we do on it).
+                return limits().filter(updatedFilter.filter(r, cfs.metadata(), nowInSec()), nowInSec());
+            },
+            controller -> controller.close()
+        );
 
-                                              // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
-                                              // no point in checking it again.
-                                              RowFilter updatedFilter = searcher == null
-                                                                        ? rowFilter()
-                                                                        : index.getPostIndexQueryFilter(rowFilter());
+        // TODO subscribeOn() deadlocks ATM (scheduler needs to execute immediately if already same thread)
 
-                                              // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
-                                              // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
-                                              // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
-                                              // processing we do on it).
-                                              final UnfilteredPartitionIterator res = limits().filter(updatedFilter.filter(r, nowInSec()), nowInSec());
-
-                                              // TODO - to be removed after final implementation with MergeFlowable is integrated.
-                                              // Closing the execution controller is too important for it to be buried in a transformation,
-                                              // so I've temporarily wrapped the iterator - I understand that in the final flowable implementation
-                                              // we'll convert a Flowable<Unfiltered> to an iterator or use the Flowable directly, so the idea
-                                              // is to close the controller when the subscription to the flowable is cancelled, i.e. when the
-                                              // iterator is closed.
-                                              // I have checked that all the callers of executeLocally() indeed close the iterator.
-                                              return new UnfilteredPartitionIterator()
-                                              {
-
-                                                  public boolean hasNext()
-                                                  {
-                                                      return res.hasNext();
-                                                  }
-
-                                                  public UnfilteredRowIterator next()
-                                                  {
-                                                      return res.next();
-                                                  }
-
-                                                  public TableMetadata metadata()
-                                                  {
-                                                      return res.metadata();
-                                                  }
-
-                                                  public void close()
-                                                  {
-                                                      controller.close();
-                                                      res.close();
-                                                  }
-                                              };
-                                          });
-            }
-            catch (Throwable t)
-            {
-                controller.close(); // idempotent
-                return Single.error(t);
-            }
-        });
-
-        // Get the scheduler for this read command and, unless we are already executing on it,
         // switch to this scheduler - normally verb handlers already execute on the correct scheduler but
         // other callers may not ensure this and so we must check again here. However, we don't want to pay
         // the price of a double schedule if we are already running on the right core and this check should
         // avoid that. Note that this check should be postponed to when the subscriber subscribes because
         // there is a small chance that the caller may change thread after creating the single but we know
         // this is not currently the case.
-        Scheduler scheduler = getScheduler();
-        if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(scheduler))
-            s = s.subscribeOn(scheduler);
-
-        return s;
+        //Scheduler scheduler = getScheduler();
+        //if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(scheduler))
+        //    flowable = flowable.subscribeOn(scheduler);
+        return flowable;
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
     public Single<PartitionIterator> executeInternal(Monitor monitor)
     {
-        return executeLocally(monitor).map(p -> UnfilteredPartitionIterators.filter(p, nowInSec()));
+        // tpc TODO: Do filtering on Flowable.
+        return Single.<PartitionIterator>defer(() -> Single.just(UnfilteredPartitionIterators.filter(FlowablePartitions.toPartitions(executeLocally(monitor), metadata()), nowInSec())));
     }
 
     public ReadExecutionController executionController()
@@ -459,9 +420,11 @@ public abstract class ReadCommand implements ReadQuery
      * Wraps the provided iterator so that metrics on what is scanned by the command are recorded.
      * This also log warning/trow TombstoneOverwhelmingException if appropriate.
      */
-    private UnfilteredPartitionIterator withMetricsRecording(UnfilteredPartitionIterator iter, final TableMetrics metric, final long startTimeNanos)
+    private Flowable<FlowableUnfilteredPartition> withMetricsRecording(Flowable<FlowableUnfilteredPartition> iter,
+                                                                       final TableMetrics metric,
+                                                                       final long startTimeNanos)
     {
-        class MetricRecording extends Transformation<UnfilteredRowIterator>
+        class MetricRecording extends Transformation
         {
             private final int failureThreshold = DatabaseDescriptor.getTombstoneFailureThreshold();
             private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
@@ -473,12 +436,13 @@ public abstract class ReadCommand implements ReadQuery
 
             private DecoratedKey currentKey;
 
-            @Override
-            public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator iter)
+            public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
             {
-                currentKey = iter.partitionKey();
+                currentKey = iter.header.partitionKey;
                 return Transformation.apply(iter, this);
             }
+
+
 
             @Override
             public Row applyToStatic(Row row)
@@ -542,7 +506,8 @@ public abstract class ReadCommand implements ReadQuery
             }
         };
 
-        return Transformation.apply(iter, new MetricRecording());
+        MetricRecording tt = new MetricRecording();
+        return iter.map(tt::applyToPartition).doFinally(tt::onClose);
     }
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
@@ -550,7 +515,7 @@ public abstract class ReadCommand implements ReadQuery
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
-    protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator, ColumnFamilyStore cfs)
+    protected Flowable<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flowable<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
     {
         class WithoutPurgeableTombstones extends PurgeFunction
         {
@@ -564,7 +529,7 @@ public abstract class ReadCommand implements ReadQuery
                 return time -> true;
             }
         }
-        return Transformation.apply(iterator, new WithoutPurgeableTombstones());
+        return iterator.map(new WithoutPurgeableTombstones());
     }
 
     /**

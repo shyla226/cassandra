@@ -19,11 +19,12 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.function.Predicate;
 
+import io.reactivex.functions.Function;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 
-public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator>
+public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator> implements Function<FlowableUnfilteredPartition, FlowableUnfilteredPartition>
 {
     private final DeletionPurger purger;
     private final int nowInSec;
@@ -69,6 +70,18 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
             return null;
         }
 
+        return purged;
+    }
+
+    // Flowable counterpart to above
+    public FlowableUnfilteredPartition apply(FlowableUnfilteredPartition partition)
+    {
+        onNewPartition(partition.header.partitionKey);
+
+        isReverseOrder = partition.header.isReverseOrder;
+        FlowableUnfilteredPartition purged = Transformation.apply(partition, this);
+        // We don't have partition emptiness test on flowables.
+        // tpc TODO If necessary, implement an isEmpty tester that caches first entry. Prefer not to!
         return purged;
     }
 

@@ -285,7 +285,7 @@ public class Util
 
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
-        try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator iterator = command.executeForTests())
         {
             if (iterator.hasNext())
             {
@@ -314,7 +314,7 @@ public class Util
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
         List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (UnfilteredPartitionIterator iterator = command.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator iterator = command.executeForTests())
         {
             while (iterator.hasNext())
             {
@@ -345,7 +345,7 @@ public class Util
 
     public static Row getOnlyRowUnfiltered(ReadCommand cmd)
     {
-        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next())
@@ -378,7 +378,7 @@ public class Util
 
     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
-        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().blockingGet())
+        try (UnfilteredPartitionIterator iterator = cmd.executeForTests())
         {
             assert iterator.hasNext() : "Expecting a single partition but got nothing";
             try (UnfilteredRowIterator partition = iterator.next())

@@ -64,7 +64,6 @@ import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
 
 import org.slf4j.Logger;
@@ -111,11 +110,6 @@ public class NettyRxScheduler extends Scheduler
 
     final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
     {
-        public int idLimit()
-        {
-            return NUM_NETTY_THREADS + 1;
-        }
-
         public int idFor(Thread t)
         {
             if (t instanceof NettyRxThread)
@@ -143,7 +137,7 @@ public class NettyRxScheduler extends Scheduler
 
     public static OpOrderThreaded newOpOrderThreaded(Object creator)
     {
-        return new OpOrderThreaded(creator, threadIdentifier);
+        return new OpOrderThreaded(creator, threadIdentifier, NUM_NETTY_THREADS + 1);
     }
 
     private final static class NettyRxThread extends FastThreadLocalThread

@@ -19,12 +19,16 @@ package org.apache.cassandra.db;
 
 import javax.annotation.Nullable;
 
+import io.reactivex.Flowable;
 import io.reactivex.Single;
+
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
@@ -69,9 +73,9 @@ public interface ReadQuery extends Monitorable
             return Single.just(EmptyIterators.partition());
         }
 
-        public Single<UnfilteredPartitionIterator> executeLocally(Monitor monitor)
+        public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
-            return Single.just(EmptyIterators.unfilteredPartition(metadata));
+            return Flowable.empty();
         }
 
         public DataLimits limits()
@@ -180,9 +184,9 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the read query.
      */
-    public Single<UnfilteredPartitionIterator> executeLocally(@Nullable Monitor monitor);
+    public Flowable<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
 
-    public default Single<UnfilteredPartitionIterator> executeLocally()
+    default public Flowable<FlowableUnfilteredPartition> executeLocally()
     {
         return executeLocally(null);
     }
@@ -263,4 +267,11 @@ public interface ReadQuery extends Monitorable
      */
     public boolean isEmpty();
 
+    /**
+     * Test-only helper method.
+     */
+    default public UnfilteredPartitionIterator executeForTests()
+    {
+        return FlowablePartitions.toPartitions(executeLocally(), metadata());
+    }
 }

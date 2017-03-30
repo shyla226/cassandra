@@ -20,7 +20,6 @@ package org.apache.cassandra.db.rows;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;

@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Flowable;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.aggregation.GroupMaker;
@@ -174,6 +175,21 @@ public abstract class DataLimits
      * discarded.
      */
     public abstract DataLimits withoutState();
+
+    public Flowable<FlowableUnfilteredPartition> filter(Flowable<FlowableUnfilteredPartition> iter, int nowInSec)
+    {
+        Counter counter = this.newCounter(nowInSec, false);
+        return iter.takeUntil(partition ->
+                              {
+                                  if (counter.isDone())
+                                  {
+                                      partition.unused();
+                                      return true;
+                                  }
+                                  return false;
+                              })
+                   .map(partition -> Transformation.apply(partition, counter));
+    }
 
     public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec)
     {
