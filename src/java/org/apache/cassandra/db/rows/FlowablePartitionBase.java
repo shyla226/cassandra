@@ -57,6 +57,8 @@ public abstract class FlowablePartitionBase<T, Header>
      */
     public void unused()
     {
-        content.subscribe().dispose();
+        // this triggers the assertion in FLowableUtils.FlowableFromIter.subscribeActual() because
+        // the content is subscribed twice, at least when called from DataLimits.filter, see SelectTest.testSelectDistinct()
+        //content.subscribe().dispose();
     }
 }

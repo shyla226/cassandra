@@ -48,6 +48,8 @@ public class CompactionAwareWriterTest extends CQLTester
     @BeforeClass
     public static void beforeClass() throws Throwable
     {
+        prepareServer();
+
         // Disabling durable write since we don't care
         schemaChange("CREATE KEYSPACE IF NOT EXISTS " + KEYSPACE + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'} AND durable_writes=false");
         schemaChange(String.format("CREATE TABLE %s.%s (k int, t int, v blob, PRIMARY KEY (k, t))", KEYSPACE, TABLE));

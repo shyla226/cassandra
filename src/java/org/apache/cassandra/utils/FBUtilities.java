@@ -875,4 +875,45 @@ public class FBUtilities
         broadcastInetAddress = null;
         broadcastRpcAddress = null;
     }
+
+    /**
+     * A class containing some debug methods to be added and removed manually when debugging problems
+     * like failing unit tests.
+     */
+    public static final class Debug
+    {
+        private static final Map<Object, StackTraceElement[]> stacks = new ConcurrentHashMap<>();
+
+        public static String getStackTrace(StackTraceElement[] stackTraceElements)
+        {
+            StringBuilder sb = new StringBuilder();
+            for (StackTraceElement element : stackTraceElements)
+            {
+                sb.append(element);
+                sb.append("\n");
+            }
+            return sb.toString();
+        }
+
+        /**
+         * Call this method for debugging purposes, when you want to save the current thread stack trace
+         * for the object specified in the parameter.
+         */
+        public static void addStackTrace(Object object)
+        {
+            stacks.put(object, Thread.currentThread().getStackTrace());
+        }
+
+
+        /** Call this method to log a message that will print the stack trace that was saved
+         * in the last call of addStackTrace() and the current stack trace.
+         */
+        public static void logStackTrace(String message, Object object)
+        {
+            logger.info("{}\n{}\n****\n{}",
+                        message,
+                        getStackTrace(stacks.get(object)),
+                        getStackTrace(Thread.currentThread().getStackTrace()));
+        }
+    }
 }

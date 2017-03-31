@@ -22,6 +22,7 @@ package org.apache.cassandra.cql3.validation.miscellaneous;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -34,6 +35,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
  * Tests for checking how many sstables we access during cql queries with LIMIT specified,
  * see CASSANDRA-8180.
  */
+@Ignore // TODO TPC - 8180 optimization currently disabled in SinglePartitionReadCommand
 public class SSTablesIteratedTest extends CQLTester
 {
     private static int defaultMetricsHistogramUpdateInterval;
