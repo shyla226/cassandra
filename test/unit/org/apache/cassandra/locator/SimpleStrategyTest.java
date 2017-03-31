@@ -179,6 +179,15 @@ public class SimpleStrategyTest
         StorageServiceAccessor.setTokenMetadata(oldTmd);
     }
 
+    @Test
+    public void testSimpleStrategyKeyspacesArePartitioned()
+    {
+        //local strategy keyspaces should not be returned here since they are not partitioned
+        List<String> partitionedKeyspaces = Schema.instance.getPartitionedKeyspaces();
+        assertEquals(1, partitionedKeyspaces.size());
+        assertEquals(KEYSPACE1, partitionedKeyspaces.get(0));
+    }
+
     private AbstractReplicationStrategy getStrategy(String keyspaceName, TokenMetadata tmd)
     {
         KeyspaceMetadata ksmd = Schema.instance.getKSMetaData(keyspaceName);

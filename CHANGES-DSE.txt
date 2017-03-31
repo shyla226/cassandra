@@ -1,4 +1,5 @@
 DSE 5.1.0
+ * Only perform drop below RF check on decommission for non-partitioned keyspaces (APOLLO-589)
  * Fix SmallInt and TinyInt serialization (APOLLO-542)
  * Check for null/empty password before calling legacyAuthenticate from CassandraLoginModule (APOLLO-412)
  * Allow registering user expression on SelectStatement (APOLLO-491)
