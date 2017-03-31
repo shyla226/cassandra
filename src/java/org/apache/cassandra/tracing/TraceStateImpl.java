@@ -107,7 +107,7 @@ public class TraceStateImpl extends TraceState
             {
                 mutateWithCatch(mutation);
             }
-        }, StageManager.getStage(Stage.TRACING));
+        }, StageManager.tracingExecutor);
 
         boolean ret = pendingFutures.add(fut);
         if (!ret)

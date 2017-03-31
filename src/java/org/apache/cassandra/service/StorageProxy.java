@@ -456,8 +456,6 @@ public class StorageProxy implements StorageProxyMBean
 
         if (shouldHint)
         {
-            // Hint dead nodes first as it's always non-blocking, while sending our message may block (due to the use
-            // of LocalAwareExecutorService.maybeExecuteImmediately for local delivery).
             Collection<InetAddress> endpointsToHint = Collections2.filter(endpoints.dead(), e -> shouldHint(e));
             if (!endpointsToHint.isEmpty())
                 submitHint(mutation, endpointsToHint, null);
@@ -1006,8 +1004,6 @@ public class StorageProxy implements StorageProxyMBean
         checkHintOverload(targets);
         MessagingService.instance().applyBackPressure(targets.live(), handler.currentTimeout());
 
-        // Hint dead nodes first as it's always non-blocking, while sending our message may block (due to the use
-        // of LocalAwareExecutorService.maybeExecuteImmediately for local delivery).
         Collection<InetAddress> endpointsToHint = Collections2.filter(targets.dead(), e -> shouldHint(e));
         if (!endpointsToHint.isEmpty())
             submitHint(mutation, endpointsToHint, handler);

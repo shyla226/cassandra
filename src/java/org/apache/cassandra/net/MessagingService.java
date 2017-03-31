@@ -46,7 +46,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -246,11 +245,6 @@ public final class MessagingService implements MessagingServiceMBean
 
     /**
      * Sends a request message, setting the provided callback to be called with the response received.
-     * <p>
-     * As for any other sending method of this class, if the request is local and the stage configured for this
-     * request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a {@link LocalAwareExecutorService}
-     * worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately} and that method silently
-     * assumes it is called on a worker.
      *
      * @param request the request to send.
      * @param callback the callback to set for the response to {@code request}.
@@ -271,11 +265,6 @@ public final class MessagingService implements MessagingServiceMBean
 
     /**
      * Sends the requests for a provided dispatcher, setting the provided callback to be called with received responses.
-     * <p>
-     * As for any other sending method of this class, if the dispatcher includes a local request and the stage configured
-     * for this request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a
-     * {@link LocalAwareExecutorService} worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately}
-     * and that method silently assumes it is called on a worker.
      *
      * @param dispatcher the dispatcher to use to generate requests to send.
      * @param callback the callback to set for responses to the request from {@code dispatcher}.
@@ -287,9 +276,6 @@ public final class MessagingService implements MessagingServiceMBean
         for (Request<?, Q> request : dispatcher.remoteRequests())
             send(request, callback);
 
-        // It is important to deliver the local request last (after other have been sent) because we use
-        // LocalAwareExecutorService.maybeExecuteImmediately() which might execute on the current thread and would
-        // thus block other messages.
         if (dispatcher.hasLocalRequest())
             deliverLocally(dispatcher.localRequest(), callback);
     }
@@ -337,11 +323,6 @@ public final class MessagingService implements MessagingServiceMBean
 
     /**
      * Sends a request and returns a future on the reception of the response.
-     * <p>
-     * As for any other sending method of this class, if the request is local and the stage configured for this
-     * request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a {@link LocalAwareExecutorService}
-     * worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately} and that method silently
-     * assumes it is called on a worker.
      *
      * @param request the request to send.
      * @return a future on the reception of the response payload to {@code request}. The future may either complete
@@ -372,11 +353,6 @@ public final class MessagingService implements MessagingServiceMBean
      * <p>
      * Note that this is a fire-and-forget type of method: the method returns as soon as the request has been set to
      * be send and there is no way to know if the request has been successfully delivered or not.
-     * <p>
-     * As for any other sending method of this class, if the request is local and the stage configured for this
-     * request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a {@link LocalAwareExecutorService}
-     * worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately} and that method silently
-     * assumes it is called on a worker.
      *
      * @param request the request to send.
      */
@@ -393,11 +369,6 @@ public final class MessagingService implements MessagingServiceMBean
      * <p>
      * Note that this is a fire-and-forget type of method: the method returns as soon as the requets have been set to
      * be send and there is no way to know if the requests have been successfully delivered or not.
-     * <p>
-     * As for any other sending method of this class, if the dispatcher includes a local request and the stage configured
-     * for this request is a {@link LocalAwareExecutorService}, then this <b>must</b> be called on a
-     * {@link LocalAwareExecutorService} worker since we'll call {@link LocalAwareExecutorService#maybeExecuteImmediately}
-     * and that method silently assumes it is called on a worker.
      *
      * @param dispatcher the dispatcher to use to generate the one-way requests to send.
      */
@@ -406,9 +377,6 @@ public final class MessagingService implements MessagingServiceMBean
         for (OneWayRequest<?> request : dispatcher.remoteRequests())
             send(request);
 
-        // It is important to deliver the local request last (after other have been sent) because we use
-        // LocalAwareExecutorService.maybeExecuteImmediately() which might execute on the current thread and would
-        // thus block other messages.
         if (dispatcher.hasLocalRequest())
             deliverLocallyOneWay(dispatcher.localRequest());
     }
@@ -447,7 +415,9 @@ public final class MessagingService implements MessagingServiceMBean
             if (!ms.allowOutgoingMessage(request, callback))
                 return;
 
-        request.executor().maybeExecuteImmediately(runnable);
+        // this will forward the request to another thread and therefore we must preserve thread local
+        // state (used for tracing and client warnings) see ExecutorLocals
+        request.executor().execute(runnable, ExecutorLocals.create());
     }
 
 

@@ -150,12 +150,6 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         scheduleDirect(new ExecutorLocals.WrappedRunnable(runnable, locals));
     }
 
-    @Override // TracingAwareExecutor
-    public void maybeExecuteImmediately(Runnable runnable)
-    {
-        scheduleDirect(runnable);
-    }
-
     private final static class NettyRxThread extends FastThreadLocalThread
     {
         private int cpuId;
@@ -351,12 +345,32 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         return coreId != null && coreId >= 0 && coreId < getNumCores();
     }
 
+    /**
+     * Return the Netty rx scheduler of the core that is assigned to run operations on the specified keyspace
+     * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.
+     * <p>
+     * The parameter useImmediateForLocal controls whether we can return an immediate scheduler in some cases,
+     * that is a scheduler that executes a task immediately, without switching threads. If useImmediateForLocal
+     * is true, an immediate scheduler would be returned if {@link StorageService} is not yet initialized,
+     * since in this case we cannot assign any partition key to any core, or if the caller's thread is already
+     * the thread of the assigned scheduler. If useImmediateForLocal is false, then the assigned scheduler is always
+     * returned unless {@link StorageService} is not yet initialized, in which case the scheduler of core zero
+     * is returned.
+     *
+     * @param keyspaceName - the keyspace name
+     * @param key - the partition key
+     * @param useImmediateForLocal - whether we can use an immediate scheduler if not yet initialized or if the current
+     *                             thread is already the thread of the assigned scheduler
+     *
+     * @return the Netty RX scheduler, which includes an immediate scheduler if useImmediateForLocal is true
+     */
     @Inline
     public static NettyRxScheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
     {
-        // nothing we can do until we have the local ranges
+        // nothing we can do until we have the local ranges, if we can execute immediately (useImmediateForLocal is true)
+        // then return the immediate scheduler, otherwise use core 0 (TODO - is this correct?)
         if (!StorageService.instance.isInitialized())
-            return immediateScheduler;
+            return useImmediateForLocal ? immediateScheduler : getForCore(0);
 
         int callerCoreId = -1;
         if (useImmediateForLocal)

@@ -55,7 +55,7 @@ public class ExecutorLocals
      *
      * @return an ExecutorLocals object which has the trace state and client warn state captured if either has been set,
      *         or null if both are unset. The null result short-circuits logic in
-     *         {@link AbstractLocalAwareExecutorService#newTaskFor(Runnable, Object, ExecutorLocals)}, preventing
+     *         {@link DebuggableThreadPoolExecutor#newTaskFor(Runnable, Object)}, preventing
      *         unnecessarily calling {@link ExecutorLocals#set(ExecutorLocals)}.
      */
     public static ExecutorLocals create()
