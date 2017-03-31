@@ -33,6 +33,8 @@ public class MappedBuffer implements Closeable
 {
     private final MappedByteBuffer[] pages;
 
+    private boolean isClosed = false;
+    private final String path;
     private long position, limit;
     private final long capacity;
     private final int pageSize, sizeBits;
@@ -45,6 +47,7 @@ public class MappedBuffer implements Closeable
         this.limit = other.limit;
         this.capacity = other.capacity;
         this.pages = other.pages;
+        this.path = other.path;
     }
 
     public MappedBuffer(RandomAccessReader file)
@@ -82,7 +85,9 @@ public class MappedBuffer implements Closeable
         finally
         {
             file.close();
+
         }
+        this.path = file.filePath();
     }
 
     public int comparePageTo(long offset, int length, AbstractType<?> comparator, ByteBuffer other)
@@ -140,7 +145,7 @@ public class MappedBuffer implements Closeable
 
     public byte get(long pos)
     {
-        return pages[getPage(pos)].get(getPageOffset(pos));
+        return getPage(pos).get(getPageOffset(pos));
     }
 
     public short getShort()
@@ -153,7 +158,7 @@ public class MappedBuffer implements Closeable
     public short getShort(long pos)
     {
         if (isPageAligned(pos, 2))
-            return pages[getPage(pos)].getShort(getPageOffset(pos));
+            return getPage(pos).getShort(getPageOffset(pos));
 
         int ch1 = get(pos)     & 0xff;
         int ch2 = get(pos + 1) & 0xff;
@@ -170,7 +175,7 @@ public class MappedBuffer implements Closeable
     public int getInt(long pos)
     {
         if (isPageAligned(pos, 4))
-            return pages[getPage(pos)].getInt(getPageOffset(pos));
+            return getPage(pos).getInt(getPageOffset(pos));
 
         int ch1 = get(pos)     & 0xff;
         int ch2 = get(pos + 1) & 0xff;
@@ -193,7 +198,7 @@ public class MappedBuffer implements Closeable
         // fast path if the long could be retrieved from a single page
         // that would avoid multiple expensive look-ups into page array.
         return (isPageAligned(pos, 8))
-                ? pages[getPage(pos)].getLong(getPageOffset(pos))
+                ? getPage(pos).getLong(getPageOffset(pos))
                 : ((long) (getInt(pos)) << 32) + (getInt(pos + 4) & 0xFFFFFFFFL);
     }
 
@@ -202,7 +207,7 @@ public class MappedBuffer implements Closeable
         if (!isPageAligned(position, length))
             throw new IllegalArgumentException(String.format("range: %s-%s wraps more than one page", position, length));
 
-        ByteBuffer slice = pages[getPage(position)].duplicate();
+        ByteBuffer slice = getPage(position).duplicate();
 
         int pageOffset = getPageOffset(position);
         slice.position(pageOffset).limit(pageOffset + length);
@@ -217,14 +222,16 @@ public class MappedBuffer implements Closeable
 
     public void close()
     {
+        // We can not rely on clean/isLoaded pair to check for whether or not region
+        // is still mapped because of the differences in behaviour on non Sun JVM.
+        isClosed = true;
+
         if (!FileUtils.isCleanerAvailable)
             return;
 
-        /*
-         * Try forcing the unmapping of pages using undocumented unsafe sun APIs.
-         * If this fails (non Sun JVM), we'll have to wait for the GC to finalize the mapping.
-         * If this works and a thread tries to access any page, hell will unleash on earth.
-         */
+        // Try forcing the unmapping of pages using undocumented unsafe sun APIs.
+        // If this fails (non Sun JVM), we'll have to wait for the GC to finalize the mapping.
+        // If this works and a thread tries to access any page, hell will unleash on earth.
         try
         {
             for (MappedByteBuffer segment : pages)
@@ -236,9 +243,14 @@ public class MappedBuffer implements Closeable
         }
     }
 
-    private int getPage(long position)
+    private MappedByteBuffer getPage(long position)
     {
-        return (int) (position >> sizeBits);
+        int page = (int) (position >> sizeBits);
+        MappedByteBuffer buffer = pages[page];
+        // Prevent segfaults, throw assertion error instead, since JVM doesn't have
+        // proper page protection and unmaps regions in an unsafe way.
+        assert !isClosed : ("Page holding the position " + position + " is already unloaded in mmaped file: '" + path + "'");
+        return buffer;
     }
 
     private int getPageOffset(long position)
