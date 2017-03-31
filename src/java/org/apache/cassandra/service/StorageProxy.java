@@ -456,8 +456,8 @@ public class StorageProxy implements StorageProxyMBean
                 submitHint(mutation, endpointsToHint, null);
         }
 
-
-        WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime);
+        WriteHandler.Builder builder = WriteHandler.builder(endpoints, consistencyLevel, WriteType.SIMPLE, queryStartNanoTime)
+                                                   .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel());
         if (shouldHint)
             builder.hintOnTimeout(mutation);
 
@@ -792,6 +792,7 @@ public class StorageProxy implements StorageProxyMBean
                 Keyspace keyspace = mae.endpoints.keyspace();
                 AsyncLatch toCleanupLatch = new AsyncLatch(batchConsistencyLevel.blockFor(keyspace), cleanupLatch::countDown);
                 return WriteHandler.builder(mae.endpoints, consistencyLevel, WriteType.BATCH, queryStartNanoTime)
+                                   .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                    .onResponse(r -> toCleanupLatch.countDown())
                                    .build();
             }));
@@ -915,6 +916,7 @@ public class StorageProxy implements StorageProxyMBean
         endpoints.checkAvailability(consistencyLevel);
 
         WriteHandler handler = WriteHandler.builder(endpoints, consistencyLevel, writeType, queryStartNanoTime)
+                                           .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                            .hintOnTimeout(mutation)
                                            .build();
         sendToHintedEndpoints(mutation, handler.endpoints(), handler, localDataCenter, Verbs.WRITES.WRITE);
@@ -1102,6 +1104,7 @@ public class StorageProxy implements StorageProxyMBean
 
         WriteEndpoints endpoints = WriteEndpoints.compute(result);
         WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
+                                           .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
                                            .hintOnTimeout(result)
                                            .build();
 
@@ -2410,5 +2413,18 @@ public class StorageProxy implements StorageProxyMBean
     public int getNumberOfTables()
     {
         return Schema.instance.getNumberOfTables();
+    }
+
+    public String getIdealConsistencyLevel()
+    {
+        return DatabaseDescriptor.getIdealConsistencyLevel().toString();
+    }
+
+    public String setIdealConsistencyLevel(String cl)
+    {
+        ConsistencyLevel original = DatabaseDescriptor.getIdealConsistencyLevel();
+        ConsistencyLevel newCL = ConsistencyLevel.valueOf(cl.trim().toUpperCase());
+        DatabaseDescriptor.setIdealConsistencyLevel(newCL);
+        return String.format("Updating ideal consistency level new value: %s old value %s", newCL, original.toString());
     }
 }

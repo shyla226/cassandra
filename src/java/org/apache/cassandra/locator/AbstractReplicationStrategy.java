@@ -29,9 +29,7 @@ import com.google.common.collect.Multimap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
@@ -142,13 +140,6 @@ public abstract class AbstractReplicationStrategy
      * @return a copy of the natural endpoints for the given token
      */
     public abstract List<InetAddress> calculateNaturalEndpoints(Token searchToken, TokenMetadata tokenMetadata);
-
-    private Keyspace getKeyspace()
-    {
-        if (keyspace == null)
-            keyspace = Keyspace.open(keyspaceName);
-        return keyspace;
-    }
 
     /**
      * calculate the RF based on strategy_options. When overwriting, ensure that this get()

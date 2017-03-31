@@ -1162,3 +1162,7 @@ continuous_paging:
     # The number of threads dedicated to continuous paging sessions
     max_threads: 24
 
+# Track a metric per keyspace indicating whether replication achieved the ideal consistency
+# level for writes without timing out. This is different from the consistency level requested by
+# each write which may be lower in order to facilitate availability.
+# ideal_consistency_level: EACH_QUORUM
