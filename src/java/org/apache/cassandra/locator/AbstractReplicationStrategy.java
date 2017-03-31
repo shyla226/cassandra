@@ -337,4 +337,12 @@ public abstract class AbstractReplicationStrategy
                 throw new ConfigurationException(String.format("Unrecognized strategy option {%s} passed to %s for keyspace %s", key, getClass().getSimpleName(), keyspaceName));
         }
     }
+
+    /**
+     * Whether this strategy partitions data across the ring
+     */
+    public boolean isPartitioned()
+    {
+        return true;
+    }
 }
