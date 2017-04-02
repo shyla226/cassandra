@@ -1490,6 +1490,7 @@ public class SelectTest extends CQLTester
                                     row(4, 2, 4, 2, 6),
                                     row(3, 2, 3, 2, 5));
         });
+        // tpc TODO see below
     }
 
     @Test
@@ -1510,6 +1511,9 @@ public class SelectTest extends CQLTester
                        row(1, 2, 1, 2, 3),
                        row(4, 2, 4, 2, 6));
         });
+        // tpc TODO: This does not currently work, because RowFilter does not filter out empty partition with static
+        // row but DataLimits counts that static row.
+        // Need blerer's opinion on how to sort this out properly (see comment in RowFilter.CQLFilter.filter and CASSANDRA-6377).
     }
 
     @Test

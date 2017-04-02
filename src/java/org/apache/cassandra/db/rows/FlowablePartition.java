@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.Flowable;
-import io.reactivex.Single;
 
 /**
  * A partition container providing access to the rows of the partition together with deletion informations.
@@ -31,10 +30,10 @@ import io.reactivex.Single;
  * Note that as for FlowableUnfilteredPartition, the rows returned must be in clustering order (or
  * reverse clustering order if isReverseOrder is true).
  */
-public class FlowablePartition extends FlowablePartitionBase<Row, PartitionHeader>
+public class FlowablePartition extends FlowablePartitionBase<Row>
 {
 
-    public FlowablePartition(PartitionHeader header, Single<Row> staticRow, Flowable<Row> content)
+    public FlowablePartition(PartitionHeader header, Row staticRow, Flowable<Row> content)
     {
         super(header, staticRow, content);
     }

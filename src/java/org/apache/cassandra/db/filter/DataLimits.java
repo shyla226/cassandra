@@ -179,16 +179,7 @@ public abstract class DataLimits
     public Flowable<FlowableUnfilteredPartition> filter(Flowable<FlowableUnfilteredPartition> iter, int nowInSec)
     {
         Counter counter = this.newCounter(nowInSec, false);
-        return iter.takeUntil(partition ->
-                              {
-                                  if (counter.isDone())
-                                  {
-                                      partition.unused();
-                                      return true;
-                                  }
-                                  return false;
-                              })
-                   .map(partition -> Transformation.apply(partition, counter));
+        return Transformation.apply(iter, counter);
     }
 
     public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec)
@@ -292,6 +283,13 @@ public abstract class DataLimits
 
             return partition instanceof UnfilteredRowIterator ? Transformation.apply((UnfilteredRowIterator) partition, this)
                                                               : Transformation.apply((RowIterator) partition, this);
+        }
+
+        @Override
+        protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+        {
+            applyToPartition(partition.header.partitionKey, partition.staticRow);
+            return Transformation.apply(partition, this);
         }
 
         // called before we process a given partition

@@ -78,7 +78,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     {
         onNewPartition(partition.header.partitionKey);
 
-        isReverseOrder = partition.header.isReverseOrder;
         FlowableUnfilteredPartition purged = Transformation.apply(partition, this);
         // We don't have partition emptiness test on flowables.
         // tpc TODO If necessary, implement an isEmpty tester that caches first entry. Prefer not to!
@@ -109,30 +108,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
     {
         updateProgress();
-        boolean reversed = isReverseOrder;
-        if (marker.isBoundary())
-        {
-            // We can only skip the whole marker if both deletion time are purgeable.
-            // If only one of them is, filterTombstoneMarker will deal with it.
-            RangeTombstoneBoundaryMarker boundary = (RangeTombstoneBoundaryMarker)marker;
-            boolean shouldPurgeClose = purger.shouldPurge(boundary.closeDeletionTime(reversed));
-            boolean shouldPurgeOpen = purger.shouldPurge(boundary.openDeletionTime(reversed));
-
-            if (shouldPurgeClose)
-            {
-                if (shouldPurgeOpen)
-                    return null;
-
-                return boundary.createCorrespondingOpenMarker(reversed);
-            }
-
-            return shouldPurgeOpen
-                   ? boundary.createCorrespondingCloseMarker(reversed)
-                   : marker;
-        }
-        else
-        {
-            return purger.shouldPurge(((RangeTombstoneBoundMarker)marker).deletionTime()) ? null : marker;
-        }
+        return marker.purge(purger, nowInSec);
     }
 }

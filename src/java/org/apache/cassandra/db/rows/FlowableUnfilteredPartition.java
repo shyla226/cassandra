@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.rows;
 
 import io.reactivex.Flowable;
-import io.reactivex.Single;
 
 /**
  * A partition container providing access to the rows of the partition together with deletion information.
@@ -41,9 +40,9 @@ import io.reactivex.Single;
  * Note: providers of data can no longer reuse mutable returned objects as we can't guarantee only one reference
  * exists at a time (e.g. Flowable.concatMap always requests one in reserve).
  */
-public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered, PartitionHeader>
+public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered>
 {
-    public FlowableUnfilteredPartition(PartitionHeader header, Single<Row> staticRow, Flowable<Unfiltered> content)
+    public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, Flowable<Unfiltered> content)
     {
         super(header, staticRow, content);
     }

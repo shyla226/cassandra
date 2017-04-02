@@ -132,6 +132,11 @@ public class RangeTombstoneBoundMarker extends AbstractRangeTombstoneMarker<Clus
         deletion.digest(digest);
     }
 
+    public RangeTombstoneMarker purge(DeletionPurger purger, int nowInSec)
+    {
+        return purger.shouldPurge(this.deletionTime()) ? null : this;
+    }
+
     public String toString(TableMetadata metadata)
     {
         return "Marker " + bound.toString(metadata) + '@' + deletion.markedForDeleteAt();
