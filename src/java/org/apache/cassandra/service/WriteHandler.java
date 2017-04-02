@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import com.google.common.collect.ImmutableList;
@@ -36,6 +37,7 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
+import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.net.EmptyPayload;
 import org.apache.cassandra.net.FailureResponse;
 import org.apache.cassandra.net.MessageCallback;
@@ -64,8 +66,7 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
     public abstract Void get() throws WriteTimeoutException, WriteFailureException;
 
     public abstract Completable toObservable();
-
-    public long currentTimeout()
+    long currentTimeout()
     {
         long requestTimeout = writeType() == WriteType.COUNTER
                               ? DatabaseDescriptor.getCounterWriteRpcTimeout()
@@ -104,6 +105,8 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         private final ConsistencyLevel consistencyLevel;
         private final WriteType writeType;
         private final long queryStartNanos;
+
+        private ConsistencyLevel idealConsistencyLevel;
 
         private List<Consumer<Response<EmptyPayload>>> onResponseTasks;
         private List<Consumer<InetAddress>> onTimeoutTasks;
@@ -220,6 +223,12 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
             });
         }
 
+        Builder withIdealConsistencyLevel(ConsistencyLevel idealConsistencyLevel)
+        {
+            this.idealConsistencyLevel = idealConsistencyLevel;
+            return this;
+        }
+
         private WriteHandler makeHandler()
         {
             if (consistencyLevel.isDatacenterLocal())
@@ -270,6 +279,58 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
             };
         }
 
+        private WriteHandler withIdealConsistencyLevel(WriteHandler handler)
+        {
+            final WriteHandler delegateHandler = WriteHandler.create(endpoints, idealConsistencyLevel, writeType, queryStartNanos);
+            KeyspaceMetrics metrics = endpoints.keyspace().metric;
+
+            delegateHandler.thenRun(() -> metrics.idealCLWriteLatency.addNano(System.nanoTime() - queryStartNanos))
+                           .exceptionally(e -> {
+                               metrics.writeFailedIdealCL.inc();
+                               return null;
+                           });
+
+            return new WrappingWriteHandler(handler)
+            {
+                private final AtomicInteger totalResponses = new AtomicInteger(endpoints.liveCount());
+
+                // Currently, our write handler ignore timeouts since we normally rely on the get() call to timeout on
+                // its own, so for the ideal CL where we don't call get(), the handler might never complete if too many
+                // nodes timeout. So we use this method to know when we heard back from every queried endpoints (being
+                // it a success, failure or timeout), and if the handler hasn't really completed when we get it all,
+                // it means we won't achieve our CL. Note that it's important this is called _after_ each response has
+                // been processed by the delegateHandler so that if the last response make us actually succeed, this
+                // happen before this.
+                private void countResponse()
+                {
+                    // Note that the actual exception doesn't matter, we treat all exceptions the same way above.
+                    if (totalResponses.decrementAndGet() == 0)
+                        delegateHandler.completeExceptionally(new RuntimeException("Got all responses for the delegate handler"));
+                }
+
+                public void onResponse(Response<EmptyPayload> response)
+                {
+                    super.onResponse(response);
+                    delegateHandler.onResponse(response);
+                    countResponse();
+                }
+
+                public void onFailure(FailureResponse<EmptyPayload> response)
+                {
+                    super.onFailure(response);
+                    delegateHandler.onFailure(response);
+                    countResponse();
+                }
+
+                public void onTimeout(InetAddress host)
+                {
+                    super.onTimeout(host);
+                    delegateHandler.onTimeout(host);
+                    countResponse();
+                }
+            };
+        }
+
         private static <T> void accept(Consumer<T> task, T value, String taskType)
         {
             try
@@ -286,9 +347,14 @@ public abstract class WriteHandler extends CompletableFuture<Void> implements Me
         public WriteHandler build()
         {
             WriteHandler handler = makeHandler();
-            return onResponseTasks == null && onFailureTasks == null && onTimeoutTasks == null
-                 ? handler
-                 : withTasks(handler);
+
+            if (onResponseTasks != null || onFailureTasks != null || onTimeoutTasks != null)
+                handler = withTasks(handler);
+
+            if (idealConsistencyLevel != null)
+                handler = withIdealConsistencyLevel(handler);
+
+            return handler;
         }
     }
 }

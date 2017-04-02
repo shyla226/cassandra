@@ -56,6 +56,7 @@ import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.Config.CommitLogSync;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
@@ -2304,6 +2305,16 @@ public class DatabaseDescriptor
     public static ContinuousPagingConfig getContinuousPaging()
     {
         return conf.continuous_paging;
+    }
+
+    public static ConsistencyLevel getIdealConsistencyLevel()
+    {
+        return conf.ideal_consistency_level;
+    }
+
+    public static void setIdealConsistencyLevel(ConsistencyLevel cl)
+    {
+        conf.ideal_consistency_level = cl;
     }
 
     public static int getMetricsHistogramUpdateTimeMillis()
