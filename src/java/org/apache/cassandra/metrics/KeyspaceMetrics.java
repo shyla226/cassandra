@@ -239,7 +239,7 @@ public class KeyspaceMetrics
         casPropose = new LatencyMetrics(factory, "CasPropose", true);
         casCommit = new LatencyMetrics(factory, "CasCommit", true);
         writeFailedIdealCL = Metrics.counter(factory.createMetricName("WriteFailedIdealCL"));
-        idealCLWriteLatency = new LatencyMetrics(factory, "IdealCLWrite");
+        idealCLWriteLatency = new LatencyMetrics(factory, "IdealCLWrite", false);
     }
 
     /**

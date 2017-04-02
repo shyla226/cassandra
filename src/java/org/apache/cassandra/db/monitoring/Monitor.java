@@ -20,13 +20,12 @@ package org.apache.cassandra.db.monitoring;
 
 import io.reactivex.Flowable;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.transform.StoppingTransformation;
-import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
 public class Monitor
 {
@@ -238,26 +237,30 @@ public class Monitor
 
     public Flowable<FlowableUnfilteredPartition> withMonitoring(Flowable<FlowableUnfilteredPartition> iter)
     {
-        CheckForAbort tt = new CheckForAbort();
-        return iter.map(tt::applyToPartition).doFinally(tt::onClose);
+        CheckForAbort checkForAbort = new CheckForAbort();
+        return iter.lift((FlowableUtils.FlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>) (subscriber, source, next) -> subscriber.onNext(checkForAbort.applyToPartition(next)));
     }
 
-    private class CheckForAbort extends StoppingTransformation
+    private class CheckForAbort implements FlowableUtils.FlowableOp<Unfiltered, Unfiltered>
     {
         protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
         {
             check();
-            return Transformation.apply(iter, this);
+            return new FlowableUnfilteredPartition(iter.header,
+                                                   iter.staticRow,
+                                                   iter.content.lift(this));
         }
 
-        protected Row applyToRow(Row row)
+        public void onNext(Subscriber<? super Unfiltered> subscriber, Subscription src, Unfiltered unfiltered)
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
 
             check();
-            return row;
+            subscriber.onNext(unfiltered);
         }
     }
+
+
 
 }

@@ -19,7 +19,6 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.Callable;
 
 import javax.annotation.Nullable;
 
@@ -27,7 +26,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.*;
@@ -439,7 +437,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
             {
                 currentKey = iter.header.partitionKey;
-                lastRow = null;
                 countRow(iter.staticRow);
 
                 return new FlowableUnfilteredPartition(iter.header,
@@ -500,27 +497,21 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
                 Tracing.trace("Read {} live and {} tombstone cells{}", liveRows, tombstones, (warnTombstones ? " (see tombstone_warn_threshold)" : ""));
             }
-        };
+        }
 
-        MetricRecording tt = new MetricRecording();
-        return iter.lift(new FlowableUtils.CloseableFlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        MetricRecording metricsRecording = new MetricRecording();
+        return iter.lift(new FlowableUtils.FlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             @Override
             public void onNext(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition next)
             {
-                if (trackingOp.shouldAbort())
-                {
-                    next.unused();
-                    complete(subscriber, source);
-                }
-                else
-                    subscriber.onNext(trackingOp.applyToPartition(next));
+                subscriber.onNext(metricsRecording.applyToPartition(next));
             }
 
             @Override
-            public void onClose()
+            public void close()
             {
-                trackingOp.onComplete();
+                metricsRecording.onComplete();
             }
         });
     }
