@@ -100,6 +100,7 @@ public class WriteHandlerTest
                 return false;
             }
         });
+        DatabaseDescriptor.setMetricsHistogramUpdateTimeMillis(0);
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.1.0.1"));
         SchemaLoader.createKeyspace("Foo", KeyspaceParams.nts("datacenter1", 3, "datacenter2", 3), SchemaLoader.standardCFMD("Foo", "Bar"));
         ks = Keyspace.open("Foo");

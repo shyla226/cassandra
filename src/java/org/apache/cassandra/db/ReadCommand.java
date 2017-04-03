@@ -418,11 +418,12 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      * Wraps the provided iterator so that metrics on what is scanned by the command are recorded.
      * This also log warning/trow TombstoneOverwhelmingException if appropriate.
      */
+    @SuppressWarnings("resource") // we close FlowableUtils.CloseableFlowableOp when the subscription is cancelled or completed
     private Flowable<FlowableUnfilteredPartition> withMetricsRecording(Flowable<FlowableUnfilteredPartition> iter,
                                                                        final TableMetrics metric,
                                                                        final long startTimeNanos)
     {
-        class MetricRecording implements FlowableUtils.FlowableOp<Unfiltered, Unfiltered>
+        class MetricRecording extends FlowableUtils.CloseableFlowableOp<Unfiltered, Unfiltered>
         {
             private final int failureThreshold = DatabaseDescriptor.getTombstoneFailureThreshold();
             private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
@@ -433,6 +434,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             private int tombstones = 0;
 
             private DecoratedKey currentKey;
+            private boolean isLastPartition;
 
             public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
             {
@@ -480,8 +482,12 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 }
             }
 
-            public void onComplete()
+            @Override
+            public void onClose()
             {
+                if (!isLastPartition)
+                    return;
+
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 
                 metric.tombstoneScannedHistogram.update(tombstones);
@@ -499,8 +505,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             }
         }
 
-        MetricRecording metricsRecording = new MetricRecording();
-        return iter.lift(new FlowableUtils.FlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        final MetricRecording metricsRecording = new MetricRecording();
+        return iter.lift(new FlowableUtils.CloseableFlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             @Override
             public void onNext(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition next)
@@ -509,9 +515,14 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             }
 
             @Override
-            public void close()
+            public void onClose()
             {
-                metricsRecording.onComplete();
+                // TODO - we cannot simply call metricsRecording.onComplete() here because
+                // we have not processed the partition yet, look at the request method in ScalarSubscription
+                // which is triggered by Flowable.just(), I also tried with Flowable.fromCallable(), which uses
+                // DeferredScalarSubscription, same thing, request will call onComplete as soon as the first
+                // flowable is published.
+                metricsRecording.isLastPartition = true;
             }
         });
     }

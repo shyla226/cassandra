@@ -39,6 +39,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Flowable;
 import io.reactivex.Single;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -285,16 +286,10 @@ public class Util
 
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
-        try (UnfilteredPartitionIterator iterator = command.executeForTests())
-        {
-            if (iterator.hasNext())
-            {
-                try (UnfilteredRowIterator partition = iterator.next())
-                {
-                    throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(partition.partitionKey().getKey()));
-                }
-            }
-        }
+        List<ImmutableBTreePartition> res = getAllUnfiltered(command);
+        assertTrue("Expected no results for query " + command.toCQLString()
+                   + " but got key " + command.metadata().partitionKeyType.getString(res.get(0).partitionKey().getKey()),
+                   res.isEmpty());
     }
 
     public static void assertEmpty(ReadCommand command)
@@ -313,18 +308,11 @@ public class Util
 
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (UnfilteredPartitionIterator iterator = command.executeForTests())
-        {
-            while (iterator.hasNext())
-            {
-                try (UnfilteredRowIterator partition = iterator.next())
-                {
-                    results.add(ImmutableBTreePartition.create(partition));
-                }
-            }
-        }
-        return results;
+        return command.executeLocally()
+                      .concatMap(partition -> ImmutableBTreePartition.create(partition).toFlowable())
+                      .filter(ImmutableBTreePartition::notEmpty)
+                      .toList()
+                      .blockingGet();
     }
 
     public static List<FilteredPartition> getAll(ReadCommand command)

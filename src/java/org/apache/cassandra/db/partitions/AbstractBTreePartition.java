@@ -20,6 +20,7 @@ package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
 
+import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -71,6 +72,11 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
     public Row staticRow()
     {
         return holder().staticRow;
+    }
+
+    public boolean notEmpty()
+    {
+        return !isEmpty();
     }
 
     public boolean isEmpty()
@@ -292,6 +298,33 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
             builder.reverse();
 
         return new Holder(columns, builder.build(), deletionBuilder.build(), iterator.staticRow(), iterator.stats());
+    }
+
+    protected static Single<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
+    {
+        PartitionHeader header = partition.header;
+        TableMetadata metadata = header.metadata;
+        RegularAndStaticColumns columns = header.columns;
+        boolean reversed = header.isReverseOrder;
+
+        BTree.Builder<Row> builder = BTree.builder(metadata.comparator, initialRowCapacity);
+        builder.auto(!ordered);
+        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionLevelDeletion, metadata.comparator, reversed);
+
+        //TODO - we should write our own single subscriber instead of relying on last() and map()
+        return partition.content.map(unfiltered -> {
+            if (unfiltered.kind() == Unfiltered.Kind.ROW)
+                builder.add((Row)unfiltered);
+            else
+                deletionBuilder.add((RangeTombstoneMarker)unfiltered);
+            return 0;
+        }).last(0)
+          .map(unfiltered -> {
+            if (reversed)
+                builder.reverse();
+
+            return new Holder(columns, builder.build(), deletionBuilder.build(), partition.staticRow, header.stats);
+        });
     }
 
     // Note that when building with a RowIterator, deletion will generally be LIVE, but we allow to pass it nonetheless because PartitionUpdate

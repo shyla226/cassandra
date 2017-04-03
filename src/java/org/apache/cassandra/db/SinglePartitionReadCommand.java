@@ -357,6 +357,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
+        // TODO - why not fromCallable()? Looks a bit more direct.
+        //return Flowable.fromCallable(() -> queryMemtableAndDisk(cfs, executionController))
         return Flowable.defer(() -> Flowable.just(queryMemtableAndDisk(cfs, executionController)))
                        ;//.subscribeOn(NettyRxScheduler.getForKey(cfs.metadata().keyspace, partitionKey(), true));  // tpc TODO deadlocks ATM (scheduler needs to execute immediately if already same thread)
     }
