@@ -61,7 +61,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     }
 
     @Override
-    public ChannelProxy channel()
+    public AsynchronousChannelProxy channel()
     {
         return source.channel();
     }
@@ -76,7 +76,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     public BufferHolder rebuffer(long position)
     {
         offset = alignedPosition(position);
-        source.readChunk(offset, buffer);
+        source.readChunk(offset, buffer).join();
         return this;
     }
 

@@ -795,7 +795,7 @@ public class RowIndexEntryTest extends CQLTester
         };
         
         AbstractSSTableIterator.IndexState indexState = new AbstractSSTableIterator.IndexState(
-            null, comp, rie, false, null                                                                                              
+           null, comp, rie, false, null, Rebufferer.ReaderConstraint.NONE
         );
         
         assertEquals(0, indexState.indexFor(cn(-1L), -1));
@@ -809,7 +809,7 @@ public class RowIndexEntryTest extends CQLTester
         assertEquals(3, indexState.indexFor(cn(100L), 3));
 
         indexState = new AbstractSSTableIterator.IndexState(
-            null, comp, rie, true, null
+            null, comp, rie, true, null, Rebufferer.ReaderConstraint.NONE
         );
 
         assertEquals(-1, indexState.indexFor(cn(-1L), -1));

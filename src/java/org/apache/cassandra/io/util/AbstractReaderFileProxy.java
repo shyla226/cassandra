@@ -20,17 +20,17 @@ package org.apache.cassandra.io.util;
 
 public abstract class AbstractReaderFileProxy implements ReaderFileProxy
 {
-    protected final ChannelProxy channel;
+    protected final AsynchronousChannelProxy channel;
     protected final long fileLength;
 
-    protected AbstractReaderFileProxy(ChannelProxy channel, long fileLength)
+    protected AbstractReaderFileProxy(AsynchronousChannelProxy channel, long fileLength)
     {
         this.channel = channel;
         this.fileLength = fileLength >= 0 ? fileLength : channel.size();
     }
 
     @Override
-    public ChannelProxy channel()
+    public AsynchronousChannelProxy channel()
     {
         return channel;
     }

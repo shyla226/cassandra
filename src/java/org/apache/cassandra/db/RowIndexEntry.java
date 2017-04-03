@@ -31,6 +31,7 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.Histogram;
@@ -215,7 +216,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
         return new RowIndexEntry<>(dataFilePosition);
     }
 
-    public IndexInfoRetriever openWithIndex(FileHandle indexFile)
+    public IndexInfoRetriever openWithIndex(FileHandle indexFile, Rebufferer.ReaderConstraint rc)
     {
         return null;
     }
@@ -488,7 +489,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
         }
 
         @Override
-        public IndexInfoRetriever openWithIndex(FileHandle indexFile)
+        public IndexInfoRetriever openWithIndex(FileHandle indexFile, Rebufferer.ReaderConstraint rc)
         {
             indexEntrySizeHistogram.update(serializedSize(deletionTime, headerLength, columnsIndex.length) + indexedPartSize);
             indexInfoCountHistogram.update(columnsIndex.length);
@@ -646,7 +647,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
         }
 
         @Override
-        public IndexInfoRetriever openWithIndex(FileHandle indexFile)
+        public IndexInfoRetriever openWithIndex(FileHandle indexFile, Rebufferer.ReaderConstraint rc)
         {
             indexEntrySizeHistogram.update(indexedPartSize + fieldsSerializedSize);
             indexInfoCountHistogram.update(columnsIndexCount);
@@ -655,7 +656,7 @@ public class RowIndexEntry<T> implements IMeasurableMemory
                                             VIntCoding.computeUnsignedVIntSize(indexedPartSize + fieldsSerializedSize) +
                                             fieldsSerializedSize,
                                             offsetsOffset - fieldsSerializedSize,
-                                            indexFile.createReader(), idxInfoSerializer);
+                                            indexFile.createReader(rc), idxInfoSerializer);
         }
 
         @Override

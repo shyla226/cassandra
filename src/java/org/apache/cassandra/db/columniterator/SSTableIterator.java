@@ -26,6 +26,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  *  A Cell Iterator over SSTable
@@ -42,16 +43,29 @@ public class SSTableIterator extends AbstractSSTableIterator
                            DecoratedKey key,
                            RowIndexEntry indexEntry,
                            Slices slices,
+                           ColumnFilter columnFilter,
+                           FileHandle ifile,
+                           DeletionTime partitionLevelDeletion,
+                           Row staticRow)
+    {
+        super(sstable, file, indexEntry, key, slices, columnFilter, ifile, partitionLevelDeletion, staticRow);
+    }
+
+    public SSTableIterator(SSTableReader sstable,
+                           FileDataInput file,
+                           DecoratedKey key,
+                           RowIndexEntry indexEntry,
+                           Slices slices,
                            ColumnFilter columns,
                            FileHandle ifile)
     {
         super(sstable, file, key, indexEntry, slices, columns, ifile);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile)
+             ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile, rc)
              : new ForwardReader(file, shouldCloseFile);
     }
 
@@ -202,6 +216,11 @@ public class SSTableIterator extends AbstractSSTableIterator
             next = null;
             return toReturn;
         }
+
+        protected void resetState()
+        {
+
+        }
     }
 
     private class ForwardIndexedReader extends ForwardReader
@@ -210,10 +229,10 @@ public class SSTableIterator extends AbstractSSTableIterator
 
         private int lastBlockIdx; // the last index block that has data for the current query
 
-        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
-            this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ifile);
+            this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ifile, rc);
             this.lastBlockIdx = indexState.blocksCount(); // if we never call setForSlice, that's where we want to stop
         }
 
@@ -222,6 +241,12 @@ public class SSTableIterator extends AbstractSSTableIterator
         {
             super.close();
             this.indexState.close();
+        }
+
+        @Override
+        protected void resetState()
+        {
+            this.indexState.reset();
         }
 
         @Override

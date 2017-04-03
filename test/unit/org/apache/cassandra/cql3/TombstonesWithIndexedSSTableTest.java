@@ -26,6 +26,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class TombstonesWithIndexedSSTableTest extends CQLTester
@@ -81,7 +82,7 @@ public class TombstonesWithIndexedSSTableTest extends CQLTester
                 {
                     try (FileDataInput reader = sstable.openIndexReader())
                     {
-                        RowIndexEntry.IndexInfoRetriever infoRetriever = indexEntry.openWithIndex(sstable.getIndexFile());
+                        RowIndexEntry.IndexInfoRetriever infoRetriever = indexEntry.openWithIndex(sstable.getIndexFile(), Rebufferer.ReaderConstraint.NONE);
                         ClusteringPrefix firstName = infoRetriever.columnsIndex(1).firstName;
                         if (firstName.kind().isBoundary())
                             break deletionLoop;

@@ -21,10 +21,11 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import io.reactivex.schedulers.Schedulers;
+import io.reactivex.Flowable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -41,6 +42,7 @@ import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -64,9 +66,36 @@ public class BigTableReader extends SSTableReader
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
-    public FlowableUnfilteredPartition flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public Flowable<FlowableUnfilteredPartition> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
-        return FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed), Schedulers.io());
+
+        if (true)
+        return Flowable.just(FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed), Schedulers.io()));
+
+
+        return Flowable.using(() -> ref(),
+                              ref ->
+                              {
+                                  PartitionFlowable pf = new PartitionFlowable(this, key, slices, selectedColumns, reversed);
+
+                                  //Convert from PartitionFlowable to FlowableUnfilteredPartition
+                                  //First two items are header info. The rest is partition data
+                                  return pf.buffer(2)
+                                           .map(head ->
+                                                {
+                                                    if (head.size() != 2)
+                                                        return new FlowableUnfilteredPartition(new PartitionHeader(metadata(), key, DeletionTime.LIVE,
+                                                                                                                   RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS),
+                                                                                               Rows.EMPTY_STATIC_ROW,
+                                                                                               Flowable.empty());
+
+                                                    PartitionFlowable u = new PartitionFlowable(pf, 2);
+
+                                                    return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), u);
+                                                })
+                                           .take(1);
+                              },
+                              ref -> ref.close());
     }
 
     public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
@@ -138,7 +167,7 @@ public class BigTableReader extends SSTableReader
      * @param updateCacheAndStats true if updating stats and cache
      * @return The index entry corresponding to the key, or null if the key is not present
      */
-    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast)
+    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, Rebufferer.ReaderConstraint rc)
     {
         if (op == Operator.EQ)
         {
@@ -207,7 +236,7 @@ public class BigTableReader extends SSTableReader
         // of the next interval).
         int i = 0;
         String path = null;
-        try (FileDataInput in = ifile.createReader(sampledPosition))
+        try (FileDataInput in = ifile.createReader(sampledPosition, rc))
         {
             path = in.getPath();
             while (!in.isEOF())
@@ -250,7 +279,7 @@ public class BigTableReader extends SSTableReader
                         if (logger.isTraceEnabled())
                         {
                             // expensive sanity check!  see CASSANDRA-4687
-                            try (FileDataInput fdi = dfile.createReader(indexEntry.position))
+                            try (FileDataInput fdi = dfile.createReader(indexEntry.position, rc))
                             {
                                 DecoratedKey keyInDisk = decorateKey(ByteBufferUtil.readWithShortLength(fdi));
                                 if (!keyInDisk.equals(key))

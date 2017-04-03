@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -87,7 +88,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     {
         protected NettyRxScheduler initialValue()
         {
-            return new NettyRxScheduler(GlobalEventExecutor.INSTANCE, Integer.MAX_VALUE);
+            return new NettyRxScheduler(GlobalEventExecutor.INSTANCE.next(), Integer.MAX_VALUE);
         }
     };
 
@@ -335,6 +336,12 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         return coreId != null && coreId >= 0 && coreId < getNumCores();
     }
 
+    public static boolean isStarted()
+    {
+        // nothing we can do until we have the local ranges
+        return StorageService.instance.isInitialized();
+    }
+
     /**
      * Return the id of the core that is assigned to run operations on the specified keyspace
      * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.
@@ -352,7 +359,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     public static int getCoreForKey(String keyspaceName, DecoratedKey key)
     {
         // nothing we can do until we have the local ranges
-        if (!StorageService.instance.isInitialized())
+        if (!isStarted())
             return 0;
 
         // Convert OP partitions to top level partitioner for secondary indexes; always route
@@ -443,6 +450,10 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         return splits;
     }
 
+    public Executor getExecutor()
+    {
+        return eventLoop;
+    }
 
     @Override
     public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)

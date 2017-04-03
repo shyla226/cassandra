@@ -313,7 +313,7 @@ public class FlowableUtils
 
         public void request(long l)
         {
-            if (source != null)
+            if (source !=  null)
                 source.request(l);
         }
 

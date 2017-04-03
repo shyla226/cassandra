@@ -69,7 +69,7 @@ public class LimitingRebufferer implements Rebufferer, Rebufferer.BufferHolder
     }
 
     @Override
-    public ChannelProxy channel()
+    public AsynchronousChannelProxy channel()
     {
         return wrapped.channel();
     }

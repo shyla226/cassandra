@@ -25,6 +25,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.CompletionHandler;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.ReadableByteChannel;
@@ -34,8 +36,10 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Futures;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -143,7 +147,7 @@ public class RandomAccessReaderTest
         Parameters params = new Parameters(SIZE, 1 << 20); // 1MB
 
 
-        try (ChannelProxy channel = new ChannelProxy("abc", new FakeFileChannel(SIZE));
+        try (AsynchronousChannelProxy channel = new AsynchronousChannelProxy("abc", new FakeFileChannel(SIZE));
              FileHandle.Builder builder = new FileHandle.Builder(channel)
                                                      .bufferType(params.bufferType).bufferSize(params.bufferSize);
              FileHandle fh = builder.complete();
@@ -163,7 +167,7 @@ public class RandomAccessReaderTest
     /** A fake file channel that simply increments the position and doesn't
      * actually read anything. We use it to simulate very large files, > 2G.
      */
-    private static final class FakeFileChannel extends FileChannel
+    private static final class FakeFileChannel extends AsynchronousFileChannel
     {
         private final long size;
         private long position;
@@ -201,7 +205,7 @@ public class RandomAccessReaderTest
             return position;
         }
 
-        public FileChannel position(long newPosition)
+        public AsynchronousFileChannel position(long newPosition)
         {
             position = newPosition;
             return this;
@@ -212,12 +216,22 @@ public class RandomAccessReaderTest
             return size;
         }
 
-        public FileChannel truncate(long size)
+        public AsynchronousFileChannel truncate(long size)
         {
             throw new UnsupportedOperationException();
         }
 
         public void force(boolean metaData)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public <A> void lock(long position, long size, boolean shared, A attachment, CompletionHandler<FileLock, ? super A> handler)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public Future<FileLock> lock(long position, long size, boolean shared)
         {
             throw new UnsupportedOperationException();
         }
@@ -232,35 +246,49 @@ public class RandomAccessReaderTest
             throw new UnsupportedOperationException();
         }
 
-        public int read(ByteBuffer dst, long position)
+        public Future<Integer> read(ByteBuffer dst, long position)
         {
             int ret = dst.remaining();
             this.position = position + ret;
             dst.position(dst.limit());
-            return ret;
+            return Futures.immediateFuture(ret);
         }
 
-        public int write(ByteBuffer src, long position)
+        public <A> void write(ByteBuffer src, long position, A attachment, CompletionHandler<Integer, ? super A> handler)
         {
             throw new UnsupportedOperationException();
         }
 
-        public MappedByteBuffer map(MapMode mode, long position, long size)
+        public Future<Integer> write(ByteBuffer src, long position)
         {
             throw new UnsupportedOperationException();
         }
 
-        public FileLock lock(long position, long size, boolean shared)
-        {
-            throw new UnsupportedOperationException();
-        }
 
         public FileLock tryLock(long position, long size, boolean shared)
         {
             throw new UnsupportedOperationException();
         }
 
+        public <A> void read(ByteBuffer dst, long position, A attachment, CompletionHandler<Integer, ? super A> handler)
+        {
+            int ret = dst.remaining();
+            this.position = position + ret;
+            dst.position(dst.limit());
+            handler.completed(ret, (A)dst);
+        }
+
         protected void implCloseChannel()
+        {
+
+        }
+
+        public boolean isOpen()
+        {
+            return true;
+        }
+
+        public void close() throws IOException
         {
 
         }

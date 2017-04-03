@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.streaming.ProgressInfo;
@@ -59,7 +60,7 @@ public class CompressedStreamWriter extends StreamWriter
         long totalSize = totalSize();
         logger.debug("[Stream #{}] Start streaming file {} to {}, repairedAt = {}, totalSize = {}", session.planId(),
                      sstable.getFilename(), session.peer, sstable.getSSTableMetadata().repairedAt, totalSize);
-        try (ChannelProxy fc = sstable.getDataChannel().sharedCopy())
+        try (AsynchronousChannelProxy fc = sstable.getDataChannel().sharedCopy())
         {
             long progress = 0L;
             // calculate chunks to transfer. we want to send continuous chunks altogether.

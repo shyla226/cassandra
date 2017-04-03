@@ -27,6 +27,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.btree.BTree;
@@ -46,16 +47,29 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
                                    DecoratedKey key,
                                    RowIndexEntry indexEntry,
                                    Slices slices,
+                                   ColumnFilter columnFilter,
+                                   FileHandle ifile,
+                                   DeletionTime partitionLevelDeletion,
+                                   Row staticRow)
+    {
+        super(sstable, file, indexEntry, key, slices, columnFilter, ifile, partitionLevelDeletion, staticRow);
+    }
+
+    public SSTableReversedIterator(SSTableReader sstable,
+                                   FileDataInput file,
+                                   DecoratedKey key,
+                                   RowIndexEntry indexEntry,
+                                   Slices slices,
                                    ColumnFilter columns,
                                    FileHandle ifile)
     {
         super(sstable, file, key, indexEntry, slices, columns, ifile);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile)
+             ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile, rc)
              : new ReverseReader(file, shouldCloseFile);
     }
 
@@ -165,6 +179,11 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             return iterator.next();
         }
 
+        @Override
+        protected void resetState()
+        {
+        }
+
         protected boolean stopReadingDisk() throws IOException
         {
             return false;
@@ -261,10 +280,12 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         // The last index block to consider for the slice
         private int lastBlockIdx;
 
-        private ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private int priorLastBlockIdx;
+
+        private ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
-            this.indexState = new IndexState(this, metadata.comparator, indexEntry, true, ifile);
+            this.indexState = new IndexState(this, metadata.comparator, indexEntry, true, ifile, rc);
         }
 
         @Override
@@ -272,6 +293,13 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         {
             super.close();
             this.indexState.close();
+        }
+
+        @Override
+        protected void resetState()
+        {
+            lastBlockIdx = priorLastBlockIdx;
+            this.indexState.reset();
         }
 
         @Override
@@ -301,6 +329,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             {
                 assert startIdx >= indexState.blocksCount();
                 iterator = Collections.emptyIterator();
+                priorLastBlockIdx = lastBlockIdx;
                 return;
             }
 
@@ -315,6 +344,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             indexState.setToBlock(startIdx);
 
             readCurrentBlock(false, startIdx != lastBlockIdx);
+            priorLastBlockIdx = lastBlockIdx;
         }
 
         @Override

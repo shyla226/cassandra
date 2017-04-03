@@ -24,6 +24,8 @@ import java.util.function.Function;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.RequestResponse;
@@ -77,15 +79,19 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                      .handler((from, command, monitor) ->
                                   {
                                       final boolean isLocal = from.equals(local);
+                                      CompletableFuture<ReadResponse> result = new CompletableFuture<>();
 
                                       // Note that we want to allow locally delivered reads no matter what
                                       if (StorageService.instance.isBootstrapMode() && !isLocal)
-                                          throw new RuntimeException("Cannot service reads while bootstrapping!");
-
-                                      // Monitoring tests want to artificially slow down their reads, but we don't want this
-                                      // to impact the queries drivers do on system/schema tables
-                                      if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
-                                          monitor = null;
+                                      {
+                                          result.completeExceptionally(new RuntimeException("Cannot service reads while bootstrapping!"));
+                                      }
+                                      else
+                                      {
+                                          // Monitoring tests want to artificially slow down their reads, but we don't want this
+                                          // to impact the queries drivers do on system/schema tables
+                                          if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
+                                              monitor = null;
 
                                       // TODO - this code is temporary because it is materializing the partitions in memory and we don't
                                       // need to do this for remote responses, we should serialize and calculate the digest directly from

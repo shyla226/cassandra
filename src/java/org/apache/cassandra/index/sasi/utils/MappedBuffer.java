@@ -47,11 +47,6 @@ public class MappedBuffer implements Closeable
         this.pages = other.pages;
     }
 
-    public MappedBuffer(RandomAccessReader file)
-    {
-        this(file.getChannel(), 30);
-    }
-
     public MappedBuffer(ChannelProxy file)
     {
         this(file, 30);

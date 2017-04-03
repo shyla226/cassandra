@@ -115,60 +115,9 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
         return new ImmutableBTreePartition(iterator.metadata(), iterator.partitionKey(), build(iterator, initialRowCapacity, ordered));
     }
 
-    /**
-     * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
-     *
-     * @param partition the partition to gather in memory.
-     *
-     * @return a single that will create the partition on subscribing.
-     */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition)
+    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition fup)
     {
-        return create(partition, 16);
-    }
-
-    /**
-     * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
-     *
-     * @param partition the partition to gather in memory.
-     * @param ordered {@code true} if the iterator will return the rows in order, {@code false} otherwise.
-     *
-     * @return a single that will create the partition on subscribing.
-     */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, boolean ordered)
-    {
-        return create(partition, 16, ordered);
-    }
-
-    /**
-     * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
-     *
-     * @param partition the partition to gather in memory.
-     * @param initialRowCapacity sizing hint (in rows) to use for the created partition. It should ideally
-     * correspond or be a good estimation of the number or rows in {@code iterator}.
-     *
-     * @return a single that will create the partition on subscribing.
-     */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity)
-    {
-        return create(partition, initialRowCapacity, true);
-    }
-
-    /**
-     * Creates an {@code ImmutableBTreePartition} holding all the data of the provided flowable.
-     *
-     * @param partition the partition to gather in memory.
-     * @param initialRowCapacity sizing hint (in rows) to use for the created partition. It should ideally
-     * correspond or be a good estimation of the number or rows in {@code iterator}.
-     * @param ordered {@code true} if the iterator will return the rows in order, {@code false} otherwise.
-     *
-     * @return a single that will create the partition on subscribing.
-     */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
-    {
-        final PartitionHeader header = partition.header;
-        return build(partition, initialRowCapacity, ordered)
-               .map(holder -> new ImmutableBTreePartition(header.metadata, header.partitionKey, holder));
+        return fup.content.toList().map(uf -> new ImmutableBTreePartition(fup.header.metadata, fup.header.partitionKey, build(fup, uf)));
     }
 
     public TableMetadata metadata()

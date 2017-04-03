@@ -39,6 +39,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -120,7 +121,7 @@ public class KeyCacheTest
                 RowIndexEntry rie = CacheService.instance.keyCache.get(k);
                 savedMap.put(k, rie);
                 SSTableReader sstr = readerForKey(k);
-                savedInfoMap.put(k, rie.openWithIndex(sstr.getIndexFile()));
+                savedInfoMap.put(k, rie.openWithIndex(sstr.getIndexFile(), Rebufferer.ReaderConstraint.NONE));
             }
         }
 
@@ -143,7 +144,7 @@ public class KeyCacheTest
             for (int i = 0; i < expected.columnsIndexCount(); i++)
             {
                 SSTableReader actualSstr = readerForKey(entry.getKey());
-                try (RowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile()))
+                try (RowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile(), Rebufferer.ReaderConstraint.NONE))
                 {
                     RowIndexEntry.IndexInfoRetriever expectedIir = savedInfoMap.get(entry.getKey());
                     assertEquals(expectedIir.columnsIndex(i), actualIir.columnsIndex(i));

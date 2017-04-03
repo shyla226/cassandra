@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory;
 import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
+import io.reactivex.Flowable;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
@@ -90,6 +91,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
@@ -97,6 +99,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.schema.CachingParams;
@@ -1566,14 +1569,19 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * Get position updating key cache and stats.
      * @see #getPosition(PartitionPosition, SSTableReader.Operator, boolean)
      */
+    public RowIndexEntry getPosition(PartitionPosition key, Operator op, Rebufferer.ReaderConstraint rc)
+    {
+        return getPosition(key, op, true, false, rc);
+    }
+
     public RowIndexEntry getPosition(PartitionPosition key, Operator op)
     {
-        return getPosition(key, op, true, false);
+        return getPosition(key, op, true, false, Rebufferer.ReaderConstraint.NONE);
     }
 
     public RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats)
     {
-        return getPosition(key, op, updateCacheAndStats, false);
+        return getPosition(key, op, updateCacheAndStats, false, Rebufferer.ReaderConstraint.NONE);
     }
     /**
      * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
@@ -1582,10 +1590,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param updateCacheAndStats true if updating stats and cache
      * @return The index entry corresponding to the key, or null if the key is not present
      */
-    protected abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast);
+    protected abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, Rebufferer.ReaderConstraint rc);
 
     public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
-    public abstract FlowableUnfilteredPartition flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract Flowable<FlowableUnfilteredPartition> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
     public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
 
     public abstract UnfilteredRowIterator simpleIterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, boolean tombstoneOnly);
@@ -1604,7 +1612,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             return null;
 
         String path = null;
-        try (FileDataInput in = ifile.createReader(sampledPosition))
+        try (FileDataInput in = ifile.createReader(sampledPosition, Rebufferer.ReaderConstraint.NONE))
         {
             path = in.getPath();
             while (!in.isEOF())
@@ -1748,9 +1756,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     public abstract ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange);
 
-    public FileDataInput getFileDataInput(long position)
+    public FileDataInput getFileDataInput(long position, Rebufferer.ReaderConstraint rc)
     {
-        return dfile.createReader(position);
+        return dfile.createReader(position, rc);
     }
 
     /**
@@ -1784,7 +1792,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public DecoratedKey keyAt(long indexPosition) throws IOException
     {
         DecoratedKey key;
-        try (FileDataInput in = ifile.createReader(indexPosition))
+        try (FileDataInput in = ifile.createReader(indexPosition, Rebufferer.ReaderConstraint.NONE))
         {
             if (in.isEOF())
                 return null;
@@ -1996,12 +2004,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return null;
     }
 
-    public ChannelProxy getDataChannel()
+    public AsynchronousChannelProxy getDataChannel()
     {
         return dfile.channel;
     }
 
-    public ChannelProxy getIndexChannel()
+    public AsynchronousChannelProxy getIndexChannel()
     {
         return ifile.channel;
     }
@@ -2098,7 +2106,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         ifile.addTo(identities);
         bf.addTo(identities);
         indexSummary.addTo(identities);
-
     }
 
     /**

@@ -28,6 +28,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
 import org.apache.cassandra.db.Clusterable;
@@ -52,6 +55,8 @@ import org.reactivestreams.Subscription;
  */
 public class FlowablePartitions
 {
+    private final static Logger logger = LoggerFactory.getLogger(FlowablePartitions.class);
+
     public static UnfilteredRowIterator toIterator(FlowableUnfilteredPartition source)
     {
         IteratorSubscription subscr = new IteratorSubscription(source.header, source.staticRow);
@@ -188,10 +193,14 @@ public class FlowablePartitions
             return merged;
     }
 
-    private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = (x, y) -> x.header.partitionKey.compareTo(y.header.partitionKey);
+    private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = Comparator.comparing(x -> x.header.partitionKey);
 
     public static Flowable<FlowableUnfilteredPartition> mergePartitions(final List<? extends Flowable<FlowableUnfilteredPartition>> sources, final int nowInSec)
     {
+        assert !sources.isEmpty();
+        if (sources.size() == 1)
+            return sources.get(0);
+
         return MergeFlowable.get(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             private final List<FlowableUnfilteredPartition> toMerge = new ArrayList<>(sources.size());
