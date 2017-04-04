@@ -18,18 +18,19 @@
 package org.apache.cassandra.db;
 
 import java.net.InetAddress;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.RequestResponse;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -73,7 +74,7 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                      .timeout(command -> command instanceof SinglePartitionReadCommand
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
-                     .syncHandler((from, command, monitor) ->
+                     .handler((from, command, monitor) ->
                                   {
                                       final boolean isLocal = from.equals(local);
 
@@ -86,10 +87,19 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                       if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
                                           monitor = null;
 
-                                      try (UnfilteredPartitionIterator it = FlowablePartitions.toPartitions(command.executeLocally(monitor), command.metadata()))
-                                      { //TODO - fixme, this should become non-blocking and the response should be built from the flowable
-                                          return command.createResponse(it, isLocal);
-                                      }
+                                      // TODO - this code is temporary because it is materializing the partitions in memory and we don't
+                                      // need to do this for remote responses, we should serialize and calculate the digest directly from
+                                      // flowable partitions
+                                      CompletableFuture<ReadResponse> result = new CompletableFuture<>();
+                                      command.executeLocally(monitor)
+                                             //.lift(FlowableUtils.concatMapLazy(partition -> ImmutableBTreePartition.create(partition).toFlowable()))
+                                             .concatMap(partition -> ImmutableBTreePartition.create(partition).toFlowable())
+                                             .reduceWith(() -> new ReadResponse.InMemoryPartitionsIterator(command),
+                                                         (it, partition) -> { it.add(partition); return it; })
+                                             .map(it -> command.createResponse(it, isLocal))
+                                             .subscribe(result::complete, result::completeExceptionally);
+
+                                      return result;
                                   });
     }
 }

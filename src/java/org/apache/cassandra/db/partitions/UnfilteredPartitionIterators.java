@@ -113,8 +113,11 @@ public abstract class UnfilteredPartitionIterators
         return Transformation.apply(toReturn, new Close());
     }
 
-    public static UnfilteredPartitionIterator concat(final List<UnfilteredPartitionIterator> iterators)
+    public static UnfilteredPartitionIterator concat(final List<UnfilteredPartitionIterator> iterators, TableMetadata metadata)
     {
+        if (iterators.isEmpty())
+            return EmptyIterators.unfilteredPartition(metadata);
+
         if (iterators.size() == 1)
             return iterators.get(0);
 

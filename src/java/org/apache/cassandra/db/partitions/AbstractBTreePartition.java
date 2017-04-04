@@ -307,19 +307,18 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         RegularAndStaticColumns columns = header.columns;
         boolean reversed = header.isReverseOrder;
 
-        BTree.Builder<Row> builder = BTree.builder(metadata.comparator, initialRowCapacity);
-        builder.auto(!ordered);
         MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionLevelDeletion, metadata.comparator, reversed);
 
-        //TODO - we should write our own single subscriber instead of relying on last() and map()
-        return partition.content.map(unfiltered -> {
-            if (unfiltered.kind() == Unfiltered.Kind.ROW)
-                builder.add((Row)unfiltered);
-            else
-                deletionBuilder.add((RangeTombstoneMarker)unfiltered);
-            return 0;
-        }).last(0)
-          .map(unfiltered -> {
+        // Note that multiple subscribers would share the builder
+        return partition.content
+               .reduceWith(() -> BTree.builder(metadata.comparator, initialRowCapacity).auto(!ordered),
+                           (builder, unfiltered) -> {
+                               if (unfiltered.kind() == Unfiltered.Kind.ROW)
+                                   builder.add(unfiltered);
+                               else
+                                   deletionBuilder.add((RangeTombstoneMarker)unfiltered);
+                               return builder;
+        }).map(builder -> {
             if (reversed)
                 builder.reverse();
 
@@ -376,7 +375,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
     public Iterator<Row> iterator()
     {
-        return BTree.<Row>iterator(holder().tree);
+        return BTree.iterator(holder().tree);
     }
 
     public Row lastRow()

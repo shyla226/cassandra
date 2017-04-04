@@ -147,6 +147,52 @@ public abstract class ReadResponse
         }
     }
 
+    static class InMemoryPartitionsIterator implements UnfilteredPartitionIterator
+    {
+        private final List<ImmutableBTreePartition> partitions;
+        private final ReadCommand command;
+        private int idx;
+
+        InMemoryPartitionsIterator(List<ImmutableBTreePartition> partitions, ReadCommand command)
+        {
+            this(command);
+            this.partitions.addAll(partitions);
+        }
+
+        InMemoryPartitionsIterator(ReadCommand command)
+        {
+            this.partitions = new ArrayList<>();
+            this.command = command;
+            this.idx = 0;
+        }
+
+        public void add(ImmutableBTreePartition partition)
+        {
+            this.partitions.add(partition);
+        }
+
+        public TableMetadata metadata()
+        {
+            return command.metadata();
+        }
+
+        public boolean hasNext()
+        {
+            return idx < partitions.size();
+        }
+
+        public UnfilteredRowIterator next()
+        {
+            // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
+            return partitions.get(idx++).unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed());
+        }
+
+        public void close()
+        {
+
+        }
+    }
+
     /**
      * A local response that is not meant to be serialized. Currently we use an in-memory list of
      * ImmutableBTreePartition, a possible optimization would be to use the iterator directly, provided
@@ -154,45 +200,18 @@ public abstract class ReadResponse
      */
     private static class LocalResponse extends ReadResponse
     {
-        //private UnfilteredPartitionIterator iter;
         private final List<ImmutableBTreePartition> partitions;
 
         private LocalResponse(UnfilteredPartitionIterator iter, ReadCommand command)
         {
             super();
-            //this.iter = iter; // this works only when the local host is the only host queried
             this.partitions = build(iter, command);
         }
 
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
         {
-            return new AbstractUnfilteredPartitionIterator()
-            {
-                private int idx;
-
-                public TableMetadata metadata()
-                {
-                    return command.metadata();
-                }
-
-                public boolean hasNext()
-                {
-                    return idx < partitions.size();
-                }
-
-                public UnfilteredRowIterator next()
-                {
-                    // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
-                    return partitions.get(idx++).unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed());
-                }
-
-                public void close()
-                {
-
-                }
-            };
-
+            return new InMemoryPartitionsIterator(partitions, command);
         }
 
         public boolean isDigestResponse()

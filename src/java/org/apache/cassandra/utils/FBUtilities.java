@@ -877,6 +877,21 @@ public class FBUtilities
     }
 
     /**
+     * Return the sum of its arguments or Long.MAX_VALUE on overflow.
+     */
+    public static long add(long x, long y)
+    {
+        try
+        {
+            return Math.addExact(x, y);
+        }
+        catch(ArithmeticException ex)
+        {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /**
      * A class containing some debug methods to be added and removed manually when debugging problems
      * like failing unit tests.
      */

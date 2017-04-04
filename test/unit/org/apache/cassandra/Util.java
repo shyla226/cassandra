@@ -287,9 +287,8 @@ public class Util
     public static void assertEmptyUnfiltered(ReadCommand command)
     {
         List<ImmutableBTreePartition> res = getAllUnfiltered(command);
-        assertTrue("Expected no results for query " + command.toCQLString()
-                   + " but got key " + command.metadata().partitionKeyType.getString(res.get(0).partitionKey().getKey()),
-                   res.isEmpty());
+        if (!res.isEmpty())
+            throw new AssertionError("Expected no results for query " + command.toCQLString() + " but got key " + command.metadata().partitionKeyType.getString(res.get(0).partitionKey().getKey()));
     }
 
     public static void assertEmpty(ReadCommand command)

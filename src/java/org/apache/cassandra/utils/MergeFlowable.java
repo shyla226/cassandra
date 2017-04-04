@@ -125,11 +125,12 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
         protected Candidate<In>[] heap;
         private final Reducer<In, Out> reducer;
         Subscriber<? super Out> subscriber;
-        int requested;                  // check for possible threading issue
+        long requested;                 // check for possible threading issue
                                         // if was 0 on request, advance()
                                         // if > 0 at end of consume(), advance()
         AtomicInteger advancing = new AtomicInteger();
-        boolean consuming = false;
+        volatile boolean consuming = false;
+        volatile boolean cancelled = false;
 
         /** Number of non-exhausted iterators. */
         int size;
@@ -170,7 +171,7 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
 
             // subscribing may have caused a request
             --requested;
-            if (requested > 0)
+            if (requested > 0 && !cancelled)
                 advance();
         }
 
@@ -179,14 +180,16 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
         {
             boolean hadRequests = requested > 0;
             requested += count;
-            if (!hadRequests)
+            if (requested < count)  // overflow, happens for Long.MAX_VALUE as passed by some subscribers.
+                requested = count;
+            if (!hadRequests && !cancelled)
                 advance();
         }
 
         @Override
         public void cancel()
         {
-            requested = 0;
+            cancelled = true;
             for (int i = 0; i < size; ++i)
                 heap[i].cancel();
         }
@@ -300,7 +303,7 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
                 else
                     request(1);           // reducer rejected its input; get another set
     
-                if (hadRequests)
+                if (hadRequests && !cancelled)
                     advance();
                 consuming = false;
             }

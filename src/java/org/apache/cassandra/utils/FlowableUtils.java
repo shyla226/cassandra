@@ -287,7 +287,7 @@ public class FlowableUtils
 
         public void request(long l)
         {
-            requests += l;
+            requests = FBUtilities.add(requests, l);
             doRequests();
         }
 
@@ -505,5 +505,15 @@ public class FlowableUtils
     public static <I, O> Flowable<O> skippingMap(Flowable<I> source, SkippingOp<I, O> mapper)
     {
         return source.lift(mapper);
+    }
+
+    public static <T> FlowableOperator<T, Flowable<T>> concatLazy()
+    {
+        return FlowableConcatLazy.getDirect();
+    }
+
+    public static <I, O> FlowableOperator<O, I> concatMapLazy(Function<I, Flowable<O>> mapper)
+    {
+        return new FlowableConcatLazy<I, O>(mapper);
     }
 }
