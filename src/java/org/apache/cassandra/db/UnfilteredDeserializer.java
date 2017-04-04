@@ -45,7 +45,7 @@ public class UnfilteredDeserializer
     private boolean isReady;
     private boolean isDone;
 
-    private final Row.Builder builder;
+    private final BTreeRow.Builder builder;
 
     private UnfilteredDeserializer(TableMetadata metadata,
                                    DataInputPlus in,
@@ -58,7 +58,7 @@ public class UnfilteredDeserializer
         this.header = header;
         this.serializer = UnfilteredSerializer.serializers.get(helper.version);
         this.clusteringDeserializer = new ClusteringPrefix.Deserializer(metadata.comparator, in, header);
-        this.builder = BTreeRow.sortedBuilder();
+        this.builder = (BTreeRow.Builder)BTreeRow.sortedBuilder();
     }
 
     public static UnfilteredDeserializer create(TableMetadata metadata,
@@ -151,6 +151,7 @@ public class UnfilteredDeserializer
      */
     public void clearState()
     {
+        builder.reset();
         isReady = false;
         isDone = false;
     }

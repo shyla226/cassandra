@@ -179,11 +179,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             return iterator.next();
         }
 
-        @Override
-        protected void resetState()
-        {
-        }
-
         protected boolean stopReadingDisk() throws IOException
         {
             return false;
@@ -298,6 +293,7 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         @Override
         protected void resetState()
         {
+            super.resetState();
             lastBlockIdx = priorLastBlockIdx;
             this.indexState.reset();
         }

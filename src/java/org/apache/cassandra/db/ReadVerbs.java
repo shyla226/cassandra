@@ -82,38 +82,40 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
                      .handler((from, command, monitor) ->
+                              {
+                                  //logger.info("read command single={} {}",command instanceof SinglePartitionReadCommand , command);
+
+                                  final boolean isLocal = from.equals(local);
+                                  CompletableFuture<ReadResponse> result = new CompletableFuture<>();
+
+                                  // Note that we want to allow locally delivered reads no matter what
+                                  if (StorageService.instance.isBootstrapMode() && !isLocal)
                                   {
-                                      //logger.info("read command single={} {}",command instanceof SinglePartitionReadCommand , command);
-
-                                      final boolean isLocal = from.equals(local);
-                                      CompletableFuture<ReadResponse> result = new CompletableFuture<>();
-
-                                      // Note that we want to allow locally delivered reads no matter what
-                                      if (StorageService.instance.isBootstrapMode() && !isLocal)
-                                      {
-                                          logger.info("ere");
-                                          result.completeExceptionally(new RuntimeException("Cannot service reads while bootstrapping!"));
-                                      }
-                                      else
-                                      {
-                                          // Monitoring tests want to artificially slow down their reads, but we don't want this
-                                          // to impact the queries drivers do on system/schema tables
-                                          if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
-                                              monitor = null;
+                                      result.completeExceptionally(new RuntimeException("Cannot service reads while bootstrapping!"));
+                                  }
+                                  else
+                                  {
+                                      // Monitoring tests want to artificially slow down their reads, but we don't want this
+                                      // to impact the queries drivers do on system/schema tables
+                                      if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
+                                          monitor = null;
 
                                       // TODO - this code is temporary because it is materializing the partitions in memory and we don't
                                       // need to do this for remote responses, we should serialize and calculate the digest directly from
                                       // flowable partitions
-                                      CompletableFuture<ReadResponse> result = new CompletableFuture<>();
                                       command.executeLocally(monitor)
                                              //.flatMapSingle(partition -> ImmutableBTreePartition.create(partition), false, 1)
                                              .lift(FlowableUtils.concatMapLazy(partition -> ImmutableBTreePartition.create(partition).toFlowable()))
                                              .reduceWith(() -> new ReadResponse.InMemoryPartitionsIterator(command),
-                                                         (it, partition) -> { it.add(partition); return it; })
+                                                         (it, partition) ->
+                                                         {
+                                                             it.add(partition);
+                                                             return it;
+                                                         })
                                              .map(it -> command.createResponse(it, isLocal))
                                              .subscribe(result::complete, result::completeExceptionally);
-
-                                      return result;
-                                  });
+                                  }
+                                  return result;
+                              });
     }
 }

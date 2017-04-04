@@ -192,6 +192,7 @@ public class SSTableIterator extends AbstractSSTableIterator
                 }
             }
 
+
             next = computeNext();
             if (next != null)
                 return true;
@@ -216,11 +217,6 @@ public class SSTableIterator extends AbstractSSTableIterator
             next = null;
             return toReturn;
         }
-
-        protected void resetState()
-        {
-
-        }
     }
 
     private class ForwardIndexedReader extends ForwardReader
@@ -228,12 +224,14 @@ public class SSTableIterator extends AbstractSSTableIterator
         private final IndexState indexState;
 
         private int lastBlockIdx; // the last index block that has data for the current query
+        private int prevLastBlockIdx; //Tracks last known value (for resetState())
 
         private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
             this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ifile, rc);
             this.lastBlockIdx = indexState.blocksCount(); // if we never call setForSlice, that's where we want to stop
+            this.prevLastBlockIdx = lastBlockIdx;
         }
 
         @Override
@@ -246,7 +244,9 @@ public class SSTableIterator extends AbstractSSTableIterator
         @Override
         protected void resetState()
         {
+            super.resetState();
             this.indexState.reset();
+            lastBlockIdx = prevLastBlockIdx;
         }
 
         @Override
@@ -307,30 +307,37 @@ public class SSTableIterator extends AbstractSSTableIterator
         @Override
         protected Unfiltered computeNext() throws IOException
         {
-            while (true)
+            try
             {
-                // Our previous read might have made us cross an index block boundary. If so, update our informations.
-                // If we read from the beginning of the partition, this is also what will initialize the index state.
-                indexState.updateBlock();
+                while (true)
+                {
+                    // Our previous read might have made us cross an index block boundary. If so, update our informations.
+                    // If we read from the beginning of the partition, this is also what will initialize the index state.
+                    indexState.updateBlock();
 
-                // Return the next unfiltered unless we've reached the end, or we're beyond our slice
-                // end (note that unless we're on the last block for the slice, there is no point
-                // in checking the slice end).
-                if (indexState.isDone()
-                    || indexState.currentBlockIdx() > lastBlockIdx
-                    || !deserializer.hasNext()
-                    || (indexState.currentBlockIdx() == lastBlockIdx && deserializer.compareNextTo(end) >= 0))
-                    return null;
+                    // Return the next unfiltered unless we've reached the end, or we're beyond our slice
+                    // end (note that unless we're on the last block for the slice, there is no point
+                    // in checking the slice end).
+                    if (indexState.isDone()
+                        || indexState.currentBlockIdx() > lastBlockIdx
+                        || !deserializer.hasNext()
+                        || (indexState.currentBlockIdx() == lastBlockIdx && deserializer.compareNextTo(end) >= 0))
+                        return null;
 
 
-                Unfiltered next = deserializer.readNext();
-                // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
-                if (next.isEmpty())
-                    continue;
+                    Unfiltered next = deserializer.readNext();
+                    // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
+                    if (next.isEmpty())
+                        continue;
 
-                if (next.kind() == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
-                    updateOpenMarker((RangeTombstoneMarker) next);
-                return next;
+                    if (next.kind() == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
+                        updateOpenMarker((RangeTombstoneMarker) next);
+                    return next;
+                }
+            }
+            finally
+            {
+                prevLastBlockIdx = lastBlockIdx;
             }
         }
     }

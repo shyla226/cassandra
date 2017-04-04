@@ -68,11 +68,6 @@ public class BigTableReader extends SSTableReader
 
     public Flowable<FlowableUnfilteredPartition> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
-
-        if (true)
-        return Flowable.just(FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed), Schedulers.io()));
-
-
         return Flowable.using(() -> ref(),
                               ref ->
                               {

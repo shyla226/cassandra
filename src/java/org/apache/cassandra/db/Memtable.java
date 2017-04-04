@@ -451,7 +451,7 @@ public class Memtable implements Comparable<Memtable>
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        ArrayList<Flowable<PartitionPosition>> all = new ArrayList<>(partitions.size());
+        ArrayList<Flowable<Map.Entry<PartitionPosition, AtomicBTreePartition>>> all = new ArrayList<>(partitions.size());
 
         for (int i = 0; i < NettyRxScheduler.getNumCores(); i++)
         {
@@ -469,7 +469,7 @@ public class Memtable implements Comparable<Memtable>
                                                                      ? memtableSubrange.tailMap(keyRange.left, includeStart)
                                                                      : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-                                       return Flowable.fromIterable(trimmedMemtableSubrange.keySet());
+                                       return Flowable.fromIterable(trimmedMemtableSubrange.entrySet());
                                    }));
 
             // For system tables we just use the first core

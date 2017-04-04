@@ -81,7 +81,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
         try
         {
-            if (reader != null)
+            if (reader != null && !slices.isEmpty())
                 reader.setForSlice(nextSlice());
         }
         catch (IOException e)
@@ -343,6 +343,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
         // Records the currently open range tombstone (if any)
         protected DeletionTime openMarker = null;
+        protected DeletionTime lastOpenMarker = null;
 
         protected Reader(FileDataInput file, boolean shouldCloseFile)
         {
@@ -362,8 +363,13 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         /**
          * Resets the state to the last known finished item
          * This is needed to handle async retries. due to missing data in the chunk cache
+         * classes that override this must call the base class too.
          */
-        abstract void resetState();
+         protected void resetState()
+         {
+             deserializer.clearState();
+             openMarker = lastOpenMarker;
+         }
 
         protected void seekToPosition(long position) throws IOException
         {
@@ -382,6 +388,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
         protected void updateOpenMarker(RangeTombstoneMarker marker)
         {
+            lastOpenMarker = null;
             // Note that we always read index blocks in forward order so this method is always called in forward order
             openMarker = marker.isOpen(false) ? marker.openDeletionTime(false) : null;
         }
@@ -389,6 +396,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         protected DeletionTime getAndClearOpenMarker()
         {
             DeletionTime toReturn = openMarker;
+            lastOpenMarker = openMarker;
             openMarker = null;
             return toReturn;
         }

@@ -736,7 +736,7 @@ public class BTreeRow extends AbstractRow
             return clustering;
         }
 
-        protected void reset()
+        public void reset()
         {
             this.clustering = null;
             this.primaryKeyLivenessInfo = LivenessInfo.EMPTY;

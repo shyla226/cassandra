@@ -11,6 +11,9 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Flowable;
 import io.reactivex.FlowableOperator;
 import io.reactivex.functions.Function;
@@ -19,6 +22,7 @@ import org.reactivestreams.Subscription;
 
 public class FlowableUtils
 {
+    private static final Logger logger = LoggerFactory.getLogger(FlowableUtils.class);
 
     public static <T> CloseableIterator<T> closeableIterator(Flowable<T> content)
     {
@@ -313,7 +317,7 @@ public class FlowableUtils
 
         public void request(long l)
         {
-            if (source !=  null)
+            if (source != null)
                 source.request(l);
         }
 
