@@ -1,4 +1,5 @@
 DSE 5.1.1
+ * Backport follow-up commit to CASSANDRA-12929
  * Fix version check to enable streaming keep-alive (backport CASSANDRA-12929)
 
 DSE 5.1.0
