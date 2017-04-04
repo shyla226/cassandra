@@ -21,9 +21,13 @@ import java.net.InetAddress;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.dht.BoundsVersion;
@@ -39,6 +43,7 @@ import org.apache.cassandra.utils.versioning.Versioned;
 public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
 {
     private static final InetAddress local = FBUtilities.getBroadcastAddress();
+    private static final Logger logger = LoggerFactory.getLogger(ReadVerbs.class);
 
     public enum ReadVersion implements Version<ReadVersion>
     {
@@ -78,12 +83,15 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                          : DatabaseDescriptor.getRangeRpcTimeout())
                      .handler((from, command, monitor) ->
                                   {
+                                      //logger.info("read command single={} {}",command instanceof SinglePartitionReadCommand , command);
+
                                       final boolean isLocal = from.equals(local);
                                       CompletableFuture<ReadResponse> result = new CompletableFuture<>();
 
                                       // Note that we want to allow locally delivered reads no matter what
                                       if (StorageService.instance.isBootstrapMode() && !isLocal)
                                       {
+                                          logger.info("ere");
                                           result.completeExceptionally(new RuntimeException("Cannot service reads while bootstrapping!"));
                                       }
                                       else
