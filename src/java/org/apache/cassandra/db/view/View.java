@@ -201,7 +201,10 @@ public class View
     public ReadQuery getReadQuery()
     {
         if (query == null)
+        {
             query = getSelectStatement().getQuery(QueryState.forInternalCalls(), QueryOptions.forInternalCalls(Collections.emptyList()), FBUtilities.nowInSeconds());
+            logger.trace("View query: {}", rawSelect);
+        }
         return query;
     }
 
@@ -209,6 +212,7 @@ public class View
     {
         if (this.builder != null)
         {
+            logger.debug("Stopping current view builder due to schema change");
             this.builder.stop();
             this.builder = null;
         }
