@@ -7,6 +7,8 @@ dse 5.2.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Backport follow-up commit to CASSANDRA-12929
+ * Fix version check to enable streaming keep-alive (backport CASSANDRA-12929)
  * Only perform drop below RF check on decommission for non-partitioned keyspaces (APOLLO-589)
  * Fix SmallInt and TinyInt serialization (APOLLO-542)
  * Check for null/empty password before calling legacyAuthenticate from CassandraLoginModule (APOLLO-412)
