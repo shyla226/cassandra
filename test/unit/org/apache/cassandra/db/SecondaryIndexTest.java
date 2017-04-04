@@ -28,8 +28,11 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import io.reactivex.Flowable;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.IndexTarget;
@@ -119,11 +122,10 @@ public class SecondaryIndexTest
                                       .build();
 
         Index.Searcher searcher = cfs.indexManager.getBestIndexFor(rc).searcherFor(rc);
-        try (ReadExecutionController executionController = rc.executionController();
-             UnfilteredPartitionIterator pi = searcher.search(executionController).blockingGet())
+        try (ReadExecutionController executionController = rc.executionController())
         {
-            assertTrue(pi.hasNext());
-            pi.next().close();
+            Flowable<FlowableUnfilteredPartition> pi = searcher.search(executionController);
+            pi.blockingFirst().unused();    // has to have at least one partition
         }
 
         // Verify gt on idx scan
@@ -541,22 +543,19 @@ public class SecondaryIndexTest
         if (count != 0)
             assertNotNull(searcher);
 
-        try (ReadExecutionController executionController = rc.executionController();
-             PartitionIterator iter = UnfilteredPartitionIterators.filter(searcher.search(executionController).blockingGet(),
-                                                                          FBUtilities.nowInSeconds()))
+        try (ReadExecutionController executionController = rc.executionController())
         {
-            assertEquals(count, Util.size(iter));
+            assertEquals(count, Util.size(searcher.search(executionController), FBUtilities.nowInSeconds()));
         }
     }
 
     private void assertIndexCfsIsEmpty(ColumnFamilyStore indexCfs)
     {
         PartitionRangeReadCommand command = (PartitionRangeReadCommand)Util.cmd(indexCfs).build();
-        try (ReadExecutionController controller = command.executionController();
-             PartitionIterator iter = UnfilteredPartitionIterators.filter(Util.executeLocally(command, indexCfs, controller).blockingGet(),
-                                                                          FBUtilities.nowInSeconds()))
+        try (ReadExecutionController controller = command.executionController())
         {
-            assertFalse(iter.hasNext());
+            assertEquals(0, Util.size(Util.executeLocally(command, indexCfs, controller),
+                                               FBUtilities.nowInSeconds()));
         }
     }
 }

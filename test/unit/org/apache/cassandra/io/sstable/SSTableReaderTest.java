@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import io.reactivex.Flowable;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -36,7 +37,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner.LocalToken;
@@ -614,7 +615,9 @@ public class SSTableReaderTest
         assertNotNull(searcher);
         try (ReadExecutionController executionController = rc.executionController())
         {
-            assertEquals(1, Util.size(UnfilteredPartitionIterators.filter(searcher.search(executionController).blockingGet(), rc.nowInSec())));
+            Flowable<FlowableUnfilteredPartition> partitions = searcher.search(executionController);
+            assertEquals(1,
+                         Util.size(partitions, rc.nowInSec()));
         }
     }
 

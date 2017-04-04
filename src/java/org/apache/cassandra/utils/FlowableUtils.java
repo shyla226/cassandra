@@ -1,7 +1,8 @@
 package org.apache.cassandra.utils;
 
 import java.io.Closeable;
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -149,16 +150,13 @@ public class FlowableUtils
             this.prepend = prepend;
         }
 
+        // synchronization should not be contested
         @Override
-        public void request(long count)
+        public synchronized void request(long count)
         {
-            //if (closed)
-            //    FBUtilities.Debug.logStackTrace("Request after cancel", this);
-
-            assert !closed;
             try
             {
-                while (--count >= 0)
+                while (!closed && --count >= 0)
                 {
                     if (pos < prepend.length)
                         subscriber.onNext(prepend[pos++]);
@@ -179,167 +177,15 @@ public class FlowableUtils
             }
         }
 
+        // tpc TODO remove synchronization
         @Override
-        public void cancel()
+        public synchronized void cancel()
         {
             if (!closed)
             {
                 iter.close();
                 closed = true;
-                //FBUtilities.Debug.addStackTrace(this);
             }
-        }
-    }
-
-    /**
-     * Flowable.concat is somewhat eager, in the sense that it makes prefetch requests for the next elements from the
-     * iterator before the downstream subscriber has asked for them. This doesn't work well for us (we only want to
-     * read if we have to).
-     *
-     * The method below is a lazy counterpart, only asks for data when it has been requested (and one item at a time).
-     */
-    public static <T> Flowable<T> concatLazy(Iterable<Flowable<T>> sources)
-    {
-        return new LazyConcat<>(sources);
-    }
-
-    private static class LazyConcat<T> extends Flowable<T>
-    {
-        final Iterable<Flowable<T>> sources;
-
-        public LazyConcat(Iterable<Flowable<T>> sources)
-        {
-            this.sources = sources;
-        }
-
-        protected void subscribeActual(Subscriber<? super T> subscriber)
-        {
-            LazyConcatSubscription<T> subscription = new LazyConcatSubscription<>(sources.iterator(), subscriber);
-            subscriber.onSubscribe(subscription);
-        }
-    }
-
-
-    private static class LazyConcatSubscription<T> implements Subscription, Subscriber<T>
-    {
-        final Iterator<Flowable<T>> iterator;
-        final Subscriber<? super T> subscriber;
-        volatile long requests = 0;  // requests received from subscriber
-        volatile long requested = 0; // requests passed on to sources
-        volatile boolean requesting;
-        Subscription currentSubscription;
-
-        enum State
-        {
-            NO_SUBSCRIPTION(null, null, null),
-            READY(null, NO_SUBSCRIPTION, null),
-            SUBSCRIBING(null, null, READY),
-            REQUESTING(READY, NO_SUBSCRIPTION, null);
-
-            final State onNext;
-            final State onComplete;
-            final State onSubscribe;
-
-            State(State onNext, State onComplete, State onSubscribe)
-            {
-                this.onNext = onNext;
-                this.onComplete = onComplete;
-                this.onSubscribe = onSubscribe;
-            }
-        }
-        State state;
-
-        public LazyConcatSubscription(Iterator<Flowable<T>> iterator, Subscriber<? super T> subscriber)
-        {
-            this.iterator = iterator;
-            this.subscriber = subscriber;
-            state = State.NO_SUBSCRIPTION;
-        }
-
-        void switchState(State newState, String op)
-        {
-            if (newState == null)
-                subscriber.onError(new IllegalStateException(String.format("LazyConcat: invalid %s transition from %s", op, state)));
-            state = newState;
-        }
-
-        public void onSubscribe(Subscription subscription)
-        {
-            currentSubscription = subscription;
-            switchState(state.onSubscribe, "onSubscribe");
-            doRequests();
-        }
-
-        public void onNext(T t)
-        {
-            subscriber.onNext(t);
-            switchState(state.onNext, "onNext");
-            doRequests();
-        }
-
-        public void onError(Throwable throwable)
-        {
-            subscriber.onError(throwable);
-        }
-
-        public void onComplete()
-        {
-            currentSubscription = null;
-            switchState(state.onComplete, "onComplete");
-            doRequests();
-        }
-
-        public void request(long l)
-        {
-            requests = FBUtilities.add(requests, l);
-            doRequests();
-        }
-
-        // TODO: Remove synchronization:
-        // -- need to make sure we can't leave loop after onXXX/request call has rejected entering loop due to 'requesting'.
-        // -- IN_LOOP variations on State could do the trick, so that we CAS the right one.
-        private synchronized void doRequests()
-        {
-            if (requesting || requested == requests)
-                return;
-
-            requesting = true;
-
-            loop:
-            while (requested < requests)
-            {
-                switch (state)
-                {
-                case NO_SUBSCRIPTION:
-                {
-                    if (!iterator.hasNext())
-                    {
-                        subscriber.onComplete();
-                        break loop;
-                    }
-                    state = State.SUBSCRIBING;
-                    Flowable<T> next = iterator.next();
-                    next.subscribe(this);
-                    break;
-                }
-                case READY:
-                    state = State.REQUESTING;
-                    ++requested;
-                    currentSubscription.request(1);
-                    break;
-                default:
-                    // We are awaiting response. Leave loop, we will be called from onXXX
-                    break loop;
-                }
-            }
-            requesting = false;
-        }
-
-        public void cancel()
-        {
-            requests = 0;
-            if (currentSubscription != null)
-                currentSubscription.cancel();
         }
     }
 
@@ -354,14 +200,14 @@ public class FlowableUtils
         abstract public void onClose();
 
         private volatile int closed = 0;
-        AtomicIntegerFieldUpdater closedUpdater = AtomicIntegerFieldUpdater.newUpdater(OnceCloseable.class, "closed");
+        private static final AtomicIntegerFieldUpdater closedUpdater =
+            AtomicIntegerFieldUpdater.newUpdater(OnceCloseable.class, "closed");
 
         public void close()
         {
             if (closedUpdater.compareAndSet(this, 0, 1))
                 onClose();
         }
-
     }
 
     public interface FlowableOp<I, O> extends FlowableOperator<O, I>
@@ -369,6 +215,7 @@ public class FlowableUtils
         /**
          * Called on next item. Normally calls subscriber.onNext, but could instead finish the stream by calling
          * complete, throw an error using error, or decide to ignore input and request another.
+         * For some usage ideas, see SkippingOp and StoppingOp below.
          */
         void onNext(Subscriber<? super O> subscriber, Subscription source, I next);
 
@@ -511,11 +358,183 @@ public class FlowableUtils
         return source.lift(mapper);
     }
 
+    public static <I, O> FlowableOperator<O, I> skippingMap(SkippingOp<I, O> mapper)
+    {
+        return mapper;
+    }
+
+    // Wrapper allowing simple transformations to extend all the way to FlowableOperator without extra objects being
+    // created.
+    public interface StoppingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
+    {
+        default void onNext(Subscriber<? super O> subscriber, Subscription source, I next)
+        {
+            try
+            {
+                O out = apply(next);
+                if (out != null)
+                    subscriber.onNext(out);
+                else
+                    complete(subscriber, source);
+            }
+            catch (Throwable t)
+            {
+                error(subscriber, source, t);
+            }
+        }
+    }
+
+    /**
+     * Like Flowable.map, but permits mapper to return null, which is treated as indication that the stream should stop.
+     */
+    public static <I, O> Flowable<O> stoppingMap(Flowable<I> source, StoppingOp<I, O> mapper)
+    {
+        return source.lift(mapper);
+    }
+
+    public static <I, O> FlowableOperator<O, I> stoppingMap(StoppingOp<I, O> mapper)
+    {
+        return mapper;
+    }
+
+    /**
+     * Operator for grouping elements of a flowable stream. Used with {@link #group(Flowable, GroupOp)} below.
+     * <p>
+     * Stream is broken up in selections of consecutive elements where {@link #inSameGroup} returns true, passing each
+     * collection through {@link #map(List)}.
+     */
+    public interface GroupOp<I, O> extends FlowableOperator<O, I>
+    {
+        /**
+         * Should return true if l and r are to be grouped together.
+         */
+        boolean inSameGroup(I l, I r);
+
+        /**
+         * Transform the group. May return null, meaning skip.
+         */
+        O map(List<I> inputs);
+
+        /**
+         * Implementation of FlowableOperator to enable direct usage through Flowable.lift().
+         */
+        default Subscriber<I> apply(Subscriber<? super O> sub)
+        {
+            return new GroupOpSubscription<I, O>(sub, this);
+        }
+    }
+
+    private static class GroupOpSubscription<I, O> implements Subscriber<I>, Subscription
+    {
+        final Subscriber<? super O> subscriber;
+        final GroupOp<I, O> mapper;
+        Subscription source;
+        boolean completed;
+        I first;
+        List<I> entries;
+
+        public GroupOpSubscription(Subscriber<? super O> subscriber, GroupOp<I, O> mapper)
+        {
+            this.subscriber = subscriber;
+            this.mapper = mapper;
+        }
+
+        public void onSubscribe(Subscription subscription)
+        {
+            source = subscription;
+            subscriber.onSubscribe(this);
+            if (completed)
+                source.cancel();
+        }
+
+        public void onNext(I entry)
+        {
+            boolean needsRequest = true;
+
+            if (first == null || !mapper.inSameGroup(first, entry))
+            {
+                // Issue previous result
+                if (first != null)
+                    needsRequest = drain();
+
+                entries = new ArrayList<>();    // create a new collection rather than empty because mapper may hold on to it
+                first = entry;
+            }
+
+            entries.add(entry);
+            if (needsRequest)
+                source.request(1);
+        }
+
+        /**
+         * Send all ready data and return true if a request for new entry needs to be made.
+         */
+        private boolean drain()
+        {
+            O out = mapper.map(entries);
+            if (out == null)
+                return true;
+
+            subscriber.onNext(out);
+            return false;
+        }
+
+        public void onError(Throwable throwable)
+        {
+            subscriber.onError(throwable);
+        }
+
+        public void onComplete()
+        {
+            completed = true;
+            if (first != null)
+                drain();
+            subscriber.onComplete();
+        }
+
+        public void request(long l)
+        {
+            if (!completed)
+                source.request(l);
+        }
+
+        public void cancel()
+        {
+            if (source != null)
+                source.cancel();
+            completed = true;
+        }
+    }
+
+    static public <I, O> Flowable<O> group(Flowable<I> source, GroupOp<I, O> groupMapping)
+    {
+        return source.lift(groupMapping);
+    }
+
+    public static <I, O> FlowableOperator<O, I> group(GroupOp<I, O> mapper)
+    {
+        return mapper;
+    }
+
+    /**
+     * Flowable.concat is somewhat eager, in the sense that it makes prefetch requests for the next elements from the
+     * iterator before the downstream subscriber has asked for them. This doesn't work well for us (we only want to
+     * read if we have to).
+     * <p>
+     * The method below is a lazy counterpart, only asks for data when it has been requested (and one item at a time).
+     */
     public static <T> FlowableOperator<T, Flowable<T>> concatLazy()
     {
         return FlowableConcatLazy.getDirect();
     }
 
+    /**
+     * Flowable.concat is somewhat eager, in the sense that it makes prefetch requests for the next elements from the
+     * iterator before the downstream subscriber has asked for them. This doesn't work well for us (we only want to
+     * read if we have to).
+     * <p>
+     * The method below is a lazy counterpart, only asks for data when it has been requested (and one item at a time).
+     */
     public static <I, O> FlowableOperator<O, I> concatMapLazy(Function<I, Flowable<O>> mapper)
     {
         return new FlowableConcatLazy<I, O>(mapper);

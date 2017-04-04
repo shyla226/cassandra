@@ -30,7 +30,6 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
-import io.reactivex.Single;
 import org.apache.cassandra.db.Clusterable;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
@@ -40,6 +39,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.FlowableThreads;
 import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.MergeFlowable;
 import org.apache.cassandra.utils.Reducer;
@@ -124,7 +124,7 @@ public class FlowablePartitions
     {
         Flowable<Unfiltered> data = FlowableUtils.fromCloseableIterator(iter);
         if (callOn != null)
-            data = data.subscribeOn(callOn);
+            data = data.lift(FlowableThreads.requestOn(callOn));
         Row staticRow = iter.staticRow();
         return new FlowableUnfilteredPartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), iter.partitionLevelDeletion(), iter.columns(), iter.isReverseOrder(), iter.stats()),
                                                staticRow,
@@ -212,7 +212,7 @@ public class FlowablePartitions
         Flowable<FlowableUnfilteredPartition> flowable = FlowableUtils.fromCloseableIterator(iter)
                                                                       .map(i -> fromIterator(i, scheduler));
         if (scheduler != null)
-            flowable.subscribeOn(scheduler);    // tpc TODO needs to be requestOn
+            flowable = flowable.lift(FlowableThreads.requestOn(scheduler));
         return flowable;
     }
 

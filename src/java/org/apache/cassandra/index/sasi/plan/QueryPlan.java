@@ -19,18 +19,15 @@ package org.apache.cassandra.index.sasi.plan;
 
 import java.util.*;
 
-import io.reactivex.Single;
+import io.reactivex.Flowable;
+import io.reactivex.functions.Function;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.PartitionIterators;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.index.sasi.disk.Token;
 import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.FlowableUtils;
 
 public class QueryPlan
 {
@@ -65,12 +62,12 @@ public class QueryPlan
         }
     }
 
-    public Single<UnfilteredPartitionIterator> execute(ReadExecutionController executionController) throws RequestTimeoutException
+    public Flowable<FlowableUnfilteredPartition> execute(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        return Single.just(new ResultIterator(analyze(), controller, executionController));
+        return new ResultRetriever(analyze(), controller, executionController).getPartitions();
     }
 
-    private static class ResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    private static class ResultRetriever implements Function<DecoratedKey, Flowable<FlowableUnfilteredPartition>>
     {
         private final AbstractBounds<PartitionPosition> keyRange;
         private final Operation operationTree;
@@ -79,85 +76,43 @@ public class QueryPlan
 
         private Iterator<DecoratedKey> currentKeys = null;
 
-        public ResultIterator(Operation operationTree, QueryController controller, ReadExecutionController executionController)
+        public ResultRetriever(Operation operationTree, QueryController controller, ReadExecutionController executionController)
         {
             this.keyRange = controller.dataRange().keyRange();
             this.operationTree = operationTree;
             this.controller = controller;
             this.executionController = executionController;
-            if (operationTree != null)
-                operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
         }
 
-        protected UnfilteredRowIterator computeNext()
+        public Flowable<FlowableUnfilteredPartition> getPartitions()
         {
             if (operationTree == null)
-                return endOfData();
+                return Flowable.empty();
 
-            for (;;)
-            {
-                if (currentKeys == null || !currentKeys.hasNext())
-                {
-                    if (!operationTree.hasNext())
-                         return endOfData();
+            operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
 
-                    Token token = operationTree.next();
-                    currentKeys = token.iterator();
-                }
+            Flowable<DecoratedKey> keys = Flowable.fromIterable(() -> operationTree)
+                                                  .lift(FlowableUtils.concatMapLazy(Flowable::fromIterable));
 
-                while (currentKeys.hasNext())
-                {
-                    DecoratedKey key = currentKeys.next();
+            if (!keyRange.right.isMinimum())
+                keys = keys.takeWhile(key -> keyRange.right.compareTo(key) >= 0);
 
-                    if (!keyRange.right.isMinimum() && keyRange.right.compareTo(key) < 0)
-                        return endOfData();
-
-                    try (UnfilteredRowIterator partition = controller.getPartition(key, executionController).blockingGet())
-                    {
-                        Row staticRow = partition.staticRow();
-                        List<Unfiltered> clusters = new ArrayList<>();
-
-                        while (partition.hasNext())
-                        {
-                            Unfiltered row = partition.next();
-                            if (operationTree.satisfiedBy(row, staticRow, true))
-                                clusters.add(row);
-                        }
-
-                        if (!clusters.isEmpty())
-                            return new PartitionIterator(partition, clusters);
-                    }
-                }
-            }
+            return keys.lift(FlowableUtils.concatMapLazy(this))
+                       .doFinally(this::close);
         }
 
-        private static class PartitionIterator extends AbstractUnfilteredRowIterator
+        public Flowable<FlowableUnfilteredPartition> apply(DecoratedKey key)
         {
-            private final Iterator<Unfiltered> rows;
-
-            public PartitionIterator(UnfilteredRowIterator partition, Collection<Unfiltered> content)
+            Flowable<FlowableUnfilteredPartition> fp = controller.getPartition(key, executionController);
+            return fp.map(partition ->
             {
-                super(partition.metadata(),
-                      partition.partitionKey(),
-                      partition.partitionLevelDeletion(),
-                      partition.columns(),
-                      partition.staticRow(),
-                      partition.isReverseOrder(),
-                      partition.stats());
+                Row staticRow = partition.staticRow;
 
-                rows = content.iterator();
-            }
+                Flowable<Unfiltered> filteredContent = partition.content
+                    .filter(row -> operationTree.satisfiedBy(row, staticRow, true));
 
-            @Override
-            protected Unfiltered computeNext()
-            {
-                return rows.hasNext() ? rows.next() : endOfData();
-            }
-        }
-
-        public TableMetadata metadata()
-        {
-            return controller.metadata();
+                return new FlowableUnfilteredPartition(partition.header, partition.staticRow, filteredContent);
+            });
         }
 
         public void close()

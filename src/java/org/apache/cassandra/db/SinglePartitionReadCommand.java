@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
@@ -28,8 +27,6 @@ import com.google.common.collect.Sets;
 
 import io.reactivex.*;
 import io.reactivex.schedulers.Schedulers;
-
-import org.apache.commons.lang3.tuple.Pair;
 
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
@@ -58,6 +55,7 @@ import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableThreads;
 import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedBoolean;
@@ -357,10 +355,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        // TODO - why not fromCallable()? Looks a bit more direct.
-        //return Flowable.fromCallable(() -> queryMemtableAndDisk(cfs, executionController))
-        return Flowable.defer(() -> Flowable.just(queryMemtableAndDisk(cfs, executionController)))
-                       ;//.subscribeOn(NettyRxScheduler.getForKey(cfs.metadata().keyspace, partitionKey(), true));  // tpc TODO deadlocks ATM (scheduler needs to execute immediately if already same thread)
+        return FlowableThreads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
+                                              NettyRxScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
     }
 
     /**
@@ -1029,7 +1025,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return Single.defer(() -> Single.just(FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata())))  // tpc TODO do filtering on Flowable
+            return Single.fromCallable(() -> FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata()))  // tpc TODO do filtering on Flowable
                          .map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
@@ -1060,7 +1056,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                 commands.sort(Comparator.comparing(SinglePartitionReadCommand::partitionKey));
             }
 
-            return FlowableUtils.concatLazy(Iterables.transform(commands, cmd -> cmd.executeLocally(monitor)));
+            return Flowable.fromIterable(commands)
+                           .lift(FlowableUtils.concatMapLazy(command -> command.executeLocally(monitor)));
         }
 
         public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

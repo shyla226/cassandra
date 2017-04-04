@@ -54,6 +54,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.*;
 import org.apache.cassandra.index.internal.composites.CompositesSearcher;
+import org.apache.cassandra.index.internal.composites.StaticColumnsSearcher;
 import org.apache.cassandra.index.internal.keys.KeysSearcher;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -302,7 +303,10 @@ public abstract class CassandraIndex implements Index
             switch (getIndexMetadata().kind)
             {
                 case COMPOSITES:
-                    return new CompositesSearcher(command, target.get(), this);
+                    if (!indexedColumn.isStatic())
+                        return new CompositesSearcher(command, target.get(), this);
+                    else
+                        return new StaticColumnsSearcher(command, target.get(), this);
                 case KEYS:
                     return new KeysSearcher(command, target.get(), this);
                 default:

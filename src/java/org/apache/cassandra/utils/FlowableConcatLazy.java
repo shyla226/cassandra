@@ -62,6 +62,7 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
         boolean requesting;
         boolean complete;
         boolean subscribed;
+        boolean received = true;
 
         ConcatItem current;
 
@@ -73,28 +74,32 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
 
         public void request(long l)
         {
-            requests = FBUtilities.add(requested, l);
+            requests += l;
+            if (requests < l)   // overflow
+                requests = Long.MAX_VALUE;
             doRequests();
         }
 
         public void cancel()
         {
             cancelled = true;
+            source.cancel();
             if (current != null)
                 current.source.cancel();
         }
 
-        // TODO: Remove synchronization:
-        // -- need to make sure we can't leave loop after onXXX/request call has rejected entering loop due to 'requesting'.
-        private synchronized void doRequests()
+        private void doRequests()
         {
-            if (cancelled || requesting || requested == requests || source == null)
-                return;
+            synchronized (this)
+            {
+                if (requesting || cancelled || requested == requests || source == null)
+                    return;
 
-            requesting = true;
+                requesting = true;
+            }
 
             loop:
-            while (!cancelled && requested < requests)
+            while (true)
             {
                 if (current == null)
                 {
@@ -102,22 +107,38 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
                     {
                         subscriber.onComplete();
                         cancelled = true;
+                        return;
                     }
                     else
                     {
                         subscribed = false;
                         source.request(1);
-                        if (!subscribed)
-                            break loop;
+                        synchronized (this)
+                        {
+                            if (!subscribed || cancelled || requested == requests)
+                            {
+                                requesting = false;
+                                return;
+                            }
+                        }
                     }
                 }
                 else
                 {
                     ++requested;
+                    received = false;
                     current.source.request(1);
+                    synchronized (this)
+                    {
+                        if (!received || cancelled || requested == requests)
+                        {
+                            requesting = false;
+                            return;
+                        }
+                    }
                 }
+
             }
-            requesting = false;
         }
 
         public void onSubscribe(Subscription subscription)
@@ -141,9 +162,9 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
 
             assert current == null;
             current = new ConcatItem();
-            child.subscribe(current);
             subscribed = true;
-            doRequests();
+            child.subscribe(current);
+            // onSubscribe will call doRequests
         }
 
         public void onError(Throwable throwable)
@@ -155,8 +176,12 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
         public void onComplete()
         {
             complete = true;
-            subscribed = true;
-            doRequests();
+            if (!subscribed)
+            {
+                // This was in response to a request that did not get onNext. We need to pass on the onComplete.
+                subscribed = true;
+                doRequests();
+            }
         }
 
         class ConcatItem implements Subscriber<O>
@@ -166,23 +191,31 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
             public void onSubscribe(Subscription subscription)
             {
                 source = subscription;
+                doRequests();
             }
 
             public void onNext(O next)
             {
+                received = true;
                 subscriber.onNext(next);
                 doRequests();
             }
 
             public void onError(Throwable throwable)
             {
+                Concat.this.source.cancel();
                 subscriber.onError(throwable);
             }
 
             public void onComplete()
             {
                 current = null;
-                doRequests();
+                if (!received)
+                {
+                    // This was in response to a request that did not get onNext. We need to re-request from the next child.
+                    received = true;
+                    request(1);
+                }
             }
         }
     }

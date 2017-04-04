@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
 
-import io.reactivex.Single;
+import io.reactivex.Flowable;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -31,8 +31,7 @@ import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.rows.FlowablePartitions;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sasi.SASIIndex;
@@ -97,7 +96,7 @@ public class QueryController
     }
 
 
-    public Single<UnfilteredRowIterator> getPartition(DecoratedKey key, ReadExecutionController executionController)
+    public Flowable<FlowableUnfilteredPartition> getPartition(DecoratedKey key, ReadExecutionController executionController)
     {
         if (key == null)
             throw new NullPointerException();
@@ -111,7 +110,7 @@ public class QueryController
                                                                                      key,
                                                                                      command.clusteringIndexFilter(key));
 
-            return Single.just(FlowablePartitions.toIterator(partition.queryStorage(cfs, executionController).blockingSingle()));
+            return partition.queryStorage(cfs, executionController);
         }
         finally
         {

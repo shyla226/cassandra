@@ -101,7 +101,7 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     @Override
     public void onNextPartition(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition item)
     {
-        if (stop.isSignalled)
+        if (stop != null && stop.isSignalled)
         {
             item.unused();
             source.cancel();

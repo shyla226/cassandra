@@ -345,6 +345,43 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         return coreId != null && coreId >= 0 && coreId < getNumCores();
     }
 
+    @Inline
+    public static int getCoreForKey(String keyspaceName, DecoratedKey key)
+    {
+        // nothing we can do until we have the local ranges
+        if (!StorageService.instance.isInitialized())
+            return 0;
+
+        // Convert OP partitions to top level partitioner for secondary indexes; always route
+        // system table mutations through core 0
+        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
+        {
+            if (SchemaConstants.isSystemKeyspace(keyspaceName))
+                return 0;
+
+            key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
+        }
+
+        List<Token> keyspaceRanges = getRangeList(keyspaceName, true);
+        Token keyToken = key.getToken();
+
+        Token rangeStart = keyspaceRanges.get(0);
+        for (int i = 1; i < keyspaceRanges.size(); i++)
+        {
+            Token next = keyspaceRanges.get(i);
+            if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
+            {
+                //logger.info("Read moving to {} from {}", i-1, getCoreId());
+
+                return i - 1;
+            }
+
+            rangeStart = next;
+        }
+
+        throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
+    }
+
     /**
      * Return the Netty rx scheduler of the core that is assigned to run operations on the specified keyspace
      * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.

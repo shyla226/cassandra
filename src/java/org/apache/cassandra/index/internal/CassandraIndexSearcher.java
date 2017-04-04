@@ -26,18 +26,16 @@ import java.util.NavigableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Observable;
-import io.reactivex.Single;
+import io.reactivex.Flowable;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.FlowablePartitions;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 public abstract class CassandraIndexSearcher implements Index.Searcher
@@ -59,24 +57,23 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
     @SuppressWarnings("resource") // Both the OpOrder and 'indexIter' are closed on exception, or through the closing of the result
     // of this method.
-    public Single<UnfilteredPartitionIterator> search(ReadExecutionController executionController)
+    public Flowable<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table
         DecoratedKey indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
-        Single<UnfilteredRowIterator> indexIter = queryIndex(indexKey, command, executionController);
+        Flowable<FlowableUnfilteredPartition> indexIter = queryIndex(indexKey, command, executionController);
 
-        return indexIter.flatMap(i -> queryDataFromIndex(indexKey, UnfilteredRowIterators.filter(i, command.nowInSec()), command, executionController));
+        return indexIter.lift(FlowableUtils.concatMapLazy(
+            i -> queryDataFromIndex(indexKey, FlowablePartitions.filter(i, command.nowInSec()), command, executionController)));
     }
 
-    private Single<UnfilteredRowIterator> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
+    private Flowable<FlowableUnfilteredPartition> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
     {
         ClusteringIndexFilter filter = makeIndexFilter(command);
         ColumnFamilyStore indexCfs = index.getBackingTable().get();
         TableMetadata indexMetadata = indexCfs.metadata();
-        return Single.just(
-                FlowablePartitions.toIterator(
-                        SinglePartitionReadCommand.create(indexMetadata, command.nowInSec(), indexKey, ColumnFilter.all(indexMetadata), filter)
-                                                  .queryStorage(indexCfs, executionController.indexReadController()).blockingSingle()));
+        return SinglePartitionReadCommand.create(indexMetadata, command.nowInSec(), indexKey, ColumnFilter.all(indexMetadata), filter)
+                                         .queryStorage(indexCfs, executionController.indexReadController());
     }
 
     private ClusteringIndexFilter makeIndexFilter(ReadCommand command)
@@ -183,8 +180,8 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return index.buildIndexClusteringPrefix(rowKey, clustering, null).build();
     }
 
-    protected abstract Single<UnfilteredPartitionIterator> queryDataFromIndex(DecoratedKey indexKey,
-                                                                                  RowIterator indexHits,
-                                                                                  ReadCommand command,
-                                                                                  ReadExecutionController executionController);
+    protected abstract Flowable<FlowableUnfilteredPartition> queryDataFromIndex(DecoratedKey indexKey,
+                                                                                FlowablePartition indexHits,
+                                                                                ReadCommand command,
+                                                                                ReadExecutionController executionController);
 }

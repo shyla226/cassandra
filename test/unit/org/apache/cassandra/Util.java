@@ -40,7 +40,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.Flowable;
-import io.reactivex.Single;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableId;
@@ -73,6 +72,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -424,6 +424,22 @@ public class Util
         }
     }
 
+    public static Flowable<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
+    {
+        if (!partition.staticRow.isEmpty() || !partition.header.partitionLevelDeletion.isLive())
+            return Flowable.just(partition.header.partitionKey);
+        return partition.content.take(1).map(x -> partition.header.partitionKey);
+    }
+
+    public static long size(Flowable<FlowableUnfilteredPartition> partitions, int nowInSec)
+    {
+        return FlowablePartitions.filter(partitions, nowInSec)
+                                 .lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys))
+                                 .count()
+                                 .blockingGet()
+                                 .longValue();
+    }
+
     public static int size(PartitionIterator iter)
     {
         int size = 0;
@@ -632,9 +648,9 @@ public class Util
         }
     }
 
-    public static Single<UnfilteredPartitionIterator> executeLocally(PartitionRangeReadCommand command,
-                                                             ColumnFamilyStore cfs,
-                                                             ReadExecutionController controller)
+    public static Flowable<FlowableUnfilteredPartition> executeLocally(PartitionRangeReadCommand command,
+                                                                       ColumnFamilyStore cfs,
+                                                                       ReadExecutionController controller)
     {
         return new InternalPartitionRangeReadCommand(command).queryStorageInternal(cfs, controller);
     }
@@ -654,10 +670,10 @@ public class Util
                   Optional.empty());
         }
 
-        private Single<UnfilteredPartitionIterator> queryStorageInternal(ColumnFamilyStore cfs,
-                                                                         ReadExecutionController controller)
+        private Flowable<FlowableUnfilteredPartition> queryStorageInternal(ColumnFamilyStore cfs,
+                                                                           ReadExecutionController controller)
         {
-            return Single.just(FlowablePartitions.toPartitions(queryStorage(cfs, controller), cfs.metadata()));
+            return queryStorage(cfs, controller);
         }
     }
 

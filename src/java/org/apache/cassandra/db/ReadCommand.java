@@ -365,7 +365,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             {
                 Flowable<FlowableUnfilteredPartition> r = searcher == null
                                                           ? queryStorage(cfs, controller)
-                                                          : FlowablePartitions.fromPartitions(searcher.search(controller).blockingGet(), null);
+                                                          : searcher.search(controller);
 
                 if (monitor != null)
                     r = monitor.withMonitoring(r);
@@ -387,17 +387,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             controller -> controller.close()
         );
 
-        // TODO subscribeOn() deadlocks ATM (scheduler needs to execute immediately if already same thread)
-
-        // switch to this scheduler - normally verb handlers already execute on the correct scheduler but
-        // other callers may not ensure this and so we must check again here. However, we don't want to pay
-        // the price of a double schedule if we are already running on the right core and this check should
-        // avoid that. Note that this check should be postponed to when the subscriber subscribes because
-        // there is a small chance that the caller may change thread after creating the single but we know
-        // this is not currently the case.
-        //Scheduler scheduler = getScheduler();
-        //if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(scheduler))
-        //    flowable = flowable.subscribeOn(scheduler);
         return flowable;
     }
 
