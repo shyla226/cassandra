@@ -20,6 +20,8 @@ package org.apache.cassandra.utils;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.common.math.LongMath;
+
 import io.reactivex.Flowable;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
