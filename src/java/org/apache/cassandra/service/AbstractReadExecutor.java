@@ -61,12 +61,14 @@ public abstract class AbstractReadExecutor
     protected final List<InetAddress> targetReplicas;
     protected final ReadCallback handler;
     protected final DigestVersion digestVersion;
+    protected final ColumnFamilyStore cfs;
 
-    AbstractReadExecutor(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
+    AbstractReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
     {
         this.command = command;
         this.targetReplicas = targetReplicas;
         this.handler = new ReadCallback(new DigestResolver(keyspace, command, consistencyLevel, targetReplicas.size()), consistencyLevel, command, targetReplicas, queryStartNanoTime);
+        this.cfs = cfs;
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
@@ -122,7 +124,21 @@ public abstract class AbstractReadExecutor
      */
     public PartitionIterator get() throws ReadFailureException, ReadTimeoutException, DigestMismatchException
     {
-        return handler.get();
+        try
+        {
+            return handler.get();
+        }
+        catch (ReadTimeoutException e)
+        {
+            try
+            {
+                onReadTimeout();
+            }
+            finally
+            {
+                throw e;
+            }
+        }
     }
 
     private static ReadRepairDecision newReadRepairDecision(TableMetadata metadata)
@@ -166,12 +182,16 @@ public abstract class AbstractReadExecutor
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
         SpeculativeRetryParam retry = cfs.metadata().params.speculativeRetry;
 
-        // Speculative retry is disabled *OR* there are simply no extra replicas to speculate.
+        // Speculative retry is disabled *OR*
         // 11980: Disable speculative retry if using EACH_QUORUM in order to prevent miscounting DC responses
         if (retry.equals(SpeculativeRetryParam.NONE)
-            || consistencyLevel == ConsistencyLevel.EACH_QUORUM
-            || consistencyLevel.blockFor(keyspace) == allReplicas.size())
-            return new NeverSpeculatingReadExecutor(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            | consistencyLevel == ConsistencyLevel.EACH_QUORUM)
+            return new NeverSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime, false);
+
+        // There are simply no extra replicas to speculate.
+        // Handle this separately so it can log failed attempts to speculate due to lack of replicas
+        if (consistencyLevel.blockFor(keyspace) == allReplicas.size())
+            return new NeverSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime, true);
 
         if (targetReplicas.size() == allReplicas.size())
         {
@@ -204,11 +224,34 @@ public abstract class AbstractReadExecutor
             return new SpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
     }
 
+    /**
+     *  Returns true if speculation should occur and if it should then block until it is time to
+     *  send the speculative reads
+     */
+    boolean shouldSpeculateAndMaybeWait()
+    {
+        // no latency information, or we're overloaded
+        if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
+            return false;
+
+        return !handler.await(cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+    }
+
+    void onReadTimeout() {}
+
     public static class NeverSpeculatingReadExecutor extends AbstractReadExecutor
     {
-        public NeverSpeculatingReadExecutor(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
+        /**
+         * If never speculating due to lack of replicas
+         * log it is as a failure if it should have happened
+         * but couldn't due to lack of replicas
+         */
+        private final boolean logFailedSpeculation;
+
+        public NeverSpeculatingReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime, boolean logFailedSpeculation)
         {
-            super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            this.logFailedSpeculation = logFailedSpeculation;
         }
 
         public void executeAsync()
@@ -220,7 +263,10 @@ public abstract class AbstractReadExecutor
 
         public void maybeTryAdditionalReplicas()
         {
-            // no-op
+            if (shouldSpeculateAndMaybeWait() && logFailedSpeculation)
+            {
+                cfs.metric.speculativeInsufficientReplicas.inc();
+            }
         }
 
         public List<InetAddress> getContactedReplicas()
@@ -229,9 +275,8 @@ public abstract class AbstractReadExecutor
         }
     }
 
-    private static class SpeculatingReadExecutor extends AbstractReadExecutor
+    static class SpeculatingReadExecutor extends AbstractReadExecutor
     {
-        private final ColumnFamilyStore cfs;
         private volatile boolean speculated = false;
 
         public SpeculatingReadExecutor(Keyspace keyspace,
@@ -241,8 +286,7 @@ public abstract class AbstractReadExecutor
                                        List<InetAddress> targetReplicas,
                                        long queryStartNanoTime)
         {
-            super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
-            this.cfs = cfs;
+            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
         public void executeAsync()
@@ -272,12 +316,11 @@ public abstract class AbstractReadExecutor
 
         public void maybeTryAdditionalReplicas()
         {
-            // no latency information, or we're overloaded
-            if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
-                return;
-
-            if (!handler.await(cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS))
+            if (shouldSpeculateAndMaybeWait())
             {
+                //Handle speculation stats first in case the callback fires immediately
+                speculated = true;
+                cfs.metric.speculativeRetries.inc();
                 // Could be waiting on the data, or on enough digests.
                 ReadCommand retryCommand = command;
                 if (handler.resolver.isDataPresent())
@@ -287,9 +330,6 @@ public abstract class AbstractReadExecutor
                 Tracing.trace("Speculating read retry on {}", extraReplica);
                 logger.trace("Speculating read retry on {}", extraReplica);
                 MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
-                speculated = true;
-
-                cfs.metric.speculativeRetries.inc();
             }
         }
 
@@ -299,12 +339,19 @@ public abstract class AbstractReadExecutor
                  ? targetReplicas
                  : targetReplicas.subList(0, targetReplicas.size() - 1);
         }
+
+        @Override
+        void onReadTimeout()
+        {
+            //Shouldn't be possible to get here without first attempting to speculate even if the
+            //timing is bad
+            assert speculated;
+            cfs.metric.speculativeFailedRetries.inc();
+        }
     }
 
     private static class AlwaysSpeculatingReadExecutor extends AbstractReadExecutor
     {
-        private final ColumnFamilyStore cfs;
-
         public AlwaysSpeculatingReadExecutor(Keyspace keyspace,
                                              ColumnFamilyStore cfs,
                                              ReadCommand command,
@@ -312,8 +359,7 @@ public abstract class AbstractReadExecutor
                                              List<InetAddress> targetReplicas,
                                              long queryStartNanoTime)
         {
-            super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
-            this.cfs = cfs;
+            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
         public void maybeTryAdditionalReplicas()
@@ -333,6 +379,12 @@ public abstract class AbstractReadExecutor
             if (targetReplicas.size() > 2)
                 makeDigestRequests(targetReplicas.subList(2, targetReplicas.size()));
             cfs.metric.speculativeRetries.inc();
+        }
+
+        @Override
+        void onReadTimeout()
+        {
+            cfs.metric.speculativeFailedRetries.inc();
         }
     }
 }

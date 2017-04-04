@@ -55,7 +55,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     final ResponseResolver resolver;
     final List<InetAddress> endpoints;
 
-    private final SimpleCondition condition = new SimpleCondition();
+    final SimpleCondition condition = new SimpleCondition();
     private final long queryStartNanoTime;
     private final int blockfor;
     private final ReadCommand command;
