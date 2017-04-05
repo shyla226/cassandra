@@ -946,7 +946,7 @@ public abstract class CQLTester
                                               i, protocolVersion),
                                 meta.size(), rows[i].length);
 
-            assertTrue(String.format("Got fewer rows than epected. Expected %d but got %d", rows.length, i), iter.hasNext());
+            assertTrue(String.format("Got fewer rows than expected. Expected %d but got %d", rows.length, i), iter.hasNext());
             Row actual = iter.next();
 
             List<ByteBuffer> expectedRow = new ArrayList<>(meta.size());
@@ -967,13 +967,32 @@ public abstract class CQLTester
 
         if (iter.hasNext())
         {
+            List<Row> unexpectedRows = new ArrayList<>(2);
             while (iter.hasNext())
             {
-                iter.next();
+                unexpectedRows.add(iter.next());
                 i++;
             }
-            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s).",
-                                      rows.length, i, protocolVersion));
+
+            String[][] formattedRows = new String[unexpectedRows.size()][meta.size()];
+            for (int k = 0; k < unexpectedRows.size(); k++)
+            {
+                Row row = unexpectedRows.get(k);
+                for (int j = 0; j < meta.size(); j++)
+                {
+                    DataType type = meta.getType(j);
+                    com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
+                                                                               .getCodecRegistry()
+                                                                               .codecFor(type);
+
+                    formattedRows[k][j] = codec.format(codec.deserialize(row.getBytesUnsafe(meta.getName(j)), driverVersion));
+                }
+            }
+
+            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s)." +
+                                      "\nAdditional rows:\n%s",
+                                      rows.length, i, protocolVersion,
+                                      Arrays.stream(formattedRows).map(Arrays::toString).collect(Collectors.toList())));
         }
 
         if (ignoreOrder)

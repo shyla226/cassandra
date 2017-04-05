@@ -31,10 +31,7 @@ import com.google.common.base.Throwables;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.io.FSDiskFullWriteError;
-import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.utils.MergeIterator;
-import org.apache.cassandra.utils.Pair;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,10 +47,14 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.io.FSDiskFullWriteError;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -63,6 +64,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrderSimple;
@@ -141,7 +144,12 @@ public class Memtable implements Comparable<Memtable>
     private final boolean hasSplits;
 
     // The smallest timestamp for all partitions stored in this memtable
-    private long minTimestamp = Long.MAX_VALUE;
+    private AtomicLong minTimestamp = new AtomicLong(Long.MAX_VALUE);
+
+    // The smallest min local deletion time for all partitions in this memtable
+    // This is actually an integer but to avoid duplicating the code to set the minimum
+    // it is stored as a long, see updateIfMin
+    private AtomicLong minLocalDeletionTime = new AtomicLong(Integer.MAX_VALUE);
 
     // Record the comparator of the CFS at the creation of the memtable. This
     // is only used when a user update the CF comparator, to know if the
@@ -351,7 +359,8 @@ public class Memtable implements Comparable<Memtable>
         return previous.addAllWithSizeDelta(update, opGroup, indexer)
                                       .map(p ->
                                            {
-                                               minTimestamp = Math.min(minTimestamp, finalPrevious.stats().minTimestamp);
+                                               updateIfMin(minTimestamp, finalPrevious.stats().minTimestamp);
+                                               updateIfMin(minLocalDeletionTime, finalPrevious.stats().minLocalDeletionTime);
                                                liveDataSize.addAndGet(size + p[0]);
                                                columnsCollector.update(update.columns());
                                                statsCollector.update(update.stats());
@@ -359,6 +368,18 @@ public class Memtable implements Comparable<Memtable>
 
                                                return p[1];
                                            });
+    }
+
+    private void updateIfMin(AtomicLong val, long newVal)
+    {
+        long current = val.get();
+        while(newVal < current)
+        {
+            if (val.compareAndSet(current, newVal))
+                break;
+
+            current = val.get();
+        }
     }
 
     public int partitionCount()
@@ -415,7 +436,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    public Flowable<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -425,11 +446,6 @@ public class Memtable implements Comparable<Memtable>
         boolean isBound = keyRange instanceof Bounds;
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
-
-        // avoid iterating over the memtable if we purge all tombstones
-        boolean findMinLocalDeletionTime = cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones();
-        int minLocalDeletionTime[] = new int[NettyRxScheduler.NUM_NETTY_THREADS];
-        Arrays.fill(minLocalDeletionTime, Integer.MAX_VALUE);
 
         ArrayList<Flowable<PartitionPosition>> all = new ArrayList<>(partitions.size());
 
@@ -450,13 +466,6 @@ public class Memtable implements Comparable<Memtable>
                                                                      ? memtableSubrange.tailMap(keyRange.left, includeStart)
                                                                      : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-                                       if (findMinLocalDeletionTime)
-                                       {
-                                           for (AtomicBTreePartition partition : trimmedMemtableSubrange.values())
-                                               minLocalDeletionTime[coreId] = Math.min(minLocalDeletionTime[coreId], partition.stats().minLocalDeletionTime);
-                                       }
-
-
                                        return Flowable.fromIterable(trimmedMemtableSubrange.keySet());
                                    })
                             .subscribeOn(scheduler));
@@ -466,7 +475,14 @@ public class Memtable implements Comparable<Memtable>
                 break;
         }
 
-        return new MemtableUnfilteredPartitionIterator(cfs, Flowable.concat(all).blockingIterable().iterator(), minLocalDeletionTime, columnFilter, dataRange);
+        return Flowable.concat(all).map(position -> {
+            assert position instanceof DecoratedKey;
+            DecoratedKey key = (DecoratedKey)position;
+            ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
+
+            return FlowablePartitions.fromIterator(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)),
+                                                   NettyRxScheduler.getForKey(cfs.keyspace.getName(), key, true));
+        });
     }
 
     private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getAllSortedPartitions()
@@ -502,7 +518,12 @@ public class Memtable implements Comparable<Memtable>
 
     public long getMinTimestamp()
     {
-        return minTimestamp;
+        return minTimestamp.get();
+    }
+
+    public int getMinLocalDeletionTime()
+    {
+        return Math.toIntExact(minLocalDeletionTime.get());
     }
 
     /**
@@ -697,59 +718,6 @@ public class Memtable implements Comparable<Memtable>
             allocator.setDiscarding();
             allocator.setDiscarded();
             return rowOverhead;
-        }
-    }
-
-    public class MemtableUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator
-    {
-        private final ColumnFamilyStore cfs;
-        private final Iterator<PartitionPosition> iter;
-        private final int minLocalDeletionTime;
-        private final ColumnFilter columnFilter;
-        private final DataRange dataRange;
-
-        public MemtableUnfilteredPartitionIterator(ColumnFamilyStore cfs, Iterator<PartitionPosition> iter, int[] minLocalDeletionTime, ColumnFilter columnFilter, DataRange dataRange)
-        {
-            this.cfs = cfs;
-            this.iter = iter;
-            this.minLocalDeletionTime = Arrays.stream(minLocalDeletionTime).min().getAsInt();
-            this.columnFilter = columnFilter;
-            this.dataRange = dataRange;
-        }
-
-        public int getMinLocalDeletionTime()
-        {
-            return minLocalDeletionTime;
-        }
-
-        public TableMetadata metadata()
-        {
-            return cfs.metadata();
-        }
-
-        public boolean hasNext()
-        {
-            return iter.hasNext();
-        }
-
-        public UnfilteredRowIterator next()
-        {
-            PartitionPosition position = iter.next();
-            // Actual stored key should be true DecoratedKey
-            assert position instanceof DecoratedKey;
-            DecoratedKey key = (DecoratedKey)position;
-            ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-
-            UnfilteredRowIterator row = Single.defer(() -> Single.just(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position))))
-                                              .observeOn(NettyRxScheduler.getForKey(cfs.keyspace.getName(), key, true))
-                                              .blockingGet();
-
-            return row;
-        }
-
-        public void close()
-        {
-
         }
     }
 

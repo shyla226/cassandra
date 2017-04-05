@@ -152,6 +152,9 @@ public class FlowableUtils
         @Override
         public void request(long count)
         {
+            //if (closed)
+            //    FBUtilities.Debug.logStackTrace("Request after cancel", this);
+
             assert !closed;
             try
             {
@@ -183,6 +186,7 @@ public class FlowableUtils
             {
                 iter.close();
                 closed = true;
+                //FBUtilities.Debug.addStackTrace(this);
             }
         }
     }

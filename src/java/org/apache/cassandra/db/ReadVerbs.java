@@ -92,8 +92,7 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                       // flowable partitions
                                       CompletableFuture<ReadResponse> result = new CompletableFuture<>();
                                       command.executeLocally(monitor)
-                                             //.lift(FlowableUtils.concatMapLazy(partition -> ImmutableBTreePartition.create(partition).toFlowable()))
-                                             .concatMap(partition -> ImmutableBTreePartition.create(partition).toFlowable())
+                                             .flatMapSingle(partition -> ImmutableBTreePartition.create(partition), false, 1)
                                              .reduceWith(() -> new ReadResponse.InMemoryPartitionsIterator(command),
                                                          (it, partition) -> { it.add(partition); return it; })
                                              .map(it -> command.createResponse(it, isLocal))

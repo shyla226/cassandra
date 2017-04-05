@@ -569,8 +569,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     }
 
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
-    // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
-    // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
+    // can save us some bandwidth, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
+    // are to some extend an artifact of compaction lagging behind and hence counting them is somewhat unintuitive).
     protected Flowable<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flowable<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
     {
         return iterator.map(new PurgeOp(nowInSec(),

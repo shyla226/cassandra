@@ -220,9 +220,9 @@ public class PartitionRangeReadCommand extends ReadCommand
         for (Memtable memtable : view.memtables)
         {
             @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-            Memtable.MemtableUnfilteredPartitionIterator iter = memtable.makePartitionIterator(columnFilter(), dataRange());
-            oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, iter.getMinLocalDeletionTime());
-            iterators.add(FlowablePartitions.fromPartitions(iter, null));
+            Flowable<FlowableUnfilteredPartition> iter = memtable.makePartitionIterator(columnFilter(), dataRange());
+            oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, memtable.getMinLocalDeletionTime());
+            iterators.add(iter);
         }
 
         for (SSTableReader sstable : view.sstables)

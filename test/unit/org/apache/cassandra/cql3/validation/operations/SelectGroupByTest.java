@@ -923,6 +923,8 @@ public class SelectGroupByTest extends CQLTester
 
             for (int pageSize = 1; pageSize < 10; pageSize++)
             {
+                logger.info("Testing page size {}", pageSize);
+
                 // Range queries
                 assertRowsNet(executeNetWithPaging("SELECT a, b, e, count(b), max(e) FROM %s GROUP BY a", pageSize),
                               row(1, 2, 6, 4L, 24),
