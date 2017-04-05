@@ -17,17 +17,14 @@
  */
 package org.apache.cassandra.transport.messages;
 
-import java.util.UUID;
-
 import com.google.common.collect.ImmutableMap;
-import io.netty.buffer.ByteBuf;
 
+import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.UUIDGen;
 
 public class PrepareMessage extends Message.Request
 {
@@ -62,14 +59,7 @@ public class PrepareMessage extends Message.Request
     {
         try
         {
-            UUID tracingId = null;
-            if (isTracingRequested())
-            {
-                tracingId = UUIDGen.getTimeUUID();
-                state.prepareTracingSession(tracingId);
-            }
-
-            if (state.traceNextQuery())
+            if (state.shouldTraceRequest(isTracingRequested()))
             {
                 state.createTracingSession();
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
@@ -77,8 +67,7 @@ public class PrepareMessage extends Message.Request
 
             Message.Response response = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
 
-            if (tracingId != null)
-                response.setTracingId(tracingId);
+            response.setTracingId(state.getPreparedTracingSession());
 
             return response;
         }

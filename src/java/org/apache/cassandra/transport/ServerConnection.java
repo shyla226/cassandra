@@ -17,9 +17,6 @@
  */
 package org.apache.cassandra.transport;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-
 import io.netty.channel.Channel;
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -34,27 +31,11 @@ public class ServerConnection extends Connection
     private final ClientState clientState;
     private volatile State state;
 
-    private final ConcurrentMap<Integer, QueryState> queryStates = new ConcurrentHashMap<>();
-
     public ServerConnection(Channel channel, ProtocolVersion version, Connection.Tracker tracker)
     {
         super(channel, version, tracker);
         this.clientState = ClientState.forExternalCalls(channel.remoteAddress(), this);
         this.state = State.UNINITIALIZED;
-    }
-
-    private QueryState getQueryState(Message.Request request)
-    {
-        int streamId = request.getStreamId();
-        QueryState qState = queryStates.get(streamId);
-        if (qState == null)
-        {
-            // In theory we shouldn't get any race here, but it never hurts to be careful
-            QueryState newState = new QueryState(clientState, request);
-            if ((qState = queryStates.putIfAbsent(streamId, newState)) == null)
-                qState = newState;
-        }
-        return qState;
     }
 
     public QueryState validateNewMessage(Message.Request request, ProtocolVersion version)
@@ -78,7 +59,7 @@ public class ServerConnection extends Connection
             default:
                 throw new AssertionError();
         }
-        return getQueryState(request);
+        return new QueryState(clientState, request.getStreamId());
     }
 
     public void applyStateTransition(Message.Type requestType, Message.Type responseType)

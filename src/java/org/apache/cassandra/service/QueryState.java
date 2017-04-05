@@ -26,7 +26,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.Connection;
-import org.apache.cassandra.transport.Message;
 
 /**
  * Represents the state related to a given query.
@@ -40,10 +39,6 @@ public class QueryState
     public QueryState(ClientState clientState)
     {
         this(clientState, 0);
-    }
-    public QueryState(ClientState clientState, Message.Request request)
-    {
-        this(clientState, request.getStreamId());
     }
 
     public QueryState(ClientState clientState, int streamId)
@@ -74,39 +69,24 @@ public class QueryState
         return clientState.getTimestamp();
     }
 
-    public boolean traceNextQuery()
+    public boolean shouldTraceRequest(boolean tracingRequested)
     {
-        if (preparedTracingSession != null)
-        {
+        if (tracingRequested)
             return true;
-        }
 
+        // If no tracing is explicitly requested in the message, eventually trace the query according to configured trace probability.
         double traceProbability = StorageService.instance.getTraceProbability();
         return traceProbability != 0 && ThreadLocalRandom.current().nextDouble() < traceProbability;
     }
 
-    public void prepareTracingSession(UUID sessionId)
-    {
-        this.preparedTracingSession = sessionId;
-    }
-
     public void createTracingSession()
     {
-        createTracingSession(Collections.EMPTY_MAP);
+        createTracingSession(Collections.emptyMap());
     }
 
     public void createTracingSession(Map<String,ByteBuffer> customPayload)
     {
-        UUID session = this.preparedTracingSession;
-        if (session == null)
-        {
-            Tracing.instance.newSession(customPayload);
-        }
-        else
-        {
-            Tracing.instance.newSession(session, customPayload);
-            this.preparedTracingSession = null;
-        }
+        preparedTracingSession = Tracing.instance.newSession(customPayload);
     }
 
     public InetAddress getClientAddress()
@@ -116,7 +96,7 @@ public class QueryState
              : clientState.getRemoteAddress().getAddress();
     }
 
-	public int getStreamId()
+    public int getStreamId()
     {
         return streamId;
     }

@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.concurrent.ExecutorLocal;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -170,23 +169,12 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
     public UUID newSession(Map<String, ByteBuffer> customPayload)
     {
-        return newSession(
-        TimeUUIDType.instance.compose(ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes())),
-        TraceType.QUERY,
-        customPayload);
+        return newSession(UUIDGen.getTimeUUID(), TraceType.QUERY, customPayload);
     }
 
     public UUID newSession(TraceType traceType)
     {
-        return newSession(
-        TimeUUIDType.instance.compose(ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes())),
-        traceType,
-        Collections.emptyMap());
-    }
-
-    public UUID newSession(UUID sessionId, Map<String, ByteBuffer> customPayload)
-    {
-        return newSession(sessionId, TraceType.QUERY, customPayload);
+        return newSession(UUIDGen.getTimeUUID(), traceType, Collections.emptyMap());
     }
 
     /**

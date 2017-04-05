@@ -370,8 +370,7 @@ public class ContinuousPagingService
                 metadata.setPagingResult(pagingResult);
                 EncodedPage response = new EncodedPage(metadata, numRows, buf);
                 response.setWarnings(ClientWarn.instance.getWarnings());
-                if (state.getPreparedTracingSession() != null)
-                    response.setTracingId(state.getPreparedTracingSession());
+                response.setTracingId(state.getPreparedTracingSession());
 
                 return makeFrame(response, EncodedPage.codec, version, state.getStreamId());
             }

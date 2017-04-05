@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.transport.messages;
 
-import java.util.UUID;
-
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
@@ -32,7 +30,6 @@ import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.UUIDGen;
 
 /**
  * A CQL query
@@ -86,35 +83,14 @@ public class QueryMessage extends Message.Request
     {
         try
         {
-            UUID tracingId = null;
-            if (isTracingRequested())
-            {
-                tracingId = UUIDGen.getTimeUUID();
-                state.prepareTracingSession(tracingId);
-            }
-
-            if (state.traceNextQuery())
-            {
-                state.createTracingSession();
-
-                ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-                builder.put("query", query);
-                if (options.getPagingOptions() != null)
-                    builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
-                if(options.getConsistency() != null)
-                    builder.put("consistency_level", options.getConsistency().name());
-                if(options.getSerialConsistency() != null)
-                    builder.put("serial_consistency_level", options.getSerialConsistency().name());
-
-                Tracing.instance.begin("Execute CQL3 query", state.getClientAddress(), builder.build());
-            }
+            if (state.shouldTraceRequest(isTracingRequested()))
+                setUpTracing(state);
 
             Message.Response response = ClientState.getCQLQueryHandler().process(query, state, options, getCustomPayload(), queryStartNanoTime);
             if (options.skipMetadata() && response instanceof ResultMessage.Rows)
                 ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
 
-            if (tracingId != null)
-                response.setTracingId(tracingId);
+            response.setTracingId(state.getPreparedTracingSession());
 
             return response;
         }
@@ -129,6 +105,22 @@ public class QueryMessage extends Message.Request
         {
             Tracing.instance.stopSession();
         }
+    }
+
+    private void setUpTracing(QueryState state)
+    {
+        state.createTracingSession();
+
+        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
+        builder.put("query", query);
+        if (options.getPagingOptions() != null)
+            builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
+        if (options.getConsistency() != null)
+            builder.put("consistency_level", options.getConsistency().name());
+        if (options.getSerialConsistency() != null)
+            builder.put("serial_consistency_level", options.getSerialConsistency().name());
+
+        Tracing.instance.begin("Execute CQL3 query", state.getClientAddress(), builder.build());
     }
 
     @Override

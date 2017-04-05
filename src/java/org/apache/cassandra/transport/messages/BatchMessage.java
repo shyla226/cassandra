@@ -20,11 +20,10 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
-import io.netty.buffer.ByteBuf;
 
+import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
@@ -37,7 +36,6 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.UUIDGen;
 
 public class BatchMessage extends Message.Request
 {
@@ -151,26 +149,8 @@ public class BatchMessage extends Message.Request
     {
         try
         {
-            UUID tracingId = null;
-            if (isTracingRequested())
-            {
-                tracingId = UUIDGen.getTimeUUID();
-                state.prepareTracingSession(tracingId);
-            }
-
-            if (state.traceNextQuery())
-            {
-                state.createTracingSession();
-
-                ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-                if(options.getConsistency() != null)
-                    builder.put("consistency_level", options.getConsistency().name());
-                if(options.getSerialConsistency() != null)
-                    builder.put("serial_consistency_level", options.getSerialConsistency().name());
-
-                // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
-                Tracing.instance.begin("Execute batch of CQL3 queries", state.getClientAddress(), builder.build());
-            }
+            if (state.shouldTraceRequest(isTracingRequested()))
+                setUpTracing(state);
 
             QueryHandler handler = ClientState.getCQLQueryHandler();
             List<ParsedStatement.Prepared> prepared = new ArrayList<>(queryOrIdList.size());
@@ -216,8 +196,7 @@ public class BatchMessage extends Message.Request
             BatchStatement batch = new BatchStatement(-1, batchType, statements, Attributes.none());
             Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload(), queryStartNanoTime);
 
-            if (tracingId != null)
-                response.setTracingId(tracingId);
+            response.setTracingId(state.getPreparedTracingSession());
 
             return response;
         }
@@ -230,6 +209,20 @@ public class BatchMessage extends Message.Request
         {
             Tracing.instance.stopSession();
         }
+    }
+
+    private void setUpTracing(QueryState state)
+    {
+        state.createTracingSession();
+
+        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
+        if (options.getConsistency() != null)
+            builder.put("consistency_level", options.getConsistency().name());
+        if (options.getSerialConsistency() != null)
+            builder.put("serial_consistency_level", options.getSerialConsistency().name());
+
+        // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
+        Tracing.instance.begin("Execute batch of CQL3 queries", state.getClientAddress(), builder.build());
     }
 
     @Override
