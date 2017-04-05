@@ -27,6 +27,7 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ExecutionException;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -50,8 +51,8 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
     {
         try
         {
-            return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
-            //return NettyRxScheduler.openFileChannel(file);
+            //return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+            return NettyRxScheduler.openFileChannel(file);
         }
         catch (IOException e)
         {

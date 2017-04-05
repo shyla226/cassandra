@@ -122,7 +122,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         private final Executor onReadyExecutor = NettyRxScheduler.instance().getExecutor();
 
         volatile State state = State.READY;
-        AtomicReferenceFieldUpdater<PartitionSubscription, State> stateUpdater = PlatformDependent.newAtomicReferenceFieldUpdater(PartitionSubscription.class, "state");
+        AtomicReferenceFieldUpdater<PartitionSubscription, State> stateUpdater = AtomicReferenceFieldUpdater.newUpdater(PartitionSubscription.class, State.class, "state");
         Subscriber<? super Unfiltered> s;
 
         AtomicInteger count = new AtomicInteger(0);

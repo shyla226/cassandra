@@ -60,6 +60,8 @@ import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.Refs;
 
 /**
  * A read command that selects a (part of a) single partition.
@@ -530,7 +532,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         //    return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
 
         Tracing.trace("Acquiring sstable references");
-        ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
+        ColumnFamilyStore.RefViewFragment view = cfs.selectAndReference(View.select(SSTableSet.LIVE, partitionKey()));
         List<Flowable<FlowableUnfilteredPartition>> allIterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
 
         ClusteringIndexFilter filter = clusteringIndexFilter();
@@ -564,7 +566,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          * in one pass, and minimize the number of sstables for which we read a partition tombstone.
          */
         Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
-        List<Long> sstableMaxTimestamps = new ArrayList<>(view.sstables.size());
+        List<SSTableReader> sstableReaders = new ArrayList<>(view.sstables.size());
         int nonIntersectingSSTables = 0;
         int ssTablesIterated = 0;
         List<SSTableReader> skippedSSTablesWithTombstones = null;
@@ -592,7 +594,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
             allIterators.add(iter);
-            sstableMaxTimestamps.add(sstable.getMaxTimestamp());
+            sstableReaders.add(sstable);
             ssTablesIterated++;
             sstable.incrementReadCount();
         }
@@ -613,7 +615,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
                 allIterators.add(iter);
-                sstableMaxTimestamps.add(sstable.getMaxTimestamp());
+                sstableReaders.add(sstable);
                 ssTablesIterated++;
                 includedDueToTombstones++;
                 sstable.incrementReadCount();
@@ -624,7 +626,10 @@ public class SinglePartitionReadCommand extends ReadCommand
                           nonIntersectingSSTables, view.sstables.size(), includedDueToTombstones);
 
         if (allIterators.isEmpty())
+        {
+            view.release();
             return Flowable.just(FlowablePartitions.empty(cfs.metadata(), partitionKey(), filter.isReversed()));
+        }
 
         StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
         cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(partitionKey.getKey(), partitionKey.hashCode(), 1);
@@ -640,7 +645,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                              List<FlowableUnfilteredPartition> filtered;
                                              if (numMemtableIterators != l.size())
                                              {
-                                                filtered = new ArrayList<>(view.sstables.size());
+                                                filtered = new ArrayList<>(sstableReaders.size());
                                                 long mostRecentPartitionTombstone = Long.MIN_VALUE;
 
                                                 for (int i = 0; i < l.size(); i++)
@@ -649,7 +654,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                         filtered.add(l.get(i));
                                                     else
                                                     {
-                                                        long maxTs = sstableMaxTimestamps.get(i - numMemtableIterators);
+                                                        SSTableReader reader = sstableReaders.get(i - numMemtableIterators);
+                                                        long maxTs = reader.getMaxTimestamp();
 
                                                         // if we've already seen a partition tombstone with a timestamp greater
                                                         // than the most recent update to this sstable, we can skip it
@@ -670,7 +676,9 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                  filtered = l;
                                              }
 
-                                             return Flowable.just(FlowablePartitions.merge(filtered, nowInSec()));
+                                             return Flowable.using(() -> Collections.EMPTY_LIST,
+                                                                   (refs) -> Flowable.just(FlowablePartitions.merge(filtered, nowInSec())),
+                                                                   (refs) -> view.release());
                                          });
     }
 

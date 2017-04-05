@@ -18,6 +18,10 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -340,6 +344,21 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     {
         // nothing we can do until we have the local ranges
         return StorageService.instance.isInitialized();
+    }
+
+    public static AsynchronousFileChannel openFileChannel(File file) throws IOException
+    {
+        //if (!isStarted())
+            return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+
+        /*Integer coreId = getCoreId();
+
+        if (coreId == null || coreId == perCoreSchedulers.length)
+            coreId = getNextCore();
+
+        EpollEventLoop loop = (EpollEventLoop)perCoreSchedulers[coreId].eventLoop;
+
+        return new AIOEpollFileChannel(file, loop);*/
     }
 
     /**

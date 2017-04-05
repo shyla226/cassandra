@@ -9,6 +9,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.base.Throwables;
+import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
