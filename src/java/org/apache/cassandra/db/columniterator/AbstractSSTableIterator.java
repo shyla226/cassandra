@@ -22,6 +22,9 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Observable;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
@@ -39,6 +42,7 @@ import org.reactivestreams.Subscription;
 
 public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 {
+    final static Logger logger = LoggerFactory.getLogger(AbstractSSTableIterator.class);
     protected final SSTableReader sstable;
     // We could use sstable.metadata(), but that can change during execution so it's good hygiene to grab an immutable instance
     protected final TableMetadata metadata;
@@ -362,8 +366,8 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
         /**
          * Resets the state to the last known finished item
-         * This is needed to handle async retries. due to missing data in the chunk cache
-         * classes that override this must call the base class too.
+         * This is needed to handle async retries - due to missing data in the chunk cache.
+         * Classes that override this must call the base class too.
          */
          protected void resetState()
          {
@@ -522,6 +526,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
             this.currentIndexIdx = lastIndexIdx;
             this.mark = lastMark;
             if (mark != null)
+            {
                 try
                 {
                     this.reader.file.reset(mark);
@@ -530,6 +535,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                 {
                     throw new RuntimeException(e);
                 }
+            }
         }
 
         public boolean isDone()

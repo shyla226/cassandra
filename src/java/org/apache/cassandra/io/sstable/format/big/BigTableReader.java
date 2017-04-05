@@ -71,7 +71,7 @@ public class BigTableReader extends SSTableReader
         return Flowable.using(() -> ref(),
                               ref ->
                               {
-                                  PartitionFlowable pf = new PartitionFlowable(this, key, slices, selectedColumns, reversed);
+                                  PartitionFlowable pf = new PartitionFlowable(this, key, slices, selectedColumns, reversed, 2);
 
                                   //Convert from PartitionFlowable to FlowableUnfilteredPartition
                                   //First two items are header info. The rest is partition data

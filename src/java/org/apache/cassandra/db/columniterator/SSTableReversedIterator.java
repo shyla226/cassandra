@@ -275,8 +275,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         // The last index block to consider for the slice
         private int lastBlockIdx;
 
-        private int priorLastBlockIdx;
-
         private ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
@@ -294,7 +292,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         protected void resetState()
         {
             super.resetState();
-            lastBlockIdx = priorLastBlockIdx;
             this.indexState.reset();
         }
 
@@ -325,7 +322,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             {
                 assert startIdx >= indexState.blocksCount();
                 iterator = Collections.emptyIterator();
-                priorLastBlockIdx = lastBlockIdx;
                 return;
             }
 
@@ -340,7 +336,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             indexState.setToBlock(startIdx);
 
             readCurrentBlock(false, startIdx != lastBlockIdx);
-            priorLastBlockIdx = lastBlockIdx;
         }
 
         @Override

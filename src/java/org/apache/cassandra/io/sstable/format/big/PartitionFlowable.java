@@ -50,10 +50,11 @@ class PartitionFlowable extends Flowable<Unfiltered>
     final BigTableReader table;
     final boolean reverse;
     final int offset;
+    final long limit;
 
     Slices slices;
 
-    public PartitionFlowable(BigTableReader table, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
+    public PartitionFlowable(BigTableReader table, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse, long limit)
     {
         this.table = table;
         this.key = key;
@@ -62,6 +63,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         this.reverse = reverse;
         this.subscr = null;
         this.offset = 0;
+        this.limit = limit;
     }
 
 
@@ -74,6 +76,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         this.reverse = o.reverse;
         this.subscr = new PartitionSubscription(o.subscr, offset);
         this.offset = offset;
+        this.limit = Long.MAX_VALUE;
     }
 
 
@@ -183,6 +186,10 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
         public void pull()
         {
+            //Avoid doing any work beyond our limit
+            if (count.get() >= limit)
+                return;
+
             switch (count.getAndIncrement())
             {
                 case 0:
@@ -250,13 +257,12 @@ class PartitionFlowable extends Flowable<Unfiltered>
             if (howMany > 0)
                 requests.addAndGet(howMany);
 
-            //logger.info("requested={}, total={}, expected={}, current={} count={}", howMany, requests.get(), expectedState, state, count);
+            //logger.info("key={} requested={}, total={}, expected={}, current={} count={} limit={}", key, howMany, requests.get(), expectedState, state, count, limit);
 
             while (requests.get() > 0 && stateUpdater.compareAndSet(this, expectedState, State.WORKING))
             {
                 long r = requests.decrementAndGet();
                 assert r >= 0 : "" + howMany + " " + expectedState;
-
                 pull();
 
                 //pull may not have finished working if we hit an async wait
@@ -435,11 +441,19 @@ class PartitionFlowable extends Flowable<Unfiltered>
                 assert state != State.CLOSED;
 
                 AbstractSSTableIterator iter = maybeInitIterator(rc);
-                iter.resetReaderState();
-                dfile.seek(filePos);
+
+                //If this was an async response
+                //Make sure the state is reset
+                if (state.equals(State.WAITING))
+                {
+                    iter.resetReaderState();
+                    dfile.seek(filePos);
+                }
 
                 if (needsHasNextCheck)
                 {
+                    filePos = dfile.getFilePointer();
+
                     boolean hasNext = iter.hasNext();
                     if (!hasNext)
                     {
@@ -448,7 +462,6 @@ class PartitionFlowable extends Flowable<Unfiltered>
                         return;
                     }
 
-                    filePos = dfile.getFilePointer();
                     needsHasNextCheck = false;
                 }
 
