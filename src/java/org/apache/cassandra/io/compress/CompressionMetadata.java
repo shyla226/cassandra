@@ -316,7 +316,7 @@ public class CompressionMetadata
                 offsets.add(new Chunk(chunkOffset, (int) (nextChunkOffset - chunkOffset - 4))); // "4" bytes reserved for checksum
             }
         }
-        return offsets.toArray(new Chunk[offsets.size()]);
+        return offsets.toArray(new Chunk[0]);
     }
 
     public void close()

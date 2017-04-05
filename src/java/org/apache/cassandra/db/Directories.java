@@ -183,7 +183,7 @@ public class Directories
 
     public Directories(final TableMetadata metadata, Collection<DataDirectory> paths)
     {
-        this(metadata, paths.toArray(new DataDirectory[paths.size()]));
+        this(metadata, paths.toArray(new DataDirectory[0]));
     }
 
     /**
@@ -469,7 +469,7 @@ public class Directories
                 return o1.location.compareTo(o2.location);
             }
         });
-        return nonBlacklistedDirs.toArray(new DataDirectory[nonBlacklistedDirs.size()]);
+        return nonBlacklistedDirs.toArray(new DataDirectory[0]);
     }
 
     public static File getSnapshotDirectory(Descriptor desc, String snapshotName)

@@ -131,7 +131,7 @@ class AsyncPartitionReader
     {
         final StatsMetadata m = table.getSSTableMetadata();
         List<ByteBuffer> vals = reverse ? m.maxClusteringValues : m.minClusteringValues;
-        return ClusteringBound.inclusiveOpen(reverse, vals.toArray(new ByteBuffer[vals.size()]));
+        return ClusteringBound.inclusiveOpen(reverse, vals.toArray(new ByteBuffer[0]));
     }
 
     /**

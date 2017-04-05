@@ -20,6 +20,7 @@ package org.apache.cassandra.tools.nodetool.formatter;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import javax.annotation.Nonnull;
@@ -69,9 +70,7 @@ public class TableBuilder
         // expand max column widths if given row has more columns
         if (row.length > maximumColumnWidth.length)
         {
-            int[] tmp = new int[row.length];
-            System.arraycopy(maximumColumnWidth, 0, tmp, 0, maximumColumnWidth.length);
-            maximumColumnWidth = tmp;
+            maximumColumnWidth = Arrays.copyOf(maximumColumnWidth, row.length);
         }
         // calculate maximum column width
         int i = 0;

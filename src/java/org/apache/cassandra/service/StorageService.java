@@ -3593,7 +3593,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (option.isIncremental())
         {
-            failIfCannotRunIncrementalRepair(keyspace, option.getColumnFamilies().toArray(new String[option.getColumnFamilies().size()]));
+            failIfCannotRunIncrementalRepair(keyspace, option.getColumnFamilies().toArray(new String[0]));
         }
 
         // We reject any repair that targets a table on which NodeSync is enabled.
@@ -3606,7 +3606,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void checkForNodeSyncEnabledTables(String keyspace, RepairOption option)
     {
-        String[] columnFamilies = option.getColumnFamilies().toArray(new String[option.getColumnFamilies().size()]);
+        String[] columnFamilies = option.getColumnFamilies().toArray(new String[0]);
         try
         {
             Iterable<ColumnFamilyStore> validTables = getValidColumnFamilies(false, false, keyspace, columnFamilies);
@@ -5360,7 +5360,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         String[] indices = asList(idxNames).stream()
                                            .map(p -> isIndexColumnFamily(p) ? getIndexName(p) : p)
                                            .collect(toList())
-                                           .toArray(new String[idxNames.length]);
+                                           .toArray(new String[0]);
 
         ColumnFamilyStore.rebuildSecondaryIndex(ksName, cfName, indices);
     }

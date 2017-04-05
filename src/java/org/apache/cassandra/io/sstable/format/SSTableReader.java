@@ -335,7 +335,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         ICardinality base = new HyperLogLogPlus(13, 25); // see MetadataCollector.cardinality
         try
         {
-            base = base.merge(cardinalities.toArray(new ICardinality[cardinalities.size()]));
+            base = base.merge(cardinalities.toArray(new ICardinality[0]));
         }
         catch (CardinalityMergeException e)
         {

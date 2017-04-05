@@ -223,7 +223,7 @@ public abstract class Slices implements Iterable<Slice>
                                    ? normalize(slices)
                                    : slices;
 
-            return new ArrayBackedSlices(comparator, normalized.toArray(new Slice[normalized.size()]));
+            return new ArrayBackedSlices(comparator, normalized.toArray(new Slice[0]));
         }
 
         /**

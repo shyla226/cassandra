@@ -107,7 +107,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
             l.add(ByteBufferUtil.readBytesWithShortLength(bb));
             bb.get(); // skip end-of-component
         }
-        return l.toArray(new ByteBuffer[l.size()]);
+        return l.toArray(new ByteBuffer[0]);
     }
     private static final String COLON = ":";
     private static final Pattern COLON_PAT = Pattern.compile(COLON);

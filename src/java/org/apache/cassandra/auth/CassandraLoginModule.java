@@ -18,6 +18,7 @@
 package org.apache.cassandra.auth;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import javax.security.auth.Subject;
@@ -106,8 +107,7 @@ public class CassandraLoginModule implements LoginModule
             char[] tmpPassword = pc.getPassword();
             if (tmpPassword == null)
                 tmpPassword = new char[0];
-            password = new char[tmpPassword.length];
-            System.arraycopy(tmpPassword, 0, password, 0, tmpPassword.length);
+            password = Arrays.copyOf(tmpPassword, tmpPassword.length);
             pc.clearPassword();
         }
         catch (IOException | UnsupportedCallbackException e)

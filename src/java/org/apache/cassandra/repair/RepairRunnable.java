@@ -187,7 +187,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         final AtomicInteger progress = new AtomicInteger();
         final int totalProgress = 4 + options.getRanges().size(); // get valid column families, calculate neighbors, validation, prepare for repair + number of ranges to repair
 
-        String[] columnFamilies = options.getColumnFamilies().toArray(new String[options.getColumnFamilies().size()]);
+        String[] columnFamilies = options.getColumnFamilies().toArray(new String[0]);
         Iterable<ColumnFamilyStore> validColumnFamilies;
         try
         {

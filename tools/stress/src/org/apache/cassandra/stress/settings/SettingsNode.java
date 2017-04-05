@@ -53,7 +53,7 @@ public class SettingsNode implements Serializable
                         if (node.length() > 0)
                             tmpNodes.add(node);
                     }
-                    nodes = Arrays.asList(tmpNodes.toArray(new String[tmpNodes.size()]));
+                    nodes = Arrays.asList(tmpNodes.toArray(new String[0]));
                 }
             }
             catch(IOException ioe)

@@ -50,7 +50,7 @@ public class ListSnapshots extends NodeToolCmd
             TableBuilder table = new TableBuilder();
             // display column names only once
             final List<String> indexNames = snapshotDetails.entrySet().iterator().next().getValue().getTabularType().getIndexNames();
-            table.add(indexNames.toArray(new String[indexNames.size()]));
+            table.add(indexNames.toArray(new String[0]));
 
             for (final Map.Entry<String, TabularData> snapshotDetail : snapshotDetails.entrySet())
             {
@@ -58,7 +58,7 @@ public class ListSnapshots extends NodeToolCmd
                 for (Object eachValue : values)
                 {
                     final List<?> value = (List<?>) eachValue;
-                    table.add(value.toArray(new String[value.size()]));
+                    table.add(value.toArray(new String[0]));
                 }
             }
             table.printTo(System.out);

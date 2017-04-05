@@ -38,7 +38,7 @@ public class FailureDetectorInfo extends NodeToolCmd
         for (Object o : data.keySet())
         {
             @SuppressWarnings({ "rawtypes", "unchecked" })
-            CompositeData datum = data.get(((List) o).toArray(new Object[((List) o).size()]));
+            CompositeData datum = data.get(((List) o).toArray());
             System.out.printf("%10s,%16.8f%n",datum.get("Endpoint"), datum.get("PHI"));
         }
     }
