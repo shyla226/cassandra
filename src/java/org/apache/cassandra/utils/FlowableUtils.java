@@ -6,10 +6,8 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.base.Throwables;
-import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
@@ -18,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import io.reactivex.Flowable;
 import io.reactivex.FlowableOperator;
 import io.reactivex.functions.Function;
+import org.agrona.UnsafeAccess;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
@@ -204,13 +203,13 @@ public class FlowableUtils
          */
         abstract public void onClose();
 
+        static final long CLOSED_OFFSET = UnsafeAccess.UNSAFE.objectFieldOffset(FBUtilities.getProtectedField(OnceCloseable.class, "closed"));
+
         private volatile int closed = 0;
-        private static final AtomicIntegerFieldUpdater closedUpdater =
-            AtomicIntegerFieldUpdater.newUpdater(OnceCloseable.class, "closed");
 
         public void close()
         {
-            if (closedUpdater.compareAndSet(this, 0, 1))
+            if (UnsafeAccess.UNSAFE.compareAndSwapInt(this, CLOSED_OFFSET, 0, 1));
                 onClose();
         }
     }

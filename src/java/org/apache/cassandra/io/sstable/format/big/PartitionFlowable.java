@@ -15,6 +15,7 @@ import io.netty.util.internal.PlatformDependent;
 import io.reactivex.Flowable;
 import io.reactivex.internal.subscriptions.SubscriptionArbiter;
 import io.reactivex.internal.subscriptions.SubscriptionHelper;
+import org.agrona.UnsafeAccess;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.AbstractSSTableIterator;
@@ -29,6 +30,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -43,6 +46,7 @@ import org.reactivestreams.Subscription;
 class PartitionFlowable extends Flowable<Unfiltered>
 {
     private static final Logger logger = LoggerFactory.getLogger(PartitionFlowable.class);
+    static final long STATE_OFFSET = UnsafeAccess.UNSAFE.objectFieldOffset(FBUtilities.getProtectedField(PartitionSubscription.class, "state"));
 
     PartitionSubscription subscr;
     final DecoratedKey key;
@@ -121,8 +125,8 @@ class PartitionFlowable extends Flowable<Unfiltered>
         //Force all disk callbacks through the same thread
         private final Executor onReadyExecutor = NettyRxScheduler.instance().getExecutor();
 
+
         volatile State state = State.READY;
-        AtomicReferenceFieldUpdater<PartitionSubscription, State> stateUpdater = AtomicReferenceFieldUpdater.newUpdater(PartitionSubscription.class, State.class, "state");
         Subscriber<? super Unfiltered> s;
 
         AtomicInteger count = new AtomicInteger(0);
@@ -165,7 +169,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
                     close();
                     break;
                 case WAITING:
-                    stateUpdater.compareAndSet(this, State.WAITING, State.CLOSING);
+                    UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.WAITING, State.CLOSING);
                     break;
                 case CLOSING:
                 case CLOSED:
@@ -178,7 +182,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         private void close()
         {
             assert state != State.CLOSED : "Already closed";
-            stateUpdater.set(this, State.CLOSED);
+            state = State.CLOSED;
             tableRef.close();
             FileUtils.closeQuietly(dfile);
             FileUtils.closeQuietly(ssTableIterator);
@@ -213,7 +217,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
                 switch (state)
                 {
                     case WORKING:
-                        stateUpdater.compareAndSet(this, State.WORKING, State.DONE_WORKING);
+                        UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.WORKING, State.DONE_WORKING);
                         break;
                     case WAITING:
                         break;
@@ -236,7 +240,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
             {
                 if (state != State.WAITING)
                 {
-                    boolean f = stateUpdater.compareAndSet(this, State.WORKING, State.WAITING);
+                    boolean f = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.WORKING, State.WAITING);
                     assert f : state;
                 }
 
@@ -259,7 +263,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
             //logger.info("key={} requested={}, total={}, expected={}, current={} count={} limit={}", key, howMany, requests.get(), expectedState, state, count, limit);
 
-            while (requests.get() > 0 && stateUpdater.compareAndSet(this, expectedState, State.WORKING))
+            while (requests.get() > 0 && UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, expectedState, State.WORKING))
             {
                 long r = requests.decrementAndGet();
                 assert r >= 0 : "" + howMany + " " + expectedState;
@@ -269,16 +273,14 @@ class PartitionFlowable extends Flowable<Unfiltered>
                 //so we only put the state back to ready if it's DONE_WORKING.
                 //It could be in WAITING state which we will just stop and let
                 //the callback handle it.
-                stateUpdater.compareAndSet(this, State.DONE_WORKING, expectedState);
+                UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.DONE_WORKING, expectedState);
             }
 
             // When finishing a callback request
             // We must ensure we put it back into the ready state
             // So RX requests can start working again
             if (expectedState != State.READY)
-            {
-                stateUpdater.compareAndSet(this, expectedState, State.READY);
-            }
+                UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, expectedState, State.READY);
         }
 
         private void issueHeader(ReaderConstraint rc)
