@@ -1,4 +1,5 @@
 4.0
+ * Improve error messages for +/- operations on maps and tuples (CASSANDRA-13197)
  * Remove deprecated repair JMX APIs (CASSANDRA-11530)
  * Fix version check to enable streaming keep-alive (CASSANDRA-12929)
  * Make it possible to monitor an ideal consistency level separate from actual consistency level (CASSANDRA-13289)
@@ -52,7 +53,7 @@
 3.11.0
  * Fix testLimitSSTables flake caused by concurrent flush (CASSANDRA-12820)
  * cdc column addition strikes again (CASSANDRA-13382)
- * Fix static column indexes (CASSANDRA-13277) 
+ * Fix static column indexes (CASSANDRA-13277)
  * DataOutputBuffer.asNewBuffer broken (CASSANDRA-13298)
  * unittest CipherFactoryTest failed on MacOS (CASSANDRA-13370)
  * Forbid SELECT restrictions and CREATE INDEX over non-frozen UDT columns (CASSANDRA-13247)
@@ -68,7 +69,12 @@
  * More fixes to the TokenAllocator (CASSANDRA-12990)
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
  * Address message coalescing regression (CASSANDRA-12676)
+ * Delete illegal character from StandardTokenizerImpl.jflex (CASSANDRA-13417)
 Merged from 3.0:
+ * Fix view builder bug that can filter out data on restart (CASSANDRA-13405)
+ * Fix 2i page size calculation when there are no regular columns (CASSANDRA-13400)
+ * Fix the conversion of 2.X expired rows without regular column data (CASSANDRA-13395)
+ * Fix hint delivery when using ext+internal IPs with prefer_local enabled (CASSANDRA-13020)
  * Legacy deserializer can create empty range tombstones (CASSANDRA-13341)
  * Legacy caching options can prevent 3.0 upgrade (CASSANDRA-13384)
  * Use the Kernel32 library to retrieve the PID on Windows and fix startup checks (CASSANDRA-13333)
@@ -101,7 +107,9 @@ Merged from 3.0:
    live rows in sstabledump (CASSANDRA-13177)
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
+ * Nodetool upgradesstables/scrub/compact ignores system tables (CASSANDRA-13410)
 Merged from 2.2:
+ * Fix JVM metric names (CASSANDRA-13103)
  * Honor truststore-password parameter in cassandra-stress (CASSANDRA-12773)
  * Discard in-flight shadow round responses (CASSANDRA-12653)
  * Don't anti-compact repaired data to avoid inconsistencies (CASSANDRA-13153)

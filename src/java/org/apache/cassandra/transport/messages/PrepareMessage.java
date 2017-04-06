@@ -17,21 +17,15 @@
  */
 package org.apache.cassandra.transport.messages;
 
-import java.util.UUID;
-
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.CBUtil;
-import org.apache.cassandra.transport.Message;
-import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.UUIDGen;
 
 public class PrepareMessage extends Message.Request
 {
@@ -66,36 +60,22 @@ public class PrepareMessage extends Message.Request
     {
         try
         {
-            UUID tracingId = null;
-            if (isTracingRequested())
-            {
-                tracingId = UUIDGen.getTimeUUID();
-                state.prepareTracingSession(tracingId);
-            }
-
-            if (state.traceNextQuery())
+            if (state.shouldTraceRequest(isTracingRequested()))
             {
                 state.createTracingSession();
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
             }
 
-            Single<ResultMessage.Prepared> observable = ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload());
-
-            if (tracingId == null)
-                return observable;
-
-            final UUID finalTracingId = tracingId;
-            return observable.map(prepared ->
+            return ClientState.getCQLQueryHandler().prepare(query, state, getCustomPayload())
+                              .map(response ->
                                   {
-                                      prepared.setTracingId(finalTracingId);
-                                      return prepared;
+                                      response.setTracingId(state.getPreparedTracingSession());
+                                      return response;
                                   })
-                             .doFinally(() -> Tracing.instance.stopSession());
+                             .doFinally(Tracing.instance::stopSession);
         }
         catch (Exception e)
         {
-            Tracing.instance.stopSession();
-
             JVMStabilityInspector.inspectThrowable(e);
             return Single.just(ErrorMessage.fromException(e));
         }

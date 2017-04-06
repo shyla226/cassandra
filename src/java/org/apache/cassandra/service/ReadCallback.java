@@ -31,13 +31,11 @@ import org.slf4j.LoggerFactory;
 
 import io.reactivex.Single;
 import io.reactivex.subjects.BehaviorSubject;
+
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.EmptyIterators;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.ReadFailureException;
@@ -101,7 +99,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.observable = makeObservable();
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
-        //assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
+        assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
@@ -109,8 +107,10 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
     private Single<PartitionIterator> makeObservable()
     {
+        long time = TimeUnit.MILLISECONDS.toNanos(command.getTimeout()) - (System.nanoTime() - queryStartNanoTime);
+
         return publishSubject
-               //.timeout(command.getTimeout(), TimeUnit.MILLISECONDS)
+               .timeout(time, TimeUnit.NANOSECONDS)
                .first(EmptyIterators.partition())
                .onErrorResumeNext(exc ->
                                   {

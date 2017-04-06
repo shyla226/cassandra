@@ -17,13 +17,11 @@
  */
 package org.apache.cassandra.transport.messages;
 
-import java.util.UUID;
-
 import com.google.common.collect.ImmutableMap;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
 import io.reactivex.Single;
+
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryHandler;
@@ -33,13 +31,9 @@ import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.CBUtil;
-import org.apache.cassandra.transport.Message;
-import org.apache.cassandra.transport.ProtocolException;
-import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.UUIDGen;
 
 public class ExecuteMessage extends Message.Request
 {
@@ -104,68 +98,55 @@ public class ExecuteMessage extends Message.Request
             options.prepare(prepared.boundNames);
             CQLStatement statement = prepared.statement;
 
-            UUID tracingId = null;
-            if (isTracingRequested())
-            {
-                tracingId = UUIDGen.getTimeUUID();
-                state.prepareTracingSession(tracingId);
-            }
-
-            if (state.traceNextQuery())
-            {
-                state.createTracingSession(getCustomPayload());
-
-                ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-                if (options.getPagingOptions() != null)
-                    builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
-                if(options.getConsistency() != null)
-                    builder.put("consistency_level", options.getConsistency().name());
-                if(options.getSerialConsistency() != null)
-                    builder.put("serial_consistency_level", options.getSerialConsistency().name());
-                builder.put("query", prepared.rawCQLStatement);
-
-                for(int i=0;i<prepared.boundNames.size();i++)
-                {
-                    ColumnSpecification cs = prepared.boundNames.get(i);
-                    String boundName = cs.name.toString();
-                    String boundValue = cs.type.asCQL3Type().toCQLLiteral(options.getValues().get(i), options.getProtocolVersion());
-                    if ( boundValue.length() > 1000 )
-                    {
-                        boundValue = boundValue.substring(0, 1000) + "...'";
-                    }
-
-                    //Here we prefix boundName with the index to avoid possible collission in builder keys due to
-                    //having multiple boundValues for the same variable
-                    builder.put("bound_var_" + Integer.toString(i) + "_" + boundName, boundValue);
-                }
-
-                Tracing.instance.begin("Execute CQL3 prepared query", state.getClientAddress(), builder.build());
-            }
+            if (state.shouldTraceRequest(isTracingRequested()))
+                setUpTracing(state, prepared);
 
             // Some custom QueryHandlers are interested by the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
-            Single<? extends ResultMessage> obs = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
-            final UUID finalTracingId = tracingId;
-            return obs.map(response ->
-                           {
-                               if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                                   ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
+            return handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime)
+                          .map(response -> {
+                              if (options.skipMetadata() && response instanceof ResultMessage.Rows)
+                                  ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
 
-                               if (finalTracingId != null)
-                                   response.setTracingId(finalTracingId);
-
-                               return response;
-                           })
-                      .doFinally(() -> Tracing.instance.stopSession());
+                              response.setTracingId(state.getPreparedTracingSession());
+                              return response;
+                          }).doFinally(Tracing.instance::stopSession);
         }
         catch (Exception e)
         {
-            Tracing.instance.stopSession();
-
             JVMStabilityInspector.inspectThrowable(e);
             return Single.just(ErrorMessage.fromException(e));
         }
+    }
+
+    private void setUpTracing(QueryState state, ParsedStatement.Prepared prepared)
+    {
+        state.createTracingSession(getCustomPayload());
+
+        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
+        if (options.getPagingOptions() != null)
+            builder.put("page_size", Integer.toString(options.getPagingOptions().pageSize().rawSize()));
+        if (options.getConsistency() != null)
+            builder.put("consistency_level", options.getConsistency().name());
+        if (options.getSerialConsistency() != null)
+            builder.put("serial_consistency_level", options.getSerialConsistency().name());
+        builder.put("query", prepared.rawCQLStatement);
+
+        for (int i = 0; i < prepared.boundNames.size(); i++)
+        {
+            ColumnSpecification cs = prepared.boundNames.get(i);
+            String boundName = cs.name.toString();
+            String boundValue = cs.type.asCQL3Type().toCQLLiteral(options.getValues().get(i), options.getProtocolVersion());
+            if (boundValue.length() > 1000)
+                boundValue = boundValue.substring(0, 1000) + "...'";
+
+            //Here we prefix boundName with the index to avoid possible collission in builder keys due to
+            //having multiple boundValues for the same variable
+            builder.put("bound_var_" + Integer.toString(i) + "_" + boundName, boundValue);
+        }
+
+        Tracing.instance.begin("Execute CQL3 prepared query", state.getClientAddress(), builder.build());
     }
 
     @Override

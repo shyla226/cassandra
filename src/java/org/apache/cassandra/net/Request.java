@@ -103,7 +103,7 @@ public class Request<P, Q> extends Message<P>
     }
 
     @VisibleForTesting
-    static <P, Q> Request<P, Q> fakeTestRequest(InetAddress to, int id, Verb<P, Q> verb, P payload)
+    public static <P, Q> Request<P, Q> fakeTestRequest(InetAddress to, int id, Verb<P, Q> verb, P payload)
     {
         return new Request<>(FBUtilities.getBroadcastAddress(),
                              to,
@@ -172,7 +172,7 @@ public class Request<P, Q> extends Message<P>
      * @param reason the reason for which the request failed.
      * @return the failure response for responding to this request with the error of reason {@code reason}.
      */
-    FailureResponse<Q> respondWithFailure(RequestFailureReason reason)
+    public FailureResponse<Q> respondWithFailure(RequestFailureReason reason)
     {
         return new FailureResponse<>(local,
                                      from(),

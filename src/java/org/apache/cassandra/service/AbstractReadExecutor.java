@@ -27,6 +27,7 @@ import com.google.common.collect.Iterables;
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.Single;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +40,7 @@ import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.Verbs;
@@ -47,6 +49,7 @@ import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Sends a read request to the replicas needed to satisfy a given ConsistencyLevel.
@@ -64,12 +67,14 @@ public abstract class AbstractReadExecutor
     protected final List<InetAddress> targetReplicas;
     protected final ReadCallback handler;
     protected final DigestVersion digestVersion;
+    protected final ColumnFamilyStore cfs;
 
-    AbstractReadExecutor(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
+    AbstractReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
     {
         this.command = command;
         this.targetReplicas = targetReplicas;
         this.handler = new ReadCallback(new DigestResolver(keyspace, command, consistencyLevel, targetReplicas.size()), consistencyLevel, command, targetReplicas, queryStartNanoTime);
+        this.cfs = cfs;
 
         // Set the digest version (if we request some digests). This is the smallest version amongst all our target replicas since new nodes
         // knows how to produce older digest but the reverse is not true.
@@ -125,7 +130,11 @@ public abstract class AbstractReadExecutor
      */
     public Single<PartitionIterator> get()
     {
-        return handler.get();
+            return handler.get().doOnError(e -> {
+                if (e instanceof ReadTimeoutException)
+                    Throwables.perform((Throwable)null, this::onReadTimeout);
+            });
+
     }
 
     private static ReadRepairDecision newReadRepairDecision(TableMetadata metadata)
@@ -169,12 +178,16 @@ public abstract class AbstractReadExecutor
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
         SpeculativeRetryParam retry = cfs.metadata().params.speculativeRetry;
 
-        // Speculative retry is disabled *OR* there are simply no extra replicas to speculate.
+        // Speculative retry is disabled *OR*
         // 11980: Disable speculative retry if using EACH_QUORUM in order to prevent miscounting DC responses
         if (retry.equals(SpeculativeRetryParam.NONE)
-            || consistencyLevel == ConsistencyLevel.EACH_QUORUM
-            || consistencyLevel.blockFor(keyspace) == allReplicas.size())
-            return new NeverSpeculatingReadExecutor(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            | consistencyLevel == ConsistencyLevel.EACH_QUORUM)
+            return new NeverSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime, false);
+
+        // There are simply no extra replicas to speculate.
+        // Handle this separately so it can log failed attempts to speculate due to lack of replicas
+        if (consistencyLevel.blockFor(keyspace) == allReplicas.size())
+            return new NeverSpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime, true);
 
         if (targetReplicas.size() == allReplicas.size())
         {
@@ -207,11 +220,34 @@ public abstract class AbstractReadExecutor
             return new SpeculatingReadExecutor(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
     }
 
+    /**
+     *  Returns true if speculation should occur.
+     */
+    boolean shouldSpeculate()
+    {
+        // no latency information, or we're overloaded
+        if (cfs.keyspace.getReplicationStrategy().getReplicationFactor() == 1 ||
+            cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
+            return false;
+
+        return true;
+    }
+
+    void onReadTimeout() {}
+
     public static class NeverSpeculatingReadExecutor extends AbstractReadExecutor
     {
-        public NeverSpeculatingReadExecutor(Keyspace keyspace, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime)
+        /**
+         * If never speculating due to lack of replicas
+         * log it is as a failure if it should have happened
+         * but couldn't due to lack of replicas
+         */
+        private final boolean logFailedSpeculation;
+
+        public NeverSpeculatingReadExecutor(Keyspace keyspace, ColumnFamilyStore cfs, ReadCommand command, ConsistencyLevel consistencyLevel, List<InetAddress> targetReplicas, long queryStartNanoTime, boolean logFailedSpeculation)
         {
-            super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
+            this.logFailedSpeculation = logFailedSpeculation;
         }
 
         public Completable executeAsync()
@@ -225,8 +261,21 @@ public abstract class AbstractReadExecutor
 
         public Completable maybeTryAdditionalReplicas()
         {
-            // no-op
-            return Completable.complete();
+            return Completable.defer(() -> {
+
+                if (!shouldSpeculate() || !logFailedSpeculation)
+                    return Completable.complete();
+
+                NettyRxScheduler.instance().scheduleDirect(() ->
+                                                           {
+                                                               if (!handler.hasValue())
+                                                               {
+                                                                   cfs.metric.speculativeInsufficientReplicas.inc();
+                                                               }
+                                                           }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+
+                return CompletableObserver::onComplete;
+            });
         }
 
         public List<InetAddress> getContactedReplicas()
@@ -235,9 +284,8 @@ public abstract class AbstractReadExecutor
         }
     }
 
-    private static class SpeculatingReadExecutor extends AbstractReadExecutor
+    static class SpeculatingReadExecutor extends AbstractReadExecutor
     {
-        private final ColumnFamilyStore cfs;
         private volatile boolean speculated = false;
 
         public SpeculatingReadExecutor(Keyspace keyspace,
@@ -247,8 +295,7 @@ public abstract class AbstractReadExecutor
                                        List<InetAddress> targetReplicas,
                                        long queryStartNanoTime)
         {
-            super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
-            this.cfs = cfs;
+            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
         public Completable executeAsync()
@@ -282,30 +329,27 @@ public abstract class AbstractReadExecutor
         public Completable maybeTryAdditionalReplicas()
         {
             return Completable.defer(
-            () ->
-            {
-                // no latency information, or we're overloaded
-                if (cfs.keyspace.getReplicationStrategy().getReplicationFactor() == 1 ||
-                    cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
-                    return CompletableObserver::onComplete;
+            () -> {
 
-                NettyRxScheduler.instance().scheduleDirect(() ->
-                   {
-                       if (handler.hasValue())
-                           return;
+                if (!shouldSpeculate())
+                    return Completable.complete();
 
-                       // Could be waiting on the data, or on enough digests.
-                       ReadCommand retryCommand = command;
-                       if (handler.resolver.isDataPresent())
-                           retryCommand = command.createDigestCommand(digestVersion);
+                NettyRxScheduler.instance().scheduleDirect(() -> {
+                       if (!handler.hasValue())
+                       {
+                           //Handle speculation stats first in case the callback fires immediately
+                           speculated = true;
+                           cfs.metric.speculativeRetries.inc();
+                           // Could be waiting on the data, or on enough digests.
+                           ReadCommand retryCommand = command;
+                           if (handler.resolver.isDataPresent())
+                               retryCommand = command.createDigestCommand(digestVersion);
 
-                       InetAddress extraReplica = Iterables.getLast(targetReplicas);
-                       Tracing.trace("Speculating read retry on {}", extraReplica);
-                       logger.trace("Speculating read retry on {}", extraReplica);
-                       MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
-                       speculated = true;
-
-                       cfs.metric.speculativeRetries.inc();
+                           InetAddress extraReplica = Iterables.getLast(targetReplicas);
+                           Tracing.trace("Speculating read retry on {}", extraReplica);
+                           logger.trace("Speculating read retry on {}", extraReplica);
+                           MessagingService.instance().send(Verbs.READS.READ.newRequest(extraReplica, retryCommand), handler);
+                       }
                    }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
@@ -318,12 +362,19 @@ public abstract class AbstractReadExecutor
                  ? targetReplicas
                  : targetReplicas.subList(0, targetReplicas.size() - 1);
         }
+
+        @Override
+        void onReadTimeout()
+        {
+            //Shouldn't be possible to get here without first attempting to speculate even if the
+            //timing is bad
+            assert speculated;
+            cfs.metric.speculativeFailedRetries.inc();
+        }
     }
 
     private static class AlwaysSpeculatingReadExecutor extends AbstractReadExecutor
     {
-        private final ColumnFamilyStore cfs;
-
         public AlwaysSpeculatingReadExecutor(Keyspace keyspace,
                                              ColumnFamilyStore cfs,
                                              ReadCommand command,
@@ -331,8 +382,7 @@ public abstract class AbstractReadExecutor
                                              List<InetAddress> targetReplicas,
                                              long queryStartNanoTime)
         {
-            super(keyspace, command, consistencyLevel, targetReplicas, queryStartNanoTime);
-            this.cfs = cfs;
+            super(keyspace, cfs, command, consistencyLevel, targetReplicas, queryStartNanoTime);
         }
 
         public Completable maybeTryAdditionalReplicas()
@@ -355,6 +405,12 @@ public abstract class AbstractReadExecutor
 
             cfs.metric.speculativeRetries.inc();
             return result;
+        }
+
+        @Override
+        void onReadTimeout()
+        {
+            cfs.metric.speculativeFailedRetries.inc();
         }
     }
 }
