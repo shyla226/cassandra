@@ -799,9 +799,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // We attempted to replace this with a schema-presence check, but you need a meaningful sleep
         // to get schema info from gossip which defeats the purpose.  See CASSANDRA-4427 for the gory details.
         Set<InetAddress> current = new HashSet<>();
-        if (true)
+        if (logger.isDebugEnabled())
         {
-            logger.info("Bootstrap variables: {} {} {} {}",
+            logger.debug("Bootstrap variables: {} {} {} {}",
                          DatabaseDescriptor.isAutoBootstrap(),
                          SystemKeyspace.bootstrapInProgress(),
                          SystemKeyspace.bootstrapComplete(),
@@ -4265,46 +4265,48 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Keyspace keyspace : Keyspace.nonSystem())
                 totalCFs += keyspace.getColumnFamilyStores().size();
             remainingCFs = totalCFs;
-            // flush
-            List<Single<CommitLogPosition>> flushes = new ArrayList<>();
-            for (Keyspace keyspace : Keyspace.nonSystem())
-            {
-                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--));
-            }
-            // wait for the flushes.
-            // TODO this is a godawful way to track progress, since they flush in parallel.  a long one could
-            // thus make several short ones "instant" if we wait for them later.try
-            try
-            {
-                Single.concat(flushes).blockingLast(CommitLogPosition.NONE);
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                // don't let this stop us from shutting down the commitlog and other thread pools
-                logger.warn("Caught exception while waiting for memtable flushes during shutdown hook", t);
-            }
+
+            // flush non-system keyspaces first
+            List<Single<CommitLogPosition>> nonSystemFlushes =
+                StreamSupport.stream(Keyspace.nonSystem().spliterator(), false)
+                            .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
+                            .map(cfs ->cfs.forceFlush().doOnSuccess((cl) -> remainingCFs--))
+                            .collect(toList());
+
+            // wait for the non-system flushes for up to 1 minute
+            Single.concat(nonSystemFlushes)
+                  .timeout(1, TimeUnit.MINUTES)
+                  .doOnError(t -> {
+                      JVMStabilityInspector.inspectThrowable(t);
+                      logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
+            }).blockingLast(CommitLogPosition.NONE);
 
             // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
             CompactionManager.instance.forceShutdown();
+
             // Flush the system tables after all other tables are flushed, just in case flushing modifies any system state
             // like CASSANDRA-5151. Don't bother with progress tracking since system data is tiny.
             // Flush system tables after stopping compactions since they modify
             // system tables (for example compactions can obsolete sstables and the tidiers in SSTableReader update
             // system tables, see SSTableReader.GlobalTidy)
-            flushes.clear();
-            for (Keyspace keyspace : Keyspace.system())
-            {
-                for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
-                    flushes.add(cfs.forceFlush());
-            }
-            Single.merge(flushes).blockingLast(CommitLogPosition.NONE);
 
+            // flush system keyspaces
+            List<Single<CommitLogPosition>> systemFlushes =
+                StreamSupport.stream(Keyspace.system().spliterator(), false)
+                             .flatMap(keyspace -> keyspace.getColumnFamilyStores().stream())
+                             .map(cfs ->cfs.forceFlush())
+                             .collect(toList());
+
+            // wait for the system flushes for up to 1 minute
+            Single.merge(systemFlushes)
+                  .timeout(1, TimeUnit.MINUTES)
+                  .doOnError(t -> {
+                      JVMStabilityInspector.inspectThrowable(t);
+                      logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
+            }).blockingLast(CommitLogPosition.NONE);
+
+            // shutdown hints
             HintsService.instance.shutdownBlocking();
-
-            // Interrupt ongoing compactions and shutdown CM to prevent further compactions.
-            CompactionManager.instance.forceShutdown();
 
             // whilst we've flushed all the CFs, which will have recycled all completed segments, we want to ensure
             // there are no segments to replay, so we force the recycling of any remaining (should be at most one)

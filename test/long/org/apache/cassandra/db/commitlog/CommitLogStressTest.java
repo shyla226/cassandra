@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -146,6 +147,14 @@ public class CommitLogStressTest
         SchemaLoader.schemaDefinition(""); // leave def. blank to maintain old behaviour
 
         CommitLog.instance.stopUnsafe(true);
+    }
+
+    @AfterClass
+    static public void tearDown()
+    {
+        // restart CL or else shutdown hook in StorageService may hang when flushing
+        // (since mutations cannot be added to CL)
+        CommitLog.instance.start();
     }
 
     @Before

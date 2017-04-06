@@ -190,7 +190,7 @@ public abstract class AbstractCommitLogService
     {
         long requestTime = System.nanoTime();
         requestExtraSync();
-        awaitSyncAt(requestTime);
+        awaitSyncAt(requestTime).blockingGet();
     }
 
     Single<Long> awaitSyncAt(long syncTime)
