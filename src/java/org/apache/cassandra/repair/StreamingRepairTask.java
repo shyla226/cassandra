@@ -37,6 +37,7 @@ import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamEventHandler;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.StreamState;
+import org.apache.cassandra.streaming.StreamOperation;
 
 /**
  * StreamingRepairTask performs data streaming between two remote replica which neither is not repair coordinator.
@@ -106,7 +107,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
         logger.info(String.format("[streaming task #%s] Performing streaming repair of %d ranges to and %d ranges from %s.",
                                   desc.sessionId, toTransfer.size(), toRequest.size(), request.dst));
 
-        return new StreamPlan(REPAIR_STREAM_PLAN_DESCRIPTION, repairedAt, 1, false, isIncremental, false, isConsistent ? desc.parentSessionId : null).listeners(this)
+        return new StreamPlan(StreamOperation.REPAIR, repairedAt, 1, false, isIncremental, false, isConsistent ? desc.parentSessionId : null).listeners(this)
                         .flushBeforeTransfer(false)
                         .requestRanges(dest, preferred, desc.keyspace, toRequest, desc.columnFamily) // request ranges from the remote node
                         .transferRanges(dest, preferred, desc.keyspace, toTransfer, desc.columnFamily); // send ranges to the remote node
