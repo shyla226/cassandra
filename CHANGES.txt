@@ -16,6 +16,7 @@ DSE backports
  * Fix potential NPE for compactionstats (CASSANDRA-12462)
 
 2.1.18
+ * Fix ParseError unhashable type list in cqlsh copy from (CASSANDRA-13364)
  * Log stacktrace of uncaught exceptions (CASSANDRA-13108)
  * Remove unused repositories (CASSANDRA-13278)
 
