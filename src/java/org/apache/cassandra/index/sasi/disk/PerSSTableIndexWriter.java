@@ -55,18 +55,19 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
 {
     private static final Logger logger = LoggerFactory.getLogger(PerSSTableIndexWriter.class);
 
+    private static final int POOL_SIZE = 8;
     private static final ThreadPoolExecutor INDEX_FLUSHER_MEMTABLE;
     private static final ThreadPoolExecutor INDEX_FLUSHER_GENERAL;
 
     static
     {
-        INDEX_FLUSHER_GENERAL = new JMXEnabledThreadPoolExecutor(1, 8, 60, TimeUnit.SECONDS,
+        INDEX_FLUSHER_GENERAL = new JMXEnabledThreadPoolExecutor(POOL_SIZE, POOL_SIZE, 1, TimeUnit.MINUTES,
                                                                  new LinkedBlockingQueue<>(),
                                                                  new NamedThreadFactory("SASI-General"),
                                                                  "internal");
         INDEX_FLUSHER_GENERAL.allowCoreThreadTimeOut(true);
 
-        INDEX_FLUSHER_MEMTABLE = new JMXEnabledThreadPoolExecutor(1, 8, 60, TimeUnit.SECONDS,
+        INDEX_FLUSHER_MEMTABLE = new JMXEnabledThreadPoolExecutor(POOL_SIZE, POOL_SIZE, 1, TimeUnit.MINUTES,
                                                                   new LinkedBlockingQueue<>(),
                                                                   new NamedThreadFactory("SASI-Memtable"),
                                                                   "internal");
@@ -79,7 +80,6 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     private final OperationType source;
 
     private final AbstractType<?> keyValidator;
-    private final Map<ColumnMetadata, ColumnIndex> supportedIndexes;
 
     @VisibleForTesting
     protected final Map<ColumnMetadata, Index> indexes;
@@ -96,8 +96,9 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
         this.keyValidator = keyValidator;
         this.descriptor = descriptor;
         this.source = source;
-        this.supportedIndexes = supportedIndexes;
         this.indexes = new HashMap<>();
+        for (Map.Entry<ColumnMetadata, ColumnIndex> entry : supportedIndexes.entrySet())
+            indexes.put(entry.getKey(), newIndex(entry.getValue()));
     }
 
     public void begin()
@@ -116,18 +117,13 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
 
         Row row = (Row) unfiltered;
 
-        supportedIndexes.keySet().forEach((column) -> {
+        indexes.forEach((column, index) -> {
             ByteBuffer value = ColumnIndex.getValueOf(column, row, nowInSec);
             if (value == null)
                 return;
 
-            ColumnIndex columnIndex = supportedIndexes.get(column);
-            if (columnIndex == null)
-                return;
-
-            Index index = indexes.get(column);
             if (index == null)
-                indexes.put(column, (index = newIndex(columnIndex)));
+                throw new IllegalArgumentException("No index exists for column " + column.name.toString());
 
             index.add(value.duplicate(), currentKey, currentKeyPosition);
         });
