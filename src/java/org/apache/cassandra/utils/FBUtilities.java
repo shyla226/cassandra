@@ -897,12 +897,30 @@ public class FBUtilities
      */
     public static final class Debug
     {
-        private static final Map<Object, StackTraceElement[]> stacks = new ConcurrentHashMap<>();
+        public static final class ThreadInfo
+        {
+            private final String name;
+            private final StackTraceElement[] stack;
 
-        public static String getStackTrace(StackTraceElement[] stackTraceElements)
+            public ThreadInfo()
+            {
+                this(Thread.currentThread());
+            }
+
+            public ThreadInfo(Thread thread)
+            {
+                this.name =  thread.getName();
+                this.stack = thread.getStackTrace();
+            }
+
+        }
+        private static final Map<Object, ThreadInfo> stacks = new ConcurrentHashMap<>();
+
+        public static String getStackTrace(ThreadInfo threadInfo)
         {
             StringBuilder sb = new StringBuilder();
-            for (StackTraceElement element : stackTraceElements)
+            sb.append("Thread ").append(threadInfo.name).append("\n");
+            for (StackTraceElement element : threadInfo.stack)
             {
                 sb.append(element);
                 sb.append("\n");
@@ -916,7 +934,7 @@ public class FBUtilities
          */
         public static void addStackTrace(Object object)
         {
-            stacks.put(object, Thread.currentThread().getStackTrace());
+            stacks.put(object, new ThreadInfo());
         }
 
 
@@ -928,7 +946,7 @@ public class FBUtilities
             logger.info("{}\n{}\n****\n{}",
                         message,
                         getStackTrace(stacks.get(object)),
-                        getStackTrace(Thread.currentThread().getStackTrace()));
+                        getStackTrace(new ThreadInfo()));
         }
     }
 }

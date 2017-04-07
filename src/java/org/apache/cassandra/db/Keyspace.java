@@ -490,7 +490,7 @@ public class Keyspace
             () -> requiresViewUpdate ? new Lock[mutation.getTableIds().size()] : null,
 
             // completable source
-            (locks) -> Completable.defer(() ->
+            (locks) ->
             {
                 if (requiresViewUpdate)
                 {
@@ -629,7 +629,7 @@ public class Keyspace
 
                     // disposer
                     (opGroup) -> opGroup.close());
-            }),
+            },
 
         // disposer
         (locks) ->
@@ -640,13 +640,21 @@ public class Keyspace
                     //The locks need to be accessed on the same thread
                     //they were created
                     schedulerForPartition.scheduleDirect(() ->
-                                                         {
-                                                             for (Lock lock : locks)
-                                                             {
-                                                                 if (lock != null)
-                                                                     lock.unlock();
-                                                             }
-                                                         });
+                         {
+                             try
+                             {
+                                 for (Lock lock : locks)
+                                 {
+                                     if (lock != null)
+                                         lock.unlock();
+                                 }
+                             }
+                             catch (Throwable t)
+                             {
+                                 JVMStabilityInspector.inspectThrowable(t);
+                                 logger.error("Fail to release view locks", t);
+                             }
+                         });
                 }
             }
         );
@@ -658,7 +666,7 @@ public class Keyspace
         // there is a small chance that the caller may change thread after creating the single but we know
         // this is not currently the case.
         if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(schedulerForPartition))
-            c.subscribeOn(schedulerForPartition);
+            return c.subscribeOn(schedulerForPartition);
 
         return c;
     }

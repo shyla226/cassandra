@@ -775,7 +775,7 @@ public abstract class CQLTester
     {
         try
         {
-            logger.error("SCHEMA CHANGE: " + query);
+            logger.info("SCHEMA CHANGE: " + query);
 
             ClientState state = ClientState.forInternalCalls();
             state.setKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME);

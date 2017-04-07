@@ -574,6 +574,35 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         }
     }
 
+    private static boolean DEBUG_SCHEDULERS = true;
+
+    private static final class RunnableWithSchedInfo implements Runnable
+    {
+        private final Runnable runnable;
+        private final FBUtilities.Debug.ThreadInfo threadInfo;
+
+        RunnableWithSchedInfo(Runnable runnable)
+        {
+            this.runnable = runnable;
+            this.threadInfo = new FBUtilities.Debug.ThreadInfo();
+        }
+
+        public void run()
+        {
+            try
+            {
+                runnable.run();
+            }
+            catch (Throwable t)
+            {
+                logger.error("Scheduler's thread info for exception {}/{} below:\n{}",
+                             t.getClass().getName(), t.getMessage(),
+                             FBUtilities.Debug.getStackTrace(threadInfo));
+                throw t;
+            }
+        }
+    }
+
     private static void initRx()
     {
         final Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
@@ -590,10 +619,11 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
          * see APOLLO-488 for more details.
          */
         RxJavaPlugins.setScheduleHandler((runnable) -> {
-            if (runnable instanceof ExecutorLocals.WrappedRunnable)
-                return runnable;
+            Runnable ret = runnable instanceof ExecutorLocals.WrappedRunnable
+                           ? runnable
+                           : new ExecutorLocals.WrappedRunnable(runnable);
 
-            return new ExecutorLocals.WrappedRunnable(runnable);
+          return DEBUG_SCHEDULERS ? new RunnableWithSchedInfo(ret) : ret;
         });
 
         //RxSubscriptionDebugger.enable();
