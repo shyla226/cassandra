@@ -51,6 +51,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Handle missing metadata when opening a keyspace (APOLLO-395)
  * Bounded range splitting token allocation for first RF nodes (APOLLO-121)
  * Backport CASSANDRA-12858: Add the range limit for the split ratio in PartitionerTestCase (APOLLO-121)
  * Partial backport of token splitting from CASSANDRA-12777: Implement the NoReplicationTokenAllocator (APOLLO-121)
