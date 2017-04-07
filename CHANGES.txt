@@ -20,6 +20,7 @@
  * Address message coalescing regression (CASSANDRA-12676)
  * Delete illegal character from StandardTokenizerImpl.jflex (CASSANDRA-13417)
 Merged from 3.0:
+ * Fix startup problems due to schema tables not completely flushed (CASSANDRA-12213)
  * Fix view builder bug that can filter out data on restart (CASSANDRA-13405)
  * Fix 2i page size calculation when there are no regular columns (CASSANDRA-13400)
  * Fix the conversion of 2.X expired rows without regular column data (CASSANDRA-13395)
@@ -76,6 +77,7 @@ Merged from 2.2:
  * Fix negative mean latency metric (CASSANDRA-12876)
  * Use only one file pointer when creating commitlog segments (CASSANDRA-12539)
 Merged from 2.1:
+ * Fix ParseError unhashable type list in cqlsh copy from (CASSANDRA-13364)
  * Remove unused repositories (CASSANDRA-13278)
  * Log stacktrace of uncaught exceptions (CASSANDRA-13108)
  * Use portable stderr for java error in startup (CASSANDRA-13211)
