@@ -483,6 +483,14 @@ public class MappedBufferTest
         new MappedBuffer(null, 33);
     }
 
+    @Test(expected = AssertionError.class)
+    public void readAfterClose() throws Exception
+    {
+        final MappedBuffer buffer = createTestFile(10);
+        buffer.close();
+        buffer.getLong();
+    }
+
     private MappedBuffer createTestFile(long numCount) throws IOException
     {
         return createTestFile(numCount, 8, 16, 0);
