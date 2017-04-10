@@ -48,7 +48,7 @@ public class ColumnsTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.setupForTesting();
+        NettyRxScheduler.register();
     }
 
     private static final TableMetadata TABLE_METADATA = MockSchema.newCFS().metadata();

@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.cli.*;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
@@ -49,6 +50,7 @@ public class StandaloneUpgrader
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
+        NettyRxScheduler.register();
 
         try
         {

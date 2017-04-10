@@ -233,7 +233,7 @@ public class Mutation implements IMutation, Scheduleable
 
     public NettyRxScheduler getScheduler()
     {
-        return NettyRxScheduler.getForKey(getKeyspaceName(), key(), false);
+        return NettyRxScheduler.getForKey(getKeyspaceName(), key());
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

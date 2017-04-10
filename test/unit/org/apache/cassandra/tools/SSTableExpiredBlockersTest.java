@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.tools;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -42,7 +41,6 @@ public class SSTableExpiredBlockersTest extends ToolsTester
     @Test
     public void testSSTableExpiredBlockers_WithArgs()
     {
-        NettyRxScheduler.setupForTesting();
         // returns exit code 1, since no sstables are there
         runTool(1, "org.apache.cassandra.tools.SSTableExpiredBlockers", "system", "range_xfers");
         assertNoUnexpectedThreadsStarted(EXPECTED_THREADS_WITH_SCHEMA, OPTIONAL_THREADS_WITH_SCHEMA);

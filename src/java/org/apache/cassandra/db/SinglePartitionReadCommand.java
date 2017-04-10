@@ -963,7 +963,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public NettyRxScheduler getScheduler()
     {
-        return NettyRxScheduler.getForKey(metadata().keyspace, partitionKey(), false);
+        return NettyRxScheduler.getForKey(metadata().keyspace, partitionKey());
     }
 
     /**

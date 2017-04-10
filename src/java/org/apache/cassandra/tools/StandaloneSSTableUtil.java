@@ -18,6 +18,7 @@
  */
 package org.apache.cassandra.tools;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -49,6 +50,8 @@ public class StandaloneSSTableUtil
         {
             // load keyspace descriptions.
             Util.initDatabaseDescriptor();
+            NettyRxScheduler.register();
+
             Schema.instance.loadFromDisk(false);
 
             TableMetadata metadata = Schema.instance.getTableMetadata(options.keyspaceName, options.cfName);

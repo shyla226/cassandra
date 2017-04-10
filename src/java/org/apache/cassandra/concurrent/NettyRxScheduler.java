@@ -41,7 +41,6 @@ import io.netty.util.concurrent.EventExecutorGroup;
 import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.concurrent.FastThreadLocalThread;
 import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.ImmediateEventExecutor;
 import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.disposables.Disposables;
@@ -106,12 +105,6 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     //Each array entry maps to a cpuId.
     final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
 
-    /**
-     * A scheduler that executes events immediately, on the caller's thread.
-     */
-    public final static NettyRxScheduler immediateScheduler = new NettyRxScheduler(ImmediateEventExecutor.INSTANCE, Integer.MAX_VALUE);
-
-
     final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
     {
         public int idFor(Thread t)
@@ -128,6 +121,12 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 //            throw new IllegalStateException("TPC OpOrder groups can only be created and accessed from TPC threads.");
 
 //          Bit it doesn't currently work!
+
+            // SA: I disagree on checking if SS is Initialized, that is only relevant for assigning PKs to cores
+            // if we assign pks correctly, until SS is initialized, the only TPC thread is core zero - so I think here we
+            // just need to throw if t is not a netty rx thread
+            // the reason for returning NUM_NETTY_THREADS is that in the metrics we initialize N_CORES+1 size
+            // arrays, and use CAS only for the last item, but it seems this method is no longer used by metrics code
         }
 
         public boolean barrierPermitted()
@@ -249,15 +248,6 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     }
 
     /**
-     * When tests are run that don't properly setup netty and rx, use this to ensure perCoreSchedulers isn't full of nulls
-     */
-    public static void setupForTesting()
-    {
-        for (int i = 0; i < perCoreSchedulers.length; i++)
-            perCoreSchedulers[i] = localNettyEventLoop.get();
-    }
-
-    /**
      * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
      * core is valid via {@link NettyRxScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
@@ -345,6 +335,19 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         return coreId != null && coreId >= 0 && coreId < getNumCores();
     }
 
+    /**
+     * Return the id of the core that is assigned to run operations on the specified keyspace
+     * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.
+     * <p>
+     * Core zero is returned if {@link StorageService} is not yet initialized,
+     * since in this case we cannot assign any partition key to any core.
+     *
+     * @param keyspaceName - the keyspace name
+     * @param key - the partition key
+     *
+     * @return the core id for this partition
+     */
+
     @Inline
     public static int getCoreForKey(String keyspaceName, DecoratedKey key)
     {
@@ -371,8 +374,8 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
             Token next = keyspaceRanges.get(i);
             if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
             {
-                //logger.info("Read moving to {} from {}", i-1, getCoreId());
-
+                if (logger.isTraceEnabled())
+                    logger.trace("Read moving to {} from {}", i-1, getCoreId());
                 return i - 1;
             }
 
@@ -386,64 +389,18 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
      * Return the Netty rx scheduler of the core that is assigned to run operations on the specified keyspace
      * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.
      * <p>
-     * The parameter useImmediateForLocal controls whether we can return an immediate scheduler in some cases,
-     * that is a scheduler that executes a task immediately, without switching threads. If useImmediateForLocal
-     * is true, an immediate scheduler would be returned if {@link StorageService} is not yet initialized,
-     * since in this case we cannot assign any partition key to any core, or if the caller's thread is already
-     * the thread of the assigned scheduler. If useImmediateForLocal is false, then the assigned scheduler is always
-     * returned unless {@link StorageService} is not yet initialized, in which case the scheduler of core zero
-     * is returned.
+     * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
+     * since in this case we cannot assign any partition key to any core.
      *
      * @param keyspaceName - the keyspace name
      * @param key - the partition key
-     * @param useImmediateForLocal - whether we can use an immediate scheduler if not yet initialized or if the current
-     *                             thread is already the thread of the assigned scheduler
      *
-     * @return the Netty RX scheduler, which includes an immediate scheduler if useImmediateForLocal is true
+     * @return the Netty RX scheduler
      */
     @Inline
-    public static NettyRxScheduler getForKey(String keyspaceName, DecoratedKey key, boolean useImmediateForLocal)
+    public static NettyRxScheduler getForKey(String keyspaceName, DecoratedKey key)
     {
-        // nothing we can do until we have the local ranges, if we can execute immediately (useImmediateForLocal is true)
-        // then return the immediate scheduler, otherwise use core 0 (TODO - is this correct?)
-        if (!StorageService.instance.isInitialized())
-            return useImmediateForLocal ? immediateScheduler : getForCore(0);
-
-        int callerCoreId = -1;
-        if (useImmediateForLocal)
-            callerCoreId = getCoreId();
-
-        // Convert OP partitions to top level partitioner for secondary indexes; always route
-        // system table mutations through core 0
-        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
-        {
-            if (SchemaConstants.isSystemKeyspace(keyspaceName))
-                return getForCore(0);
-
-            key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
-        }
-
-        List<Token> keyspaceRanges = getRangeList(keyspaceName, true);
-        Token keyToken = key.getToken();
-
-        Token rangeStart = keyspaceRanges.get(0);
-        for (int i = 1; i < keyspaceRanges.size(); i++)
-        {
-            Token next = keyspaceRanges.get(i);
-            if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
-            {
-                //logger.info("Read moving to {} from {}", i-1, getCoreId());
-
-                if (useImmediateForLocal)
-                    return callerCoreId == i - 1 ? immediateScheduler : getForCore(i - 1);
-
-                return getForCore(i - 1);
-            }
-
-            rangeStart = next;
-        }
-
-        throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
+        return getForCore(getCoreForKey(keyspaceName, key));
     }
 
     public static List<Token> getRangeList(String keyspaceName, boolean persist)

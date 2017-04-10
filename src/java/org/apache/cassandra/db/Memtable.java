@@ -456,10 +456,7 @@ public class Memtable implements Comparable<Memtable>
         for (int i = 0; i < NettyRxScheduler.getNumCores(); i++)
         {
             final int coreId = i;
-            NettyRxScheduler scheduler = NettyRxScheduler.getForCore(coreId);
 
-            // TPC - TODO - this can be simplified if the partitons are thread safe for reading, particularly the
-            // subscribe on are no longer required.
             all.add(Flowable.defer(() ->
                                    {
                                        ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(coreId);
@@ -474,7 +471,6 @@ public class Memtable implements Comparable<Memtable>
 
                                        return Flowable.fromIterable(trimmedMemtableSubrange.keySet());
                                    }));
-                            // .subscribeOn(scheduler)); // see TODO above
 
             // For system tables we just use the first core
             if (!hasSplits)
@@ -487,7 +483,7 @@ public class Memtable implements Comparable<Memtable>
             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
             return FlowablePartitions.fromIterator(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)),
-                                                   NettyRxScheduler.getForKey(cfs.keyspace.getName(), key, true));
+                                                   NettyRxScheduler.getForKey(cfs.keyspace.getName(), key));
         });
     }
 

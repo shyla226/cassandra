@@ -21,6 +21,7 @@ import java.io.PrintStream;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -58,6 +59,7 @@ public class SSTableLevelResetter
         }
 
         Util.initDatabaseDescriptor();
+        NettyRxScheduler.register();
 
         // TODO several daemon threads will run from here.
         // So we have to explicitly call System.exit.

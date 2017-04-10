@@ -1370,8 +1370,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public Completable apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
-        return applyInternal(update, indexer, opGroup, commitLogPosition)
-               .subscribeOn(NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey(), true));
+        Completable ret = applyInternal(update, indexer, opGroup, commitLogPosition);
+        NettyRxScheduler scheduler = NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey());
+        return scheduler.cpuId == NettyRxScheduler.getCoreId() ? ret : ret.subscribeOn(scheduler);
     }
 
     Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
