@@ -17,19 +17,12 @@
  */
 package org.apache.cassandra.cql3;
 
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.SyntaxError;
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.index.StubIndex;
-import org.apache.cassandra.service.EmbeddedCassandraService;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;

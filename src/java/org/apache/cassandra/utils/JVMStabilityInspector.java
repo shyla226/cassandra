@@ -81,12 +81,8 @@ public final class JVMStabilityInspector
             if (t.getMessage().contains("Too many open files"))
                 isUnstable = true;
 
-        // TPC - TODO: Commenting the following two lines stops the testall build on Jenkins from being aborted
-        // but it will also incorrectly report tests as succeeded regardless of assertions.
-        // Not sure why, locally I get "Forked Java VM exited abnormally." as expected, but on
-        // Jenkins the junit report is not executed and the build hangs instead but not all the time.
-        //if (t instanceof AssertionError)
-        //    isUnstable = true;
+        if (t instanceof AssertionError)
+            isUnstable = true;
 
         if (isUnstable)
             killer.killCurrentJVM(t);

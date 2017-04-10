@@ -23,7 +23,6 @@ import java.io.Closeable;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 

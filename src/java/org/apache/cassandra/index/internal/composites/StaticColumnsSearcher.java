@@ -64,6 +64,9 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
             SinglePartitionReadCommand dataCmd;
             DecoratedKey partitionKey = index.baseCfs.decorateKey(nextEntry.indexedKey);
 
+            if (!command.selectsKey(partitionKey) || !command.selectsClustering(partitionKey, nextEntry.indexedEntryClustering))
+                return Flowable.<FlowableUnfilteredPartition>empty();  // CASSANDRA-13277
+
             // If the index is on a static column, we just need to do a full read on the partition.
             // Note that we want to re-use the command.columnFilter() in case of future change.
             dataCmd = SinglePartitionReadCommand.create(index.baseCfs.metadata(),
