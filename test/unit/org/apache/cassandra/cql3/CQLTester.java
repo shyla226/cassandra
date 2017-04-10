@@ -174,8 +174,8 @@ public abstract class CQLTester
             // unless sub-classes call this method from static initialization methods such as
             // requireNetwork(). Note that this method cannot be called by the base class setUp
             // static method because this would make it impossible to change the partitioner in
-            // sub-classed. Noramally we run tests sequentially but, to be safe, this ensures
-            // that if 2 tests execute in paralell only one test initializes the server and the
+            // sub-classed. Normally we run tests sequentially but, to be safe, this ensures
+            // that if 2 tests execute in parallel, only one test initializes the server and the
             // other test waits.
             assertTrue(Uninterruptibles.awaitUninterruptibly(serverReady, 1, TimeUnit.MINUTES));
             return;
@@ -974,10 +974,24 @@ public abstract class CQLTester
                 i++;
             }
 
-            String[][] formattedRows = new String[unexpectedRows.size()][meta.size()];
-            for (int k = 0; k < unexpectedRows.size(); k++)
+            String[][] formattedRows = new String[actualRows.size() + unexpectedRows.size()][meta.size()];
+            for (int k = 0; k < actualRows.size(); k++)
             {
-                Row row = unexpectedRows.get(k);
+                List<ByteBuffer> row = actualRows.get(k);
+                for (int j = 0; j < meta.size(); j++)
+                {
+                    DataType type = meta.getType(j);
+                    com.datastax.driver.core.TypeCodec<Object> codec = clusters.get(protocolVersion).getConfiguration()
+                                                                               .getCodecRegistry()
+                                                                               .codecFor(type);
+
+                    formattedRows[k][j] = codec.format(codec.deserialize(row.get(j), driverVersion));
+                }
+            }
+
+            for (int k = actualRows.size(); k < actualRows.size() + unexpectedRows.size(); k++)
+            {
+                Row row = unexpectedRows.get(k - actualRows.size());
                 for (int j = 0; j < meta.size(); j++)
                 {
                     DataType type = meta.getType(j);
@@ -990,7 +1004,7 @@ public abstract class CQLTester
             }
 
             Assert.fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s)." +
-                                      "\nAdditional rows:\n%s",
+                                      "\nReceived rows:\n%s",
                                       rows.length, i, protocolVersion,
                                       Arrays.stream(formattedRows).map(Arrays::toString).collect(Collectors.toList())));
         }

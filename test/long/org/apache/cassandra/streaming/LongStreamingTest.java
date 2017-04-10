@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -51,6 +52,7 @@ public class LongStreamingTest
     public static void setup() throws Exception
     {
         DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
 
         SchemaLoader.cleanupAndLeaveDirs();
         Keyspace.setInitialized();

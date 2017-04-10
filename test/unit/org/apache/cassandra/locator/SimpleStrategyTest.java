@@ -37,6 +37,7 @@ import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageServiceAccessor;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -184,8 +185,8 @@ public class SimpleStrategyTest
     {
         //local strategy keyspaces should not be returned here since they are not partitioned
         List<String> partitionedKeyspaces = Schema.instance.getPartitionedKeyspaces();
-        assertEquals(1, partitionedKeyspaces.size());
-        assertEquals(KEYSPACE1, partitionedKeyspaces.get(0));
+        assertEquals(SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.size() + 1, partitionedKeyspaces.size());
+        assertEquals(KEYSPACE1, partitionedKeyspaces.get(3));
     }
 
     private AbstractReplicationStrategy getStrategy(String keyspaceName, TokenMetadata tmd)

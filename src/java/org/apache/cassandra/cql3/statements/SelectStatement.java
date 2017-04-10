@@ -1123,7 +1123,7 @@ public class SelectStatement implements CQLStatement
         // regular columns restrictions), we ignore partitions that are empty outside of static content, but if it's a full partition
         // query, then we include that content.
         // We make an exception for "static compact" table are from a CQL standpoint we always want to show their static
-        // content for backward compatiblity.
+        // content for backward compatibility.
         return queriesFullPartitions() || table.isStaticCompactTable();
     }
 

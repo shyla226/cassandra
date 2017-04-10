@@ -34,7 +34,6 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -55,7 +54,8 @@ public class KeyCollisionTest
     public static void defineSchema() throws ConfigurationException
     {
         DatabaseDescriptor.daemonInitialization();
-        oldPartitioner = StorageService.instance.setPartitionerUnsafe(LengthPartitioner.instance);
+        oldPartitioner = DatabaseDescriptor.setPartitionerUnsafe(LengthPartitioner.instance);
+
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
@@ -117,6 +117,15 @@ public class KeyCollisionTest
         public long getHeapSize()
         {
             return 0;
+        }
+
+        @Override
+        public double size(Token next)
+        {
+            BigIntegerToken n = (BigIntegerToken) next;
+            long v = n.token - token;  // Overflow acceptable and desired.
+            double d = Math.scalb((double)v, -127); // Scale so that the full range is 1.
+            return d > 0.0 ? d : (d + 1.0); // Adjust for signed long, also making sure t.size(t) == 1.
         }
     }
 }

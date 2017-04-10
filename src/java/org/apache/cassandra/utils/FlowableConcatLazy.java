@@ -27,20 +27,25 @@ import org.reactivestreams.Subscription;
 /**
  * Lazy version of Flowable.concat. The main difference is that it never requests more data before consumer has
  * requested.
+ *
+ * @param <O> the value type of the output, also referred to as the downstream
+ * @param <I> the value type of the input, also referred to as the upstream
  */
 public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
 {
-    private static FlowableConcatLazy<?, ?> direct = new FlowableConcatLazy<Flowable<Object>, Object>(x -> x);
+    //private static final Logger logger = LoggerFactory.getLogger(FlowableConcatLazy.class);
+
+    /** A direct implementation of cancat lazy, that is without any mapping */
+    private static final FlowableConcatLazy<?, ?> direct = new FlowableConcatLazy<Flowable<Object>, Object>(x -> x);
 
     public static <T> FlowableConcatLazy<Flowable<T>, T> getDirect()
     {
         return (FlowableConcatLazy<Flowable<T>, T>) direct;
     }
 
+    private final Function<I, Flowable<O>> mapper;
 
-    final Function<I, Flowable<O>> mapper;
-
-    public FlowableConcatLazy(Function<I, Flowable<O>> mapper)
+    FlowableConcatLazy(Function<I, Flowable<O>> mapper)
     {
         this.mapper = mapper;
     }
@@ -52,21 +57,47 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
 
     static class Concat<I, O> implements Subscription, Subscriber<I>
     {
+        /** The downstream subscriber, also known as observer, it will receive the output items by calling
+         * the onXXXX() methods. */
         private final Subscriber<? super O> subscriber;
+
+        /** The mapper converts each input (upstream) item into a flowable of output (downstream) items */
         private final Function<I, Flowable<O>> mapper;
 
+        /** A subscription to the upstream publisher, it will emit the publishers to be
+         * concatenated one by one when we call request.
+         */
         Subscription source;
-        long requests;
-        long requested;
-        boolean cancelled;
-        boolean requesting;
-        boolean complete;
-        boolean subscribed;
-        boolean received = true;
 
+        /** The number of items the downstream has actually requested */
+        volatile long requests;
+
+        /** The number of items that have been requested to the sources, current or otherwise */
+        volatile long requested;
+
+        /** Set to true when the downstream cancels or when the upstream reports completed. */
+        volatile boolean cancelled;
+
+        /** Set to true when doRequests() is executing to prevent deadlocks due to onXXXX methods
+         * calling doRequests recursively from a request call
+         */
+        volatile boolean requesting;
+
+        /** Set to true when the upstream reports completed (no more sources) */
+        volatile boolean complete;
+
+        /** Set to false when we request a publisher to the upstream and to false when we receive it*/
+        volatile boolean subscribed;
+
+        /** Set to false when an item is requested and to true when it is received, ensures we request some more
+         * if a publisher completes without items (empty).
+         */
+        volatile boolean received = true;
+
+        /** The subscriber to the current source, wrapped in utility class. */
         ConcatItem current;
 
-        public Concat(Subscriber<? super O> subscriber, Function<I, Flowable<O>> mapper)
+        Concat(Subscriber<? super O> subscriber, Function<I, Flowable<O>> mapper)
         {
             this.subscriber = subscriber;
             this.mapper = mapper;
@@ -75,7 +106,7 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
         public void request(long l)
         {
             requests += l;
-            if (requests < l)   // overflow
+            if (requests < l)   // overflow, some downstream callers may invoke request(Long.MAX_VALUE)
                 requests = Long.MAX_VALUE;
             doRequests();
         }
@@ -102,7 +133,7 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
             while (true)
             {
                 if (current == null)
-                {
+                { // no current source, request one
                     if (complete)
                     {
                         subscriber.onComplete();
@@ -124,7 +155,7 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
                     }
                 }
                 else
-                {
+                { // request the next item to the current source and increment the number of items requested
                     ++requested;
                     received = false;
                     current.source.request(1);
@@ -137,7 +168,6 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
                         }
                     }
                 }
-
             }
         }
 
