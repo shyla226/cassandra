@@ -260,9 +260,7 @@ public class Expression
         // this covers EQ/RANGE with exclusions.
         for (ByteBuffer term : exclusions)
         {
-            if (isLiteral && validateStringValue(value, term))
-                return false;
-            else if (validator.compare(term, value) == 0)
+            if (isLiteral && validateStringValue(value, term) || validator.compare(term, value) == 0)
                 return false;
         }
 
@@ -285,6 +283,9 @@ public class Expression
                 // here we just need to make sure that term matched it
                 case NOT_EQ:
                     isMatch = validator.compare(term, requestedValue) == 0;
+                    break;
+                case RANGE:
+                    isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
                     break;
 
                 case PREFIX:
@@ -330,6 +331,27 @@ public class Expression
         return upper != null;
     }
 
+    public boolean isLowerSatisfiedBy(ByteBuffer value)
+    {
+        if (!hasLower())
+            return true;
+
+        int cmp = validator.compare(value, lower.value);
+        return cmp > 0 || cmp == 0 && lower.inclusive;
+    }
+
+    public boolean isUpperSatisfiedBy(ByteBuffer value)
+    {
+        if (!hasUpper())
+            return true;
+
+        int cmp = validator.compare(value, upper.value);
+        return cmp < 0 || cmp == 0 && upper.inclusive;
+    }
+
+    // Optimised versions of lower/upper bound comparisons, that will read/compare only Min(n,n')
+    // symbols from mmapped file, where n is a size of the searched term and n' is the size of the
+    // term from mmapped file.
     public boolean isLowerSatisfiedBy(OnDiskIndex.DataTerm term)
     {
         if (!hasLower())
