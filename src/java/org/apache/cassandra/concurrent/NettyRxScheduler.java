@@ -568,7 +568,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         }
     }
 
-    private static boolean DEBUG_SCHEDULERS = true;
+    private static boolean DEBUG_SCHEDULERS = false;
 
     private static final class RunnableWithSchedInfo implements Runnable
     {
