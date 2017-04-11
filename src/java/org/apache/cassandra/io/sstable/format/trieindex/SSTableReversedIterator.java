@@ -90,6 +90,7 @@ class SSTableReversedIterator extends AbstractSSTableIterator
     {
         LongStack rowOffsets = new LongStack();
         RangeTombstoneMarker blockOpenMarker, blockCloseMarker;
+        Unfiltered next = null;
         boolean foundLessThan;
         long startPos = -1;
 
@@ -111,6 +112,25 @@ class SSTableReversedIterator extends AbstractSSTableIterator
 
         protected boolean hasNextInternal() throws IOException
         {
+            if (next != null)
+                return true;
+            if (checkHasNext())
+                next = computeNext();
+            return next != null;
+        }
+
+        protected Unfiltered nextInternal() throws IOException
+        {
+            if (!hasNextInternal())
+                throw new NoSuchElementException();
+
+            Unfiltered toReturn = next;
+            next = null;
+            return toReturn;
+        }
+
+        private boolean checkHasNext() throws IOException
+        {
             do
             {
                 if (blockCloseMarker != null || !rowOffsets.isEmpty())
@@ -121,30 +141,32 @@ class SSTableReversedIterator extends AbstractSSTableIterator
             return blockOpenMarker != null;
         }
 
-        protected Unfiltered nextInternal() throws IOException
+        private Unfiltered computeNext() throws IOException
         {
             Unfiltered toReturn = null;
             if (blockCloseMarker != null)
             {
                 toReturn = blockCloseMarker;
                 blockCloseMarker = null;
+                return toReturn;
             }
-            else if (!rowOffsets.isEmpty())
+            while (!rowOffsets.isEmpty())
             {
                 seekToPosition(rowOffsets.pop());
                 boolean hasNext = deserializer.hasNext();
                 assert hasNext;
                 toReturn = deserializer.readNext();
+                // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
+                if (!toReturn.isEmpty())
+                    return toReturn;
             }
-            else if (blockOpenMarker != null)
+            if (blockOpenMarker != null)
             {
                 toReturn = blockOpenMarker;
                 blockOpenMarker = null;
+                return toReturn;
             }
-            else
-                throw new NoSuchElementException();
-
-            return toReturn;
+            return null;
         }
 
         protected boolean advanceIndexBlock() throws IOException
@@ -184,8 +206,10 @@ class SSTableReversedIterator extends AbstractSSTableIterator
 
 
             // Now deserialize everything until we reach our requested end (if we have one)
+            // See SSTableIterator.ForwardRead.computeNext() for why this is a strict inequality below: this is the same
+            // reasoning here.
             while (currentPosition < stopPosition && deserializer.hasNext()
-                   && (!filterEnd || deserializer.compareNextTo(slice.end()) <= 0))
+                   && (!filterEnd || deserializer.compareNextTo(slice.end()) < 0))
             {
                 rowOffsets.push(currentPosition);
                 if (deserializer.nextIsRow())
