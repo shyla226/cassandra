@@ -1285,9 +1285,14 @@ public abstract class LegacyLayout
                     return false;
                 }
 
-                builder.addComplexDeletion(tombstone.start.collectionName, tombstone.deletionTime);
-                if (rowDeletion == null || tombstone.deletionTime.supersedes(rowDeletion.deletionTime))
-                    collectionDeletion = tombstone;
+                // Ignore the complex deletion if the column is simple. Complex deletions may end up in the simple
+                // columns, when the complex column got dropped and re-created as simple. See APOLLO-480 for details.
+                if (tombstone.start.collectionName.isComplex())
+                {
+                    builder.addComplexDeletion(tombstone.start.collectionName, tombstone.deletionTime);
+                    if (rowDeletion == null || tombstone.deletionTime.supersedes(rowDeletion.deletionTime))
+                        collectionDeletion = tombstone;
+                }
                 return true;
             }
             return false;
