@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
 
@@ -523,11 +524,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         private final DeletionPurger purger;
         private int nowInSec;
 
-        public PurgeOp(int nowInSec, int gcBefore, int oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
+        public PurgeOp(int nowInSec, int gcBefore, Supplier<Integer> oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
         {
             this.nowInSec = nowInSec;
             this.purger = (timestamp, localDeletionTime) ->
-                          !(onlyPurgeRepairedTombstones && localDeletionTime >= oldestUnrepairedTombstone)
+                          !(onlyPurgeRepairedTombstones && localDeletionTime >= oldestUnrepairedTombstone.get())
                           && localDeletionTime < gcBefore;
         }
 
@@ -535,13 +536,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         {
             PartitionHeader header = partition.header;
             if (purger.shouldPurge(header.partitionLevelDeletion))
-                header = new PartitionHeader(header.metadata, header.partitionKey, header.partitionLevelDeletion, header.columns, header.isReverseOrder, header.stats);
+                return FlowablePartitions.empty(header.metadata, header.partitionKey, header.isReverseOrder);
 
             FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
                                                                                  applyToStatic(partition.staticRow),
                                                                                  partition.content.lift(this));
-            // We don't have partition emptiness test on flowables.
-            // tpc TODO If necessary, implement an isEmpty tester that caches first entry. Prefer not to!
             return purged;
         }
 
@@ -564,9 +563,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     {
         return iterator.map(new PurgeOp(nowInSec(),
                                         cfs.gcBefore(nowInSec()),
-                                        oldestUnrepairedTombstone(),
+                                        this::oldestUnrepairedTombstone,
                                         cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones())
-                            ::applyToPartition);
+                            ::applyToPartition).filter(p -> !(p instanceof FlowablePartitions.EmptyFlowableUnfilteredPartition));
     }
 
     /**

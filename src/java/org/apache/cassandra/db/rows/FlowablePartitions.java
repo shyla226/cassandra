@@ -120,6 +120,14 @@ public class FlowablePartitions
         }
     }
 
+    public static class EmptyFlowableUnfilteredPartition extends FlowableUnfilteredPartition
+    {
+        public EmptyFlowableUnfilteredPartition(PartitionHeader header)
+        {
+            super(header, Rows.EMPTY_STATIC_ROW, Flowable.empty());
+        }
+    }
+
     public static FlowableUnfilteredPartition fromIterator(UnfilteredRowIterator iter, Scheduler callOn)
     {
         Flowable<Unfiltered> data = FlowableUtils.fromCloseableIterator(iter);
@@ -133,9 +141,7 @@ public class FlowablePartitions
 
     public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
     {
-        return new FlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS),
-                                               Rows.EMPTY_STATIC_ROW,
-                                               Flowable.empty());
+        return new EmptyFlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS));
     }
 
     public static FlowableUnfilteredPartition merge(List<FlowableUnfilteredPartition> flowables, int nowInSec)
