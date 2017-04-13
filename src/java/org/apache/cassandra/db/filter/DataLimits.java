@@ -118,6 +118,7 @@ public abstract class DataLimits
 
     public abstract boolean isUnlimited();
     public abstract boolean isDistinct();
+    public abstract boolean isZero();
 
     public boolean isGroupByLimit()
     {
@@ -367,6 +368,11 @@ public abstract class DataLimits
         public boolean isDistinct()
         {
             return isDistinct;
+        }
+
+        public boolean isZero()
+        {
+            return rowLimit == 0 || perPartitionLimit == 0;
         }
 
         public DataLimits forPaging(int pageSize)
@@ -664,6 +670,11 @@ public abstract class DataLimits
         public boolean isGroupByLimit()
         {
             return true;
+        }
+
+        public boolean isZero()
+        {
+            return groupLimit == 0 || groupPerPartitionLimit == 0 || rowLimit == 0;
         }
 
         public boolean isUnlimited()

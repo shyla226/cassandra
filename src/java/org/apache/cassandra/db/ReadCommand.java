@@ -345,6 +345,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     @Override
     public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
     {
+        //Easy win: Avoid doing any work when limit is zero
+        if (limits().isZero())
+            return Flowable.empty();
+
         long startTimeNanos = System.nanoTime();
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
         Index index = getIndex(cfs);
