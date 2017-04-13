@@ -95,7 +95,7 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
         volatile boolean received = true;
 
         /** The subscriber to the current source, wrapped in utility class. */
-        ConcatItem current;
+        volatile ConcatItem current;
 
         Concat(Subscriber<? super O> subscriber, Function<I, Flowable<O>> mapper)
         {
@@ -132,7 +132,8 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
             loop:
             while (true)
             {
-                if (current == null)
+                ConcatItem cur = current;
+                if (cur == null)
                 { // no current source, request one
                     if (complete)
                     {
@@ -158,10 +159,24 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
                 { // request the next item to the current source and increment the number of items requested
                     ++requested;
                     received = false;
-                    current.source.request(1);
+                    // We may receive onComplete from child between getting cur and being here, or even while we
+                    // are calling request, so we can't really not do requests after we have received completion.
+                    // That's ok; we only need to make sure our flowables are OK with being requested after (or while)
+                    // they have sent onComplete.
+                    cur.source.request(1);
                     synchronized (this)
                     {
-                        if (!received || cancelled || requested == requests)
+                        // Check if current completed while we were performing the request.
+                        cur = current;
+                        if (cur == null && !received)
+                        {
+                            // If so, and the request did not result in an onNext or onComplete (possibly because
+                            // onComplete was racing with us getting cur and making decision based on it), we need to
+                            // get another item. However, it could call onComplete later or in a race with this.
+                            received = true;
+                            ++requests;
+                        }
+                        else if (!received || cancelled || requested == requests)
                         {
                             requesting = false;
                             return;
@@ -190,10 +205,8 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
                 return;
             }
 
-            assert current == null;
-            current = new ConcatItem();
-            subscribed = true;
-            child.subscribe(current);
+            ConcatItem item = new ConcatItem();
+            child.subscribe(item);
             // onSubscribe will call doRequests
         }
 
@@ -220,7 +233,10 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
 
             public void onSubscribe(Subscription subscription)
             {
+                assert current == null;
                 source = subscription;
+                current = this;
+                subscribed = true;
                 doRequests();
             }
 
@@ -239,13 +255,18 @@ public class FlowableConcatLazy<I, O> implements FlowableOperator<O, I>
 
             public void onComplete()
             {
-                current = null;
-                if (!received)
+                boolean needsRequest = false;
+                synchronized (Concat.this)  // synchronized to prevent issuing a request twice here and in doRequests
                 {
-                    // This was in response to a request that did not get onNext. We need to re-request from the next child.
-                    received = true;
-                    request(1);
+                    current = null;
+                    if (!received)
+                    {
+                        received = true;
+                        needsRequest = true;
+                    }
                 }
+                if (needsRequest)
+                    request(1);
             }
         }
     }
