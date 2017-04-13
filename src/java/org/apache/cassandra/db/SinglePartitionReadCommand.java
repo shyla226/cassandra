@@ -357,8 +357,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        return FlowableThreads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-                                              NettyRxScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
+        return queryMemtableAndDisk(cfs, executionController)
+                   .lift(FlowableThreads.requestOnCore(NettyRxScheduler.getCoreForKey(metadata().keyspace, partitionKey())));
     }
 
     /**
