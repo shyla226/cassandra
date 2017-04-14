@@ -69,6 +69,7 @@ public class StreamSessionTest
         tbm = CreateTableStatement.parse(String.format("CREATE TABLE %s (k INT PRIMARY KEY, v INT)", table), keyspace).build();
         SchemaLoader.createKeyspace(keyspace, KeyspaceParams.simple(1), tbm);
         cfs = Schema.instance.getColumnFamilyStoreInstance(tbm.id);
+        cfs.disableAutoCompaction();
     }
 
     private SSTableReader createSSTable(Runnable queryable)
@@ -110,6 +111,7 @@ public class StreamSessionTest
     @Test
     public void incrementalSSTableSelection() throws Exception
     {
+
         // make 3 tables, 1 unrepaired, 2 pending repair with different repair ids, and 1 repaired
         SSTableReader sstable1 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (1, 1)", keyspace, table)));
         SSTableReader sstable2 = createSSTable(() -> QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (k, v) VALUES (2, 2)", keyspace, table)));
