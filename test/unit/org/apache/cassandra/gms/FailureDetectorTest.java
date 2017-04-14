@@ -33,6 +33,7 @@ import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -49,7 +50,6 @@ public class FailureDetectorTest
         System.setProperty("cassandra.max_local_pause_in_ms", "20000");
 
         DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         NettyRxScheduler.register();
     }
 
@@ -59,7 +59,7 @@ public class FailureDetectorTest
         StorageService ss = StorageService.instance;
         TokenMetadata tmd = ss.getTokenMetadata();
         tmd.clearUnsafe();
-        IPartitioner partitioner = new RandomPartitioner();
+        IPartitioner partitioner = new Murmur3Partitioner();
         VersionedValue.VersionedValueFactory valueFactory = new VersionedValue.VersionedValueFactory(partitioner);
 
         ArrayList<Token> endpointTokens = new ArrayList<>();

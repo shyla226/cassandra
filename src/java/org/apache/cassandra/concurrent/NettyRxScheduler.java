@@ -599,9 +599,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     private static void initRx()
     {
-        final Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
         RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
-        RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(e -> CassandraDaemon.defaultExceptionHandler.accept(Thread.currentThread(), e));
 
         /**
