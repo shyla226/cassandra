@@ -85,6 +85,12 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         return slices.size() - (next + 1);
     }
 
+    protected int currentSliceIndex()
+    {
+        assert slice > 0;
+        return slices.size() - slice;
+    }
+
     protected boolean hasMoreSlices()
     {
         return slice < slices.size();
@@ -139,11 +145,19 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             // If we have read the data, just create the iterator for the slice. Otherwise, read the data.
             if (buffer == null)
             {
-                buffer = createBuffer(1);
-                // Note that we can reuse that buffer between slices (we could alternatively re-read from disk
-                // every time, but that feels more wasteful) so we want to include everything from the beginning.
-                // We can stop at the slice end however since any following slice will be before that.
-                loadFromDisk(null, slice.end(), false, false);
+                try
+                {
+                    buffer = createBuffer(1);
+                    // Note that we can reuse that buffer between slices (we could alternatively re-read from disk
+                    // every time, but that feels more wasteful) so we want to include everything from the beginning.
+                    // We can stop at the slice end however since any following slice will be before that.
+                    loadFromDisk(null, slice.end(), false, false);
+                }
+                catch (Rebufferer.NotInCacheException nice)
+                {
+                    buffer = null;
+                    throw nice;
+                }
             }
             setIterator(slice);
         }

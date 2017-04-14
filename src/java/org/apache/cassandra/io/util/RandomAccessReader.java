@@ -136,7 +136,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         assert mark instanceof BufferedRandomAccessFileMark;
         long bytes = current() - ((BufferedRandomAccessFileMark) mark).pointer;
-        assert bytes >= 0;
+        assert bytes >= 0 : bytes;
         return bytes;
     }
 

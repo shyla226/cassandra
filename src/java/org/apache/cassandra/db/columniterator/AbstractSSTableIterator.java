@@ -186,11 +186,18 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         return slices.get(nextSliceIndex());
     }
 
+    private Slice currentSlice()
+    {
+        return slices.get(currentSliceIndex());
+    }
+
     /**
      * Returns the index of the next slice to process.
      * @return the index of the next slice to process
      */
     protected abstract int nextSliceIndex();
+
+    protected abstract int currentSliceIndex();
 
     /**
      * Checks if there are more slice to process.
@@ -229,6 +236,14 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     {
         assert reader != null;
         reader.resetState();
+        try
+        {
+            reader.setForSlice(currentSlice());
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public TableMetadata metadata()
@@ -525,17 +540,6 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         {
             this.currentIndexIdx = lastIndexIdx;
             this.mark = lastMark;
-            if (mark != null)
-            {
-                try
-                {
-                    this.reader.file.reset(mark);
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            }
         }
 
         public boolean isDone()

@@ -76,6 +76,12 @@ public class SSTableIterator extends AbstractSSTableIterator
         return next;
     }
 
+    protected int currentSliceIndex()
+    {
+        assert slice > 0;
+        return slice - 1;
+    }
+
     protected boolean hasMoreSlices()
     {
         return slice < slices.size();
