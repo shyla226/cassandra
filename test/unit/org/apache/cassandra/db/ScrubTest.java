@@ -550,7 +550,7 @@ public class ScrubTest
         assertEquals("boo", iter.next().getString("c"));
     }
 
-    @Test /* CASSANDRA-5174 */
+    //@Test TPC no BOP /* CASSANDRA-5174 */
     public void testScrubKeysIndex_preserveOrder() throws IOException, ExecutionException, InterruptedException
     {
         //If the partitioner preserves the order then SecondaryIndex uses BytesType comparator,
@@ -558,7 +558,7 @@ public class ScrubTest
         testScrubIndex(CF_INDEX1_BYTEORDERED, COL_INDEX, false, true);
     }
 
-    @Test /* CASSANDRA-5174 */
+    //@Test TPC no BOP /* CASSANDRA-5174 */
     public void testScrubCompositeIndex_preserveOrder() throws IOException, ExecutionException, InterruptedException
     {
         testScrubIndex(CF_INDEX2_BYTEORDERED, COL_INDEX, true, true);
