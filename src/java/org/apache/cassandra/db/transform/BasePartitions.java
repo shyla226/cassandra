@@ -52,7 +52,7 @@ implements BasePartitionIterator<R>
         return value == null ? null : transformation.applyToPartition(value);
     }
 
-    void add(Transformation transformation)
+    public void add(Transformation transformation)
     {
         transformation.attachTo(this);
         super.add(transformation);

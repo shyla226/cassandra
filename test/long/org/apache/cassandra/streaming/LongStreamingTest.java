@@ -56,6 +56,8 @@ public class LongStreamingTest
         StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         NettyRxScheduler.register();
 
+        DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+
         SchemaLoader.cleanupAndLeaveDirs();
         Keyspace.setInitialized();
         StorageService.instance.initServer();

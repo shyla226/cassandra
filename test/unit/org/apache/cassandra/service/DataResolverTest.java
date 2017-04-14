@@ -40,6 +40,7 @@ import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.partitions.*;
@@ -935,10 +936,12 @@ public class DataResolverTest
 
     public Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
     {
+        final PartitionsPublisher partitions = PartitionsPublisher.create(cmd,
+                                                                          controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
         return Response.testResponse(from,
                                      FBUtilities.getBroadcastAddress(),
                                      Verbs.READS.READ,
-                                     ReadResponse.createRemoteDataResponse(partitionIterator, cmd));
+                                     ReadResponse.createRemoteDataResponse(partitions, cmd));
     }
 
     private RangeTombstone tombstone(Object start, Object end, long markedForDeleteAt, int localDeletionTime)

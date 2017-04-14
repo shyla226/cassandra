@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.Lock;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
@@ -490,7 +489,7 @@ public class Keyspace
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
         Completable c = Completable.using(
-            () -> requiresViewUpdate ? new Lock[mutation.getTableIds().size()] : null,
+            () -> requiresViewUpdate ? new Semaphore[mutation.getTableIds().size()] : null,
 
             // completable source
             (locks) ->
@@ -508,7 +507,7 @@ public class Keyspace
                     {
                         TableId tableId = idIterator.next();
                         int lockKey = Objects.hash(mutation.key().getKey(), tableId);
-                        Lock lock = null;
+                        Semaphore lock = null;
 
                         if (TEST_FAIL_MV_LOCKS_COUNT == 0)
                             lock = ViewManager.acquireLockFor(lockKey);
@@ -522,11 +521,12 @@ public class Keyspace
                             {
                                 for (int j = 0; j < i; j++)
                                 {
-                                    locks[j].unlock();
+                                    ViewManager.release(locks[j]);
                                     locks[j] = null;
                                 }
 
-                                logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
+                                if (logger.isTraceEnabled())
+                                    logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
                                 Tracing.trace("Could not acquire MV lock");
                                 return Completable.error(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
                             }
@@ -534,17 +534,21 @@ public class Keyspace
                             {
                                 for (int j = 0; j < i; j++)
                                 {
-                                    locks[j].unlock();
+                                    ViewManager.release(locks[j]);
                                     locks[j] = null;
                                 }
 
                                 // This view update can't happen right now, so schedule another attempt later.
+                                if (logger.isTraceEnabled())
+                                    logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
                                 return Completable.defer(() -> applyInternal(mutation, writeCommitLog, true, isDroppable))
                                         .observeOn(NettyRxScheduler.instance());
                             }
                         }
                         else
                         {
+                            if (logger.isTraceEnabled())
+                                logger.trace("Acquired lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
                             locks[i] = lock;
                         }
                     }
@@ -599,12 +603,13 @@ public class Keyspace
                                 {
                                     Tracing.trace("Creating materialized view mutations from base table replica");
 
-                                    viewUpdateCompletable = viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, writeCommitLog, baseComplete);
-                                    viewUpdateCompletable.doOnError(exc -> {
-                                            JVMStabilityInspector.inspectThrowable(exc);
-                                            logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s.%s",
-                                                    upd.metadata().keyspace, upd.metadata().name), exc);
-                                    });
+                                    viewUpdateCompletable = viewManager.forTable(upd.metadata().id)
+                                                                       .pushViewReplicaUpdates(upd, writeCommitLog, baseComplete)
+                                                                       .doOnError(exc -> {
+                                                                           JVMStabilityInspector.inspectThrowable(exc);
+                                                                           logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s.%s",
+                                                                                                      upd.metadata().keyspace, upd.metadata().name), exc);
+                                                                       });
                                 }
 
                                 Tracing.trace("Adding to {} memtable", upd.metadata().name);
@@ -616,7 +621,7 @@ public class Keyspace
                                 Completable memtableCompletable = cfs.applyInternal(upd, indexTransaction, opGroup, pos);
                                 if (requiresViewUpdate)
                                 {
-                                    memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
+                                    memtableCompletable = memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
                                     memtablePutCompletables.add(viewUpdateCompletable);
                                 }
                                 memtablePutCompletables.add(memtableCompletable);
@@ -639,25 +644,16 @@ public class Keyspace
             {
                 if (locks != null)
                 {
-
-                    //The locks need to be accessed on the same thread
-                    //they were created
-                    schedulerForPartition.scheduleDirect(() ->
-                         {
-                             try
-                             {
-                                 for (Lock lock : locks)
-                                 {
-                                     if (lock != null)
-                                         lock.unlock();
-                                 }
-                             }
-                             catch (Throwable t)
-                             {
-                                 JVMStabilityInspector.inspectThrowable(t);
-                                 logger.error("Fail to release view locks", t);
-                             }
-                         });
+                     try
+                     {
+                         for (Semaphore lock : locks)
+                            ViewManager.release(lock);
+                     }
+                     catch (Throwable t)
+                     {
+                         JVMStabilityInspector.inspectThrowable(t);
+                         logger.error("Fail to release view locks", t);
+                     }
                 }
             }
         );

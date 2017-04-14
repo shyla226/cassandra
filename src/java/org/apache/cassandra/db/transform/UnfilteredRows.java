@@ -42,7 +42,7 @@ final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> i
     }
 
     @Override
-    void add(Transformation add)
+    public void add(Transformation add)
     {
         super.add(add);
         regularAndStaticColumns = add.applyToPartitionColumns(regularAndStaticColumns);

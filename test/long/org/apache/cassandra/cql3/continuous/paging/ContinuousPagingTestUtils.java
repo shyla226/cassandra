@@ -864,8 +864,8 @@ class ContinuousPagingTestUtils
 
             private void checkError(Throwable t, int expectedPageNum)
             {
-                assertTrue(exception != null);
-                assertEquals(exception, t.getClass());
+                assertTrue("Unexpected exception: " + t, exception != null);
+                assertEquals("Unexpected exception: " + t, exception, t.getClass());
                 assertEquals(failAfter, numPagesReceived);
                 assertEquals(numPagesReceived, expectedPageNum - 1);
             }

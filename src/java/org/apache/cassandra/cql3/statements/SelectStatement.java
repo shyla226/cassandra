@@ -744,7 +744,7 @@ public class SelectStatement implements CQLStatement
             pager = null;
 
             schedulingTimeNano = System.nanoTime();
-            StageManager.getStage(Stage.CONTINUOUS_PAGING).submit(() -> retrieveMultiplePages(pagingState, builder));
+            Schedulers.io().scheduleDirect(() -> retrieveMultiplePages(pagingState, builder));
         }
     }
 

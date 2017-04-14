@@ -19,6 +19,7 @@ package org.apache.cassandra.db.rows;
 
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.db.transform.BaseIterator;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 
@@ -43,6 +44,9 @@ public abstract class FlowablePartitionBase<T>
      * associated resources when the subscription completes (complete/error/cancel).
      */
     public final CsFlow<T> content;
+
+    /** Signalled by a stopping transformation when it wants to stop */
+    public BaseIterator.Stop stop = new BaseIterator.Stop();
 
     public FlowablePartitionBase(PartitionHeader header,
                                  Row staticRow,

@@ -220,25 +220,6 @@ public class PartitionUpdate extends AbstractBTreePartition
     /**
      * Turns the given iterator into an update.
      *
-     * @param partition the partition to turn into updates.
-     * @param filter the column filter used when querying {@code iterator}. This is used to make
-     * sure we don't include data for which the value has been skipped while reading (as we would
-     * then be writing something incorrect).
-     */
-    public static CsFlow<PartitionUpdate> fromFlow(FlowableUnfilteredPartition partition, ColumnFilter filter)
-    {
-        FlowableUnfilteredPartition queriedOnly = UnfilteredRowIterators.withOnlyQueriedData(partition, filter);
-        CsFlow<Holder> holder = build(queriedOnly, 16, true);
-        return holder.map(h -> new PartitionUpdate(partition.header.metadata,
-                                                   partition.header.partitionKey,
-                                                   h,
-                                                   (MutableDeletionInfo) h.deletionInfo,
-                                                   false));
-    }
-
-    /**
-     * Turns the given iterator into an update.
-     *
      * @param iterator the iterator to turn into updates.
      * @param filter the column filter used when querying {@code iterator}. This is used to make
      * sure we don't include data for which the value has been skipped while reading (as we would

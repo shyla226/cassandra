@@ -27,6 +27,7 @@ import java.util.UUID;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -57,6 +58,7 @@ public class TracingNetworkTest extends CQLTester
         {
             client.connect(false);
 
+            // Perform a mutation
             QueryMessage query = new QueryMessage(String.format("INSERT INTO %s.%s (pk, v) VALUES (1, 'abc')", KEYSPACE, currentTable()),
                                                   QueryOptions.DEFAULT);
             query.setTracingRequested();
@@ -65,6 +67,9 @@ public class TracingNetworkTest extends CQLTester
             UUID id = resp.getTracingId();
             assertNotNull(id);
 
+            waitForTracingEvents();
+
+            // Query the tracing events
             query = new QueryMessage(String.format("SELECT * from system_traces.events where session_id = %s", id),
                                      QueryOptions.DEFAULT);
             resp = client.execute(query);
@@ -74,7 +79,7 @@ public class TracingNetworkTest extends CQLTester
             ResultSet tracingEvents = ((ResultMessage.Rows)resp).result;
             assertNotNull(tracingEvents);
 
-            Set<String> loggingThreads = new HashSet<>();
+            // log the events
             for (List<ByteBuffer> row : tracingEvents.rows)
             {
                 StringBuilder rowText = new StringBuilder("TRACING: ");
@@ -83,19 +88,13 @@ public class TracingNetworkTest extends CQLTester
                     String name = tracingEvents.metadata.names.get(i).name.toCQLString();
                     String val = tracingEvents.metadata.names.get(i).type.asCQL3Type().toCQLLiteral(row.get(i), ProtocolVersion.V4);
                     rowText.append(String.format("%s=%s, ", name, val));
-
-                    if (name.equals("thread"))
-                        loggingThreads.add(val);
                 }
 
                 logger.debug(rowText.toString());
             }
 
-            // for inserts at least two threads should participate in the insert
-            // because the mutation is applied on the rx thread corresponding to the correct
-            // token range, which for pk=1 is monitoredEpollEventLoopGroup-1-3, whilst the request
-            // is handled by monitoredEpollEventLoopGroup-1-2
-            assertTrue(loggingThreads.size() > 1);
+            // check we have at least 3 events, the current events for mutations (parse/det. replicas/apply mutation)
+            assertTrue(tracingEvents.rows.size() >= 3);
         }
     }
 }

@@ -86,7 +86,7 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
     // Should only be used for the on-wire format.
     public void serialize(UnfilteredRowIterator iterator, ColumnFilter selection, DataOutputPlus out) throws IOException
     {
-        serialize(iterator, selection, out,-1);
+        serialize(iterator, selection, out, -1);
     }
 
     // Should only be used for the on-wire format.
@@ -99,30 +99,39 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
                                                              iterator.columns(),
                                                              iterator.stats());
 
-        serialize(iterator, header, selection, out, rowEstimate);
+        serializeBeginningOfPartition(iterator, header, selection, out, rowEstimate);
+
+        while (iterator.hasNext())
+            serialize(iterator.next(), header, out);
+
+        serializeEndOfPartition(out);
     }
 
     // Should only be used for the on-wire format.
-    public void serialize(UnfilteredRowIterator iterator, SerializationHeader header, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
+    public void serializeBeginningOfPartition(PartitionTrait partition,
+                                              SerializationHeader header,
+                                              ColumnFilter selection,
+                                              DataOutputPlus out,
+                                              int rowEstimate) throws IOException
     {
         assert !header.isForSSTable();
 
-        ByteBufferUtil.writeWithVIntLength(iterator.partitionKey().getKey(), out);
+        ByteBufferUtil.writeWithVIntLength(partition.partitionKey().getKey(), out);
 
         int flags = 0;
-        if (iterator.isReverseOrder())
+        if (partition.isReverseOrder())
             flags |= IS_REVERSED;
 
-        if (iterator.isEmpty())
+        if (partition.isEmpty())
         {
             out.writeByte((byte)(flags | IS_EMPTY));
             return;
         }
 
-        DeletionTime partitionDeletion = iterator.partitionLevelDeletion();
+        DeletionTime partitionDeletion = partition.partitionLevelDeletion();
         if (!partitionDeletion.isLive())
             flags |= HAS_PARTITION_DELETION;
-        Row staticRow = iterator.staticRow();
+        Row staticRow = partition.staticRow();
         boolean hasStatic = staticRow != Rows.EMPTY_STATIC_ROW;
         if (hasStatic)
             flags |= HAS_STATIC_ROW;
@@ -142,9 +151,15 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
 
         if (rowEstimate >= 0)
             out.writeUnsignedVInt(rowEstimate);
+    }
 
-        while (iterator.hasNext())
-            unfilteredSerializer.serialize(iterator.next(), header, out);
+    public void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out) throws IOException
+    {
+        unfilteredSerializer.serialize(unfiltered, header, out);
+    }
+
+    public void serializeEndOfPartition(DataOutputPlus out) throws IOException
+    {
         unfilteredSerializer.writeEndOfPartition(out);
     }
 

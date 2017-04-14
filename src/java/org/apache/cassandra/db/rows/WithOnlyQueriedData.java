@@ -42,7 +42,7 @@ public class WithOnlyQueriedData<I extends BaseRowIterator<?>> extends Transform
     }
 
     @Override
-    protected Row applyToStatic(Row row)
+    public Row applyToStatic(Row row)
     {
         return row.withOnlyQueriedData(filter);
     }

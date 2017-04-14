@@ -498,6 +498,11 @@ public class DataResolver extends ResponseResolver
                 return doShortReadRetry(cmd);
             }
 
+            public boolean closeNonAttachedContents()
+            {
+                return false;
+            }
+
             /**
              * Returns the number of results counted by the counter.
              *

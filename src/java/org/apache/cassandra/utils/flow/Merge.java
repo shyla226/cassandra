@@ -22,6 +22,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.Ignore;
+
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -118,14 +120,14 @@ public class Merge<In, Out> extends CsFlow<Out>
      *
      * For more formal definitions and proof of correctness, see CASSANDRA-8915.
      */
+    // the candidates are stashed back onto the heap and closed when close() is called,
+    // Eclipse Warnings cannot work it out and complains in several places
+    @SuppressWarnings("resource")
     static final class ManyToOne<In, Out> implements CsSubscription
     {
         protected Candidate<In>[] heap;
         private final Reducer<In, Out> reducer;
         CsSubscriber<Out> subscriber;
-        long requested;                 // check for possible threading issue
-                                        // if was 0 on request, advance()
-                                        // if > 0 at end of consume(), advance()
         AtomicInteger advancing = new AtomicInteger();
 
         /** Number of non-exhausted iterators. */
@@ -507,7 +509,7 @@ public class Merge<In, Out> extends CsFlow<Out>
 
         public void consume(Reducer<In, ?> reducer)
         {
-            assert state == State.PROCESSED;
+            assert state == State.PROCESSED : "Was expecting State.PROCESSED, got: " + state.toString();
             state = State.NEEDS_REQUEST;
             if (error != null)
                 reducer.error(error);

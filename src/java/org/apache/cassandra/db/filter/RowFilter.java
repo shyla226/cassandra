@@ -19,10 +19,7 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,28 +29,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionPurger;
-import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
-import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.db.context.CounterContext;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.marshal.ListType;
-import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.marshal.MapType;
-import org.apache.cassandra.db.marshal.SetType;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.CellPath;
-import org.apache.cassandra.db.rows.ComplexColumnData;
-import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.context.*;
+import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -62,7 +44,6 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -139,12 +120,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * Filters the provided iterator so that only the row satisfying the expression of this filter
      * are included in the resulting iterator.
      *
-     * @param iter the iterator to filter
+     * @param publisher the partitions to filter
      * @param nowInSec the time of query in seconds.
      * @return the filtered iterator.
      */
-//    public abstract UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec);
-    public abstract CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec);
+    public abstract PartitionsPublisher filter(PartitionsPublisher publisher, TableMetadata metadata, int nowInSec);
 
     /**
      * Whether the provided row in the provided partition satisfies this filter.
@@ -265,10 +245,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        public CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
+        public PartitionsPublisher filter(PartitionsPublisher publisher, TableMetadata metadata, int nowInSec)
         {
             if (expressions.isEmpty())
-                return iter;
+                return publisher;
 
             List<Expression> partitionLevelExpressions = new ArrayList<>();
             List<Expression> rowLevelExpressions = new ArrayList<>();
@@ -280,38 +260,24 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     rowLevelExpressions.add(e);
             }
 
-            return iter.skippingMap(
-                partition ->
+            long numberOfRegularColumnExpressions = rowLevelExpressions.size();
+            final boolean filterNonStaticColumns = numberOfRegularColumnExpressions > 0;
+
+            class IsSatisfiedFilter extends Transformation
+            {
+                DecoratedKey pk;
+
+                @Override
+                public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
                 {
-                    DecoratedKey pk = partition.header.partitionKey;
+                    pk = partition.header.partitionKey;
 
                     // Short-circuit all partitions that won't match based on static and partition keys
                     for (Expression e : partitionLevelExpressions)
-                        if (!e.isSatisfiedBy(metadata, pk, partition.staticRow))
-                        {
-                            partition.unused();
+                        if (!e.isSatisfiedBy(metadata, partition.header.partitionKey, partition.staticRow))
                             return null;
-                        }
 
-                    CsFlow<Unfiltered> content = partition.content.skippingMap(
-                        unfiltered ->
-                        {
-                            if (unfiltered.isRow())
-                            {
-                                Row purged = ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec);
-                                if (purged == null)
-                                    return null;
-
-                                for (Expression e : rowLevelExpressions)
-                                    if (!e.isSatisfiedBy(metadata, pk, purged))
-                                        return null;
-                            }
-
-                            return unfiltered;
-                        });
-
-                    // Note: The old code would reject a partition here if it did not have rows and
-                    //          rowLevelExpressions.size() > 0
+                    // TODO: We reject a partition here if it does not have rows and filterNonStaticColumns is true
                     // This makes a material difference if the partition has a static row, as that static row will
                     // disappear in this case.
                     // I do not believe removing a static row at this point, before merging the data from all replicas,
@@ -321,18 +287,28 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     // possible, though this may require specific treatment for synchronization between nodes for this
                     // case (so that digests do not include static rows for non-matches, but they are included on
                     // full reads after digest mismatch).
-                    // Should I turn out to be mistaken, it is not impossible to do the removal here, but it is
-                    // incredibly complex (we need to get first item of content; cache that item; delay doing
-                    // onNext/onComplete on the _partition_ iterator until this happens) and needs a complete rewrite
-                    // of RowLimit to CsFlow.
 
-                    FlowableUnfilteredPartition iterator = new FlowableUnfilteredPartition(
-                        partition.header,
-                        partition.staticRow,
-                        content);
+                    if (filterNonStaticColumns && !partition.hasData)
+                        return null;
 
-                    return iterator;
-                });
+                    return Transformation.apply(partition, this);
+                }
+
+                public Row applyToRow(Row row)
+                {
+                    Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
+                    if (purged == null)
+                        return null;
+
+                    for (Expression e : rowLevelExpressions)
+                        if (!e.isSatisfiedBy(metadata, pk, purged))
+                            return null;
+
+                    return row;
+                }
+            }
+
+            return publisher.transform(new IsSatisfiedFilter());
         }
 
         protected RowFilter withNewExpressions(List<Expression> expressions)

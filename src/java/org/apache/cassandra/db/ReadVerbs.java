@@ -18,11 +18,11 @@
 package org.apache.cassandra.db;
 
 import java.net.InetAddress;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.Monitor;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.dht.BoundsVersion;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.net.Verb.RequestResponse;
@@ -73,30 +73,23 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                          ? DatabaseDescriptor.getReadRpcTimeout()
                                          : DatabaseDescriptor.getRangeRpcTimeout())
                      .handler((from, command, monitor) ->
-                                  {
-                                      final boolean isLocal = from.equals(local);
+                              {
+                                  final boolean isLocal = from.equals(local);
 
-                                      // Note that we want to allow locally delivered reads no matter what
-                                      if (StorageService.instance.isBootstrapMode() && !isLocal)
-                                          throw new RuntimeException("Cannot service reads while bootstrapping!");
+                                  // Note that we want to allow locally delivered reads no matter what
+                                  if (StorageService.instance.isBootstrapMode() && !isLocal)
+                                      throw new RuntimeException("Cannot service reads while bootstrapping!");
 
-                                      // Monitoring tests want to artificially slow down their reads, but we don't want this
-                                      // to impact the queries drivers do on system/schema tables
-                                      if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
-                                          monitor = null;
+                                  // Monitoring tests want to artificially slow down their reads, but we don't want this
+                                  // to impact the queries drivers do on system/schema tables
+                                  if (Monitor.isTesting() && SchemaConstants.isSystemKeyspace(command.metadata().keyspace))
+                                      monitor = null;
 
-                                      // TODO - this code is temporary because it is materializing the partitions in memory and we don't
-                                      // need to do this for remote responses, we should serialize and calculate the digest directly from
-                                      // CsFlow partitions
-                                      return command.executeLocally(monitor)
-                                             .flatMap(partition -> ImmutableBTreePartition.create(partition))
-                                             .reduceToFuture(new ReadResponse.InMemoryPartitionsIterator(command),
-                                                             (it, partition) ->
-                                                             {
-                                                                 it.add(partition);
-                                                                 return it;
-                                                             })
-                                             .thenApply(it -> command.createResponse(it, isLocal));
-                                  });
+                                  CompletableFuture<ReadResponse> result = new CompletableFuture<>();
+                                  command.createResponse(command.executeLocally(monitor), isLocal)
+                                         .subscribe(result::complete, result::completeExceptionally);
+
+                                  return result;
+                              });
     }
 }

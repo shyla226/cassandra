@@ -31,6 +31,7 @@ import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.db.transform.BasePartitions;
 import org.apache.cassandra.db.transform.BaseRows;
 import org.apache.cassandra.db.transform.StoppingTransformation;
@@ -177,10 +178,10 @@ public abstract class DataLimits
      */
     public abstract DataLimits withoutState();
 
-    public CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, int nowInSec)
+    public PartitionsPublisher filter(PartitionsPublisher publisher, int nowInSec)
     {
         Counter counter = this.newCounter(nowInSec, false);
-        return Transformation.apply(iter, counter);
+        return publisher.transform(counter);
     }
 
     public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec)
@@ -210,6 +211,9 @@ public abstract class DataLimits
 
         // false means we do not propagate our stop signals onto the iterator, we only count
         private boolean enforceLimits = true;
+
+        // log debug messages, temporary code
+        public boolean log = false;
 
         protected Counter(int nowInSec, boolean assumeLiveData)
         {
@@ -287,7 +291,7 @@ public abstract class DataLimits
         }
 
         @Override
-        protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+        public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
         {
             applyToPartition(partition.header.partitionKey, partition.staticRow);
             return Transformation.apply(partition, this);
@@ -848,8 +852,8 @@ public abstract class DataLimits
             @Override
             public void applyToPartition(DecoratedKey partitionKey, Row staticRow)
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("{} - GroupByAwareCounter.applyToPartition {}", hashCode(),
+                if (log && logger.isDebugEnabled())
+                    logger.debug("{} - GroupByAwareCounter.applyToPartition {}", hashCode(),
                                  ByteBufferUtil.bytesToHex(partitionKey.getKey()));
                 if (partitionKey.getKey().equals(state.partitionKey()))
                 {
@@ -895,10 +899,10 @@ public abstract class DataLimits
             }
 
             @Override
-            protected Row applyToStatic(Row row)
+            public Row applyToStatic(Row row)
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("{} - GroupByAwareCounter.applyToStatic {}/{}",
+                if (log && logger.isDebugEnabled())
+                    logger.debug("{} - GroupByAwareCounter.applyToStatic {}/{}",
                                  hashCode(),
                                  ByteBufferUtil.bytesToHex(currentPartitionKey.getKey()),
                                  row == null ? "null" : row.clustering().toBinaryString());
@@ -917,8 +921,8 @@ public abstract class DataLimits
             @Override
             public Row applyToRow(Row row)
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("{} - GroupByAwareCounter.applyToRow {}/{}",
+                if (log && logger.isDebugEnabled())
+                    logger.debug("{} - GroupByAwareCounter.applyToRow {}/{}",
                                  hashCode(),
                                  ByteBufferUtil.bytesToHex(currentPartitionKey.getKey()),
                                  row.clustering().toBinaryString());
@@ -1118,8 +1122,8 @@ public abstract class DataLimits
             @Override
             public void applyToPartition(DecoratedKey partitionKey, Row staticRow)
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("{} - CQLGroupByPagingLimits.applyToPartition {}",
+                if (log && logger.isDebugEnabled())
+                    logger.debug("{} - CQLGroupByPagingLimits.applyToPartition {}",
                                  hashCode(), ByteBufferUtil.bytesToHex(partitionKey.getKey()));
 
                 if (partitionKey.getKey().equals(lastReturnedKey))

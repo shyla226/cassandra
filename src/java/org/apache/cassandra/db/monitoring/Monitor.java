@@ -20,11 +20,9 @@ package org.apache.cassandra.db.monitoring;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
 
 public class Monitor
 {
@@ -234,32 +232,28 @@ public class Monitor
             abort();
     }
 
-    public CsFlow<FlowableUnfilteredPartition> withMonitoring(CsFlow<FlowableUnfilteredPartition> iter)
+    public Transformation withMonitoring()
     {
-        CheckForAbort checkForAbort = new CheckForAbort();
-        return iter.stoppingMap(next -> checkForAbort.applyToPartition(next));
+        return new CheckForAbort();
     }
 
-    private class CheckForAbort implements CsFlow.FlowableOp<Unfiltered, Unfiltered>
+    private class CheckForAbort extends Transformation
     {
-        protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
+        @Override
+        public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
         {
             check();
-            return new FlowableUnfilteredPartition(iter.header,
-                                                   iter.staticRow,
-                                                   iter.content.apply(this));
+            return Transformation.apply(partition, this);
         }
 
-        public void onNext(CsSubscriber<Unfiltered> subscriber, CsSubscription src, Unfiltered unfiltered)
+        @Override
+        protected Row applyToRow(Row row)
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
 
             check();
-            subscriber.onNext(unfiltered);
+            return row;
         }
     }
-
-
-
 }

@@ -47,7 +47,7 @@ final class Filter extends Transformation
     }
 
     @Override
-    protected Row applyToStatic(Row row)
+    public Row applyToStatic(Row row)
     {
         if (row.isEmpty())
             return Rows.EMPTY_STATIC_ROW;

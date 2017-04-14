@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
@@ -40,6 +41,7 @@ import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -1025,14 +1027,11 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return Single.fromCallable(() ->
-            {
-                UnfilteredPartitionIterator iter = FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata());
-                return limits.filter(UnfilteredPartitionIterators.filter(iter, nowInSec), nowInSec);
-            });
+            return Single.fromCallable(() -> executeLocally(monitor, false).toIterator()) // TODO - add filterint to partition publisher
+                         .map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 
-        public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+        public PartitionsPublisher executeLocally(Monitor monitor)
         {
             return executeLocally(monitor, true);
         }
@@ -1047,20 +1046,29 @@ public class SinglePartitionReadCommand extends ReadCommand
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor, boolean sort)
+        private PartitionsPublisher executeLocally(Monitor monitor, boolean sort)
         {
+            if (commands.size() == 0)
+                return PartitionsPublisher.empty();
+
             if (commands.size() == 1)
                 return commands.get(0).executeLocally(monitor);
 
             List<SinglePartitionReadCommand> commands = this.commands;
             if (sort)
             {
-                commands = new ArrayList<SinglePartitionReadCommand>(commands);
+                commands = new ArrayList<>(commands);
                 commands.sort(Comparator.comparing(SinglePartitionReadCommand::partitionKey));
             }
 
-            return CsFlow.fromIterable(commands)
-                         .flatMap(command -> command.executeLocally(monitor));
+            // TODO - not the exact behavior as befor, e.g. data limits were applied individually per command,
+            // now they will be applied on all commands, same for other transformations, see PartitionPublisher.extend()
+            return commands.get(0)
+                           .executeLocally(monitor)
+                           .extend(commands.stream()
+                                           .skip(1)
+                                           .map(command -> command.executeLocally(monitor))
+                                           .collect(Collectors.toList()));
         }
 
         public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

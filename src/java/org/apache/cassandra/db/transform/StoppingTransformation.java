@@ -20,10 +20,16 @@
  */
 package org.apache.cassandra.db.transform;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import net.nicoulaj.compilecommand.annotations.DontInline;
+import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
 import org.reactivestreams.Subscriber;
@@ -32,6 +38,8 @@ import org.reactivestreams.Subscription;
 // A Transformation that can stop an iterator earlier than its natural exhaustion
 public abstract class StoppingTransformation<I extends BaseRowIterator<?>> extends Transformation<I>
 {
+    private static final Logger logger = LoggerFactory.getLogger(StoppingTransformation.class);
+
     BaseIterator.Stop stop;
     BaseIterator.Stop stopInPartition;
 
@@ -55,7 +63,25 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     protected void stopInPartition()
     {
         if (stopInPartition != null)
+        {
             stopInPartition.isSignalled = true;
+
+            if (this instanceof DataLimits.Counter)
+            {
+                if (((DataLimits.Counter)this).log)
+                {
+                    logger.debug("{} - stopped in partition", hashCode());
+                    logger.debug(FBUtilities.Debug.getStackTrace());
+                }
+            }
+        }
+    }
+
+    @Override
+    public void attachTo(PartitionsPublisher publisher)
+    {
+       // assert this.stop == null; // TODO cleanup: this may happen when extending
+        this.stop = publisher.stop;
     }
 
     @Override
@@ -79,7 +105,7 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     }
 
     @Override
-    protected void onPartitionClose()
+    public void onPartitionClose()
     {
         stopInPartition = null;
     }

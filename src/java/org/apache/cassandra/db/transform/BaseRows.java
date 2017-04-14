@@ -99,7 +99,7 @@ implements BaseRowIterator<R>
     }
 
     @Override
-    void add(Transformation transformation)
+    public void add(Transformation transformation)
     {
         transformation.attachTo(this);
         super.add(transformation);

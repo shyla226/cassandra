@@ -916,6 +916,11 @@ public class FBUtilities
         }
         private static final Map<Object, ThreadInfo> stacks = new ConcurrentHashMap<>();
 
+        public static String getStackTrace()
+        {
+            return getStackTrace(new ThreadInfo());
+        }
+
         public static String getStackTrace(ThreadInfo threadInfo)
         {
             StringBuilder sb = new StringBuilder();
@@ -946,7 +951,7 @@ public class FBUtilities
             logger.info("{}\n{}\n****\n{}",
                         message,
                         getStackTrace(stacks.get(object)),
-                        getStackTrace(new ThreadInfo()));
+                        getStackTrace());
         }
     }
 }

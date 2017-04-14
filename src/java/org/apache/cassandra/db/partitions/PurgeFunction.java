@@ -28,7 +28,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
 {
     private final DeletionPurger purger;
     private final int nowInSec;
-    private boolean isReverseOrder;
 
     public PurgeFunction(int nowInSec, int gcBefore, int oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
     {
@@ -61,7 +60,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     {
         onNewPartition(partition.partitionKey());
 
-        isReverseOrder = partition.isReverseOrder();
         UnfilteredRowIterator purged = Transformation.apply(partition, this);
         if (purged.isEmpty())
         {
@@ -73,15 +71,25 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
         return purged;
     }
 
-    // CsFlow counterpart to above
-    public FlowableUnfilteredPartition apply(FlowableUnfilteredPartition partition)
+    @Override
+    public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
     {
         onNewPartition(partition.header.partitionKey);
 
-        FlowableUnfilteredPartition purged = Transformation.apply(partition, this);
-        // We don't have partition emptiness test on flowables.
-        // tpc TODO If necessary, implement an isEmpty tester that caches first entry. Prefer not to!
-        return purged;
+        FlowableUnfilteredPartition ret = Transformation.apply(partition, this);
+        if (ret.isEmpty())
+        {
+            onEmptyPartitionPostPurge(partition.header.partitionKey);
+            return null;
+        }
+
+        return ret;
+    }
+
+    @Override
+    public FlowableUnfilteredPartition apply(FlowableUnfilteredPartition partition)
+    {
+        return applyToPartition(partition);
     }
 
     @Override
@@ -91,7 +99,7 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
     }
 
     @Override
-    protected Row applyToStatic(Row row)
+    public Row applyToStatic(Row row)
     {
         updateProgress();
         return row.purge(purger, nowInSec);

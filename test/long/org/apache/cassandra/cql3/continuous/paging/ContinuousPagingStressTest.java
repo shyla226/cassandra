@@ -38,7 +38,7 @@ public class ContinuousPagingStressTest extends CQLTester
     @Test
     public void selectEntireTable1KB() throws Throwable
     {
-        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(1000)
+        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(100)
                                                                                                          .numClusterings(1)
                                                                                                          .partitionSize(1024)
                                                                                                          .checkRows(true)
@@ -60,7 +60,7 @@ public class ContinuousPagingStressTest extends CQLTester
     @Test
     public void selectEntireTable10KB() throws Throwable
     {
-        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(1000)
+        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(250)
                                                                                                          .numClusterings(1)
                                                                                                          .partitionSize(10*1024)
                                                                                                          .schemaSupplier(b -> new ContinuousPagingTestUtils.FixedSizeSchema(b.numPartitions, b.numClusterings, b.partitionSize, false))
@@ -82,7 +82,7 @@ public class ContinuousPagingStressTest extends CQLTester
     @Test
     public void selectEntireTable64KB() throws Throwable
     {
-        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(500)
+        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(200)
                                                                                                          .numClusterings(10)
                                                                                                          .partitionSize(64*1024)
                                                                                                          .build())

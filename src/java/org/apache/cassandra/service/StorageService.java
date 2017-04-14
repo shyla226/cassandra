@@ -2706,6 +2706,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public Collection<Token> getLocalTokens()
     {
         Collection<Token> tokens = SystemKeyspace.getSavedTokens();
+        logger.debug("Got tokens {}", tokens);
+
         assert tokens != null && !tokens.isEmpty(); // should not be called before initServer sets this
         return tokens;
     }

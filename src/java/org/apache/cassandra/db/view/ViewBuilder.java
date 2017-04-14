@@ -87,7 +87,7 @@ public class ViewBuilder extends CompactionInfo.Holder
         // and pretend that there is nothing pre-existing.
         UnfilteredRowIterator empty = UnfilteredRowIterators.noRowsIterator(baseCfs.metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, false);
 
-        try(UnfilteredRowIterator data = FlowablePartitions.toIterator(command.executeLocally().blockingSingle()))
+        try(UnfilteredRowIterator data = UnfilteredPartitionIterators.getOnlyElement(command.executeForTests(), command))
         {
             Iterator<Collection<Mutation>> mutations = baseCfs.keyspace.viewManager
                                                       .forTable(baseCfs.metadata.id)

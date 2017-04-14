@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
@@ -389,25 +390,21 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        CsFlow<FlowableUnfilteredPartition> partitions = cmd.executeLocally();
-        try
+        try (UnfilteredPartitionIterator iter = cmd.executeLocally().toIterator())
         {
-            partitions.flatMap(p -> isSystemKeyspaceSchemaPartition(p.header.partitionKey)
-                               ? CsFlow.empty()
-                               : makeUpdateForSchema(p, cmd.columnFilter()))
-                      .reduceBlocking(mutationMap,
-                                      (map, update) ->
-                                      {
-                                          DecoratedKey key = update.partitionKey();
-                                          Mutation mutation = map.computeIfAbsent(key,
-                                                                                  k -> new Mutation(SchemaConstants.SCHEMA_KEYSPACE_NAME, k));
-                                          mutation.add(update);
-                                          return map;
-                                      });
-        }
-        catch (Exception e)
-        {
-            throw Throwables.propagate(e);
+            while (iter.hasNext())
+            {
+                try (UnfilteredRowIterator partition = iter.next())
+                {
+                    if (isSystemKeyspaceSchemaPartition(partition.partitionKey()))
+                        continue;
+
+                    DecoratedKey key = partition.partitionKey();
+                    Mutation mutation = mutationMap.computeIfAbsent(key, k -> new Mutation(SchemaConstants.SCHEMA_KEYSPACE_NAME, key));
+
+                    mutation.add(makeUpdateForSchema(partition, cmd.columnFilter()));
+                }
+            }
         }
     }
 
@@ -416,24 +413,24 @@ public final class SchemaKeyspace
      * This is mainly calling {@code PartitionUpdate.fromIterator} except for the fact that it deals with
      * the problem described in #12236.
      */
-    private static CsFlow<PartitionUpdate> makeUpdateForSchema(FlowableUnfilteredPartition partition, ColumnFilter filter)
+    private static PartitionUpdate makeUpdateForSchema(UnfilteredRowIterator partition, ColumnFilter filter)
     {
         // This method is used during schema migration tasks, and if cdc is disabled, we want to force excluding the
         // 'cdc' column from the TABLES/VIEWS schema table because it is problematic if received by older nodes (see #12236
         // and #12697). Otherwise though, we just simply "buffer" the content of the partition into a PartitionUpdate.
-        if (DatabaseDescriptor.isCDCEnabled() || !TABLES_WITH_CDC_ADDED.contains(partition.header.metadata.name))
-            return PartitionUpdate.fromFlow(partition, filter);
+        if (DatabaseDescriptor.isCDCEnabled() || !TABLES_WITH_CDC_ADDED.contains(partition.metadata().name))
+            return PartitionUpdate.fromIterator(partition, filter);
 
         // We want to skip the 'cdc' column. A simple solution for that is based on the fact that
         // 'PartitionUpdate.fromIterator()' will ignore any columns that are marked as 'fetched' but not 'queried'.
-        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(partition.header.metadata);
+        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(partition.metadata());
         for (ColumnMetadata column : filter.fetchedColumns())
         {
             if (!column.name.toString().equals("cdc"))
                 builder.add(column);
         }
 
-        return PartitionUpdate.fromFlow(partition, builder.build());
+        return PartitionUpdate.fromIterator(partition, builder.build());
     }
 
     private static boolean isSystemKeyspaceSchemaPartition(DecoratedKey partitionKey)

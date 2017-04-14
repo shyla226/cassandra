@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.util.Collection;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -64,6 +65,7 @@ public class ColumnFamilyMetricTest
         cfs.disableAutoCompaction();
 
         cfs.truncateBlocking();
+        LifecycleTransaction.waitForDeletions();
 
         assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
         assertEquals(0, cfs.metric.totalDiskSpaceUsed.getCount());

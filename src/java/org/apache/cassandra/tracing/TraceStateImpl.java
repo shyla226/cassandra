@@ -118,7 +118,7 @@ public class TraceStateImpl extends TraceState
     {
         try
         {
-            StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime());
+            StorageProxy.mutate(Collections.singletonList(mutation), ConsistencyLevel.ANY, System.nanoTime()).blockingGet();
         }
         catch (OverloadedException e)
         {

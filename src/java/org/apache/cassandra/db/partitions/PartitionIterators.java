@@ -18,16 +18,9 @@
 package org.apache.cassandra.db.partitions;
 
 import java.util.*;
-import java.util.concurrent.Callable;
 
-import com.google.common.collect.Iterables;
-
-import org.apache.cassandra.utils.flow.CsFlow;
-import io.reactivex.Single;
-import io.reactivex.SingleSource;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.RowIterators;
 import org.apache.cassandra.db.transform.MorePartitions;

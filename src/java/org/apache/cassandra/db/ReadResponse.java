@@ -21,18 +21,17 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import io.reactivex.Single;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Serializer;
@@ -86,22 +85,25 @@ public abstract class ReadResponse
     {
     }
 
-    public static ReadResponse createDataResponse(UnfilteredPartitionIterator data, ReadCommand command, boolean forLocalDelivery)
+    public static Single<ReadResponse> createDataResponse(PartitionsPublisher publisher, ReadCommand command, boolean forLocalDelivery)
     {
         return forLocalDelivery
-               ? new LocalResponse(data, command)
-               : new LocalDataResponse(data, EncodingVersion.last(), command);
+               ? LocalResponse.build(publisher)
+               : LocalDataResponse.build(publisher, EncodingVersion.last(), command);
     }
 
     @VisibleForTesting
-    public static ReadResponse createRemoteDataResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    public static ReadResponse createRemoteDataResponse(PartitionsPublisher publisher, ReadCommand command)
     {
-        return new RemoteDataResponse(LocalDataResponse.build(data, EncodingVersion.last(), command.columnFilter()), EncodingVersion.last());
+        final EncodingVersion version = EncodingVersion.last();
+        return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(publisher, command.columnFilter())
+                                           .map(buffer -> new RemoteDataResponse(buffer, version))
+                                           .blockingGet();
     }
 
-    public static ReadResponse createDigestResponse(UnfilteredPartitionIterator data, ReadCommand command)
+    public static Single<ReadResponse> createDigestResponse(PartitionsPublisher publisher, ReadCommand command)
     {
-        return new DigestResponse(makeDigest(data, command));
+        return makeDigest(publisher, command).map(digest -> new DigestResponse(digest));
     }
 
     public abstract UnfilteredPartitionIterator makeIterator(ReadCommand command);
@@ -114,6 +116,14 @@ public abstract class ReadResponse
         MessageDigest digest = FBUtilities.threadLocalMD5Digest();
         UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
         return ByteBuffer.wrap(digest.digest());
+    }
+
+    protected static Single<ByteBuffer> makeDigest(PartitionsPublisher publisher, ReadCommand command)
+    {
+        return UnfilteredPartitionIterators.digest(publisher,
+                                                   FBUtilities.threadLocalMD5Digest(),
+                                                   command.digestVersion())
+                                           .map(digest -> ByteBuffer.wrap(digest.digest()));
     }
 
     private static class DigestResponse extends ReadResponse
@@ -202,12 +212,17 @@ public abstract class ReadResponse
     {
         private final List<ImmutableBTreePartition> partitions;
 
-        private LocalResponse(UnfilteredPartitionIterator iter, ReadCommand command)
+        private LocalResponse(List<ImmutableBTreePartition> partitions)
         {
             super();
-            this.partitions = build(iter, command);
+            this.partitions = partitions;
         }
 
+        public static Single<ReadResponse> build(PartitionsPublisher publisher)
+        {
+            return ImmutableBTreePartition.create(publisher)
+                                          .map(partitions -> new LocalResponse(partitions));
+        }
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
         {
@@ -218,41 +233,6 @@ public abstract class ReadResponse
         {
             return false;
         }
-
-        private static List<ImmutableBTreePartition> build(UnfilteredPartitionIterator iterator, ReadCommand command)
-        {
-
-            try
-            {
-                if (!iterator.hasNext())
-                    return Collections.emptyList();
-
-
-                if (command instanceof SinglePartitionReadCommand)
-                {
-                    try (UnfilteredRowIterator partition = iterator.next())
-                    {
-                        return Collections.singletonList(ImmutableBTreePartition.create(partition));
-                    }
-                }
-
-                List<ImmutableBTreePartition> partitions = new ArrayList<>();
-                while (iterator.hasNext())
-                {
-                    try(UnfilteredRowIterator partition = iterator.next())
-                    {
-                        partitions.add(ImmutableBTreePartition.create(partition));
-                    }
-                }
-
-                return partitions;
-            }
-            finally
-            {
-                iterator.close();
-            }
-        }
-
 
         public ByteBuffer digest(ReadCommand command)
         {
@@ -266,23 +246,15 @@ public abstract class ReadResponse
      */
     private static class LocalDataResponse extends DataResponse
     {
-        private LocalDataResponse(UnfilteredPartitionIterator iter, EncodingVersion version, ReadCommand command)
+        private LocalDataResponse(ByteBuffer data, EncodingVersion version)
         {
-            super(build(iter, version, command.columnFilter()), version, SerializationHelper.Flag.LOCAL);
+            super(data, version, SerializationHelper.Flag.LOCAL);
         }
 
-        private static ByteBuffer build(UnfilteredPartitionIterator iter, EncodingVersion version, ColumnFilter selection)
+        private static Single<ReadResponse> build(PartitionsPublisher partitions, EncodingVersion version, ReadCommand command)
         {
-            try (DataOutputBuffer buffer = new DataOutputBuffer())
-            {
-                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, selection, buffer);
-                return buffer.buffer();
-            }
-            catch (IOException e)
-            {
-                // We're serializing in memory so this shouldn't happen
-                throw new RuntimeException(e);
-            }
+            return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
+                                               .map(buffer -> new LocalDataResponse(buffer, version));
         }
     }
 

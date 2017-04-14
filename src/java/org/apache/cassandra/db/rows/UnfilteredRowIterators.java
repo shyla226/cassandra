@@ -19,13 +19,10 @@ package org.apache.cassandra.db.rows;
 
 import java.util.*;
 import java.security.MessageDigest;
-import java.util.Observable;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.transform.FilteredRows;
@@ -152,9 +149,20 @@ public abstract class UnfilteredRowIterators
      */
     public static void digest(UnfilteredRowIterator iterator, MessageDigest digest, DigestVersion version)
     {
-        digest.update(iterator.partitionKey().getKey().duplicate());
-        iterator.partitionLevelDeletion().digest(digest);
-        iterator.columns().regulars.digest(digest);
+        digestPartition(iterator, digest, version);
+        while (iterator.hasNext())
+            digestUnfiltered(iterator.next(), digest);
+    }
+
+    /**
+     * Digest the partition common information, excluding its content.
+     */
+    public static MessageDigest digestPartition(PartitionTrait partition, MessageDigest digest, DigestVersion version)
+    {
+        digest.update(partition.partitionKey().getKey().duplicate());
+        partition.partitionLevelDeletion().digest(digest);
+        partition.columns().regulars.digest(digest);
+
         // When serializing an iterator, we skip the static columns if the iterator has not static row, even if the
         // columns() object itself has some (the columns() is a superset of what the iterator actually contains, and
         // will correspond to the queried columns pre-serialization). So we must avoid taking the satic column names
@@ -165,16 +173,21 @@ public abstract class UnfilteredRowIterators
         // (since again, the columns could be different without the information represented by the iterator being
         // different), but removing them entirely is stricly speaking a breaking change (it would create mismatches on
         // upgrade) so we can only do on the next protocol version bump.
-        if (iterator.staticRow() != Rows.EMPTY_STATIC_ROW)
-            iterator.columns().statics.digest(digest);
-        FBUtilities.updateWithBoolean(digest, iterator.isReverseOrder());
-        iterator.staticRow().digest(digest);
+        if (partition.staticRow() != Rows.EMPTY_STATIC_ROW)
+            partition.columns().statics.digest(digest);
+        FBUtilities.updateWithBoolean(digest, partition.isReverseOrder());
+        partition.staticRow().digest(digest);
 
-        while (iterator.hasNext())
-        {
-            Unfiltered unfiltered = iterator.next();
-            unfiltered.digest(digest);
-        }
+        return digest;
+    }
+
+    /**
+     * Digest a single unfiltered.
+     */
+    public static MessageDigest digestUnfiltered(Unfiltered unfiltered, MessageDigest digest)
+    {
+        unfiltered.digest(digest);
+        return digest;
     }
 
     /**

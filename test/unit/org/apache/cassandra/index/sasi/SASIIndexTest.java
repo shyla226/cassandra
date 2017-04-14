@@ -40,8 +40,11 @@ import org.junit.Test;
 
 import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
@@ -1352,7 +1355,7 @@ public class SASIIndexTest
 
         try (ReadExecutionController controller = command.executionController())
         {
-            Set<String> rows = getKeys(new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller));
+            Set<String> rows = getKeys(FlowablePartitions.toPartitions(new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller), command.metadata()));
             Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2", "key3", "key4" }, rows.toArray(new String[rows.size()])));
         }
     }
@@ -2021,7 +2024,7 @@ public class SASIIndexTest
                                                          "'case_sensitive': 'false' };",
                                                          KS_NAME, containsTable)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
-                "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX' };", KS_NAME, prefixTable));
+                "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX' };", KS_NAME, prefixTable)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
                 "USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = { 'mode' : 'PREFIX', 'analyzed': 'true' };", KS_NAME, analyzedPrefixTable)).blockingGet();
         QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) " +
@@ -2369,7 +2372,7 @@ public class SASIIndexTest
 
     private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
     {
-        CsFlow<FlowableUnfilteredPartition> currentPage;
+        UnfilteredPartitionIterator currentPage;
         Set<DecoratedKey> uniqueKeys = new TreeSet<>();
 
         DecoratedKey lastKey = null;
@@ -2382,28 +2385,53 @@ public class SASIIndexTest
             if (currentPage == null)
                 break;
 
-            try
+            while (currentPage.hasNext())
             {
-                lastKey = currentPage.flatMap(Util::nonEmptyKeys)
-                                     .map(key ->
-                                          {
-                                              uniqueKeys.add(key);
-                                              count.incrementAndGet();
-                                              return key;
-                                          })
-                                     .blockingLast(null);
+                try (UnfilteredRowIterator row = currentPage.next())
+                {
+                    uniqueKeys.add(row.partitionKey());
+                    lastKey = row.partitionKey();
+                    count.incrementAndGet();
+                }
             }
-            catch (Exception e)
-            {
-                throw Throwables.propagate(e);
-            }
+
+            currentPage.close();
         }
         while (count.get() == pageSize);
 
         return uniqueKeys;
     }
 
-    private static CsFlow<FlowableUnfilteredPartition> getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
+//    private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
+//    {
+//        Flowable<FlowableUnfilteredPartition> currentPage;
+//        Set<DecoratedKey> uniqueKeys = new TreeSet<>();
+//
+//        DecoratedKey lastKey = null;
+//
+//        AtomicInteger count = new AtomicInteger();
+//        do
+//        {
+//            count.set(0);
+//            currentPage = getIndexed(store, ColumnFilter.all(store.metadata()), lastKey, pageSize, expressions);
+//            if (currentPage == null)
+//                break;
+//
+//            lastKey = currentPage.lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys))
+//                                 .map(key ->
+//                                      {
+//                                          uniqueKeys.add(key);
+//                                          count.incrementAndGet();
+//                                          return key;
+//                                      })
+//                                 .blockingLast(null);
+//        }
+//        while (count.get() == pageSize);
+//
+//        return uniqueKeys;
+//    }
+
+    private static UnfilteredPartitionIterator getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
     {
         DataRange range = (startKey == null)
                             ? DataRange.allData(PARTITIONER)
@@ -2421,7 +2449,7 @@ public class SASIIndexTest
                                                             range,
                                                             Optional.empty());
 
-        return command.executeLocally();
+        return command.executeForTests();
     }
 
     private static Mutation newMutation(String key, String firstName, String lastName, int age, long timestamp)
@@ -2440,24 +2468,39 @@ public class SASIIndexTest
         return rm;
     }
 
-    private static Set<String> getKeys(final CsFlow<FlowableUnfilteredPartition> rows)
+    private static Set<String> getKeys(final UnfilteredPartitionIterator rows)
     {
-        CsFlow<DecoratedKey> fs = rows.flatMap(Util::nonEmptyKeys);
-
         try
         {
-            return fs.reduceBlocking(new TreeSet<String>(),
-                                     (set, pk) ->
-                                     {
-                                         set.add(AsciiType.instance.compose(pk.getKey()));
-                                         return set;
-                                     });
+            return new TreeSet<String>()
+            {{
+                while (rows.hasNext())
+                {
+                    try (UnfilteredRowIterator row = rows.next())
+                    {
+                        if (!row.isEmpty())
+                            add(AsciiType.instance.compose(row.partitionKey().getKey()));
+                    }
+                }
+            }};
         }
-        catch (Exception e)
+        finally
         {
-            throw Throwables.propagate(e);
+            rows.close();
         }
     }
+
+//    private static Set<String> getKeys(final Flowable<FlowableUnfilteredPartition> rows)
+//    {
+//        Flowable<DecoratedKey> fs = rows.lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys));
+//
+//        return fs.reduce(new TreeSet<String>(),
+//                           (set, pk) ->
+//                           {
+//                               set.add(AsciiType.instance.compose(pk.getKey()));
+//                               return set;
+//                           }).blockingGet();
+//    }
 
     private static List<String> convert(final Set<DecoratedKey> keys)
     {

@@ -31,7 +31,6 @@ import org.apache.cassandra.db.rows.AbstractRow;
 import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.rx.RxSubscriptionDebugger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -265,7 +264,6 @@ public class RepairedDataTombstonesTest extends CQLTester
                 }
             }
         }
-
         assertEquals(expectedRows, foundRows);
     }
 

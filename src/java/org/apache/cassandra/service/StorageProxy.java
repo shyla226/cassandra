@@ -1430,12 +1430,14 @@ public class StorageProxy implements StorageProxyMBean
     private static Single<PartitionIterator> fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel, long queryStartNanoTime)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
+        // Note: this is not consistent with the > 1 code, it will send out responses immediately (hot observable) while
+        // the code for > 1 will delay until subscription
         if (commands.size() == 1)
             return new SinglePartitionReadLifecycle(commands.get(0), consistencyLevel, queryStartNanoTime).getPartitionIterator();
 
         return Observable.fromIterable(commands)
                          .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel, queryStartNanoTime))
-                         .flatMap(readLifecycle -> readLifecycle.getPartitionIterator().toObservable())
+                         .concatMap(readLifecycle -> readLifecycle.getPartitionIterator().toObservable())
                          .toList()
                          .map(PartitionIterators::concat);
     }

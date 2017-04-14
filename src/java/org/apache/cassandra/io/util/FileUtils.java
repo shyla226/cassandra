@@ -242,6 +242,7 @@ public final class FileUtils
         }
         catch (Exception e)
         {
+            JVMStabilityInspector.inspectThrowable(e);
             logger.warn("Failed closing {}", c, e);
         }
     }

@@ -42,6 +42,7 @@ import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.FunctionName;
@@ -68,6 +69,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static junit.framework.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -766,6 +768,23 @@ public abstract class CQLTester
         String fullQuery = String.format(query, KEYSPACE);
         logger.info(fullQuery);
         schemaChange(fullQuery);
+    }
+
+    /**
+     *  Because the tracing executor is single threaded, submitting an empty event should ensure
+     *  that all tracing events mutations have been applied.
+     */
+    protected void waitForTracingEvents()
+    {
+        try
+        {
+            StageManager.tracingExecutor.submit(() -> {}).get();
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Failed to wait for tracing events: {}", t);
+        }
     }
 
     protected void assertLastSchemaChange(Event.SchemaChange.Change change, Event.SchemaChange.Target target,
@@ -1682,7 +1701,7 @@ public abstract class CQLTester
         return type.decompose(serializeTuples(value));
     }
 
-    private static String formatValue(ByteBuffer bb, AbstractType<?> type)
+    protected static String formatValue(ByteBuffer bb, AbstractType<?> type)
     {
         if (bb == null)
             return "null";

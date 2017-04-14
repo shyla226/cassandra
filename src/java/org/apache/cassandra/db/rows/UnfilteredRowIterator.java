@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.db.rows;
 
-import org.apache.cassandra.db.DeletionTime;
-
 /**
  * An iterator over the rows of a given partition that also includes deletion informations.
  * <p>
@@ -43,20 +41,8 @@ import org.apache.cassandra.db.DeletionTime;
  * the returned objects for longer than the iteration, it must make a copy of
  * it explicitly.
  */
-public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>
+public interface UnfilteredRowIterator extends PartitionTrait, BaseRowIterator<Unfiltered>
 {
-    /**
-     * The partition level deletion for the partition this iterate over.
-     */
-    public DeletionTime partitionLevelDeletion();
-
-    /**
-     * Return "statistics" about what is returned by this iterator. Those are used for
-     * performance reasons (for delta-encoding for instance) and code should not
-     * expect those to be exact.
-     */
-    public EncodingStats stats();
-
     /**
      * Returns whether this iterator has no data (including no deletion data).
      */

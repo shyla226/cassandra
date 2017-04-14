@@ -138,7 +138,7 @@ public class TableViews extends AbstractCollection<View>
 
         long start = System.nanoTime();
         Collection<Mutation> mutations;
-        try (UnfilteredRowIterator existings = FlowablePartitions.toIterator(command.executeLocally().blockingSingle());
+        try (UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeForTests(), command);
              UnfilteredRowIterator updates = update.unfilteredIterator())
         {
             mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));

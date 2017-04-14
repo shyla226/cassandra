@@ -20,16 +20,18 @@
  */
 package org.apache.cassandra.db.transform;
 
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 
-abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> extends Stack implements AutoCloseable, Iterator<O>
+public abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> extends Stack implements AutoCloseable, Iterator<O>
 {
     I input;
     V next;
@@ -39,7 +41,7 @@ abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> ext
     {
         // TODO: consider moving "next" into here, so that a stop() when signalled outside of a function call (e.g. in attach)
         // can take effect immediately; this doesn't seem to be necessary at the moment, but it might cause least surprise in future
-        boolean isSignalled;
+        public boolean isSignalled;
     }
 
     // responsibility for initialising next lies with the subclass
@@ -85,6 +87,11 @@ abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> ext
                 ((CloseableIterator)input).close();
         }
         catch (Throwable t) { fail = merge(fail, t); }
+
+        if (moreContents.length > 0)
+        {
+            fail = Throwables.perform(fail, Arrays.stream(moreContents).map(m -> () -> m.close()));
+        }
         maybeFail(fail);
     }
 
@@ -106,6 +113,8 @@ abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends V> ext
     }
 
     @DontInline
+    @SuppressWarnings("resource") // holder does not need closing if provider is null
+                                  // and provider will be closed since it becomes an input
     private boolean tryGetMoreContents()
     {
         for (int i = 0 ; i < moreContents.length ; i++)

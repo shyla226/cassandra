@@ -44,13 +44,13 @@ import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
 /**
- * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's CsFlow with some simplifications.
+ * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
  */
 public abstract class CsFlow<T>
 {
     /**
      * Create a subscription linking the content of the flow with the given subscriber.
-     * The subsciber is expected to call request() on the returned subscription; in response, it will receive an
+     * The subscriber is expected to call request() on the returned subscription; in response, it will receive an
      * onNext(item), onComplete(), or onError(throwable). To get further items, the subscriber must call request()
      * again _after_ receiving the onNext (usually before returning from the call).
      * When done with the content (regardless of whether onComplete or onError was received), the subscriber must

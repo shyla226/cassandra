@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -30,12 +30,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.*;
 
-import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
@@ -51,24 +49,20 @@ import static org.junit.Assert.assertTrue;
 
 public class RemoveTest
 {
-    static
-    {
-        DatabaseDescriptor.daemonInitialization();
-    }
-
-    StorageService ss = StorageService.instance;
-    TokenMetadata tmd = ss.getTokenMetadata();
-    ArrayList<Token> endpointTokens = new ArrayList<Token>();
-    ArrayList<Token> keyTokens = new ArrayList<Token>();
-    List<InetAddress> hosts = new ArrayList<InetAddress>();
-    List<UUID> hostIds = new ArrayList<UUID>();
-    InetAddress removalhost;
-    UUID removalId;
+    private final StorageService ss = StorageService.instance;
+    private final TokenMetadata tmd = ss.getTokenMetadata();
+    private final ArrayList<Token> endpointTokens = new ArrayList<>();
+    private final ArrayList<Token> keyTokens = new ArrayList<>();
+    private final List<InetAddress> hosts = new ArrayList<>();
+    private final List<UUID> hostIds = new ArrayList<>();
+    private InetAddress removalhost;
+    private UUID removalId;
 
     @BeforeClass
     public static void setupClass() throws ConfigurationException
     {
-        SchemaLoader.loadSchema();
+        DatabaseDescriptor.daemonInitialization();
+        NettyRxScheduler.register();
     }
 
     @Before
@@ -79,7 +73,7 @@ public class RemoveTest
         // create a ring of 5 nodes
         Util.createInitialRing(ss, Util.testPartitioner(), endpointTokens, keyTokens, hosts, hostIds, 6);
 
-        Gossiper.instance.start(1);
+        MessagingService.instance().listen();
         removalhost = hosts.get(5);
         hosts.remove(removalhost);
         removalId = hostIds.get(5);

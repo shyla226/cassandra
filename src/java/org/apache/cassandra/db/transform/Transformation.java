@@ -25,17 +25,13 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.BaseRowIterator;
-import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.PartitionHeader;
-import org.apache.cassandra.db.rows.RangeTombstoneMarker;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
 /**
  * We have a single common superclass for all Transformations to make implementation efficient.
@@ -48,6 +44,7 @@ import org.apache.cassandra.utils.flow.CsSubscription;
 public abstract class Transformation<I extends BaseRowIterator<?>>
 {
     // internal methods for StoppableTransformation only
+    public void attachTo(PartitionsPublisher publisher) { }
     void attachTo(BasePartitions partitions) { }
     void attachTo(BaseRows rows) { }
 
@@ -58,7 +55,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * object may be longer than the lifetime of the "logical" iterator it was applied to; if the iterator
      * is refilled with MoreContents, for instance, the iterator may outlive this function
      */
-    protected void onClose() { }
+    public void onClose() { }
 
     /**
      * Run on the close of any (logical) rows iterator this function was applied to
@@ -67,7 +64,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * object may be longer than the lifetime of the "logical" iterator it was applied to; if the iterator
      * is refilled with MoreContents, for instance, the iterator may outlive this function
      */
-    protected void onPartitionClose() { }
+    public void onPartitionClose() { }
 
     /**
      * Applied to any rows iterator (partition) we encounter in a partitions iterator
@@ -81,9 +78,9 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * Applied to any partition we encounter in a partitions iterator.
      * Normally includes a transformation of the partition through Transformation.apply(partition, this).
      */
-    protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+    public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
     {
-        throw new AssertionError("Transformation used on CsFlow without implementing flow applyToPartition");
+        return Transformation.apply(partition, this);
     }
 
     /**
@@ -113,7 +110,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      * NOTE that this is only applied to the first iterator in any sequence of iterators filled by a MoreContents;
      * the static data for such iterators is all expected to be equal
      */
-    protected Row applyToStatic(Row row)
+    public Row applyToStatic(Row row)
     {
         return row;
     }
@@ -140,6 +137,13 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return columns;
     }
 
+    public Unfiltered applyToUnfiltered(Unfiltered item)
+    {
+        if (item.isRow())
+            return applyToRow((Row) item);
+        else
+            return applyToMarker((RangeTombstoneMarker) item);
+    }
 
     // FlowableOp interpretation of transformation
     public void onNextUnfiltered(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered item)
@@ -147,10 +151,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         Unfiltered next;
         try
         {
-            if (item.isRow())
-                next = applyToRow((Row) item);
-            else
-                next = applyToMarker((RangeTombstoneMarker) item);
+            next = applyToUnfiltered(item);
         }
         catch (Throwable t)
         {
@@ -265,17 +266,19 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
 
     public static FlowableUnfilteredPartition apply(FlowableUnfilteredPartition src, Transformation transformation)
     {
-        CsFlow<Unfiltered> content = src.content.apply(new FlowableRowOp(transformation));
+        CsFlow<Unfiltered> content = src.content; // src.content.apply(new FlowableRowOp(transformation));
+        FlowableUnfilteredPartition ret = new FlowableUnfilteredPartition(apply(src.header, transformation),
+                                                                          transformation.applyToStatic(src.staticRow),
+                                                                          content,
+                                                                          src.hasData);
 
         if (transformation instanceof StoppingTransformation)
         {
             StoppingTransformation s = (StoppingTransformation) transformation;
-            s.stopInPartition = new BaseIterator.Stop();
+            s.stopInPartition = ret.stop;
         }
 
-        return new FlowableUnfilteredPartition(apply(src.header, transformation),
-                                               transformation.applyToStatic(src.staticRow),
-                                               content);
+        return ret;
     }
 
     static class FlowablePartitionOp implements CsFlow.FlowableOp<FlowableUnfilteredPartition,FlowableUnfilteredPartition>

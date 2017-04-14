@@ -1,14 +1,16 @@
 package org.apache.cassandra.db.rows;
 
-import java.util.Comparator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.Columns;
-import org.apache.cassandra.db.Clusterable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators.MergeListener;
 import org.apache.cassandra.utils.Reducer;
 
 public class MergeReducer extends Reducer<Unfiltered, Unfiltered>
 {
+    private static final Logger logger = LoggerFactory.getLogger(MergeReducer.class);
+
     private final MergeListener listener;
 
     private Unfiltered.Kind nextKind;
@@ -48,6 +50,8 @@ public class MergeReducer extends Reducer<Unfiltered, Unfiltered>
 
     public void reduce(int idx, Unfiltered current)
     {
+        //logger.debug("{} - Reducing {}", hashCode(), current.toString(header.metadata, true));
+
         nextKind = current.kind();
         switch (nextKind)
         {
@@ -69,10 +73,15 @@ public class MergeReducer extends Reducer<Unfiltered, Unfiltered>
             {
                 Row merged = rowMerger.merge(markerMerger == null ? header.partitionLevelDeletion : markerMerger.activeDeletion());
                 if (merged == null)
+                {
+                    //logger.debug("{} - Reduced to null", hashCode());
                     return null;
+                }
 
                 if (listener != null)
                     listener.onMergedRows(merged, rowMerger.mergedRows());
+
+                //logger.debug("{} - Reduced to {}", hashCode(), merged.toString(header.metadata, true));
                 return merged;
             }
             case RANGE_TOMBSTONE_MARKER:
@@ -81,6 +90,8 @@ public class MergeReducer extends Reducer<Unfiltered, Unfiltered>
                 RangeTombstoneMarker merged = markerMerger.merge();
                 if (listener != null)
                     listener.onMergedRangeTombstoneMarkers(merged, markerMerger.mergedMarkers());
+
+                //logger.debug("{} - Reduced to {}", hashCode(), merged.toString(header.metadata, true));
                 return merged;
             }
         }

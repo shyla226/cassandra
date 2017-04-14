@@ -59,6 +59,29 @@ import static org.junit.Assert.fail;
 
 public class TWCSMultiWriterTest extends CQLTester
 {
+    // some of the tests in this test suite rely on the exact sstables and therefore the async cleanup
+    // in CQLTester causes flakiness due to the extra flushing that occurs when dropping tables,
+    // using KEYSPACE_PER_TEST ensures that cleanup is done synchronously
+    // and no extra flushing occurs
+
+    @Override
+    public String createTable(String query)
+    {
+        return super.createTable(KEYSPACE_PER_TEST, query);
+    }
+
+    @Override
+    public UntypedResultSet execute(String query, Object... values) throws Throwable
+    {
+        return super.executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
+    }
+
+    @Override
+    public ColumnFamilyStore getCurrentColumnFamilyStore()
+    {
+        return super.getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
+    }
+
     @Test
     public void testSimpleSplittingPartitions() throws Throwable
     {
