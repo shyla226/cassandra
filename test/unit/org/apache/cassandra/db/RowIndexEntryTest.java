@@ -773,7 +773,8 @@ public class RowIndexEntryTest extends CQLTester
 
         RowIndexEntry rie = new RowIndexEntry(0L)
         {
-            public IndexInfoRetriever openWithIndex(FileHandle indexFile)
+            @Override
+            public IndexInfoRetriever openWithIndex(FileHandle indexFile, Rebufferer.ReaderConstraint rc)
             {
                 return new IndexInfoRetriever()
                 {

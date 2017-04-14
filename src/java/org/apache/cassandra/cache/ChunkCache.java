@@ -302,7 +302,7 @@ public class ChunkCache
         {
             source = file;
             int chunkSize = file.chunkSize();
-            assert Integer.bitCount(chunkSize) == 1;    // Must be power of two
+            assert Integer.bitCount(chunkSize) == 1 : chunkSize;    // Must be power of two
             alignmentMask = -chunkSize;
         }
 
