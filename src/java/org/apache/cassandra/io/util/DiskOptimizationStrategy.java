@@ -48,8 +48,9 @@ public interface DiskOptimizationStrategy
 
         size = (size + 4095) & ~4095;
 
-        size = MathUtil.findNextPositivePowerOfTwo(Ints.checkedCast(size));
-
-        return (int)Math.min(size, MAX_BUFFER_SIZE);
+        if (size >= MAX_BUFFER_SIZE)
+            return MAX_BUFFER_SIZE;
+        else
+            return Math.min(MathUtil.findNextPositivePowerOfTwo(Ints.saturatedCast(size)), MAX_BUFFER_SIZE);
     }
 }
