@@ -678,7 +678,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                                              return Flowable.using(() -> Collections.EMPTY_LIST,
                                                                    (refs) -> Flowable.just(FlowablePartitions.merge(filtered, nowInSec())),
-                                                                   (refs) -> view.release());
+                                                                   (refs) -> view.release(), false);
                                          });
     }
 

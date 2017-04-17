@@ -366,7 +366,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         }
 
         Index.Searcher searcher = pickSearcher;
-        Flowable<FlowableUnfilteredPartition> flowable = Flowable.<FlowableUnfilteredPartition, ReadExecutionController>using(
+        Flowable<FlowableUnfilteredPartition> flowable = Flowable.using(
             () -> ReadExecutionController.forCommand(this),
             controller ->
             {
@@ -391,7 +391,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 // processing we do on it).
                 return limits().filter(updatedFilter.filter(r, cfs.metadata(), nowInSec()), nowInSec());
             },
-            controller -> controller.close()
+            controller -> controller.close(),
+            false
         );
 
         return flowable;

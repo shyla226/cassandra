@@ -68,8 +68,7 @@ public class BigTableReader extends SSTableReader
 
     public Flowable<FlowableUnfilteredPartition> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
-        return Flowable.using(() -> ref(),
-                              ref ->
+        return Flowable.defer(() ->
                               {
                                   PartitionFlowable pf = new PartitionFlowable(this, key, slices, selectedColumns, reversed, 2);
 
@@ -89,8 +88,7 @@ public class BigTableReader extends SSTableReader
                                                     return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), u);
                                                 })
                                            .take(1);
-                              },
-                              ref -> ref.close());
+                              });
     }
 
     public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
