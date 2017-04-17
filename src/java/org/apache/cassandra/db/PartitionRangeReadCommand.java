@@ -233,7 +233,10 @@ public class PartitionRangeReadCommand extends ReadCommand
             if (!sstable.isRepaired())
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
         }
-        // iterators can be empty for offline tools
+
+        if (iterators.isEmpty())
+            return Flowable.empty();
+
         // TODO: open and close when subscribed -- make sure no resource allocated on create
         return FlowablePartitions.mergePartitions(iterators, nowInSec());
     }
