@@ -29,6 +29,7 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -404,7 +405,7 @@ public class CompressionMetadata
             }
 
             // flush the data to disk
-            try (SeekableByteChannel fos = Files.newByteChannel(new File(filePath).toPath());
+            try (SeekableByteChannel fos = Files.newByteChannel(new File(filePath).toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                  DataOutputStream out = new DataOutputStream(new BufferedDataOutputStreamPlus(fos)))
             {
                 writeHeader(out, dataLength, count);
