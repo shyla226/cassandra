@@ -201,7 +201,6 @@ public class ChunkCache
         {
             if (references.decrementAndGet() == 0)
             {
-                logger.info("Releasing");
                 BufferPool.put(futureBuffer.join());
             }
         }
@@ -246,7 +245,6 @@ public class ChunkCache
     @Override
     public void onRemoval(Key key, Buffer buffer, RemovalCause cause)
     {
-        logger.info("Removing key");
         buffer.release();
     }
 

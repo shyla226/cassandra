@@ -78,7 +78,7 @@ public class SSTableIterator extends AbstractSSTableIterator
 
     protected int currentSliceIndex()
     {
-        assert slice > 0;
+        assert slice > 0 : slice;
         return slice - 1;
     }
 

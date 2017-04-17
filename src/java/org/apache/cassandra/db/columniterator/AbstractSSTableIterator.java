@@ -236,13 +236,16 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     {
         assert reader != null;
         reader.resetState();
-        try
+        if (!slices.isEmpty())
         {
-            reader.setForSlice(currentSlice());
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
+            try
+            {
+                reader.setForSlice(currentSlice());
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
         }
     }
 
