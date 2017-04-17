@@ -19,8 +19,8 @@ package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -123,7 +123,7 @@ public class BigFormat implements SSTableFormat
             if (!summariesFile.exists())
                 return null;
 
-            try (DataInputStream iStream = new DataInputStream(new FileInputStream(summariesFile)))
+            try (DataInputStream iStream = new DataInputStream(Files.newInputStream(summariesFile.toPath())))
             {
                 return new IndexSummary.IndexSummarySerializer().deserializeFirstLastKey(iStream, partitioner);
             }

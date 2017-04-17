@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.io.*;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
@@ -693,7 +695,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             bf = FilterFactory.AlwaysPresent;
             return;
         }
-        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(new FileInputStream(descriptor.filenameFor(Component.FILTER)))))
+        try (DataInputStream stream = new DataInputStream(new BufferedInputStream(Files.newInputStream(Paths.get(descriptor.filenameFor(Component.FILTER))))))
         {
             bf = FilterFactory.deserialize(stream, true);
         }

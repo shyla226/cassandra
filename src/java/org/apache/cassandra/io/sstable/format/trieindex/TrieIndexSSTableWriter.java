@@ -18,8 +18,11 @@
 package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
@@ -480,13 +483,13 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             if (components.contains(Component.FILTER))
             {
                 String path = descriptor.filenameFor(Component.FILTER);
-                try (FileOutputStream fos = new FileOutputStream(path);
+                try (SeekableByteChannel fos = Files.newByteChannel(Paths.get(path));
                      DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
                 {
                     // bloom filter
                     FilterFactory.serialize(bf, stream);
                     stream.flush();
-                    SyncUtil.sync(fos);
+                    SyncUtil.sync((FileChannel) fos);
                 }
                 catch (IOException e)
                 {

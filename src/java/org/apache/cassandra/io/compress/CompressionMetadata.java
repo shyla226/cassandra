@@ -17,16 +17,17 @@
  */
 package org.apache.cassandra.io.compress;
 
-import java.io.BufferedOutputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Comparator;
@@ -46,11 +47,13 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -103,7 +106,7 @@ public class CompressionMetadata
     {
         this.indexFilePath = indexFilePath;
 
-        try (DataInputStream stream = new DataInputStream(new FileInputStream(indexFilePath)))
+        try (DataInputStream stream = new DataInputStream(Files.newInputStream(Paths.get(indexFilePath))))
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
@@ -401,15 +404,15 @@ public class CompressionMetadata
             }
 
             // flush the data to disk
-            try (FileOutputStream fos = new FileOutputStream(filePath);
-                 DataOutputStream out = new DataOutputStream(new BufferedOutputStream(fos)))
+            try (SeekableByteChannel fos = Files.newByteChannel(new File(filePath).toPath());
+                 DataOutputStream out = new DataOutputStream(new BufferedDataOutputStreamPlus(fos)))
             {
                 writeHeader(out, dataLength, count);
                 for (int i = 0; i < count; i++)
                     out.writeLong(offsets.getLong(i * 8L));
 
                 out.flush();
-                fos.getFD().sync();
+                NativeLibrary.getFileDescriptor((FileChannel) fos).sync();
             }
             catch (IOException e)
             {

@@ -19,10 +19,11 @@ package org.apache.cassandra.utils;
 
 import java.io.File;
 import java.io.FileDescriptor;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -206,9 +207,9 @@ public final class NativeLibrary
         if (!f.exists())
             return;
 
-        try (FileInputStream fis = new FileInputStream(f))
+        try (SeekableByteChannel fc = Files.newByteChannel(f.toPath()))
         {
-            trySkipCache(getfd(fis.getChannel()), offset, len, path);
+            trySkipCache(getfd((FileChannel) fc), offset, len, path);
         }
         catch (IOException e)
         {
@@ -359,13 +360,24 @@ public final class NativeLibrary
     {
         try
         {
-            return getfd((FileDescriptor)FILE_CHANNEL_FD_FIELD.get(channel));
+            return getfd(getFileDescriptor(channel));
         }
-        catch (IllegalArgumentException|IllegalAccessException e)
+        catch (IllegalArgumentException e)
         {
-            logger.warn("Unable to read fd field from FileChannel");
+            throw new RuntimeException("Unable to read fd field from FileChannel", e);
         }
-        return -1;
+    }
+
+    public static FileDescriptor getFileDescriptor(FileChannel channel)
+    {
+        try
+        {
+            return (FileDescriptor)FILE_CHANNEL_FD_FIELD.get(channel);
+        }
+        catch (IllegalArgumentException | IllegalAccessException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     /**

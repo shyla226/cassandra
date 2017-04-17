@@ -19,9 +19,9 @@ package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -126,7 +126,7 @@ public class BigTableReader extends SSTableReader
         DataInputStream iStream = null;
         try
         {
-            iStream = new DataInputStream(new FileInputStream(summariesFile));
+            iStream = new DataInputStream(Files.newInputStream(summariesFile.toPath()));
             indexSummary = IndexSummary.serializer.deserialize(
                     iStream, getPartitioner(),
                     metadata().params.minIndexInterval, metadata().params.maxIndexInterval);

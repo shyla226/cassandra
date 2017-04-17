@@ -171,6 +171,12 @@ public class SyncUtil
         sync(fos.getFD());
     }
 
+    public static void sync(FileChannel fc) throws IOException
+    {
+        Preconditions.checkNotNull(fc);
+        sync(NativeLibrary.getFileDescriptor(fc));
+    }
+
     public static void trySync(int fd)
     {
         if (SKIP_SYNC)

@@ -20,7 +20,6 @@ package org.apache.cassandra.stress;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -148,7 +147,7 @@ public class StressGraph
                         currentThreadCount = tc.group(2);
                     }
                 }
-                
+
                 // Detect mode changes
                 if (line.equals(StressMetrics.HEAD))
                 {
@@ -232,7 +231,7 @@ public class StressGraph
 
     private JSONObject createJSONStats(JSONObject json)
     {
-        try (InputStream logStream = new FileInputStream(stressSettings.graph.temporaryLogFile))
+        try (InputStream logStream = Files.newInputStream(stressSettings.graph.temporaryLogFile.toPath()))
         {
             JSONArray stats;
             if (json == null)
