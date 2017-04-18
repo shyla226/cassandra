@@ -32,6 +32,7 @@ import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FlowableUtils;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -49,6 +50,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
     static final long STATE_OFFSET = UnsafeAccess.UNSAFE.objectFieldOffset(FBUtilities.getProtectedField(PartitionSubscription.class, "state"));
 
     PartitionSubscription subscr;
+    final OpOrder readOrdering;
     final DecoratedKey key;
     final ColumnFilter selectedColumns;
     final BigTableReader table;
@@ -58,9 +60,10 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
     Slices slices;
 
-    public PartitionFlowable(BigTableReader table, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse, long limit)
+    public PartitionFlowable(BigTableReader table, OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse, long limit)
     {
         this.table = table;
+        this.readOrdering = readOrdering;
         this.key = key;
         this.selectedColumns = selectedColumns;
         this.slices = slices;
@@ -74,6 +77,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
     public PartitionFlowable(PartitionFlowable o, int offset)
     {
         this.table = o.table;
+        this.readOrdering = o.readOrdering;
         this.key = o.key;
         this.selectedColumns = o.selectedColumns;
         this.slices = o.slices;
@@ -107,7 +111,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
     class PartitionSubscription implements Subscription
     {
-        final Ref<SSTableReader> tableRef;
+        final OpOrder.Group opGroup;
         FileDataInput dfile = null;
         AbstractSSTableIterator ssTableIterator = null;
 
@@ -135,7 +139,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         PartitionSubscription(Subscriber<? super Unfiltered> s)
         {
             this.s = s;
-            this.tableRef = table.ref();
+            this.opGroup = readOrdering.start();
             this.helper = new SerializationHelper(table.metadata(), table.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, selectedColumns);
         }
 
@@ -143,7 +147,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         PartitionSubscription(PartitionSubscription p, int offset)
         {
             this.s = null;
-            this.tableRef = table.ref();
+            this.opGroup = readOrdering.start();
             this.helper = p.helper;
             this.count.set(offset);
             this.indexEntry = p.indexEntry;
@@ -183,7 +187,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         {
             assert state != State.CLOSED : "Already closed";
             state = State.CLOSED;
-            tableRef.close();
+            opGroup.close();
             FileUtils.closeQuietly(dfile);
             FileUtils.closeQuietly(ssTableIterator);
         }

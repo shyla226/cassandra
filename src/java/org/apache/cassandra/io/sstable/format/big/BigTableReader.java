@@ -46,6 +46,7 @@ import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -66,11 +67,12 @@ public class BigTableReader extends SSTableReader
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
-    public Flowable<FlowableUnfilteredPartition> flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public Flowable<FlowableUnfilteredPartition> flowable(OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
-        return Flowable.defer(() ->
+        return Flowable.using(() -> readOrdering.start(),
+                              (opGroup) ->
                               {
-                                  PartitionFlowable pf = new PartitionFlowable(this, key, slices, selectedColumns, reversed, 2);
+                                  PartitionFlowable pf = new PartitionFlowable(this, readOrdering, key, slices, selectedColumns, reversed, 2);
 
                                   //Convert from PartitionFlowable to FlowableUnfilteredPartition
                                   //First two items are header info. The rest is partition data
@@ -88,7 +90,9 @@ public class BigTableReader extends SSTableReader
                                                     return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), u);
                                                 })
                                            .take(1);
-                              });
+                              },
+                              (opGroup) -> opGroup.close(),
+                              false);
     }
 
     public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
