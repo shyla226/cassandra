@@ -316,13 +316,12 @@ public class ChunkCache
                 Buffer buf;
                 Key pageKey = new Key(source, pageAlignedPos, true);
 
-                Buffer page = cache.get(pageKey);
-                assert page.references.get() != UNINITIALISED : "Attempt to access an uninitialsed buffer";
+                Buffer page = null;
 
                 //There is a small window when a released buffer/invalidated chunk
                 //is still in the cache. In this case it will return null
                 //so we spin loop while waiting for the cache to re-populate
-                while((buf = page.reference()) == null)
+                while(page == null || ((buf = page.reference()) == null))
                 {
                     page = cache.get(pageKey);
                 }

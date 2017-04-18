@@ -201,18 +201,18 @@ class PartitionFlowable extends Flowable<Unfiltered>
             switch (count.getAndIncrement())
             {
                 case 0:
-                    perform(this::issueHeader, s);
+                    perform(this::issueHeader);
                     break;
                 case 1:
-                    perform(indexEntry.isIndexed() ? this::issueStaticRowIndexed : this::issueStaticRowUnindexed, s);
+                    perform(indexEntry.isIndexed() ? this::issueStaticRowIndexed : this::issueStaticRowUnindexed);
                     break;
                 default:
-                    perform(this::issueNextUnfiltered, s);
+                    perform(this::issueNextUnfiltered);
                     break;
             }
         }
 
-        void perform(Consumer<ReaderConstraint> action, Subscriber caller)
+        void perform(Consumer<ReaderConstraint> action)
         {
             try
             {
@@ -237,7 +237,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
                 //If this is an async wait callback then start the request
                 //chain again
-                if (state == State.WAITING && caller == s)
+                if (state == State.WAITING)
                     request(0, State.WAITING);
             }
             catch (NotInCacheException e)
@@ -249,7 +249,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
                 }
 
                 // Retry the request once data is in the cache
-                e.accept(() -> perform(action, caller), onReadyExecutor);
+                e.accept(() -> perform(action), onReadyExecutor);
             }
         }
 
