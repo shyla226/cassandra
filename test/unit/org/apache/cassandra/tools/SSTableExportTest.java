@@ -41,7 +41,19 @@ public class SSTableExportTest extends ToolsTester
     @Test
     public void testSSTableExport_WithArgs() throws Exception
     {
-        runTool(0, "org.apache.cassandra.tools.SSTableExport", findOneSSTable("legacy_sstables", "legacy_ma_simple"));
+        runTool(0, "org.apache.cassandra.tools.SSTableExport", findOneSSTable("legacy_sstables", "legacy_aa_simple"));
+        assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);
+        assertSchemaNotLoaded();
+        assertCLSMNotLoaded();
+        assertSystemKSNotLoaded();
+        assertServerNotLoaded();
+    }
+
+
+    @Test
+    public void testSSTableExport_Legacy() throws Exception
+    {
+        runTool(0, "org.apache.cassandra.tools.SSTableExport", findOneSSTable("legacy_sstables", "legacy_na_simple"));
         assertNoUnexpectedThreadsStarted(null, OPTIONAL_THREADS_WITH_SCHEMA);
         assertSchemaNotLoaded();
         assertCLSMNotLoaded();

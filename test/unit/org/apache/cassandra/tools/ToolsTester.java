@@ -286,7 +286,15 @@ public abstract class ToolsTester
     public static File copySSTables() throws IOException
     {
         File dataDir = new File("build/test/cassandra/data");
-        File srcDir = new File("test/data/legacy-sstables/ma");
+        copySSTables("ma", dataDir);
+        copySSTables("na", dataDir);
+        copySSTables("aa", dataDir);
+        return dataDir;
+    }
+
+    public static File copySSTables(String ver, File dataDir) throws IOException
+    {
+        File srcDir = new File("test/data/legacy-sstables/" + ver);
         FileUtils.copyDirectory(new File(srcDir, "legacy_tables"), new File(dataDir, "legacy_sstables"));
         return dataDir;
     }

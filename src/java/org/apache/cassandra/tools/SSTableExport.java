@@ -131,18 +131,28 @@ public class SSTableExport
 
     private static Stream<DecoratedKey> iterToStream(PartitionIndexIterator iter)
     {
-        return Stream.generate(() -> 
-        {
-            try
+        final Iterator<DecoratedKey> iterator = new Iterator<DecoratedKey>() {
+            public boolean hasNext()
             {
-                DecoratedKey key = iter.key();
-                iter.advance();
-                return key;
-            } catch (Exception e)
-            {
-                throw new RuntimeException(e);
+                return iter.key() != null;
             }
-        });
+
+            public DecoratedKey next() {
+                try
+                {
+                    DecoratedKey key = iter.key();
+                    iter.advance();
+                    return key;
+                } catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return StreamSupport.stream(
+                Spliterators.spliteratorUnknownSize(iterator,
+                                                    Spliterator.ORDERED | Spliterator.IMMUTABLE),
+                false);
     }
 
     /**
