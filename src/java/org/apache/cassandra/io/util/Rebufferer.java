@@ -21,6 +21,7 @@ package org.apache.cassandra.io.util;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.cache.ChunkCache;
@@ -59,7 +60,7 @@ public interface Rebufferer extends ReaderFileProxy
         IN_CACHE_ONLY
     }
 
-    public static class NotInCacheException extends RuntimeException implements BiConsumer<Runnable, Executor>
+    public static class NotInCacheException extends RuntimeException
     {
         private static final long serialVersionUID = 1L;
 
@@ -78,13 +79,16 @@ public interface Rebufferer extends ReaderFileProxy
             return this;
         }
 
-
-        @Override
-        public void accept(Runnable run, Executor executor)
+        public void accept(Runnable onReady, Runnable onSchedule, Executor executor)
         {
             //Registers a callback to be issued when the async buffer is ready
-            if (asyncBuffer != null)
-                asyncBuffer.onReady(run, executor);
+            assert asyncBuffer != null;
+            asyncBuffer.onReady(onReady, onSchedule, executor);
+        }
+
+        public String toString()
+        {
+            return "NotInCache " + asyncBuffer;
         }
     }
 

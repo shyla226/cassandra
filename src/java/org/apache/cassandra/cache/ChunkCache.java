@@ -23,7 +23,9 @@ package org.apache.cassandra.cache;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
@@ -173,7 +175,13 @@ public class ChunkCache
             return futureBuffer.join().duplicate();
         }
 
-        public void onReady(Runnable onReady, Executor executor)
+        /**
+         * Callback handler for
+         * @param onReady called when buffer is ready.
+         * @param onSchedule called if the buffer isn't ready yet and will be scheduled
+         * @param executor if not instantly ready the callback will happen on this executor
+         */
+        public void onReady(Runnable onReady, Runnable onSchedule, Executor executor)
         {
             if (futureBuffer.isDone())
             {
@@ -181,6 +189,7 @@ public class ChunkCache
             }
             else
             {
+                onSchedule.run();
                 futureBuffer.thenRunAsync(() -> onReady.run(), executor);
             }
         }
@@ -203,6 +212,11 @@ public class ChunkCache
             {
                 BufferPool.put(futureBuffer.join());
             }
+        }
+
+        public String toString()
+        {
+            return "ChunkCacheBuffer " + key;
         }
     }
 

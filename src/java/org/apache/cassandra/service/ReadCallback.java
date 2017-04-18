@@ -110,7 +110,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         long time = TimeUnit.MILLISECONDS.toNanos(command.getTimeout()) - (System.nanoTime() - queryStartNanoTime);
 
         return publishSubject
-               .timeout(time, TimeUnit.NANOSECONDS)
+               //.timeout(time, TimeUnit.NANOSECONDS)
                .first(EmptyIterators.partition())
                .onErrorResumeNext(exc ->
                                   {

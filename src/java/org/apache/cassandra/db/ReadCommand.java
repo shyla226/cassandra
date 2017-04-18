@@ -20,9 +20,11 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
+import com.google.common.base.Suppliers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -403,7 +405,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     public Single<PartitionIterator> executeInternal(Monitor monitor)
     {
         // tpc TODO: Do filtering on Flowable.
-        return Single.<PartitionIterator>defer(() -> Single.just(UnfilteredPartitionIterators.filter(FlowablePartitions.toPartitions(executeLocally(monitor), metadata()), nowInSec())));
+        return Single.defer(() -> executeLocally(monitor)
+                               .concatMap(f -> ImmutableBTreePartition.create(f).toFlowable()).toList()
+                               .map(p -> UnfilteredPartitionIterators.filter(UnfilteredPartitionIterators.concat(p.stream().map(l -> new SingletonUnfilteredPartitionIterator(l.unfilteredIterator())).collect(Collectors.toList()), metadata()), nowInSec()))
+        );
     }
 
     public ReadExecutionController executionController()

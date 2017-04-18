@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
@@ -1109,8 +1110,10 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return Single.fromCallable(() -> FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata()))  // tpc TODO do filtering on Flowable
-                         .map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
+            return Single.defer(() -> executeLocally(monitor, false)
+                                      .concatMap(f -> ImmutableBTreePartition.create(f).toFlowable()).toList()
+                                      .map(p -> UnfilteredPartitionIterators.filter(UnfilteredPartitionIterators.concat(p.stream().map(l -> new SingletonUnfilteredPartitionIterator(l.unfilteredIterator())).collect(Collectors.toList()), metadata()), nowInSec()))
+            );
         }
 
         public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
