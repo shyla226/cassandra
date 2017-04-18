@@ -74,10 +74,10 @@ class PartitionFlowable extends Flowable<Unfiltered>
     }
 
 
-    public PartitionFlowable(PartitionFlowable o, int offset)
+    public PartitionFlowable(PartitionFlowable o, OpOrder readOrdering, int offset)
     {
         this.table = o.table;
-        this.readOrdering = o.readOrdering;
+        this.readOrdering = readOrdering;
         this.key = o.key;
         this.selectedColumns = o.selectedColumns;
         this.slices = o.slices;
@@ -111,7 +111,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
     class PartitionSubscription implements Subscription
     {
-        final OpOrder.Group opGroup;
+        OpOrder.Group opGroup;
         FileDataInput dfile = null;
         AbstractSSTableIterator ssTableIterator = null;
 
@@ -147,7 +147,6 @@ class PartitionFlowable extends Flowable<Unfiltered>
         PartitionSubscription(PartitionSubscription p, int offset)
         {
             this.s = null;
-            this.opGroup = readOrdering.start();
             this.helper = p.helper;
             this.count.set(offset);
             this.indexEntry = p.indexEntry;
@@ -159,6 +158,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
         void setSubscriber(Subscriber<? super Unfiltered> s)
         {
             assert this.s == null;
+            this.opGroup = readOrdering.start();
             this.s = s;
         }
 
@@ -187,7 +187,8 @@ class PartitionFlowable extends Flowable<Unfiltered>
         {
             assert state != State.CLOSED : "Already closed";
             state = State.CLOSED;
-            opGroup.close();
+            if (opGroup != null)
+                opGroup.close();
             FileUtils.closeQuietly(dfile);
             FileUtils.closeQuietly(ssTableIterator);
         }

@@ -85,7 +85,7 @@ public class BigTableReader extends SSTableReader
                                                                                                Rows.EMPTY_STATIC_ROW,
                                                                                                Flowable.empty());
 
-                                                    PartitionFlowable u = new PartitionFlowable(pf, 2);
+                                                    PartitionFlowable u = new PartitionFlowable(pf, readOrdering, 2);
 
                                                     return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), u);
                                                 })
