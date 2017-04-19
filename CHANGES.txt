@@ -51,6 +51,7 @@
  * cqlsh auto completion: refactor definition of compaction strategy options (CASSANDRA-12946)
  * Add support for arithmetic operators (CASSANDRA-11935)
  * Add histogram for delay to deliver hints (CASSANDRA-13234)
+ * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
 
 
 3.11.0
@@ -79,6 +80,7 @@
  * Address message coalescing regression (CASSANDRA-12676)
  * Delete illegal character from StandardTokenizerImpl.jflex (CASSANDRA-13417)
 Merged from 3.0:
+ * Handling partially written hint files (CASSANDRA-12728)
  * Fix NPE issue in StorageService (CASSANDRA-13060)
  * Make reading of range tombstones more reliable (CASSANDRA-12811)
  * Fix startup problems due to schema tables not completely flushed (CASSANDRA-12213)
