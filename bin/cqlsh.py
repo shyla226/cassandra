@@ -493,7 +493,7 @@ class Shell(cmd.Cmd):
                                 ssl_options=sslhandling.ssl_settings(hostname, CONFIG_FILE) if ssl else None,
                                 control_connection_timeout=connect_timeout,
                                 connect_timeout=connect_timeout,
-								execution_profiles=self.execution_profiles,
+                                execution_profiles=self.execution_profiles,
                                 **kwargs)
         self.owns_connection = not use_conn
 
