@@ -167,7 +167,7 @@ public abstract class Rows
                     inputDatas[idx - 1] = current;
             }
 
-            protected Object getReduced()
+            public Object getReduced()
             {
                 for (int i = 0 ; i != inputDatas.length ; i++)
                 {
@@ -229,7 +229,7 @@ public abstract class Rows
                 return null;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 mergedData = null;
                 Arrays.fill(inputDatas, null);

@@ -15,25 +15,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.utils;
+package org.apache.cassandra.utils.flow;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Flowable;
-import org.reactivestreams.Publisher;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
+import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.Throwables;
 
 /** Merges sorted input iterators which individually contain unique items. */
 // Not closeable -- the subscription is where that belongs, via the cancel method.
-public class MergeFlowable<In,Out> extends Flowable<Out>
+public class Merge<In, Out> extends CsFlow<Out>
 {
     protected final Reducer<In,Out> reducer;
-    protected final List<? extends Publisher<In>> iterators;
+    protected final List<? extends CsFlow<In>> iterators;
     protected final Comparator<? super In> comparator;
 
-    public static <In, Out> Flowable<Out> get(List<? extends Flowable<In>> sources,
+    public static <In, Out> CsFlow<Out> get(
+            List<? extends CsFlow<In>> sources,
             Comparator<? super In> comparator,
             Reducer<In, Out> reducer)
     {
@@ -48,15 +49,15 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
                 });
 
             @SuppressWarnings("unchecked")
-            Flowable<Out> converted = (Flowable<Out>) sources.get(0);
+            CsFlow<Out> converted = (CsFlow<Out>) sources.get(0);
             return converted;
         }
-        return new MergeFlowable<>(sources, comparator, reducer);
+        return new Merge<>(sources, comparator, reducer);
     }
 
-    public MergeFlowable(List<? extends Publisher<In>> iters,
-                             Comparator<? super In> comparator,
-                             Reducer<In, Out> reducer)
+    public Merge(List<? extends CsFlow<In>> iters,
+                 Comparator<? super In> comparator,
+                 Reducer<In, Out> reducer)
     {
         this.iterators = iters;
         this.reducer = reducer;
@@ -64,14 +65,11 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
     }
 
     @Override
-    public void subscribeActual(Subscriber<? super Out> subscriber)
+    public CsSubscription subscribe(CsSubscriber<Out> subscriber) throws Exception
     {
         ManyToOne<In, Out> merger = new ManyToOne<>(subscriber, reducer);
-
-        // Downstream should already be set up for subscriptions as we might output during subscription.
-        subscriber.onSubscribe(merger);
-
         merger.subscribe(iterators, comparator);
+        return merger;
     }
 
     /**
@@ -120,17 +118,15 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
      *
      * For more formal definitions and proof of correctness, see CASSANDRA-8915.
      */
-    static final class ManyToOne<In,Out> implements Subscription
+    static final class ManyToOne<In, Out> implements CsSubscription
     {
         protected Candidate<In>[] heap;
         private final Reducer<In, Out> reducer;
-        Subscriber<? super Out> subscriber;
+        CsSubscriber<Out> subscriber;
         long requested;                 // check for possible threading issue
                                         // if was 0 on request, advance()
                                         // if > 0 at end of consume(), advance()
         AtomicInteger advancing = new AtomicInteger();
-        volatile boolean consuming = false;
-        volatile boolean cancelled = false;
 
         /** Number of non-exhausted iterators. */
         int size;
@@ -148,14 +144,13 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
          */
         static final int SORTED_SECTION_SIZE = 4;
 
-        public ManyToOne(Subscriber<? super Out> subscriber, Reducer<In, Out> reducer)
+        public ManyToOne(CsSubscriber<Out> subscriber, Reducer<In, Out> reducer)
         {
             this.subscriber = subscriber;
             this.reducer = reducer;
-            this.requested = 1; // we start with non-zero request, so that we don't try to advance in incompletely built state
         }
 
-        void subscribe(List<? extends Publisher<In>> iters, Comparator<? super In> comp)
+        void subscribe(List<? extends CsFlow<In>> iters, Comparator<? super In> comp) throws Exception
         {
             @SuppressWarnings("unchecked")
             Candidate<In>[] heap = new Candidate[iters.size()];
@@ -168,30 +163,18 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
                 heap[size++] = candidate;
             }
             needingAdvance = size;
+        }
 
-            // subscribing may have caused a request
-            --requested;
-            if (requested > 0 && !cancelled)
-                advance();
+        public void request()
+        {
+            advance();
         }
 
         @Override
-        public void request(long count)
+        public void close() throws Exception
         {
-            boolean hadRequests = requested > 0;
-            requested += count;
-            if (requested < count)  // overflow, happens for Long.MAX_VALUE as passed by some subscribers.
-                requested = count;
-            if (!hadRequests && !cancelled)
-                advance();
-        }
-
-        @Override
-        public void cancel()
-        {
-            cancelled = true;
-            for (int i = 0; i < size; ++i)
-                heap[i].cancel();
+            Throwable t = Throwables.close(null, Arrays.asList(heap));
+            Throwables.maybeFail(t);
         }
 
         /**
@@ -210,10 +193,14 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
          */
         private void advance()
         {
-            --requested;
-            assert advancing.get() == 0;
+            // Set to 1 initially to guard so we don't get called while we are increasing advancing.
+            // It must be 0 before we are called.
+            if (!advancing.compareAndSet(0, 1))
+            {
+                subscriber.onError(new AssertionError("Merge advance called while another has " + advancing.get() + " outstanding requests.\n\t" + this));
+                return;
+            }
 
-            advancing.set(1);        // guard so we don't get called while we are increasing advancing
             for (int i = needingAdvance - 1; i >= 0; --i)
             {
                 Candidate<In> candidate = heap[i];
@@ -230,12 +217,6 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
                 }
             }
             onAdvance();
-        }
-
-        public void onError(Throwable error)
-        {
-            cancel();
-            subscriber.onError(error);
         }
 
         // This can come concurrently!
@@ -269,44 +250,37 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
          */
         private void consume()
         {
-            while (!consuming && needingAdvance == 0)
+            if (size == 0)
             {
-                consuming = true;
-                if (size == 0)
-                {
-                    subscriber.onComplete();
-                    return;
-                }
-    
-                reducer.onKeyChange();
-                assert !heap[0].equalParent;
-                heap[0].consume(reducer);
-                final int size = this.size;
-                final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
-                int i;
-                consume: {
-                    for (i = 1; i < sortedSectionSize; ++i)
-                    {
-                        if (!heap[i].equalParent)
-                            break consume;
-                        heap[i].consume(reducer);
-                    }
-                    i = Math.max(i, consumeHeap(i) + 1);
-                }
-                needingAdvance = i;
-    
-                boolean hadRequests = requested > 0;
-
-                Out item = reducer.getReduced();
-                if (item != null)
-                    subscriber.onNext(item);    // usually requests; make sure we don't double-advance or miss a request
-                else
-                    request(1);           // reducer rejected its input; get another set
-    
-                if (hadRequests && !cancelled)
-                    advance();
-                consuming = false;
+                subscriber.onComplete();
+                return;
             }
+
+            reducer.onKeyChange();
+            assert !heap[0].equalParent;
+            heap[0].consume(reducer);
+            final int size = this.size;
+            final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
+            int i;
+            consume: {
+                for (i = 1; i < sortedSectionSize; ++i)
+                {
+                    if (!heap[i].equalParent)
+                        break consume;
+                    heap[i].consume(reducer);
+                }
+                i = Math.max(i, consumeHeap(i) + 1);
+            }
+            needingAdvance = i;
+
+            Out item = reducer.getReduced();
+            Throwable error = reducer.getErrors();
+            if (error != null)
+                subscriber.onError(error);
+            else if (item != null)
+                subscriber.onNext(item);    // usually requests; make sure we don't double-advance or miss a request
+            else
+                request();           // reducer rejected its input; get another set
         }
 
         /**
@@ -333,11 +307,12 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
          */
         private void replaceAndSink(Candidate<In> candidate, int currIdx)
         {
-            if (candidate.item == null)
+            if (candidate.item == null && candidate.error == null)
             {
                 // Drop iterator by replacing it with the last one in the heap.
+                Candidate<In> toDrop = candidate;
                 candidate = heap[--size];
-                heap[size] = null; // not necessary but helpful for debugging
+                heap[size] = toDrop; // stash iterator at end so it can be closed
             }
             // The new element will be top of its heap, at this point there is no parent to be equal to.
             candidate.equalParent = false;
@@ -437,14 +412,14 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
     }
 
     // Holds and is comparable by the head item of an iterator it owns
-    protected final static class Candidate<In> implements Comparable<Candidate<In>>, Subscriber<In>
+    protected final static class Candidate<In> implements Comparable<Candidate<In>>, CsSubscriber<In>, AutoCloseable
     {
         private final ManyToOne<In, ?> merger;
-        private Subscription source;
+        private CsSubscription source;
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
-        boolean done;
+        Throwable error = null;
 
         enum State {
             NEEDS_REQUEST,
@@ -457,20 +432,13 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
 
         boolean equalParent;
 
-        public Candidate(final ManyToOne<In, ?> merger, int idx, Publisher<In> iter, Comparator<? super In> comp)
+        public Candidate(final ManyToOne<In, ?> merger, int idx, CsFlow<In> iter, Comparator<? super In> comp) throws Exception
         {
             this.merger = merger;
             this.comp = comp;
             this.idx = idx;
             this.state = State.NEEDS_REQUEST;
-            done = false;
-            iter.subscribe(this);
-        }
-
-        @Override
-        public void onSubscribe(Subscription source)
-        {
-            this.source = source;
+            source = iter.subscribe(this);
         }
 
         public boolean needsAdvance()
@@ -484,25 +452,20 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
             assert state == State.NEEDS_REQUEST;
             assert item == null;
             state = State.AWAITING_ADVANCE;
-            if (!done)
-                source.request(1);
-            else        // directly go to advanced, consuming the completion
-                onAdvance(null);
+            source.request();
         }
 
         @Override
         public void onComplete()
         {
-            // This may come in response to request, or following a request or subscribe.
-            done = true;
-            if (state == State.AWAITING_ADVANCE)
-                onAdvance(null);
+            onAdvance(null);
         }
 
         @Override
         public void onError(Throwable error)
         {
-            merger.onError(error);
+            this.error = error;
+            onAdvance(null);
         }
 
         @Override
@@ -533,6 +496,9 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
         public int compareTo(Candidate<In> that)
         {
             assert this.state == State.PROCESSED && that.state == State.PROCESSED;
+            if (this.error != null || that.error != null)
+                return ((this.error != null) ? -1 : 0) - ((that.error != null) ? -1 : 0);
+
             assert this.item != null && that.item != null;
             int ret = comp.compare(this.item, that.item);
             return ret;
@@ -542,13 +508,21 @@ public class MergeFlowable<In,Out> extends Flowable<Out>
         {
             assert state == State.PROCESSED;
             state = State.NEEDS_REQUEST;
-            reducer.reduce(idx, item);
+            if (error != null)
+                reducer.error(error);
+            else
+                reducer.reduce(idx, item);
             item = null;
         }
 
-        public void cancel()
+        public void close() throws Exception
         {
-            source.cancel();
+            source.close();
+        }
+
+        public String toString()
+        {
+            return "merge\n\tsubscriber " + merger.subscriber;
         }
     }
 }

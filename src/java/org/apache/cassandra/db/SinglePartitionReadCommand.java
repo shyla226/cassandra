@@ -55,11 +55,11 @@ import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableThreads;
-import org.apache.cassandra.utils.FlowableUtils;
+import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * A read command that selects a (part of a) single partition.
@@ -345,7 +345,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
-    public Flowable<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public CsFlow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         if (cfs.isRowCacheEnabled())
             return getThroughCache(cfs, executionController);       // tpc TODO: Not tested!
@@ -353,10 +353,10 @@ public class SinglePartitionReadCommand extends ReadCommand
             return deferredQuery(cfs, executionController);
     }
 
-    public Flowable<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        return FlowableThreads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-                                              NettyRxScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
+        return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
+                                      NettyRxScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
     }
 
     /**
@@ -368,7 +368,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * If the partition is is not cached, we figure out what filter is "biggest", read
      * that from disk, then filter the result and either cache that or return it.
      */
-    private Flowable<FlowableUnfilteredPartition> getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    private CsFlow<FlowableUnfilteredPartition> getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert !cfs.isIndex(); // CASSANDRA-5732
         assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
@@ -396,7 +396,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 Tracing.trace("Row cache hit");
                 UnfilteredRowIterator unfilteredRowIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
                 cfs.metric.updateSSTableIterated(0);
-                return Flowable.just(FlowablePartitions.fromIterator(unfilteredRowIterator, null));
+                return CsFlow.just(FlowablePartitions.fromIterator(unfilteredRowIterator, null));
             }
 
             cfs.metric.rowCacheHitOutOfRange.inc();
@@ -430,24 +430,33 @@ public class SinglePartitionReadCommand extends ReadCommand
             //{
             int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
             @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
-            Flowable<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).deferredQuery(cfs, executionController);
+            CsFlow<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).deferredQuery(cfs, executionController);
 
             return iter.map(fup ->
             {
                 UnfilteredRowIterator i = FlowablePartitions.toIterator(fup);
-                // We want to cache only rowsToCache rows
-                CachedPartition toCache =
-                        CachedBTreePartition.create(
-                                DataLimits.cqlLimits(rowsToCache).filter(i, nowInSec()),
-                                nowInSec()
-                        );
-
-                if (sentinelSuccess && !toCache.isEmpty())
+                CachedPartition toCache;
+                try
                 {
-                    Tracing.trace("Caching {} rows", toCache.rowCount());
-                    CacheService.instance.rowCache.replace(key, sentinel, toCache);
-                    // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
-                    sentinelReplaced.set(true);
+                    // We want to cache only rowsToCache rows
+                    toCache = CachedBTreePartition.create(
+                        DataLimits.cqlLimits(rowsToCache).filter(i, nowInSec()),
+                        nowInSec());
+
+                    if (sentinelSuccess && !toCache.isEmpty())
+                    {
+                        Tracing.trace("Caching {} rows", toCache.rowCount());
+                        CacheService.instance.rowCache.replace(key, sentinel, toCache);
+                        // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
+                        sentinelReplaced.set(true);
+                    }
+                }
+                catch (Throwable t)
+                {
+                    if (sentinelSuccess && !sentinelReplaced.get())
+                        cfs.invalidateCachedPartition(key);
+                    i.close();
+                    throw t;
                 }
 
                 // We then re-filter out what this query wants.
@@ -471,12 +480,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                     i.close();
                     throw e;
                 }
-            }).onErrorResumeNext(t ->
-            {
-                if (sentinelSuccess && !sentinelReplaced.get())
-                    cfs.invalidateCachedPartition(key);
-
-                return Flowable.error(t);
             });
         }
 
@@ -574,7 +577,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 // than the most recent update to this sstable, we can skip it
                 if (sstable.getMaxTimestamp() < mostRecentPartitionTombstone)
                     break;
-                // TODO: Filter out flowable content if table or partition covered by partition-level deletion
+                // TODO: Filter out flow content if table or partition covered by partition-level deletion
 
                 if (!shouldInclude(sstable))
                 {
@@ -668,7 +671,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     private FlowableUnfilteredPartition makeFlowable(ColumnFamilyStore cfs, final SSTableReader sstable)
     {
         // synchronous!
-        return sstable.flowable(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed());
+        return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed());
     }
 
 //    /**
@@ -1025,11 +1028,14 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return Single.fromCallable(() -> FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata()))  // tpc TODO do filtering on Flowable
-                         .map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
+            return Single.fromCallable(() ->
+            {
+                UnfilteredPartitionIterator iter = FlowablePartitions.toPartitions(executeLocally(monitor, false), metadata());
+                return limits.filter(UnfilteredPartitionIterators.filter(iter, nowInSec), nowInSec);
+            });
         }
 
-        public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+        public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
             return executeLocally(monitor, true);
         }
@@ -1044,7 +1050,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor, boolean sort)
+        private CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor, boolean sort)
         {
             if (commands.size() == 1)
                 return commands.get(0).executeLocally(monitor);
@@ -1056,8 +1062,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                 commands.sort(Comparator.comparing(SinglePartitionReadCommand::partitionKey));
             }
 
-            return Flowable.fromIterable(commands)
-                           .lift(FlowableUtils.concatMapLazy(command -> command.executeLocally(monitor)));
+            return CsFlow.fromIterable(commands)
+                         .flatMap(command -> command.executeLocally(monitor));
         }
 
         public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

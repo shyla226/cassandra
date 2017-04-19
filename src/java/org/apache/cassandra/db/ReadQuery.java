@@ -19,7 +19,7 @@ package org.apache.cassandra.db;
 
 import javax.annotation.Nullable;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
 
 import org.apache.cassandra.db.filter.DataLimits;
@@ -73,9 +73,9 @@ public interface ReadQuery extends Monitorable
             return Single.just(EmptyIterators.partition());
         }
 
-        public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+        public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
-            return Flowable.empty();
+            return CsFlow.empty();
         }
 
         public DataLimits limits()
@@ -184,9 +184,9 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the read query.
      */
-    public Flowable<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
+    public CsFlow<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
 
-    default public Flowable<FlowableUnfilteredPartition> executeLocally()
+    default public CsFlow<FlowableUnfilteredPartition> executeLocally()
     {
         return executeLocally(null);
     }

@@ -19,7 +19,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.*;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -223,10 +223,5 @@ public class SSTableIdentityIterator implements Comparable<SSTableIdentityIterat
     public int compareTo(SSTableIdentityIterator o)
     {
         return key.compareTo(o.key);
-    }
-
-    public Flowable<Unfiltered> asObservable()
-    {
-        return Flowable.fromIterable(() -> this).doAfterTerminate(() -> close());
     }
 }

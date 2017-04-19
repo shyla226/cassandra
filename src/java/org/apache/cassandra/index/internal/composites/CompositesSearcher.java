@@ -23,18 +23,28 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import io.reactivex.Completable;
-import io.reactivex.Flowable;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.index.internal.IndexEntry;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.GroupOp;
 
 
 public class CompositesSearcher extends CassandraIndexSearcher
@@ -57,21 +67,21 @@ public class CompositesSearcher extends CassandraIndexSearcher
             return null;
     }
 
-    protected Flowable<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+    protected CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
                                                                        final FlowablePartition indexHits,
                                                                        final ReadCommand command,
                                                                        final ReadExecutionController executionController)
     {
         assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
 
-        class Collector implements FlowableUtils.GroupOp<IndexEntry, Flowable<FlowableUnfilteredPartition>>
+        class Collector implements GroupOp<IndexEntry, CsFlow<FlowableUnfilteredPartition>>
         {
             public boolean inSameGroup(IndexEntry l, IndexEntry r)
             {
                 return l.indexedKey.equals(r.indexedKey);
             }
 
-            public Flowable<FlowableUnfilteredPartition> map(List<IndexEntry> entries)
+            public CsFlow<FlowableUnfilteredPartition> map(List<IndexEntry> entries)
             {
                 DecoratedKey partitionKey = index.baseCfs.decorateKey(entries.get(0).indexedKey);
                 BTreeSet.Builder clusterings = BTreeSet.builder(index.baseCfs.getComparator());
@@ -87,7 +97,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                                        DataLimits.NONE,
                                                                                        partitionKey,
                                                                                        filter);
-                Flowable<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+                CsFlow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
 
                 return partition.map(p -> filterStaleEntries(p,
                                                              indexKey.getKey(), entries,
@@ -96,9 +106,9 @@ public class CompositesSearcher extends CassandraIndexSearcher
             }
         }
 
-        return indexHits.content.lift(FlowableUtils.skippingMap(hit -> decodeMatchingEntry(indexKey, hit, command)))
-                                .lift(FlowableUtils.group(new Collector()))
-                                .lift(FlowableUtils.concatLazy());
+        return indexHits.content.skippingMap(hit -> decodeMatchingEntry(indexKey, hit, command))
+                                .group(new Collector())
+                                .flatMap(x -> x);
     }
 
     // We assume all rows in dataIter belong to the same partition.
@@ -124,7 +134,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
         }
 
         ClusteringComparator comparator = dataIter.header.metadata.comparator;
-        class Transform extends FlowableUtils.OnceCloseable implements FlowableUtils.SkippingOp<Unfiltered, Unfiltered>
+        class Transform implements CsFlow.SkippingOp<Unfiltered, Unfiltered>
         {
             private int entriesIdx;
 
@@ -166,8 +176,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                 throw new AssertionError();
             }
 
-            @Override
-            public void onClose()
+            public void close()
             {
                 //This is purely a optimization
                 // if it fails we don't really care
@@ -175,7 +184,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
             }
         }
 
-        Flowable<Unfiltered> content = FlowableUtils.skippingMap(dataIter.content, new Transform());
+        CsFlow<Unfiltered> content = dataIter.content.skippingMap(new Transform());
         return new FlowableUnfilteredPartition(dataIter.header,
                                                dataIter.staticRow,
                                                content);

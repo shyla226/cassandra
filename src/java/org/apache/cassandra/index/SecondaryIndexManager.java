@@ -234,19 +234,19 @@ public class SecondaryIndexManager implements IndexRegistry
      */
     public void markAllIndexesRemoved()
     {
-       getBuiltIndexNames().forEach(this::markIndexRemoved);
+        getBuiltIndexNames().forEach(this::markIndexRemoved);
     }
 
     /**
-    * Does a full, blocking rebuild of the indexes specified by columns from the sstables.
-    * Caller must acquire and release references to the sstables used here.
-    * Note also that only this method of (re)building indexes:
-    *   a) takes a set of index *names* rather than Indexers
-    *   b) marks exsiting indexes removed prior to rebuilding
-    *
-    * @param sstables the data to build from
-    * @param indexNames the list of indexes to be rebuilt
-    */
+     * Does a full, blocking rebuild of the indexes specified by columns from the sstables.
+     * Caller must acquire and release references to the sstables used here.
+     * Note also that only this method of (re)building indexes:
+     *   a) takes a set of index *names* rather than Indexers
+     *   b) marks exsiting indexes removed prior to rebuilding
+     *
+     * @param sstables the data to build from
+     * @param indexNames the list of indexes to be rebuilt
+     */
     public void rebuildIndexesBlocking(Collection<SSTableReader> sstables, Set<String> indexNames)
     {
         Set<Index> toRebuild = indexes.values().stream()
@@ -463,7 +463,7 @@ public class SecondaryIndexManager implements IndexRegistry
      */
     public void flushAllIndexesBlocking()
     {
-       flushIndexesBlocking(ImmutableSet.copyOf(indexes.values()));
+        flushIndexesBlocking(ImmutableSet.copyOf(indexes.values()));
     }
 
     /**
@@ -517,8 +517,8 @@ public class SecondaryIndexManager implements IndexRegistry
     {
         Set<String> allIndexNames = new HashSet<>();
         indexes.values().stream()
-                .map(i -> i.getIndexMetadata().name)
-                .forEach(allIndexNames::add);
+                        .map(i -> i.getIndexMetadata().name)
+                        .forEach(allIndexNames::add);
         return SystemKeyspace.getBuiltIndexes(baseCfs.keyspace.getName(), allIndexNames);
     }
 

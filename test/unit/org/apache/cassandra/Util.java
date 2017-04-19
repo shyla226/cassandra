@@ -25,7 +25,15 @@ import java.io.IOError;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,20 +41,14 @@ import java.util.function.Supplier;
 
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Flowable;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.Directories.DataDirectory;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
@@ -54,11 +56,15 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.IPartitioner;
-
-import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.ApplicationState;
@@ -66,13 +72,16 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableUtils;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -308,10 +317,10 @@ public class Util
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
         return command.executeLocally()
-                      .concatMap(partition -> ImmutableBTreePartition.create(partition).toFlowable())
+                      .flatMap(partition -> ImmutableBTreePartition.create(partition))
                       .filter(ImmutableBTreePartition::notEmpty)
                       .toList()
-                      .blockingGet();
+                      .blockingSingle();
     }
 
     public static List<FilteredPartition> getAll(ReadCommand command)
@@ -424,20 +433,28 @@ public class Util
         }
     }
 
-    public static Flowable<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
+    public static CsFlow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
     {
         if (!partition.staticRow.isEmpty() || !partition.header.partitionLevelDeletion.isLive())
-            return Flowable.just(partition.header.partitionKey);
+        {
+            partition.unused();
+            return CsFlow.just(partition.header.partitionKey);
+        }
         return partition.content.take(1).map(x -> partition.header.partitionKey);
     }
 
-    public static long size(Flowable<FlowableUnfilteredPartition> partitions, int nowInSec)
+    public static long size(CsFlow<FlowableUnfilteredPartition> partitions, int nowInSec)
     {
-        return FlowablePartitions.filter(partitions, nowInSec)
-                                 .lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys))
-                                 .count()
-                                 .blockingGet()
-                                 .longValue();
+        try
+        {
+            return FlowablePartitions.filter(partitions, nowInSec)
+                                     .flatMap(Util::nonEmptyKeys)
+                                     .countBlocking();
+        }
+        catch (Exception e)
+        {
+            throw Throwables.propagate(e);
+        }
     }
 
     public static int size(PartitionIterator iter)
@@ -648,7 +665,7 @@ public class Util
         }
     }
 
-    public static Flowable<FlowableUnfilteredPartition> executeLocally(PartitionRangeReadCommand command,
+    public static CsFlow<FlowableUnfilteredPartition> executeLocally(PartitionRangeReadCommand command,
                                                                        ColumnFamilyStore cfs,
                                                                        ReadExecutionController controller)
     {
@@ -670,7 +687,7 @@ public class Util
                   Optional.empty());
         }
 
-        private Flowable<FlowableUnfilteredPartition> queryStorageInternal(ColumnFamilyStore cfs,
+        private CsFlow<FlowableUnfilteredPartition> queryStorageInternal(ColumnFamilyStore cfs,
                                                                            ReadExecutionController controller)
         {
             return queryStorage(cfs, controller);

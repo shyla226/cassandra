@@ -232,7 +232,7 @@ public abstract class UnfilteredPartitionIterators
             toMerge.set(idx, current);
         }
 
-        protected UnfilteredRowIterator getReduced()
+        public UnfilteredRowIterator getReduced()
         {
             UnfilteredRowIterators.MergeListener rowListener = listener.getRowMergeListener(partitionKey, toMerge);
 
@@ -259,7 +259,7 @@ public abstract class UnfilteredPartitionIterators
             return numNonEmptyRowIterators == 1 && !listener.callOnTrivialMerge() ? nonEmptyRowIterator : UnfilteredRowIterators.merge(toMerge, nowInSec, rowListener);
         }
 
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             toMerge.clear();
             for (int i = 0, length = numIterators; i < length; i++)

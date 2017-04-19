@@ -18,14 +18,13 @@
 
 package org.apache.cassandra.db.monitoring;
 
-import io.reactivex.Flowable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableUtils;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 
 public class Monitor
 {
@@ -235,23 +234,23 @@ public class Monitor
             abort();
     }
 
-    public Flowable<FlowableUnfilteredPartition> withMonitoring(Flowable<FlowableUnfilteredPartition> iter)
+    public CsFlow<FlowableUnfilteredPartition> withMonitoring(CsFlow<FlowableUnfilteredPartition> iter)
     {
         CheckForAbort checkForAbort = new CheckForAbort();
-        return iter.lift((FlowableUtils.FlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>) (subscriber, source, next) -> subscriber.onNext(checkForAbort.applyToPartition(next)));
+        return iter.stoppingMap(next -> checkForAbort.applyToPartition(next));
     }
 
-    private class CheckForAbort implements FlowableUtils.FlowableOp<Unfiltered, Unfiltered>
+    private class CheckForAbort implements CsFlow.FlowableOp<Unfiltered, Unfiltered>
     {
         protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
         {
             check();
             return new FlowableUnfilteredPartition(iter.header,
                                                    iter.staticRow,
-                                                   iter.content.lift(this));
+                                                   iter.content.apply(this));
         }
 
-        public void onNext(Subscriber<? super Unfiltered> subscriber, Subscription src, Unfiltered unfiltered)
+        public void onNext(CsSubscriber<Unfiltered> subscriber, CsSubscription src, Unfiltered unfiltered)
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);

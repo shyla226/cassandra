@@ -17,14 +17,28 @@ public abstract class Reducer<In,Out>
      */
     public abstract void reduce(int idx, In current);
 
+    Throwable errors = null;
+
+    public void error(Throwable error)
+    {
+        errors = Throwables.merge(errors, error);
+    }
+
+    public Throwable getErrors()
+    {
+        return errors;
+    }
+
     /** @return The last object computed by reduce */
-    protected abstract Out getReduced();
+    public abstract Out getReduced();
 
     /**
      * Called at the beginning of each new key, before any reduce is called.
      * To be overridden by implementing classes.
+     *
+     * Note: There's no need to clear error; merging completes once one is found.
      */
-    protected void onKeyChange() {}
+    public void onKeyChange() {}
 
     /**
      * May be overridden by implementations that require cleaning up after use

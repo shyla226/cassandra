@@ -24,6 +24,8 @@ import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
@@ -84,12 +86,11 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
 
     // FlowableOp interpretation of transformation
     @Override
-    public void onNextUnfiltered(Subscriber<? super Unfiltered> subscriber, Subscription source, Unfiltered item)
+    public void onNextUnfiltered(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered item)
     {
+        // TODO: This is best done on request.
         if (stopInPartition != null && stopInPartition.isSignalled)
         {
-            source.cancel();
-            onPartitionClose();
             subscriber.onComplete();
             return;
         }
@@ -99,13 +100,11 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
 
     // FlowableOp interpretation of transformation
     @Override
-    public void onNextPartition(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition item)
+    public void onNextPartition(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition item)
     {
         if (stop != null && stop.isSignalled)
         {
             item.unused();
-            source.cancel();
-            onClose();
             subscriber.onComplete();
             return;
         }

@@ -22,7 +22,7 @@ import java.util.function.Predicate;
 
 import com.google.common.collect.Ordering;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
@@ -266,9 +266,9 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         return this.getCompactionInfo().toString();
     }
 
-    public Flowable<UnfilteredRowIterator> asObservable()
+    public CsFlow<UnfilteredRowIterator> asObservable()
     {
-        return Flowable.empty();
+        return CsFlow.empty();
     }
 
     private class Purger extends PurgeFunction

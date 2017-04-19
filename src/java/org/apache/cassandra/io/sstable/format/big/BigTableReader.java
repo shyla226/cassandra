@@ -64,7 +64,7 @@ public class BigTableReader extends SSTableReader
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
-    public FlowableUnfilteredPartition flowable(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public FlowableUnfilteredPartition flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
         return FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed), Schedulers.io());
     }

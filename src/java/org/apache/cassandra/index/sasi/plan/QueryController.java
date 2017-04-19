@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -96,7 +96,7 @@ public class QueryController
     }
 
 
-    public Flowable<FlowableUnfilteredPartition> getPartition(DecoratedKey key, ReadExecutionController executionController)
+    public CsFlow<FlowableUnfilteredPartition> getPartition(DecoratedKey key, ReadExecutionController executionController)
     {
         if (key == null)
             throw new NullPointerException();

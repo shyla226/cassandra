@@ -19,7 +19,10 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,15 +31,29 @@ import com.google.common.base.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Flowable;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
-import org.apache.cassandra.db.context.*;
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellPath;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -45,7 +62,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableUtils;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -127,7 +144,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * @return the filtered iterator.
      */
 //    public abstract UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec);
-    public abstract Flowable<FlowableUnfilteredPartition> filter(Flowable<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec);
+    public abstract CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec);
 
     /**
      * Whether the provided row in the provided partition satisfies this filter.
@@ -248,7 +265,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        public Flowable<FlowableUnfilteredPartition> filter(Flowable<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
+        public CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
         {
             if (expressions.isEmpty())
                 return iter;
@@ -263,8 +280,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     rowLevelExpressions.add(e);
             }
 
-            return FlowableUtils.skippingMap(
-                iter,
+            return iter.skippingMap(
                 partition ->
                 {
                     DecoratedKey pk = partition.header.partitionKey;
@@ -277,8 +293,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                             return null;
                         }
 
-                    Flowable<Unfiltered> content = FlowableUtils.skippingMap(
-                        partition.content, unfiltered ->
+                    CsFlow<Unfiltered> content = partition.content.skippingMap(
+                        unfiltered ->
                         {
                             if (unfiltered.isRow())
                             {
@@ -308,7 +324,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     // Should I turn out to be mistaken, it is not impossible to do the removal here, but it is
                     // incredibly complex (we need to get first item of content; cache that item; delay doing
                     // onNext/onComplete on the _partition_ iterator until this happens) and needs a complete rewrite
-                    // of RowLimit to Flowable.
+                    // of RowLimit to CsFlow.
 
                     FlowableUnfilteredPartition iterator = new FlowableUnfilteredPartition(
                         partition.header,

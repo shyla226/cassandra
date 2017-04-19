@@ -31,23 +31,47 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Flowable;
+import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
+import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.IndexTarget;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
@@ -60,21 +84,16 @@ import org.apache.cassandra.index.sasi.memory.IndexMemtable;
 import org.apache.cassandra.index.sasi.plan.QueryController;
 import org.apache.cassandra.index.sasi.plan.QueryPlan;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.Pair;
-
-import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.Uninterruptibles;
-
-import junit.framework.Assert;
-
-import org.junit.*;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public class SASIIndexTest
 {
@@ -2326,7 +2345,7 @@ public class SASIIndexTest
 
     private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
     {
-        Flowable<FlowableUnfilteredPartition> currentPage;
+        CsFlow<FlowableUnfilteredPartition> currentPage;
         Set<DecoratedKey> uniqueKeys = new TreeSet<>();
 
         DecoratedKey lastKey = null;
@@ -2339,21 +2358,28 @@ public class SASIIndexTest
             if (currentPage == null)
                 break;
 
-            lastKey = currentPage.lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys))
-                                 .map(key ->
-                                      {
-                                          uniqueKeys.add(key);
-                                          count.incrementAndGet();
-                                          return key;
-                                      })
-                                 .blockingLast(null);
+            try
+            {
+                lastKey = currentPage.flatMap(Util::nonEmptyKeys)
+                                     .map(key ->
+                                          {
+                                              uniqueKeys.add(key);
+                                              count.incrementAndGet();
+                                              return key;
+                                          })
+                                     .blockingLast(null);
+            }
+            catch (Exception e)
+            {
+                throw Throwables.propagate(e);
+            }
         }
         while (count.get() == pageSize);
 
         return uniqueKeys;
     }
 
-    private static Flowable<FlowableUnfilteredPartition> getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
+    private static CsFlow<FlowableUnfilteredPartition> getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
     {
         DataRange range = (startKey == null)
                             ? DataRange.allData(PARTITIONER)
@@ -2390,16 +2416,23 @@ public class SASIIndexTest
         return rm;
     }
 
-    private static Set<String> getKeys(final Flowable<FlowableUnfilteredPartition> rows)
+    private static Set<String> getKeys(final CsFlow<FlowableUnfilteredPartition> rows)
     {
-        Flowable<DecoratedKey> fs = rows.lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys));
+        CsFlow<DecoratedKey> fs = rows.flatMap(Util::nonEmptyKeys);
 
-        return fs.reduce(new TreeSet<String>(),
-                           (set, pk) ->
-                           {
-                               set.add(AsciiType.instance.compose(pk.getKey()));
-                               return set;
-                           }).blockingGet();
+        try
+        {
+            return fs.reduceBlocking(new TreeSet<String>(),
+                                     (set, pk) ->
+                                     {
+                                         set.add(AsciiType.instance.compose(pk.getKey()));
+                                         return set;
+                                     });
+        }
+        catch (Exception e)
+        {
+            throw Throwables.propagate(e);
+        }
     }
 
     private static List<String> convert(final Set<DecoratedKey> keys)

@@ -549,7 +549,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -557,7 +557,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected Counted<T> getReduced()
+        public Counted<T> getReduced()
         {
             assert current != null;
             read = true;
@@ -600,7 +600,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -608,7 +608,7 @@ public class MergeIteratorComparisonTest
         }
 
         @Override
-        protected KeyedSet<K, V> getReduced()
+        public KeyedSet<K, V> getReduced()
         {
             assert current != null;
             read = true;

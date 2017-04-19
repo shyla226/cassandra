@@ -29,7 +29,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
@@ -124,8 +124,8 @@ public class SecondaryIndexTest
         Index.Searcher searcher = cfs.indexManager.getBestIndexFor(rc).searcherFor(rc);
         try (ReadExecutionController executionController = rc.executionController())
         {
-            Flowable<FlowableUnfilteredPartition> pi = searcher.search(executionController);
-            pi.blockingFirst().unused();    // has to have at least one partition
+            CsFlow<FlowableUnfilteredPartition> pi = searcher.search(executionController);
+            pi.take(1).blockingSingle().unused();    // has to have at least one partition
         }
 
         // Verify gt on idx scan

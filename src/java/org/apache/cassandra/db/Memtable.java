@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 
@@ -440,7 +440,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public Flowable<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    public CsFlow<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -451,13 +451,13 @@ public class Memtable implements Comparable<Memtable>
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        ArrayList<Flowable<PartitionPosition>> all = new ArrayList<>(partitions.size());
+        ArrayList<Callable<CsFlow<PartitionPosition>>> all = new ArrayList<>(partitions.size());
 
         for (int i = 0; i < NettyRxScheduler.getNumCores(); i++)
         {
             final int coreId = i;
 
-            all.add(Flowable.defer(() ->
+            all.add(() ->
                                    {
                                        ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(coreId);
                                        SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
@@ -469,22 +469,25 @@ public class Memtable implements Comparable<Memtable>
                                                                      ? memtableSubrange.tailMap(keyRange.left, includeStart)
                                                                      : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-                                       return Flowable.fromIterable(trimmedMemtableSubrange.keySet());
-                                   }));
+                                       return CsFlow.fromIterable(trimmedMemtableSubrange.keySet());
+                                   });
 
             // For system tables we just use the first core
             if (!hasSplits)
                 break;
         }
 
-        return Flowable.concat(all).map(position -> {
-            assert position instanceof DecoratedKey;
-            DecoratedKey key = (DecoratedKey)position;
-            ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
+        return CsFlow.fromIterable(all)
+                     .flatMap(Callable::call)
+                     .map(position ->
+                          {
+                              assert position instanceof DecoratedKey;
+                              DecoratedKey key = (DecoratedKey)position;
+                              ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
-            return FlowablePartitions.fromIterator(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)),
-                                                   NettyRxScheduler.getForKey(cfs.keyspace.getName(), key));
-        });
+                              return FlowablePartitions.fromIterator(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)),
+                                                                     NettyRxScheduler.getForKey(cfs.keyspace.getName(), key));
+                          });
     }
 
     private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getAllSortedPartitions()
@@ -636,7 +639,7 @@ public class Memtable implements Comparable<Memtable>
                         reduced = current;
                     }
 
-                    protected AtomicBTreePartition getReduced()
+                    public AtomicBTreePartition getReduced()
                     {
                         return reduced;
                     }

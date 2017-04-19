@@ -195,6 +195,23 @@ public abstract class UnfilteredRowIterators
     }
 
     /**
+     * Filter the provided iterator to exclude cells that have been fetched but are not queried by the user
+     * (see ColumnFilter for detailes).
+     *
+     * @param iterator the iterator to filter.
+     * @param filter the {@code ColumnFilter} to use when deciding which columns are the one queried by the
+     * user. This should be the filter that was used when querying {@code iterator}.
+     * @return the filtered iterator..
+     */
+    public static FlowableUnfilteredPartition withOnlyQueriedData(FlowableUnfilteredPartition iterator, ColumnFilter filter)
+    {
+        if (filter.allFetchedColumnsAreQueried())
+            return iterator;
+
+        return Transformation.apply(iterator, new WithOnlyQueriedData(filter));
+    }
+
+    /**
      * Returns an iterator that concatenate two atom iterators.
      * This method assumes that both iterator are from the same partition and that the atom from
      * {@code iter2} come after the ones of {@code iter1} (that is, that concatenating the iterator
@@ -572,7 +589,7 @@ public abstract class UnfilteredRowIterators
             }
         }
 
-        protected Unfiltered getReduced()
+        public Unfiltered getReduced()
         {
             if (nextKind == Unfiltered.Kind.ROW)
             {
@@ -591,7 +608,7 @@ public abstract class UnfilteredRowIterators
             }
         }
 
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             if (nextKind == Unfiltered.Kind.ROW)
             {

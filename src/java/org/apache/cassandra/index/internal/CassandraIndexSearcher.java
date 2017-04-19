@@ -26,7 +26,7 @@ import java.util.NavigableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.TableMetadata;
@@ -35,7 +35,6 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 public abstract class CassandraIndexSearcher implements Index.Searcher
@@ -57,17 +56,17 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
     @SuppressWarnings("resource") // Both the OpOrder and 'indexIter' are closed on exception, or through the closing of the result
     // of this method.
-    public Flowable<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
+    public CsFlow<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table
         DecoratedKey indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
-        Flowable<FlowableUnfilteredPartition> indexIter = queryIndex(indexKey, command, executionController);
+        CsFlow<FlowableUnfilteredPartition> indexIter = queryIndex(indexKey, command, executionController);
 
-        return indexIter.lift(FlowableUtils.concatMapLazy(
-            i -> queryDataFromIndex(indexKey, FlowablePartitions.filter(i, command.nowInSec()), command, executionController)));
+        return indexIter.flatMap(
+            i -> queryDataFromIndex(indexKey, FlowablePartitions.filter(i, command.nowInSec()), command, executionController));
     }
 
-    private Flowable<FlowableUnfilteredPartition> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
+    private CsFlow<FlowableUnfilteredPartition> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
     {
         ClusteringIndexFilter filter = makeIndexFilter(command);
         ColumnFamilyStore indexCfs = index.getBackingTable().get();
@@ -180,7 +179,7 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return index.buildIndexClusteringPrefix(rowKey, clustering, null).build();
     }
 
-    protected abstract Flowable<FlowableUnfilteredPartition> queryDataFromIndex(DecoratedKey indexKey,
+    protected abstract CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(DecoratedKey indexKey,
                                                                                 FlowablePartition indexHits,
                                                                                 ReadCommand command,
                                                                                 ReadExecutionController executionController);

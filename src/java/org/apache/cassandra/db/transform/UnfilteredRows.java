@@ -20,7 +20,7 @@
  */
 package org.apache.cassandra.db.transform;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Observable;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;

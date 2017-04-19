@@ -1225,7 +1225,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     for (SSTableMultiWriter writer : flushResults)
                         t = writer.abort(t);
                     t = txn.abort(t);
-                    Throwables.propagate(t);
+                    throw Throwables.propagate(t);
                 }
 
                 txn.prepareToCommit();

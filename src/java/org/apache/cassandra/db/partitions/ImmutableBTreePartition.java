@@ -24,6 +24,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public class ImmutableBTreePartition extends AbstractBTreePartition
 {
@@ -122,7 +123,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition)
+    public static CsFlow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition)
     {
         return create(partition, 16);
     }
@@ -135,7 +136,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, boolean ordered)
+    public static CsFlow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, boolean ordered)
     {
         return create(partition, 16, ordered);
     }
@@ -149,13 +150,13 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity)
+    public static CsFlow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity)
     {
         return create(partition, initialRowCapacity, true);
     }
 
     /**
-     * Creates an {@code ImmutableBTreePartition} holding all the data of the provided flowable.
+     * Creates an {@code ImmutableBTreePartition} holding all the data of the provided CsFlow.
      *
      * @param partition the partition to gather in memory.
      * @param initialRowCapacity sizing hint (in rows) to use for the created partition. It should ideally
@@ -164,7 +165,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
+    public static CsFlow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
         final PartitionHeader header = partition.header;
         return build(partition, initialRowCapacity, ordered)

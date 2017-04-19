@@ -39,6 +39,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -214,6 +215,25 @@ public class PartitionUpdate extends AbstractBTreePartition
         Holder holder = build(iterator, 16);
         MutableDeletionInfo deletionInfo = (MutableDeletionInfo) holder.deletionInfo;
         return new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), holder, deletionInfo, false);
+    }
+
+    /**
+     * Turns the given iterator into an update.
+     *
+     * @param partition the partition to turn into updates.
+     * @param filter the column filter used when querying {@code iterator}. This is used to make
+     * sure we don't include data for which the value has been skipped while reading (as we would
+     * then be writing something incorrect).
+     */
+    public static CsFlow<PartitionUpdate> fromFlow(FlowableUnfilteredPartition partition, ColumnFilter filter)
+    {
+        FlowableUnfilteredPartition queriedOnly = UnfilteredRowIterators.withOnlyQueriedData(partition, filter);
+        CsFlow<Holder> holder = build(queriedOnly, 16, true);
+        return holder.map(h -> new PartitionUpdate(partition.header.metadata,
+                                                   partition.header.partitionKey,
+                                                   h,
+                                                   (MutableDeletionInfo) h.deletionInfo,
+                                                   false));
     }
 
     /**

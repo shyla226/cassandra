@@ -20,16 +20,22 @@
  */
 package org.apache.cassandra.db.transform;
 
-import io.reactivex.Flowable;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.FlowableUtils;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
+import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.PartitionHeader;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 
 /**
  * We have a single common superclass for all Transformations to make implementation efficient.
@@ -77,7 +83,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
      */
     protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
     {
-        throw new AssertionError("Transformation used on flowable without implementing flowable applyToPartition");
+        throw new AssertionError("Transformation used on CsFlow without implementing flow applyToPartition");
     }
 
     /**
@@ -136,29 +142,46 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
 
 
     // FlowableOp interpretation of transformation
-    public void onNextUnfiltered(Subscriber<? super Unfiltered> subscriber, Subscription source, Unfiltered item)
+    public void onNextUnfiltered(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered item)
     {
         Unfiltered next;
-        if (item.isRow())
-            next = applyToRow((Row) item);
-        else
-            next = applyToMarker((RangeTombstoneMarker) item);
+        try
+        {
+            if (item.isRow())
+                next = applyToRow((Row) item);
+            else
+                next = applyToMarker((RangeTombstoneMarker) item);
+        }
+        catch (Throwable t)
+        {
+            subscriber.onError(t);
+            return;
+        }
 
         if (next != null)
             subscriber.onNext(next);
         else
-            source.request(1);
+            source.request();
     }
 
     // FlowableOp interpretation of transformation
-    public void onNextPartition(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition item)
+    public void onNextPartition(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition item)
     {
-        FlowableUnfilteredPartition next = applyToPartition(item);
+        FlowableUnfilteredPartition next;
+        try
+        {
+            next = applyToPartition(item);
+        }
+        catch (Throwable t)
+        {
+            subscriber.onError(t);
+            return;
+        }
 
         if (next != null)
             subscriber.onNext(next);
         else
-            source.request(1);
+            source.request();
     }
 
 
@@ -220,7 +243,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
         return to;
     }
 
-    static class FlowableRowOp extends FlowableUtils.CloseableFlowableOp<Unfiltered, Unfiltered>
+    static class FlowableRowOp implements CsFlow.FlowableOp<Unfiltered, Unfiltered>
     {
         final Transformation transformation;
 
@@ -229,19 +252,12 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
             this.transformation = transformation;
         }
 
-        public void onNext(Subscriber<? super Unfiltered> subscriber, Subscription source, Unfiltered next)
+        public void onNext(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered next)
         {
-            try
-            {
-                transformation.onNextUnfiltered(subscriber, source, next);
-            }
-            catch (Throwable t)
-            {
-                error(subscriber, source, t);
-            }
+            transformation.onNextUnfiltered(subscriber, source, next);
         }
 
-        public void onClose()
+        public void close()
         {
             transformation.onPartitionClose();
         }
@@ -249,7 +265,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
 
     public static FlowableUnfilteredPartition apply(FlowableUnfilteredPartition src, Transformation transformation)
     {
-        Flowable<Unfiltered> content = src.content.lift(new FlowableRowOp(transformation));
+        CsFlow<Unfiltered> content = src.content.apply(new FlowableRowOp(transformation));
 
         if (transformation instanceof StoppingTransformation)
         {
@@ -262,7 +278,7 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
                                                content);
     }
 
-    static class FlowablePartitionOp extends FlowableUtils.CloseableFlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>
+    static class FlowablePartitionOp implements CsFlow.FlowableOp<FlowableUnfilteredPartition,FlowableUnfilteredPartition>
     {
         final Transformation transformation;
 
@@ -271,27 +287,20 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
             this.transformation = transformation;
         }
 
-        public void onNext(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition next)
+        public void onNext(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition next)
         {
-            try
-            {
-                transformation.onNextPartition(subscriber, source, next);
-            }
-            catch (Throwable t)
-            {
-                error(subscriber, source, t);
-            }
+            transformation.onNextPartition(subscriber, source, next);
         }
 
-        public void onClose()
+        public void close()
         {
             transformation.onClose();
         }
     }
 
-    public static Flowable<FlowableUnfilteredPartition> apply(Flowable<FlowableUnfilteredPartition> src, Transformation transformation)
+    public static CsFlow<FlowableUnfilteredPartition> apply(CsFlow<FlowableUnfilteredPartition> src, Transformation transformation)
     {
-        Flowable<FlowableUnfilteredPartition> content = src.lift(new FlowablePartitionOp(transformation));
+        CsFlow<FlowableUnfilteredPartition> content = src.apply(new FlowablePartitionOp(transformation));
 
         if (transformation instanceof StoppingTransformation)
         {

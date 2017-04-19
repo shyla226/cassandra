@@ -62,7 +62,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
                     reduced = current;
                 }
 
-                protected DecoratedKey getReduced()
+                public DecoratedKey getReduced()
                 {
                     return reduced;
                 }

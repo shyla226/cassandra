@@ -18,7 +18,6 @@
 package org.apache.cassandra.db;
 
 import java.net.InetAddress;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -30,7 +29,6 @@ import org.apache.cassandra.net.Verb.RequestResponse;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -89,17 +87,16 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
 
                                       // TODO - this code is temporary because it is materializing the partitions in memory and we don't
                                       // need to do this for remote responses, we should serialize and calculate the digest directly from
-                                      // flowable partitions
-                                      CompletableFuture<ReadResponse> result = new CompletableFuture<>();
-                                      command.executeLocally(monitor)
-                                             //.flatMapSingle(partition -> ImmutableBTreePartition.create(partition), false, 1)
-                                             .lift(FlowableUtils.concatMapLazy(partition -> ImmutableBTreePartition.create(partition).toFlowable()))
-                                             .reduceWith(() -> new ReadResponse.InMemoryPartitionsIterator(command),
-                                                         (it, partition) -> { it.add(partition); return it; })
-                                             .map(it -> command.createResponse(it, isLocal))
-                                             .subscribe(result::complete, result::completeExceptionally);
-
-                                      return result;
+                                      // CsFlow partitions
+                                      return command.executeLocally(monitor)
+                                             .flatMap(partition -> ImmutableBTreePartition.create(partition))
+                                             .reduceToFuture(new ReadResponse.InMemoryPartitionsIterator(command),
+                                                             (it, partition) ->
+                                                             {
+                                                                 it.add(partition);
+                                                                 return it;
+                                                             })
+                                             .thenApply(it -> command.createResponse(it, isLocal));
                                   });
     }
 }

@@ -20,7 +20,6 @@ package org.apache.cassandra.index.internal.composites;
 
 import java.nio.ByteBuffer;
 
-import io.reactivex.Flowable;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.ReadCommand;
@@ -36,8 +35,8 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.index.internal.IndexEntry;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 
 public class StaticColumnsSearcher extends CassandraIndexSearcher
@@ -50,14 +49,14 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
         assert index.getIndexedColumn().isStatic();
     }
 
-    protected Flowable<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+    protected CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
                                                                        final FlowablePartition indexHits,
                                                                        final ReadCommand command,
                                                                        final ReadExecutionController executionController)
     {
         assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
 
-        return indexHits.content.lift(FlowableUtils.concatMapLazy(hit ->
+        return indexHits.content.flatMap(hit ->
         {
             IndexEntry nextEntry = index.decodeEntry(indexKey, hit);
 
@@ -65,7 +64,7 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
             DecoratedKey partitionKey = index.baseCfs.decorateKey(nextEntry.indexedKey);
 
             if (!command.selectsKey(partitionKey) || !command.selectsClustering(partitionKey, nextEntry.indexedEntryClustering))
-                return Flowable.<FlowableUnfilteredPartition>empty();  // CASSANDRA-13277
+                return CsFlow.<FlowableUnfilteredPartition>empty();  // CASSANDRA-13277
 
             // If the index is on a static column, we just need to do a full read on the partition.
             // Note that we want to re-use the command.columnFilter() in case of future change.
@@ -77,14 +76,14 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
                                                         partitionKey,
                                                         new ClusteringIndexSliceFilter(Slices.ALL, false));
 
-            Flowable<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
-            return partition.lift(FlowableUtils.skippingMap(p -> filterStaleEntry(p,
-                                                                                  indexKey.getKey(),
-                                                                                  nextEntry,
-                                                                                  executionController.writeOpOrderGroup(),
-                                                                                  command.nowInSec()))
+            CsFlow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+            return partition.skippingMap(p -> filterStaleEntry(p,
+                                                               indexKey.getKey(),
+                                                               nextEntry,
+                                                               executionController.writeOpOrderGroup(),
+                                                               command.nowInSec())
             );
-        }));
+        });
     }
 
     // We assume all rows in dataIter belong to the same partition.

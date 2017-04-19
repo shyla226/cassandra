@@ -73,7 +73,7 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
         return purged;
     }
 
-    // Flowable counterpart to above
+    // CsFlow counterpart to above
     public FlowableUnfilteredPartition apply(FlowableUnfilteredPartition partition)
     {
         onNewPartition(partition.header.partitionKey);

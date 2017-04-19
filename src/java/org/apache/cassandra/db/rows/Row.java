@@ -729,7 +729,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 versions.add(data);
             }
 
-            protected ColumnData getReduced()
+            public ColumnData getReduced()
             {
                 if (column.isSimple())
                 {
@@ -776,7 +776,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                 }
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 versions.clear();
             }
@@ -806,12 +806,12 @@ public interface Row extends Unfiltered, Collection<ColumnData>
                     merged = merged == null ? cell : Cells.reconcile(merged, cell, nowInSec);
             }
 
-            protected Cell getReduced()
+            public Cell getReduced()
             {
                 return merged;
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 merged = null;
             }

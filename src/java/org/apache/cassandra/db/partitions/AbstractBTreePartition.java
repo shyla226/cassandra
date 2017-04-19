@@ -28,6 +28,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.BTreeSearchIterator;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
@@ -300,7 +301,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return new Holder(columns, builder.build(), deletionBuilder.build(), iterator.staticRow(), iterator.stats());
     }
 
-    protected static Single<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
+    protected static CsFlow<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
         PartitionHeader header = partition.header;
         TableMetadata metadata = header.metadata;
@@ -311,19 +312,22 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
 
         // Note that multiple subscribers would share the builder
         return partition.content
-               .reduceWith(() -> BTree.builder(metadata.comparator, initialRowCapacity).auto(!ordered),
-                           (builder, unfiltered) -> {
-                               if (unfiltered.kind() == Unfiltered.Kind.ROW)
-                                   builder.add(unfiltered);
-                               else
-                                   deletionBuilder.add((RangeTombstoneMarker)unfiltered);
-                               return builder;
-        }).map(builder -> {
-            if (reversed)
-                builder.reverse();
+                        .reduceWith(() -> BTree.builder(metadata.comparator, initialRowCapacity).auto(!ordered),
+                                    (builder, unfiltered) ->
+                                    {
+                                        if (unfiltered.kind() == Unfiltered.Kind.ROW)
+                                            builder.add(unfiltered);
+                                        else
+                                            deletionBuilder.add((RangeTombstoneMarker)unfiltered);
+                                        return builder;
+                                    })
+                        .map(builder ->
+                             {
+                                 if (reversed)
+                                     builder.reverse();
 
-            return new Holder(columns, builder.build(), deletionBuilder.build(), partition.staticRow, header.stats);
-        });
+                                 return new Holder(columns, builder.build(), deletionBuilder.build(), partition.staticRow, header.stats);
+                             });
     }
 
     // Note that when building with a RowIterator, deletion will generally be LIVE, but we allow to pass it nonetheless because PartitionUpdate

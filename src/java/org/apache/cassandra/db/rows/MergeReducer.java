@@ -61,7 +61,7 @@ public class MergeReducer extends Reducer<Unfiltered, Unfiltered>
         }
     }
 
-    protected Unfiltered getReduced()
+    public Unfiltered getReduced()
     {
         switch (nextKind)
         {
@@ -87,7 +87,7 @@ public class MergeReducer extends Reducer<Unfiltered, Unfiltered>
         throw new AssertionError();
     }
 
-    protected void onKeyChange()
+    public void onKeyChange()
     {
         if (nextKind == null)
             return;

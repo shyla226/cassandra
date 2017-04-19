@@ -26,7 +26,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.*;
@@ -52,8 +52,9 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -255,7 +256,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      */
     public abstract ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key);
 
-    protected abstract Flowable<FlowableUnfilteredPartition> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    protected abstract CsFlow<FlowableUnfilteredPartition> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
 
@@ -343,11 +344,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     @SuppressWarnings("resource")
     @Override
-    public Flowable<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+    public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
     {
         //Easy win: Avoid doing any work when limit is zero
         if (limits().isZero())
-            return Flowable.empty();
+            return CsFlow.empty();
 
         long startTimeNanos = System.nanoTime();
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
@@ -364,13 +365,13 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         }
 
         Index.Searcher searcher = pickSearcher;
-        Flowable<FlowableUnfilteredPartition> flowable = Flowable.<FlowableUnfilteredPartition, ReadExecutionController>using(
+        CsFlow<FlowableUnfilteredPartition> flow = CsFlow.using(
             () -> ReadExecutionController.forCommand(this),
             controller ->
             {
-                Flowable<FlowableUnfilteredPartition> r = searcher == null
-                                                          ? queryStorage(cfs, controller)
-                                                          : searcher.search(controller);
+                CsFlow<FlowableUnfilteredPartition> r = searcher == null
+                                                        ? queryStorage(cfs, controller)
+                                                        : searcher.search(controller);
 
                 if (monitor != null)
                     r = monitor.withMonitoring(r);
@@ -392,15 +393,18 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             controller -> controller.close()
         );
 
-        return flowable;
+        return flow;
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
     public Single<PartitionIterator> executeInternal(Monitor monitor)
     {
-        // tpc TODO: Do filtering on Flowable.
-        return Single.<PartitionIterator>defer(() -> Single.just(UnfilteredPartitionIterators.filter(FlowablePartitions.toPartitions(executeLocally(monitor), metadata()), nowInSec())));
+        // tpc TODO: Do filtering on CsFlow.
+        return Single.fromCallable(() ->
+            UnfilteredPartitionIterators.filter(FlowablePartitions.toPartitions(executeLocally(monitor),
+                                                                                metadata()),
+                                                nowInSec()));
     }
 
     public ReadExecutionController executionController()
@@ -413,11 +417,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      * This also log warning/trow TombstoneOverwhelmingException if appropriate.
      */
     @SuppressWarnings("resource") // we close FlowableUtils.CloseableFlowableOp when the subscription is cancelled or completed
-    private Flowable<FlowableUnfilteredPartition> withMetricsRecording(Flowable<FlowableUnfilteredPartition> iter,
+    private CsFlow<FlowableUnfilteredPartition> withMetricsRecording(CsFlow<FlowableUnfilteredPartition> iter,
                                                                        final TableMetrics metric,
                                                                        final long startTimeNanos)
     {
-        class MetricRecording extends FlowableUtils.CloseableFlowableOp<Unfiltered, Unfiltered>
+        class MetricRecording implements CsFlow.FlowableOp<Unfiltered, Unfiltered>
         {
             private final int failureThreshold = DatabaseDescriptor.getTombstoneFailureThreshold();
             private final int warningThreshold = DatabaseDescriptor.getTombstoneWarnThreshold();
@@ -428,7 +432,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             private int tombstones = 0;
 
             private DecoratedKey currentKey;
-            private boolean isLastPartition;
 
             public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
             {
@@ -437,10 +440,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
                 return new FlowableUnfilteredPartition(iter.header,
                                                        iter.staticRow,
-                                                       iter.content.lift(this));
+                                                       iter.content.apply(this));
             }
 
-            public void onNext(Subscriber<? super Unfiltered> subscriber, Subscription src, Unfiltered unfiltered)
+            public void onNext(CsSubscriber<Unfiltered> subscriber, CsSubscription src, Unfiltered unfiltered)
             {
                 if (unfiltered.isRow())
                     countRow((Row) unfiltered);
@@ -476,12 +479,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 }
             }
 
-            @Override
-            public void onClose()
+            public void onComplete()
             {
-                if (!isLastPartition)
-                    return;
-
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 
                 metric.tombstoneScannedHistogram.update(tombstones);
@@ -500,30 +499,25 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         }
 
         final MetricRecording metricsRecording = new MetricRecording();
-        return iter.lift(new FlowableUtils.CloseableFlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        return iter.apply(new CsFlow.FlowableOp<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             @Override
-            public void onNext(Subscriber<? super FlowableUnfilteredPartition> subscriber, Subscription source, FlowableUnfilteredPartition next)
+            public void onNext(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition next)
             {
                 subscriber.onNext(metricsRecording.applyToPartition(next));
             }
 
             @Override
-            public void onClose()
+            public void close()
             {
-                // TODO - we cannot simply call metricsRecording.onComplete() here because
-                // we have not processed the partition yet, look at the request method in ScalarSubscription
-                // which is triggered by Flowable.just(), I also tried with Flowable.fromCallable(), which uses
-                // DeferredScalarSubscription, same thing, request will call onComplete as soon as the first
-                // flowable is published.
-                metricsRecording.isLastPartition = true;
+                metricsRecording.onComplete();
             }
         });
     }
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 
-    static class PurgeOp implements FlowableUtils.SkippingOp<Unfiltered, Unfiltered>
+    static class PurgeOp implements CsFlow.SkippingOp<Unfiltered, Unfiltered>
     {
         private final DeletionPurger purger;
         private int nowInSec;
@@ -544,7 +538,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
             FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
                                                                                  applyToStatic(partition.staticRow),
-                                                                                 partition.content.lift(this));
+                                                                                 partition.content.apply(this));
             return purged;
         }
 
@@ -563,7 +557,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwidth, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artifact of compaction lagging behind and hence counting them is somewhat unintuitive).
-    protected Flowable<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flowable<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
+    protected CsFlow<FlowableUnfilteredPartition> withoutPurgeableTombstones(CsFlow<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
     {
         return iterator.map(new PurgeOp(nowInSec(),
                                         cfs.gcBefore(nowInSec()),

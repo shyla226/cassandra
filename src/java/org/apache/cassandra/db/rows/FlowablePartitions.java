@@ -22,13 +22,14 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.reactivex.Flowable;
 import io.reactivex.Scheduler;
 import org.apache.cassandra.db.Clusterable;
 import org.apache.cassandra.db.Columns;
@@ -39,12 +40,11 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.FlowableThreads;
-import org.apache.cassandra.utils.FlowableUtils;
-import org.apache.cassandra.utils.MergeFlowable;
 import org.apache.cassandra.utils.Reducer;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Threads;
 
 /**
  * Partition manipulation functions.
@@ -54,27 +54,40 @@ public class FlowablePartitions
 {
     public static UnfilteredRowIterator toIterator(FlowableUnfilteredPartition source)
     {
-        IteratorSubscription subscr = new IteratorSubscription(source.header, source.staticRow);
-        source.content.subscribe(subscr);
-        return subscr;
+        try
+        {
+            return new IteratorSubscription(source.header, source.staticRow, source.content);
+        }
+        catch (Exception e)
+        {
+            throw Throwables.propagate(e);
+        }
     }
 
-    static class IteratorSubscription extends AbstractUnfilteredRowIterator implements Subscriber<Unfiltered>
+    static class IteratorSubscription extends AbstractUnfilteredRowIterator implements CsSubscriber<Unfiltered>
     {
         static final Unfiltered POISON_PILL = Rows.EMPTY_STATIC_ROW;
 
-        Subscription subscription = null;
-        BlockingQueue<Unfiltered> queue = new ArrayBlockingQueue<>(3);  // onComplete comes with next() sometimes, leave one more for onError
+        final CsSubscription subscription;
+        BlockingQueue<Unfiltered> queue = new ArrayBlockingQueue<>(1);
         Throwable error = null;
 
-        public IteratorSubscription(PartitionHeader header, Row staticRow)
+        public IteratorSubscription(PartitionHeader header, Row staticRow, CsFlow<Unfiltered> source) throws Exception
         {
             super(header.metadata, header.partitionKey, header.partitionLevelDeletion, header.columns, staticRow, header.isReverseOrder, header.stats);
+            subscription = source.subscribe(this);
         }
 
         public void close()
         {
-            subscription.cancel();
+            try
+            {
+                subscription.close();
+            }
+            catch (Exception e)
+            {
+                throw Throwables.propagate(e);
+            }
         }
 
         @Override
@@ -96,26 +109,14 @@ public class FlowablePartitions
             Uninterruptibles.putUninterruptibly(queue, arg0);
         }
 
-        @Override
-        public void onSubscribe(Subscription arg0)
-        {
-            assert subscription == null;
-            subscription = arg0;
-        }
-
         protected Unfiltered computeNext()
         {
-            Unfiltered next = queue.poll();
-            if (error != null)
-                Throwables.propagate(error);
-            if (next != null)
-                return next == POISON_PILL ? endOfData() : next;
+            assert queue.isEmpty();
+            subscription.request();
 
-            subscription.request(1);
-
-            next = Uninterruptibles.takeUninterruptibly(queue);
+            Unfiltered next = Uninterruptibles.takeUninterruptibly(queue);
             if (error != null)
-                Throwables.propagate(error);
+                throw Throwables.propagate(error);
             return next == POISON_PILL ? endOfData() : next;
         }
     }
@@ -124,15 +125,15 @@ public class FlowablePartitions
     {
         public EmptyFlowableUnfilteredPartition(PartitionHeader header)
         {
-            super(header, Rows.EMPTY_STATIC_ROW, Flowable.empty());
+            super(header, Rows.EMPTY_STATIC_ROW, CsFlow.empty());
         }
     }
 
     public static FlowableUnfilteredPartition fromIterator(UnfilteredRowIterator iter, Scheduler callOn)
     {
-        Flowable<Unfiltered> data = FlowableUtils.fromCloseableIterator(iter);
+        CsFlow<Unfiltered> data = CsFlow.fromIterable(() -> iter);
         if (callOn != null)
-            data = data.lift(FlowableThreads.requestOn(callOn));
+            Threads.requestOn(callOn);
         Row staticRow = iter.staticRow();
         return new FlowableUnfilteredPartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), iter.partitionLevelDeletion(), iter.columns(), iter.isReverseOrder(), iter.stats()),
                                                staticRow,
@@ -169,9 +170,9 @@ public class FlowablePartitions
         return new FlowableUnfilteredPartition(
                 header,
                 staticRow,
-                new MergeFlowable<>(ImmutableList.copyOf(Lists.transform(flowables, x -> x.content)),
-                                    comparator,
-                                    reducer));
+                CsFlow.merge(ImmutableList.copyOf(Lists.transform(flowables, x -> x.content)),
+                             comparator,
+                             reducer));
     }
 
     public static Row mergeStaticRows(List<FlowableUnfilteredPartition> sources, DeletionTime activeDeletion, Columns columns, int nowInSec)
@@ -190,9 +191,9 @@ public class FlowablePartitions
 
     private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = (x, y) -> x.header.partitionKey.compareTo(y.header.partitionKey);
 
-    public static Flowable<FlowableUnfilteredPartition> mergePartitions(final List<? extends Flowable<FlowableUnfilteredPartition>> sources, final int nowInSec)
+    public static CsFlow<FlowableUnfilteredPartition> mergePartitions(final List<CsFlow<FlowableUnfilteredPartition>> sources, final int nowInSec)
     {
-        return MergeFlowable.get(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        return CsFlow.merge(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             private final List<FlowableUnfilteredPartition> toMerge = new ArrayList<>(sources.size());
 
@@ -201,53 +202,67 @@ public class FlowablePartitions
                 toMerge.add(current);
             }
 
-            protected FlowableUnfilteredPartition getReduced()
+            public FlowableUnfilteredPartition getReduced()
             {
                 return FlowablePartitions.merge(toMerge, nowInSec);
             }
 
-            protected void onKeyChange()
+            public void onKeyChange()
             {
                 toMerge.clear();
             }
         });
     }
 
-    public static Flowable<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
+    public static CsFlow<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
     {
-        Flowable<FlowableUnfilteredPartition> flowable = FlowableUtils.fromCloseableIterator(iter)
-                                                                      .map(i -> fromIterator(i, scheduler));
+        CsFlow<FlowableUnfilteredPartition> flow = CsFlow.fromIterable(() -> iter)
+                                                         .map(i -> fromIterator(i, scheduler));
         if (scheduler != null)
-            flowable = flowable.lift(FlowableThreads.requestOn(scheduler));
-        return flowable;
+            flow = flow.lift(Threads.requestOn(scheduler));
+        return flow;
     }
 
-    public static UnfilteredPartitionIterator toPartitions(Flowable<FlowableUnfilteredPartition> source, TableMetadata metadata)
+    public static UnfilteredPartitionIterator toPartitions(CsFlow<FlowableUnfilteredPartition> source, TableMetadata metadata)
     {
-        UPartitionsSubscription subscr = new UPartitionsSubscription(metadata);
-        source.subscribe(subscr);
-        return subscr;
+        try
+        {
+            return new UPartitionsSubscription(metadata, source);
+        }
+        catch (Exception e)
+        {
+            throw Throwables.propagate(e);
+        }
     }
 
-    static class UPartitionsSubscription extends AbstractUnfilteredPartitionIterator implements Subscriber<FlowableUnfilteredPartition>
+    static class UPartitionsSubscription extends AbstractUnfilteredPartitionIterator implements CsSubscriber<FlowableUnfilteredPartition>
     {
         static final FlowableUnfilteredPartition POISON_PILL = empty(null, null, false);
 
-        Subscription subscription = null;
-        BlockingQueue<FlowableUnfilteredPartition> queue = new ArrayBlockingQueue<>(3);  // onComplete comes with next() sometimes, leave one more for onError
+        final CsSubscription subscription;
+        BlockingQueue<FlowableUnfilteredPartition> queue = new ArrayBlockingQueue<>(1);
         Throwable error = null;
         FlowableUnfilteredPartition next = null;
         TableMetadata metadata = null;
+        StackTraceElement[] stackTrace;
 
-        UPartitionsSubscription(TableMetadata metadata)
+        UPartitionsSubscription(TableMetadata metadata, CsFlow<FlowableUnfilteredPartition> source) throws Exception
         {
             this.metadata = metadata;
+            subscription = source.subscribe(this);
+            this.stackTrace = CsFlow.maybeGetStackTrace();
         }
 
         public void close()
         {
-            subscription.cancel();
-            Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
+            try
+            {
+                subscription.close();
+            }
+            catch (Exception e)
+            {
+                throw Throwables.propagate(e);
+            }
         }
 
         @Override
@@ -269,29 +284,17 @@ public class FlowablePartitions
             Uninterruptibles.putUninterruptibly(queue, arg0);
         }
 
-        @Override
-        public void onSubscribe(Subscription arg0)
-        {
-            assert subscription == null;
-            subscription = arg0;
-        }
-
         protected FlowableUnfilteredPartition computeNext()
         {
             if (next != null)
                 return next;
 
-            next = queue.poll();
-            if (error != null)
-                Throwables.propagate(error);
-            if (next != null)
-                return next;
-
-            subscription.request(1);
+            assert queue.isEmpty();
+            subscription.request();
 
             next = Uninterruptibles.takeUninterruptibly(queue);
             if (error != null)
-                Throwables.propagate(error);
+                throw Throwables.propagate(error);
             return next;
         }
 
@@ -316,19 +319,23 @@ public class FlowablePartitions
             next = null;
             return toIterator(toReturn);
         }
+
+        public String toString()
+        {
+            return "toPartitions with metadata " + metadata().toString() + CsFlow.stackTraceString(stackTrace);
+        }
     }
 
     public static FlowablePartition filter(FlowableUnfilteredPartition data, int nowInSec)
     {
         return new FlowablePartition(data.header,
                                      data.staticRow,
-                                     FlowableUtils.skippingMap(data.content,
-                                                               unfiltered -> unfiltered.isRow()
-                                                                             ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec)
-                                                                             : null));
+                                     data.content.skippingMap(unfiltered -> unfiltered.isRow()
+                                                                            ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec)
+                                                                            : null));
     }
 
-    public static Flowable<FlowablePartition> filter(Flowable<FlowableUnfilteredPartition> data, int nowInSec)
+    public static CsFlow<FlowablePartition> filter(CsFlow<FlowableUnfilteredPartition> data, int nowInSec)
     {
         return data.map(p -> filter(p, nowInSec)); // tpc TODO: can we filter empty ones?
     }

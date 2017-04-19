@@ -19,16 +19,23 @@ package org.apache.cassandra.index.internal.keys;
 
 import java.nio.ByteBuffer;
 
-import io.reactivex.Flowable;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public class KeysSearcher extends CassandraIndexSearcher
 {
@@ -39,18 +46,18 @@ public class KeysSearcher extends CassandraIndexSearcher
         super(command, expression, indexer);
     }
 
-    protected Flowable<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+    protected CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
                                                                        final FlowablePartition indexHits,
                                                                        final ReadCommand command,
                                                                        final ReadExecutionController executionController)
     {
         assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
         return indexHits.content
-               .lift(FlowableUtils.concatMapLazy(hit ->
+               .flatMap(hit ->
                {
                    DecoratedKey key = index.baseCfs.decorateKey(hit.clustering().get(0));
                    if (!command.selectsKey(key))
-                       return Flowable.<FlowableUnfilteredPartition>empty();
+                       return CsFlow.<FlowableUnfilteredPartition>empty();
 
                    ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(
@@ -62,13 +69,13 @@ public class KeysSearcher extends CassandraIndexSearcher
                        key,
                        command.clusteringIndexFilter(key));
 
-                   Flowable<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
-                   return partition.lift(FlowableUtils.skippingMap(p -> filterIfStale(p,
-                                                                                      hit,
-                                                                                      indexKey.getKey(),
-                                                                                      executionController.writeOpOrderGroup(),
-                                                                                      command.nowInSec())));
-               }));
+                   CsFlow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+                   return partition.skippingMap(p -> filterIfStale(p,
+                                                                   hit,
+                                                                   indexKey.getKey(),
+                                                                   executionController.writeOpOrderGroup(),
+                                                                   command.nowInSec()));
+               });
     }
 
     private ColumnFilter getExtendedFilter(ColumnFilter initialFilter)

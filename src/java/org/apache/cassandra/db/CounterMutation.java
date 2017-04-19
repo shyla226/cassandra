@@ -126,46 +126,46 @@ public class CounterMutation implements IMutation, Scheduleable
         Scheduler scheduler = getScheduler();
 
         return Single.defer(() ->
-        {
-            Keyspace keyspace = Keyspace.open(getKeyspaceName());
-            if ((System.nanoTime() - startTime) > TimeUnit.MILLISECONDS.toNanos(getTimeout()))
-                return Single.error(new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace)));
+                            {
+                                Keyspace keyspace = Keyspace.open(getKeyspaceName());
+                                if ((System.nanoTime() - startTime) > TimeUnit.MILLISECONDS.toNanos(getTimeout()))
+                                    return Single.error(new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace)));
 
-            Mutation result = new Mutation(getKeyspaceName(), key());
-            List<Lock> locks = new ArrayList<>();
-            Tracing.trace("Acquiring counter locks");
-            try
-            {
-                boolean success = tryGrabCounterLocks(locks);
-                if (!success)
-                {
-                    Tracing.trace("Failed to acquire counter locks, scheduling retry");
-                    return Single.defer(() -> this.applyCounterMutation(startTime))
-                            .subscribeOn(NettyRxScheduler.instance());
-                }
+                                Mutation result = new Mutation(getKeyspaceName(), key());
+                                List<Lock> locks = new ArrayList<>();
+                                Tracing.trace("Acquiring counter locks");
+                                try
+                                {
+                                    boolean success = tryGrabCounterLocks(locks);
+                                    if (!success)
+                                    {
+                                        Tracing.trace("Failed to acquire counter locks, scheduling retry");
+                                        return Single.defer(() -> this.applyCounterMutation(startTime))
+                                                     .subscribeOn(NettyRxScheduler.instance());
+                                    }
 
-                // TODO this will need to become async to handle disk reads
-                for (PartitionUpdate upd : getPartitionUpdates())
-                    result.add(processModifications(upd));
+                                    // TODO this will need to become async to handle disk reads
+                                    for (PartitionUpdate upd : getPartitionUpdates())
+                                        result.add(processModifications(upd));
 
-                Completable completable = result.applyAsync();
-                completable = completable.doFinally(() -> {
-                    scheduler.scheduleDirect(() ->
-                                             {
-                                                 for (Lock lock : locks)
-                                                     lock.unlock();
-                                             });
-                });
-                return completable.toSingleDefault(result);
-            }
-            // failsafe lock release
-            catch (Throwable t)
-            {
-                for (Lock lock : locks)
-                    lock.unlock();
-                throw t;
-            }
-        }).subscribeOn(scheduler);
+                                    Completable completable = result.applyAsync();
+                                    completable = completable.doFinally(() -> {
+                                        scheduler.scheduleDirect(() ->
+                                                                 {
+                                                                     for (Lock lock : locks)
+                                                                         lock.unlock();
+                                                                 });
+                                    });
+                                    return completable.toSingleDefault(result);
+                                }
+                                // failsafe lock release
+                                catch (Throwable t)
+                                {
+                                    for (Lock lock : locks)
+                                        lock.unlock();
+                                    throw t;
+                                }
+                            }).subscribeOn(scheduler);
     }
 
     public void apply()
@@ -389,7 +389,7 @@ public class CounterMutation implements IMutation, Scheduleable
         public long serializedSize(CounterMutation cm)
         {
             return Mutation.serializers.get(version).serializedSize(cm.mutation)
-                 + TypeSizes.sizeof(cm.consistency.name());
+                   + TypeSizes.sizeof(cm.consistency.name());
         }
     }
 }

@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.db.rows;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * A partition container providing access to the rows of the partition together with deletion information.
  * <p>
  * The supplied {@code PartitionHeader} contains partition top-level information.
- * The content is a flowable stream of {@code Unfiltered}, that is of either {@code Row} or {@code RangeTombstoneMarker}.
+ * The content is a flow of {@code Unfiltered}, that is of either {@code Row} or {@code RangeTombstoneMarker}.
  * An unfiltered partition <b>must</b> provide the following guarantees:
  *   1. the returned {@code Unfiltered} must be in clustering order, or in reverse clustering
  *      order iff {@code header.isReverseOrder} is true.
@@ -36,13 +36,10 @@ import io.reactivex.Flowable;
  *      can only be rows that are not deleted by the markers. Also note that when iterating
  *      in reverse order, "end" markers are returned before their "start" counterpart (i.e.
  *      "start" and "end" are always in the sense of the clustering order).
- *
- * Note: providers of data can no longer reuse mutable returned objects as we can't guarantee only one reference
- * exists at a time (e.g. Flowable.concatMap always requests one in reserve).
  */
 public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered>
 {
-    public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, Flowable<Unfiltered> content)
+    public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, CsFlow<Unfiltered> content)
     {
         super(header, staticRow, content);
     }

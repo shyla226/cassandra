@@ -27,7 +27,7 @@ import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
 import io.reactivex.Completable;
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
@@ -546,6 +546,6 @@ public interface Index
          * @param executionController the collection of OpOrder.Groups which the ReadCommand is being performed under.
          * @return partitions from the base table matching the criteria of the search.
          */
-        public Flowable<FlowableUnfilteredPartition> search(ReadExecutionController executionController);
+        public CsFlow<FlowableUnfilteredPartition> search(ReadExecutionController executionController);
     }
 }

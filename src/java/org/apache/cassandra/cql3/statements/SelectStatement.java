@@ -18,37 +18,18 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.NavigableSet;
-import java.util.Optional;
-import java.util.SortedSet;
+import java.util.*;
 
 import com.google.common.base.MoreObjects;
-
-import io.reactivex.Completable;
-import io.reactivex.Flowable;
-import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.partitions.PartitionIterators;
-import org.apache.cassandra.db.monitoring.AbortedOperationException;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService;
 import org.apache.cassandra.cql3.functions.Function;
@@ -60,21 +41,34 @@ import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
-import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.ClientWriteException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sasi.SASIIndex;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
@@ -86,7 +80,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FlowableUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -95,7 +88,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 
-/**
+/*
  * Encapsulates a completely parsed SELECT query, including the target
  * column family, expression, result count, and ordering clause.
  *
@@ -484,7 +477,7 @@ public class SelectStatement implements CQLStatement
                    + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
         Single<ResultMessage.Rows> msg;
-        //FIXME: TPC Paging needs to happen on a blocking threadpool, eventually this should be all flowable
+        //FIXME: TPC Paging needs to happen on a blocking threadpool, eventually this should be all CsFlow
         Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStartNanoTime).observeOn(Schedulers.io());
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
@@ -638,7 +631,8 @@ public class SelectStatement implements CQLStatement
 
         public void retrieveMultiplePages(PagingState pagingState, ResultBuilder builder)
         {
-            // update the metrics with how long we were waiting since scheduling this taskContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNano);
+            // update the metrics with how long we were waiting since scheduling this task
+            ContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNano);
 
             if (logger.isTraceEnabled())
                 logger.trace("{} - retrieving multiple pages with paging state {}",
@@ -646,7 +640,6 @@ public class SelectStatement implements CQLStatement
 
             assert pager == null;
             assert !builder.isCompleted();
-
 
             pager = Pager.forNormalQuery(statement.getPager(query, pagingState, options.getProtocolVersion()),
                                          consistencyLevel,
@@ -663,47 +656,53 @@ public class SelectStatement implements CQLStatement
             int pageSize = isLocalQuery ? pager.maxRemaining() : this.pageSize;
             long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
 
-            Single<PartitionIterator> page = pager.fetchPage(pageSize, queryStart);
+            pager.fetchPage(pageSize, queryStart)
+                 .subscribe(page -> process(page, builder),
+                            error ->
+                            {
+                                if (error instanceof AbortedOperationException)
+                                {
+                                    // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
+                                    // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
+                                    // don't hold OpOrder for too long).
+                                    if (!builder.isCompleted())
+                                        schedule(pager.state(false), builder);
+                                }
+                                else if (error instanceof ClientWriteException)
+                                {
+                                    logger.debug("Continuous paging client did not keep up: {}", error.getMessage());
+                                    builder.complete(error);
+                                }
+                                else
+                                {
+                                    JVMStabilityInspector.inspectThrowable(error);
+                                    logger.error("Continuous paging failed with unexpected error: {}", error.getMessage(), error);
 
-            page.map(pi ->
-                     {
-                         Flowable<RowIterator> it = FlowableUtils.fromCloseableIterator(pi);
+                                    builder.complete(error);
+                                }
+                            });
+        }
 
-                         it.takeWhile((p) -> !builder.isCompleted())
-                           .map(p -> {
-                                    statement.processPartition(p, options, builder, query.nowInSec());
-                                    return p;
-                                })
-                           .subscribe();
+        /**
+         * Iterate the results and pass them to the builder by calling statement.processPartition().
+         *
+         * @param partitions - the partitions to iterate.
+         * @throws InvalidRequestException
+         */
+        void process(PartitionIterator partitions, ResultBuilder builder) throws InvalidRequestException
+        {
+            while (partitions.hasNext())
+            {
+                try (RowIterator partition = partitions.next())
+                {
+                    statement.processPartition(partition, options, builder, query.nowInSec());
+                }
 
-                         return pi;
-                     })
-                .onErrorResumeNext(t ->
-                                   {
-                                       if (t instanceof AbortedOperationException)
-                                       {
-                                           // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
-                                           // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
-                                           // don't hold OpOrder for too long).
-                                           if (!builder.isCompleted())
-                                               schedule(pager.state(false), builder); //TODO - A/497 MERGE: this is probably not required
+                if (builder.isCompleted())
+                    break;
+            }
 
-                                           return Single.just(null);
-                                       }
-                                       else if (t instanceof ClientWriteException)
-                                       {
-                                           logger.debug("Continuous paging client did not keep up: {}", t.getMessage());
-                                       }
-                                       else
-                                       {
-                                           JVMStabilityInspector.inspectThrowable(t);
-                                           logger.error("Continuous paging failed with unexpected error: {}", t.getMessage(), t);
-                                       }
-
-                                       builder.complete(t);
-                                       return Single.error(t);
-                                   })
-                .doFinally(() -> maybeReschedule(builder)).subscribe();
+            maybeReschedule(builder);
         }
 
         /**
@@ -1085,20 +1084,23 @@ public class SelectStatement implements CQLStatement
                                       int nowInSec,
                                       int userLimit) throws InvalidRequestException
     {
-        return partitions.flatMap(p -> FlowableUtils.fromCloseableIterator(p)
-                                        .reduce(ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection),
-                                                (res, r) ->
-                                                {
-                                                    processPartition(r, options, res, nowInSec);
-                                                    return res;
-                                                })
-                                        .map(res ->
-                                             {
-                                                 ResultSet cqlRows = res.build();
-                                                 orderResults(cqlRows);
-                                                 cqlRows.trim(userLimit);
-                                                 return cqlRows;
-                                             })
+        return partitions.map(p ->
+                              {
+                                  try
+                                  {
+                                      ResultSet.Builder res = ResultSet.makeBuilder(options, parameters.isJson, aggregationSpec, selection);
+                                      while (p.hasNext())
+                                          processPartition(p.next(), options, res, nowInSec);
+                                      ResultSet cqlRows = res.build();
+                                      orderResults(cqlRows);
+                                      cqlRows.trim(userLimit);
+                                      return cqlRows;
+                                  }
+                                  finally
+                                  {
+                                      p.close();
+                                  }
+                              }
         );
     }
 

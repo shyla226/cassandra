@@ -20,7 +20,7 @@ package org.apache.cassandra.db;
 
 import java.util.NoSuchElementException;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Observable;
 import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
@@ -174,11 +174,6 @@ public class EmptyIterators
             this.partitionKey = partitionKey;
             this.isReverseOrder = isReverseOrder;
             this.partitionLevelDeletion = partitionLevelDeletion;
-        }
-
-        public Flowable<Unfiltered> asObservable()
-        {
-            return Flowable.empty();
         }
     }
 

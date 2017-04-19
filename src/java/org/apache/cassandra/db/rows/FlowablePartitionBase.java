@@ -17,11 +17,13 @@
  */
 package org.apache.cassandra.db.rows;
 
-import io.reactivex.Flowable;
-import io.reactivex.Single;
+import com.google.common.base.Throwables;
+
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
 
 /**
- * Base class for the flowable versions of partitions.
+ * Base class for the CsFlow versions of partitions.
  */
 public abstract class FlowablePartitionBase<T>
 {
@@ -37,14 +39,14 @@ public abstract class FlowablePartitionBase<T>
     public final Row staticRow;
 
     /**
-     * The partition's contents as a Flowable. This must be subscribed to exactly once, and will close all
+     * The partition's contents as a CsFlow. This must be subscribed to exactly once, and will close all
      * associated resources when the subscription completes (complete/error/cancel).
      */
-    public final Flowable<T> content;
+    public final CsFlow<T> content;
 
     public FlowablePartitionBase(PartitionHeader header,
                                  Row staticRow,
-                                 Flowable<T> content)
+                                 CsFlow<T> content)
     {
         this.header = header;
         this.staticRow = staticRow;
@@ -57,6 +59,26 @@ public abstract class FlowablePartitionBase<T>
      */
     public void unused()
     {
-        content.subscribe().dispose();
+        try
+        {
+            content.subscribe(new CsSubscriber<T>()
+            {
+                public void onNext(T item)
+                {
+                }
+
+                public void onComplete()
+                {
+                }
+
+                public void onError(Throwable t)
+                {
+                }
+            }).close();
+        }
+        catch (Exception e)
+        {
+            throw Throwables.propagate(e);
+        }
     }
 }

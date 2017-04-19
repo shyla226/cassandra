@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.utils;
+package org.apache.cassandra.utils.flow;
 
 import java.util.List;
 import java.util.Random;
@@ -28,35 +28,28 @@ import java.util.function.IntSupplier;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
-import io.reactivex.Flowable;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
-
 import static org.junit.Assert.assertEquals;
 
-public class FlowableConcatLazyTest
+public class FlatMapTest
 {
     @Test
-    public void testConcatLazy()
+    public void testFlatMap() throws Exception
     {
         // Test with a mix of:
         // - immediate flowables
         // - delayed response flowables
         // - immediate response on another thread flowables
 
-        // - onComplete response separated
-        // - onComplete response with last onNext
-
         for (int typeSeed = 1; typeSeed < 10; ++typeSeed)
         {
             Random rand = new Random(typeSeed);
             for (int seed = 3; seed < 155; seed += 8)
             {
-                Flowable<Integer> immediate = makeRecursive(() -> 0, seed);
-                List<Integer> immValues = immediate.toList().blockingGet();
+                CsFlow<Integer> immediate = makeRecursive(() -> 0, seed);
+                List<Integer> immValues = immediate.toList().blockingSingle();
                 System.out.println("Sequence length: " + immValues.size());
-                Flowable<Integer> one = makeRecursive(rand::nextInt, seed);
-                List<Integer> oneValues = one.toList().blockingGet();
+                CsFlow<Integer> one = makeRecursive(rand::nextInt, seed);
+                List<Integer> oneValues = one.toList().blockingSingle();
                 assertEquals(immValues, oneValues);
             }
         }
@@ -64,113 +57,103 @@ public class FlowableConcatLazyTest
 
     // TODO:
     // - onError thrown instead of onNext
-    // - onError thrown after onNext
 
-    // - onSubscribe delayed
-
-    // - cancel call at random point from third thread
-
-    Flowable<Integer> makeRecursive(IntSupplier typeRand, int seed)
+    CsFlow<Integer> makeRecursive(IntSupplier typeRand, int seed)
     {
-        Flowable<Integer> fl = make(typeRand, seed);
+        CsFlow<Integer> fl = make(typeRand, seed);
         switch (seed % 8)
         {
             case 3:
-                return fl.lift(FlowableUtils.concatMapLazy(i -> makeRecursive(typeRand, i)));
+                return fl.flatMap(i -> makeRecursive(typeRand, i));
             default:
                 return fl;
         }
     }
 
-    Flowable<? extends Object> makeTest(IntSupplier typeRand, int seed)
+    CsFlow<? extends Object> makeTest(IntSupplier typeRand, int seed)
     {
-        Flowable<Integer> fl = make(typeRand, seed);
+        CsFlow<Integer> fl = make(typeRand, seed);
         switch (seed % 8)
         {
             case 3:
-                return fl.concatMap(i -> makeTest(typeRand, i).toList().toFlowable());
+                return fl.flatMap(i -> makeTest(typeRand, i).toList());
             default:
                 return fl;
         }
     }
 
-    Flowable<Integer> make(IntSupplier typeRand, int seed)
+    CsFlow<Integer> make(IntSupplier typeRand, int seed)
     {
         switch (typeRand.getAsInt() % 11)
         {
             case 2:
             case 3:
-                return new Flowable<Integer>()
+                return new CsFlow<Integer>()
                 {
-                    protected void subscribeActual(Subscriber<? super Integer> subscriber)
+                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
                     {
-                        subscriber.onSubscribe(new SpinningGenerator(subscriber, seed));
+                        return new SpinningGenerator(subscriber, seed);
                     }
                 };
             case 4:
-                return new Flowable<Integer>()
+                return new CsFlow<Integer>()
                 {
-                    protected void subscribeActual(Subscriber<? super Integer> subscriber)
+                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
                     {
-                        subscriber.onSubscribe(new YieldingGenerator(subscriber, seed));
+                        return (new YieldingGenerator(subscriber, seed));
                     }
                 };
             case 5:
-                return new Flowable<Integer>()
+                return new CsFlow<Integer>()
                 {
-                    protected void subscribeActual(Subscriber<? super Integer> subscriber)
+                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
                     {
-                        subscriber.onSubscribe(new ParkingGenerator(subscriber, seed));
+                        return (new ParkingGenerator(subscriber, seed));
                     }
                 };
             case 6:
-                return new Flowable<Integer>()
+                return new CsFlow<Integer>()
                 {
-                    protected void subscribeActual(Subscriber<? super Integer> subscriber)
+                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
                     {
-                        subscriber.onSubscribe(new SleepingGenerator(subscriber, seed));
+                        return (new SleepingGenerator(subscriber, seed));
                     }
                 };
             default:
-                return new Flowable<Integer>()
+                return new CsFlow<Integer>()
                 {
-                    protected void subscribeActual(Subscriber<? super Integer> subscriber)
+                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
                     {
-                        subscriber.onSubscribe(new ImmediateGenerator(subscriber, seed));
+                        return (new ImmediateGenerator(subscriber, seed));
                     }
                 };
         }
     }
 
-    static class ImmediateGenerator implements Subscription
+    static class ImmediateGenerator implements CsSubscription
     {
-        final Subscriber<? super Integer> sub;
+        final CsSubscriber<Integer> sub;
         final Random rand;
-        volatile boolean cancelled = false;
+        volatile boolean closed = false;
         volatile boolean done = false;
 
-        ImmediateGenerator(Subscriber<? super Integer> sub, int seed)
+        ImmediateGenerator(CsSubscriber<Integer> sub, int seed)
         {
             this.sub = sub;
             this.rand = new Random(seed);
         }
 
-        public void request(long l)
+        public void request()
         {
-            for (long i = 0; !done && !cancelled && i < l; ++i)
+            switch (rand.nextInt(35))
             {
-                switch (rand.nextInt(35))
-                {
-                    case 3:
-                        perform(this::complete);
-                        break;
-                    case 4:
-                        perform(this::nextAndComplete);
-                        break;
-                    default:
-                        perform(this::next);
-                        break;
-                }
+                case 3:
+                case 4:
+                    perform(this::complete);
+                    break;
+                default:
+                    perform(this::next);
+                    break;
             }
         }
 
@@ -185,21 +168,21 @@ public class FlowableConcatLazyTest
             done = true;
         }
 
-        void nextAndComplete()
-        {
-            next();
-            complete();
-        }
-
         // overridden in children
         void perform(Runnable call)
         {
             call.run();
         }
 
-        public void cancel()
+        public void close()
         {
-            cancelled = true;
+            closed = true;
+        }
+
+        public void finalize()
+        {
+            if (!closed)
+                System.err.println("Unclosed flow " + toString());
         }
     }
 
@@ -209,23 +192,22 @@ public class FlowableConcatLazyTest
         volatile Runnable call = null;
         AtomicInteger iteration = new AtomicInteger(0);
 
-        SpinningGenerator(Subscriber<? super Integer> sub, int seed)
+        SpinningGenerator(CsSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
             {
                 public void run()
                 {
-                    while (!cancelled && !done)
+                    while (!closed && !done)
                     {
-                        if (call != null)
+                        while (call != null)
                         {
                             Runnable c = call;
                             call = null;
                             c.run();
                         }
-                        else
-                            iteration.getAndIncrement(); // to be replaced with Thread.onSpinWait() with Java 9
+                        iteration.getAndIncrement(); // to be replaced with Thread.onSpinWait() with Java 9
                     }
                 }
             };
@@ -234,7 +216,7 @@ public class FlowableConcatLazyTest
 
         void perform(Runnable call)
         {
-            while (this.call != null && !cancelled && !done)
+            while (this.call != null && !closed && !done)
                 iteration.getAndIncrement(); // to be replaced with Thread.onSpinWait() with Java 9
             this.call = call;
         }
@@ -245,23 +227,22 @@ public class FlowableConcatLazyTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        YieldingGenerator(Subscriber<? super Integer> sub, int seed)
+        YieldingGenerator(CsSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
             {
                 public void run()
                 {
-                    while (!cancelled && !done)
+                    while (!closed && !done)
                     {
-                        if (call != null)
+                        while (call != null)
                         {
                             Runnable c = call;
                             call = null;
                             c.run();
                         }
-                        else
-                            Thread.yield();
+                        Thread.yield();
                     }
                 }
             };
@@ -270,7 +251,7 @@ public class FlowableConcatLazyTest
 
         void perform(Runnable call)
         {
-            while (this.call != null && !cancelled && !done)
+            while (this.call != null && !closed && !done)
                 Thread.yield();
             this.call = call;
         }
@@ -281,23 +262,22 @@ public class FlowableConcatLazyTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        ParkingGenerator(Subscriber<? super Integer> sub, int seed)
+        ParkingGenerator(CsSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
             {
                 public void run()
                 {
-                    while (!cancelled && !done)
+                    while (!closed && !done)
                     {
-                        if (call != null)
+                        while (call != null)
                         {
                             Runnable c = call;
                             call = null;
                             c.run();
                         }
-                        else
-                            LockSupport.park();
+                        LockSupport.park();
                     }
                 }
             };
@@ -306,7 +286,7 @@ public class FlowableConcatLazyTest
 
         void perform(Runnable call)
         {
-            while (this.call != null && !cancelled && !done)
+            while (this.call != null && !closed && !done)
                 Thread.yield();
             this.call = call;
             LockSupport.unpark(spinner);
@@ -318,23 +298,22 @@ public class FlowableConcatLazyTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        SleepingGenerator(Subscriber<? super Integer> sub, int seed)
+        SleepingGenerator(CsSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
             {
                 public void run()
                 {
-                    while (!cancelled && !done)
+                    while (!closed && !done)
                     {
-                        if (call != null)
+                        while (call != null)
                         {
                             Runnable c = call;
                             call = null;
                             c.run();
                         }
-                        else
-                            Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
+                        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
                     }
                 }
             };
@@ -343,7 +322,7 @@ public class FlowableConcatLazyTest
 
         void perform(Runnable call)
         {
-            while (this.call != null && !cancelled && !done)
+            while (this.call != null && !closed && !done)
                 Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
             this.call = call;
         }

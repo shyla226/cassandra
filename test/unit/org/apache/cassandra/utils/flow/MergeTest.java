@@ -1,46 +1,47 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one
-* or more contributor license agreements.  See the NOTICE file
-* distributed with this work for additional information
-* regarding copyright ownership.  The ASF licenses this file
-* to you under the Apache License, Version 2.0 (the
-* "License"); you may not use this file except in compliance
-* with the License.  You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing,
-* software distributed under the License is distributed on an
-* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-* KIND, either express or implied.  See the License for the
-* specific language governing permissions and limitations
-* under the License.
-*/
-package org.apache.cassandra.utils;
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.cassandra.utils.flow;
 
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
-
 import org.junit.Assert;
 import org.junit.Test;
 
-import io.reactivex.Flowable;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.UUIDGen;
 
-public class MergeFlowableComparisonTest
+public class MergeTest
 {
     private static class CountingComparator<T> implements Comparator<T>
     {
@@ -79,7 +80,7 @@ public class MergeFlowableComparisonTest
                 return r.nextInt(5 * LIST_LENGTH);
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
     
     @Test
@@ -96,7 +97,7 @@ public class MergeFlowableComparisonTest
                 return next++;
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -114,7 +115,7 @@ public class MergeFlowableComparisonTest
                 return r.nextBoolean() ? r.nextInt(5 * LIST_LENGTH) : next++;
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -171,7 +172,7 @@ public class MergeFlowableComparisonTest
                     return r.nextInt();
                 }
             }.result);
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -188,7 +189,7 @@ public class MergeFlowableComparisonTest
                 return "longish_prefix_" + r.nextInt(5 * LIST_LENGTH);
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
     
     @Test
@@ -205,7 +206,7 @@ public class MergeFlowableComparisonTest
                 return "longish_prefix_" + next++;
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -222,7 +223,7 @@ public class MergeFlowableComparisonTest
                 return "longish_prefix_" + (r.nextBoolean() ? r.nextInt(5 * LIST_LENGTH) : next++);
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -238,7 +239,7 @@ public class MergeFlowableComparisonTest
                 return UUIDGen.getTimeUUID();
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -254,7 +255,7 @@ public class MergeFlowableComparisonTest
                 return UUID.randomUUID();
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -271,7 +272,7 @@ public class MergeFlowableComparisonTest
                 return type.decompose(UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeFlowable(reducer, lists, type);
+        testMergeCsFlow(reducer, lists, type);
     }
 
     @Test
@@ -288,7 +289,7 @@ public class MergeFlowableComparisonTest
                 return type.decompose(UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeFlowable(reducer, lists, type);
+        testMergeCsFlow(reducer, lists, type);
     }
 
     
@@ -307,9 +308,8 @@ public class MergeFlowableComparisonTest
                 return new KeyedSet<>(r.nextInt(5 * LIST_LENGTH), UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
-    /* */
 
     @Test
     public void testLimitedOverlapStrings2()
@@ -328,7 +328,7 @@ public class MergeFlowableComparisonTest
                 return "longish_prefix_" + (id + list * LIST_LENGTH / 2);
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     @Test
@@ -348,7 +348,7 @@ public class MergeFlowableComparisonTest
                 return "longish_prefix_" + (id + list * LIST_LENGTH / 3);
             }
         }.result;
-        testMergeFlowable(reducer, lists);
+        testMergeCsFlow(reducer, lists);
     }
 
     private static abstract class ListGenerator<T>
@@ -463,63 +463,51 @@ public class MergeFlowableComparisonTest
         }
     }
 
-    public <T extends Comparable<T>> void testMergeFlowable(Reducer<T, ?> reducer, List<List<T>> lists)
+    public <T extends Comparable<T>, AutoCloseable> void testMergeCsFlow(Reducer<T, ?> reducer, List<List<T>> lists)
     {
-        testMergeFlowable(reducer, lists, Ordering.natural());
+        testMergeCsFlow(reducer, lists, Ordering.natural());
     }
-    public <T, O> void testMergeFlowable(Reducer<T, O> reducer, List<List<T>> lists, Comparator<T> comparator)
+    public <T, O> void testMergeCsFlow(Reducer<T, O> reducer, List<List<T>> lists, Comparator<T> comparator)
     {
         {
-            Flowable<O> tested = MergeFlowable.get(
-                    flowables(lists),
-                    comparator, reducer);
+            CsFlow<O> tested = Merge.get(flowables(lists),
+                                         comparator,
+                                         reducer);
             MergeIteratorPQ<T,O> baseIter = new MergeIteratorPQ<>(closeableIterators(lists), comparator, reducer);
-            Flowable<O> base = Flowable.fromIterable(() -> baseIter);
+            List<O> base = new ArrayList<>();
+            Iterators.addAll(base, baseIter);
+            List<O> result = null;
+            try
+            {
+                result = tested.reduceBlocking(new ArrayList<O>(),
+                                                       (list, item) ->
+                                                       {
+                                                           list.add(item);
+                                                           return list;
+                                                       });
+            }
+            catch (Exception e)
+            {
+                throw new AssertionError(e);
+            }
 
-            Assert.assertTrue(Flowable.sequenceEqual(base, tested).blockingGet());
-//            List<O> basearr = base.toList().blockingGet();
-//            Assert.assertEquals(basearr, tested.toList().blockingGet());
-            if (!BENCHMARK)
-                return;
-        }
-
-        CountingComparator<T> cmp, cmpb;
-        cmp = new CountingComparator<>(comparator); cmpb = new CountingComparator<>(comparator);
-        System.out.println();
-        for (int i=0; i<10; ++i) {
-            benchmarkIterator(MergeFlowable.get(flowables(lists), cmp, reducer), cmp);
+            Assert.assertEquals(base, result);
         }
     }
 
-    <T> List<Flowable<T>> flowables(List<List<T>> lists)
+    <T> List<CsFlow<T>> flowables(List<List<T>> lists)
     {
-        return lists.stream().map(list -> maybeDelayed(Flowable.fromIterable(list))).collect(Collectors.toList());
+        return lists.stream().map(list -> maybeDelayed(CsFlow.fromIterable(list))).collect(Collectors.toList());
     }
     
-    <T> Flowable<T> maybeDelayed(Flowable<T> flowable)
+    <T> CsFlow<T> maybeDelayed(CsFlow<T> CsFlow)
     {
         if (rand.nextInt(DELAY_CHANCE) == 0)
-            return flowable.delay(rand.nextInt(15), TimeUnit.MICROSECONDS);
+            return CsFlow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS);
         else
-            return flowable;
+            return CsFlow;
     }
     
-    public <T, O> void benchmarkIterator(Flowable<O> flow, CountingComparator<T> comparator)
-    {
-        System.out.format("Testing %30s... ", flow.getClass().getSimpleName());
-        long time = System.currentTimeMillis();
-        AtomicReference<O> value = new AtomicReference<O>();
-        flow.blockingForEach(x -> value.set(x));
-        flow.subscribe(x -> value.set(x));
-        time = System.currentTimeMillis() - time;
-        String type = "";
-        if (value.get() instanceof Counted<?>)
-        {
-            type = "type " + ((Counted<?>)value.get()).item.getClass().getSimpleName();
-        }
-        System.out.format("%15s time %5dms; comparisons: %d\n", type, time, comparator.count);
-    }
-
     public <T> List<CLI<T>> closeableIterators(List<List<T>> iterators)
     {
         return Lists.transform(iterators, new Function<List<T>, CLI<T>>() {
@@ -570,7 +558,7 @@ public class MergeFlowableComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -578,7 +566,7 @@ public class MergeFlowableComparisonTest
         }
 
         @Override
-        protected Counted<T> getReduced()
+        public Counted<T> getReduced()
         {
             assert current != null;
             read = true;
@@ -621,7 +609,7 @@ public class MergeFlowableComparisonTest
         }
 
         @Override
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             assert read;
             current = null;
@@ -629,7 +617,7 @@ public class MergeFlowableComparisonTest
         }
 
         @Override
-        protected KeyedSet<K, V> getReduced()
+        public KeyedSet<K, V> getReduced()
         {
             assert current != null;
             read = true;

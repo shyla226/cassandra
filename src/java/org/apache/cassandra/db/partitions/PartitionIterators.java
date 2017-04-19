@@ -22,7 +22,7 @@ import java.util.concurrent.Callable;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.Flowable;
+import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
 import io.reactivex.SingleSource;
 import org.apache.cassandra.db.EmptyIterators;

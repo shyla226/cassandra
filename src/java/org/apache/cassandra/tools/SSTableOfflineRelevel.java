@@ -115,7 +115,7 @@ public class SSTableOfflineRelevel
                 catch (Throwable t)
                 {
                     out.println("Couldn't open sstable: "+sstable.getKey().filenameFor(Component.DATA));
-                    Throwables.propagate(t);
+                    throw Throwables.propagate(t);
                 }
             }
         }

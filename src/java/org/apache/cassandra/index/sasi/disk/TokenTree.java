@@ -404,7 +404,7 @@ public class TokenTree
                     reduced = current;
                 }
 
-                protected DecoratedKey getReduced()
+                public DecoratedKey getReduced()
                 {
                     return reduced;
                 }

@@ -24,20 +24,22 @@ import java.util.Optional;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.Flowable;
-import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.db.ReadVerbs.ReadVersion;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.CachedPartition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
-import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -47,6 +49,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.PagingState;
@@ -54,6 +57,7 @@ import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * A read command that selects a (part of a) range of partitions.
@@ -209,18 +213,18 @@ public class PartitionRangeReadCommand extends ReadCommand
         metric.rangeLatency.addNano(latencyNanos);
     }
 
-    protected Flowable<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    protected CsFlow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));
         Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), dataRange().keyRange().getString(metadata().partitionKeyType));
 
         // fetch data from current memtable, historical memtables, and SSTables in the correct order.
-        final List<Flowable<FlowableUnfilteredPartition>> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
+        final List<CsFlow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
 
         for (Memtable memtable : view.memtables)
         {
             @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-            Flowable<FlowableUnfilteredPartition> iter = memtable.makePartitionIterator(columnFilter(), dataRange());
+            CsFlow<FlowableUnfilteredPartition> iter = memtable.makePartitionIterator(columnFilter(), dataRange());
             oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, memtable.getMinLocalDeletionTime());
             iterators.add(iter);
         }

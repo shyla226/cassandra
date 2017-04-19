@@ -17,17 +17,23 @@
  */
 package org.apache.cassandra.index.sasi.plan;
 
-import java.util.*;
+import java.util.Iterator;
 
-import io.reactivex.Flowable;
 import io.reactivex.functions.Function;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.FlowableUtils;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public class QueryPlan
 {
@@ -62,12 +68,12 @@ public class QueryPlan
         }
     }
 
-    public Flowable<FlowableUnfilteredPartition> execute(ReadExecutionController executionController) throws RequestTimeoutException
+    public CsFlow<FlowableUnfilteredPartition> execute(ReadExecutionController executionController) throws RequestTimeoutException
     {
         return new ResultRetriever(analyze(), controller, executionController).getPartitions();
     }
 
-    private static class ResultRetriever implements Function<DecoratedKey, Flowable<FlowableUnfilteredPartition>>
+    private static class ResultRetriever implements Function<DecoratedKey, CsFlow<FlowableUnfilteredPartition>>
     {
         private final AbstractBounds<PartitionPosition> keyRange;
         private final Operation operationTree;
@@ -84,31 +90,31 @@ public class QueryPlan
             this.executionController = executionController;
         }
 
-        public Flowable<FlowableUnfilteredPartition> getPartitions()
+        public CsFlow<FlowableUnfilteredPartition> getPartitions()
         {
             if (operationTree == null)
-                return Flowable.empty();
+                return CsFlow.empty();
 
             operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
 
-            Flowable<DecoratedKey> keys = Flowable.fromIterable(() -> operationTree)
-                                                  .lift(FlowableUtils.concatMapLazy(Flowable::fromIterable));
+            CsFlow<DecoratedKey> keys = CsFlow.fromIterable(() -> operationTree)
+                                              .flatMap(CsFlow::fromIterable);
 
             if (!keyRange.right.isMinimum())
                 keys = keys.takeWhile(key -> keyRange.right.compareTo(key) >= 0);
 
-            return keys.lift(FlowableUtils.concatMapLazy(this))
-                       .doFinally(this::close);
+            return keys.flatMap(this)
+                       .doOnClose(this::close);
         }
 
-        public Flowable<FlowableUnfilteredPartition> apply(DecoratedKey key)
+        public CsFlow<FlowableUnfilteredPartition> apply(DecoratedKey key)
         {
-            Flowable<FlowableUnfilteredPartition> fp = controller.getPartition(key, executionController);
+            CsFlow<FlowableUnfilteredPartition> fp = controller.getPartition(key, executionController);
             return fp.map(partition ->
             {
                 Row staticRow = partition.staticRow;
 
-                Flowable<Unfiltered> filteredContent = partition.content
+                CsFlow<Unfiltered> filteredContent = partition.content
                     .filter(row -> operationTree.satisfiedBy(row, staticRow, true));
 
                 return new FlowableUnfilteredPartition(partition.header, partition.staticRow, filteredContent);
