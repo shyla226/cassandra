@@ -407,7 +407,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         // tpc TODO: Do filtering on Flowable.
         return Single.defer(() -> executeLocally(monitor)
                                .concatMap(f -> ImmutableBTreePartition.create(f).toFlowable()).toList()
-                               .map(p -> UnfilteredPartitionIterators.filter(UnfilteredPartitionIterators.concat(p.stream().map(l -> new SingletonUnfilteredPartitionIterator(l.unfilteredIterator())).collect(Collectors.toList()), metadata()), nowInSec()))
+                               .map(p -> UnfilteredPartitionIterators.filter(UnfilteredPartitionIterators.concat(p.stream()
+                                                                                                                  .map(l -> new SingletonUnfilteredPartitionIterator(l.unfilteredIterator(columnFilter(), Slices.ALL, isReversed())))
+                                                                                                                  .collect(Collectors.toList()), metadata()), nowInSec()))
         );
     }
 
@@ -548,7 +550,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         {
             PartitionHeader header = partition.header;
             if (purger.shouldPurge(header.partitionLevelDeletion))
+            {
+                partition.unused();
                 return FlowablePartitions.empty(header.metadata, header.partitionKey, header.isReverseOrder);
+            }
 
             FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
                                                                                  applyToStatic(partition.staticRow),

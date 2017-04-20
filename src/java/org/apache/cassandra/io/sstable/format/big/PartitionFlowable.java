@@ -121,15 +121,15 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
     class PartitionSubscription implements Subscription
     {
-        OpOrder.Group opGroup;
-        FileDataInput dfile = null;
-        AbstractSSTableIterator ssTableIterator = null;
+        volatile OpOrder.Group opGroup;
+        volatile FileDataInput dfile = null;
+        volatile AbstractSSTableIterator ssTableIterator = null;
 
         //Used to track the work done iterating (hasNext vs next)
         //Since we could have an async break in either place
-        boolean needsHasNextCheck = true;
+        volatile boolean needsHasNextCheck = true;
 
-        long filePos = -1;
+        volatile long filePos = -1;
         RowIndexEntry<?> indexEntry;
         DeletionTime partitionLevelDeletion;
         Row staticRow = Rows.EMPTY_STATIC_ROW;
@@ -200,8 +200,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
             boolean r = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, state, State.CLOSED);
             assert r : state;
 
-            if (opGroup != null)
-                opGroup.close();
+            opGroup.close();
             FileUtils.closeQuietly(dfile);
             FileUtils.closeQuietly(ssTableIterator);
         }
@@ -275,19 +274,22 @@ class PartitionFlowable extends Flowable<Unfiltered>
                                  assert f : state;
                              }
                          },
+                         (t) -> {
+                            close();
+                            s.onError(t);
+                         },
                          onReadyExecutor);
             }
             catch (Throwable t)
             {
-                t.printStackTrace();
-                throw t;
+                close();
+                s.onError(t);
             }
         }
 
         @Override
         public void request(long howMany)
         {
-            //logger.info("Rx Request");
             request(howMany, State.READY);
         }
 
@@ -310,11 +312,7 @@ class PartitionFlowable extends Flowable<Unfiltered>
                 //so we only put the state back to ready if it's DONE_WORKING.
                 //It could be in WAITING state which we will just stop and let
                 //the callback handle it.
-                boolean c = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.DONE_WORKING, expectedState);
-                if (state != State.WAITING && state != State.DONE_WAITING && state != CLOSED && !c)
-                {
-                    logger.info("state = {} expected = {}", state, expectedState);
-                }
+                UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.DONE_WORKING, expectedState);
             }
 
             // When finishing a callback request
@@ -329,10 +327,10 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
         private void issueHeader(ReaderConstraint rc)
         {
-            assert state != CLOSED;
-
             try
             {
+                assert state != CLOSED;
+
                 indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, rc);
                 if (indexEntry == null)
                 {
@@ -377,10 +375,11 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
         private void issueStaticRowIndexed(ReaderConstraint rc)
         {
-            assert state != CLOSED;
 
             try
             {
+                assert state != CLOSED;
+
                 Columns statics = selectedColumns.fetchedColumns().statics;
                 assert indexEntry != null;
 
@@ -421,10 +420,10 @@ class PartitionFlowable extends Flowable<Unfiltered>
 
         private void issueStaticRowUnindexed(ReaderConstraint rc)
         {
-            assert state != CLOSED;
-
             try
             {
+                assert state != CLOSED;
+
                 Columns statics = selectedColumns.fetchedColumns().statics;
                 assert indexEntry != null;
 
@@ -455,7 +454,6 @@ class PartitionFlowable extends Flowable<Unfiltered>
             }
             catch (Throwable t)
             {
-                t.printStackTrace();
                 cancel();
                 s.onError(t);
             }

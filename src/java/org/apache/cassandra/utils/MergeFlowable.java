@@ -22,6 +22,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.math.LongMath;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Flowable;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
@@ -31,6 +34,7 @@ import org.reactivestreams.Subscription;
 // Not closeable -- the subscription is where that belongs, via the cancel method.
 public class MergeFlowable<In,Out> extends Flowable<Out>
 {
+    private static final Logger logger = LoggerFactory.getLogger(MergeFlowable.class);
     protected final Reducer<In,Out> reducer;
     protected final List<? extends Publisher<In>> iterators;
     protected final Comparator<? super In> comparator;

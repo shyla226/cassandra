@@ -80,10 +80,8 @@ public class BigTableReader extends SSTableReader
                                            .map(head ->
                                                 {
                                                     if (head.size() != 2)
-                                                        return new FlowableUnfilteredPartition(new PartitionHeader(metadata(), key, DeletionTime.LIVE,
-                                                                                                                   RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS),
-                                                                                               Rows.EMPTY_STATIC_ROW,
-                                                                                               Flowable.empty());
+                                                        return new FlowablePartitions.EmptyFlowableUnfilteredPartition(new PartitionHeader(metadata(), key, DeletionTime.LIVE,
+                                                                                                                                           RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS));
 
                                                     PartitionFlowable u = new PartitionFlowable(pf, readOrdering, 2);
 

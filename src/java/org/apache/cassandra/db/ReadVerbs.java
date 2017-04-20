@@ -104,7 +104,6 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
                                       // need to do this for remote responses, we should serialize and calculate the digest directly from
                                       // flowable partitions
                                       command.executeLocally(monitor)
-                                             //.flatMapSingle(partition -> ImmutableBTreePartition.create(partition), false, 1)
                                              .lift(FlowableUtils.concatMapLazy(partition -> ImmutableBTreePartition.create(partition).toFlowable()))
                                              .reduceWith(() -> new ReadResponse.InMemoryPartitionsIterator(command),
                                                          (it, partition) ->

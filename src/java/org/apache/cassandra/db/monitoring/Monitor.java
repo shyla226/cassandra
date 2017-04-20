@@ -18,8 +18,12 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Flowable;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.utils.FBUtilities;
@@ -31,6 +35,7 @@ public class Monitor
 {
     private static final int TEST_ITERATION_DELAY_MILLIS = Integer.parseInt(System.getProperty("cassandra.test.read_iteration_delay_ms", "0"));
 
+    private static final Logger logger = LoggerFactory.getLogger(Monitor.class);
     final Monitorable operation;
     private final boolean withReporting;
 
@@ -180,6 +185,7 @@ public class Monitor
                 if (withReporting)
                     MonitoringTask.addFailedOperation(this, ApproximateTime.currentTimeMillis());
                 state = MonitoringState.ABORTED;
+                logger.error("ABORTED");
                 // Fallback on purpose
             case ABORTED:
                 // We should really get here but well...
@@ -245,7 +251,14 @@ public class Monitor
     {
         protected FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
         {
-            check();
+            checkSilently();
+
+            if (state == MonitoringState.ABORTED)
+            {
+                iter.unused();
+                return new FlowablePartitions.EmptyFlowableUnfilteredPartition(iter.header);
+            }
+
             return new FlowableUnfilteredPartition(iter.header,
                                                    iter.staticRow,
                                                    iter.content.lift(this));
@@ -256,8 +269,11 @@ public class Monitor
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
 
-            check();
-            subscriber.onNext(unfiltered);
+            checkSilently();
+            if (state == MonitoringState.ABORTED)
+                subscriber.onComplete();
+            else
+                subscriber.onNext(unfiltered);
         }
     }
 

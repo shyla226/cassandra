@@ -1112,7 +1112,9 @@ public class SinglePartitionReadCommand extends ReadCommand
         {
             return Single.defer(() -> executeLocally(monitor, false)
                                       .concatMap(f -> ImmutableBTreePartition.create(f).toFlowable()).toList()
-                                      .map(p -> UnfilteredPartitionIterators.filter(UnfilteredPartitionIterators.concat(p.stream().map(l -> new SingletonUnfilteredPartitionIterator(l.unfilteredIterator())).collect(Collectors.toList()), metadata()), nowInSec()))
+                                      .map(p -> UnfilteredPartitionIterators.filter(UnfilteredPartitionIterators.concat(p.stream()
+                                                                                                                         .map(l -> new SingletonUnfilteredPartitionIterator(l.unfilteredIterator()))
+                                                                                                                         .collect(Collectors.toList()), metadata()), nowInSec()))
             );
         }
 

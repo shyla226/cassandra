@@ -138,14 +138,13 @@ public class ChunkCache
             }
             else
             {
-
                 // We need to avoid anyone trying to reference the buffer before
                 // its been initialized.
                 references = new AtomicInteger(UNINITIALISED);
                 this.futureBuffer = futureBuffer.thenApply((buf) ->
                                                            {
                                                                boolean success = references.compareAndSet(UNINITIALISED, 1);
-                                                               assert success : "Buffer was referenced before it was initialized";
+                                                               assert success : "Buffer was referenced before it was initialized: " + key;
 
                                                                return buf;
                                                            });
@@ -155,7 +154,6 @@ public class ChunkCache
         Buffer reference()
         {
             int refCount;
-
             do
             {
                 refCount = references.get();
@@ -176,12 +174,14 @@ public class ChunkCache
         }
 
         /**
-         * Callback handler for
+         * Callback handler for async disk reads.
+         *
          * @param onReady called when buffer is ready.
          * @param onSchedule called if the buffer isn't ready yet and will be scheduled
+         * @param onError called if there was a problem reading the buffer
          * @param executor if not instantly ready the callback will happen on this executor
          */
-        public void onReady(Runnable onReady, Runnable onSchedule, Executor executor)
+        public void onReadyHandler(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
         {
             if (futureBuffer.isDone())
             {
@@ -190,7 +190,12 @@ public class ChunkCache
             else
             {
                 onSchedule.run();
-                futureBuffer.thenRunAsync(() -> onReady.run(), executor);
+                futureBuffer.thenRunAsync(() -> onReady.run(), executor)
+                            .exceptionally(t ->
+                                           {
+                                               onError.accept(t);
+                                               return null;
+                                           });
             }
         }
 
@@ -208,7 +213,9 @@ public class ChunkCache
         @Override
         public void release()
         {
-            if (references.decrementAndGet() == 0)
+            //The read from disk read may be in flight
+            //We need to keep this buffer till the async callback has fire
+            if (references.get() != UNINITIALISED && references.decrementAndGet() == 0)
             {
                 BufferPool.put(futureBuffer.join());
             }
@@ -336,9 +343,7 @@ public class ChunkCache
                 //is still in the cache. In this case it will return null
                 //so we spin loop while waiting for the cache to re-populate
                 while(page == null || ((buf = page.reference()) == null))
-                {
                     page = cache.get(pageKey);
-                }
 
                 return buf;
             }

@@ -22,10 +22,14 @@ import java.nio.ByteBuffer;
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.CompletableFuture;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.compress.BufferType;
 
 class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
+    private final static Logger logger = LoggerFactory.getLogger(SimpleChunkReader.class);
     private final int bufferSize;
     private final BufferType bufferType;
 

@@ -79,11 +79,11 @@ public interface Rebufferer extends ReaderFileProxy
             return this;
         }
 
-        public void accept(Runnable onReady, Runnable onSchedule, Executor executor)
+        public void accept(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
         {
             //Registers a callback to be issued when the async buffer is ready
             assert asyncBuffer != null;
-            asyncBuffer.onReady(onReady, onSchedule, executor);
+            asyncBuffer.onReadyHandler(onReady, onSchedule, onError, executor);
         }
 
         public String toString()

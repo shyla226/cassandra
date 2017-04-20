@@ -27,6 +27,9 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ExecutionException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.NativeLibrary;
@@ -44,6 +47,7 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  */
 public final class AsynchronousChannelProxy extends SharedCloseableImpl
 {
+    private static final Logger logger = LoggerFactory.getLogger(AsynchronousChannelProxy.class);
     private final String filePath;
     private final AsynchronousFileChannel channel;
 
@@ -139,7 +143,14 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
 
     public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
     {
-        channel.read(dest, offset, dest, onComplete);
+        try
+        {
+            channel.read(dest, offset, dest, onComplete);
+        }
+        catch (Throwable t)
+        {
+            onComplete.failed(t, dest);
+        }
     }
 
     public long size()
