@@ -40,7 +40,6 @@ public class StreamRequest
         public void serialize(StreamRequest request, DataOutputPlus out) throws IOException
         {
             out.writeUTF(request.keyspace);
-            out.writeLong(request.repairedAt);
             out.writeInt(request.ranges.size());
             for (Range<Token> range : request.ranges)
             {
@@ -56,7 +55,6 @@ public class StreamRequest
         public StreamRequest deserialize(DataInputPlus in) throws IOException
         {
             String keyspace = in.readUTF();
-            long repairedAt = in.readLong();
             int rangeCount = in.readInt();
             List<Range<Token>> ranges = new ArrayList<>(rangeCount);
             for (int i = 0; i < rangeCount; i++)
@@ -69,13 +67,12 @@ public class StreamRequest
             List<String> columnFamilies = new ArrayList<>(cfCount);
             for (int i = 0; i < cfCount; i++)
                 columnFamilies.add(in.readUTF());
-            return new StreamRequest(keyspace, ranges, columnFamilies, repairedAt);
+            return new StreamRequest(keyspace, ranges, columnFamilies);
         }
 
         public long serializedSize(StreamRequest request)
         {
             long size = TypeSizes.sizeof(request.keyspace);
-            size += TypeSizes.sizeof(request.repairedAt);
             size += TypeSizes.sizeof(request.ranges.size());
             for (Range<Token> range : request.ranges)
             {
@@ -92,13 +89,11 @@ public class StreamRequest
     public final String keyspace;
     public final Collection<Range<Token>> ranges;
     public final Collection<String> columnFamilies = new HashSet<>();
-    public final long repairedAt;
 
-    public StreamRequest(String keyspace, Collection<Range<Token>> ranges, Collection<String> columnFamilies, long repairedAt)
+    public StreamRequest(String keyspace, Collection<Range<Token>> ranges, Collection<String> columnFamilies)
     {
         this.keyspace = keyspace;
         this.ranges = ranges;
         this.columnFamilies.addAll(columnFamilies);
-        this.repairedAt = repairedAt;
     }
 }
