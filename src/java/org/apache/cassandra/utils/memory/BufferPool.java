@@ -107,7 +107,7 @@ public class BufferPool
     {
         return onHeap
                ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+               : allocateDirectAligned(size);
     }
 
     private static ByteBuffer takeFromPool(int size, boolean allocateOnHeapWhenExhausted)
@@ -132,8 +132,8 @@ public class BufferPool
 
         if (size > CHUNK_SIZE)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Requested buffer size {} is bigger than {}, allocating directly",
+            //if (logger.isTraceEnabled())
+                logger.info("Requested buffer size {} is bigger than {}, allocating directly",
                              FBUtilities.prettyPrintMemory(size),
                              FBUtilities.prettyPrintMemory(CHUNK_SIZE));
 
@@ -526,7 +526,7 @@ public class BufferPool
         });
     }
 
-    private static ByteBuffer allocateDirectAligned(int capacity)
+    public static ByteBuffer allocateDirectAligned(int capacity)
     {
         int align = MemoryUtil.pageSize();
         if (Integer.bitCount(align) != 1)
@@ -666,6 +666,14 @@ public class BufferPool
                 MemoryUtil.setAttachment(buffer, new Ref<>(this, null));
             else
                 MemoryUtil.setAttachment(buffer, this);
+
+            if (buffer != null)
+            {
+                long address = MemoryUtil.getAddress(buffer);
+                long offset = address & (512 -1); // (address % align)
+                if (offset != 0)
+                    logger.info("NOT ALIGNED " + offset);
+            }
 
             return buffer;
         }

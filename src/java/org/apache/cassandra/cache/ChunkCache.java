@@ -42,11 +42,13 @@ import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.metrics.CacheMissMetrics;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.jctools.queues.MpscArrayQueue;
 
 public class ChunkCache
@@ -247,6 +249,7 @@ public class ChunkCache
         {
             ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
             assert buffer != null;
+            assert MemoryUtil.getAddress(buffer) % 512 == 0 : "Buffer from pool is not properly aligned!";
 
             //Once the buffer has been filled we can give it an initial reference
             try

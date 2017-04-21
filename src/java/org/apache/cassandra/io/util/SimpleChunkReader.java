@@ -46,7 +46,6 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
         buffer.clear();
 
         CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
-
         channel.read(buffer, position, new CompletionHandler<Integer, ByteBuffer>()
         {
             public void completed(Integer result, ByteBuffer attachment)

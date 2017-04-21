@@ -23,6 +23,9 @@ package org.apache.cassandra.io.util;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.utils.memory.BufferPool;
 
 /**
@@ -33,6 +36,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
  */
 public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer.BufferHolder
 {
+    private static Logger logger = LoggerFactory.getLogger(BufferManagingRebufferer.class);
     protected final ChunkReader source;
     protected final ByteBuffer buffer;
     protected long offset = 0;

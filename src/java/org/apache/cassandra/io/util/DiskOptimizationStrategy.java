@@ -29,7 +29,7 @@ public interface DiskOptimizationStrategy
     // see CASSANDRA-8630
     // NOTE: this size is chosen both for historical consistency, as a reasonable upper bound,
     //       and because our BufferPool currently has a maximum allocation size of this.
-    int MAX_BUFFER_SIZE = 1 << 16; // 64k
+    int MAX_BUFFER_SIZE = 1 << 14; // 16k
 
     /**
      * @param recordSize record size

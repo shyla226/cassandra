@@ -40,6 +40,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.AIOEpollFileChannel;
+import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.EventExecutorGroup;
@@ -348,17 +350,17 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     public static AsynchronousFileChannel openFileChannel(File file) throws IOException
     {
-        //if (!isStarted())
+        if (!isStarted())
             return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
 
-        /*Integer coreId = getCoreId();
+        Integer coreId = getCoreId();
 
         if (coreId == null || coreId == perCoreSchedulers.length)
             coreId = getNextCore();
 
         EpollEventLoop loop = (EpollEventLoop)perCoreSchedulers[coreId].eventLoop;
 
-        return new AIOEpollFileChannel(file, loop);*/
+        return new AIOEpollFileChannel(file, loop);
     }
 
     /**

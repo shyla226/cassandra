@@ -19,6 +19,8 @@ package org.apache.cassandra.io.compress;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.utils.memory.BufferPool;
+
 public enum BufferType
 {
     ON_HEAP
@@ -32,7 +34,7 @@ public enum BufferType
     {
         public ByteBuffer allocate(int size)
         {
-            return ByteBuffer.allocateDirect(size);
+            return BufferPool.allocateDirectAligned(size);
         }
     };
 

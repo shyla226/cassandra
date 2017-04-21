@@ -20,6 +20,7 @@ package org.apache.cassandra.io.util;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
@@ -27,14 +28,22 @@ import java.util.concurrent.ThreadLocalRandom;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.netty.util.concurrent.FastThreadLocal;
+import io.netty.util.concurrent.FastThreadLocalThread;
+import io.netty.util.internal.MathUtil;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.utils.ChecksumType;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public abstract class CompressedChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
+    private final static Logger logger = LoggerFactory.getLogger(CompressedChunkReader.class);
     final CompressionMetadata metadata;
     final int maxCompressedLength;
 
@@ -89,22 +98,30 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     public static class Standard extends CompressedChunkReader
     {
         // we read the raw compressed bytes into this buffer, then uncompressed them into the provided one.
-        private final ThreadLocal<ByteBuffer> compressedHolder;
+        private final FastThreadLocal<ByteBuffer> compressedHolder;
 
         public Standard(AsynchronousChannelProxy channel, CompressionMetadata metadata)
         {
             super(channel, metadata);
-            compressedHolder = ThreadLocal.withInitial(this::allocateBuffer);
+            compressedHolder = new FastThreadLocal<ByteBuffer>()
+            {
+                protected ByteBuffer initialValue() throws Exception
+                {
+                    return allocateBuffer();
+                }
+            };
         }
 
-        public ByteBuffer allocateBuffer()
+        ByteBuffer allocateBuffer()
         {
-            return allocateBuffer(Math.min(maxCompressedLength,
-                                           metadata.compressor().initialCompressedBufferLength(metadata.chunkLength())));
+            return allocateBuffer(Math.min(maxCompressedLength, metadata.compressor().initialCompressedBufferLength(metadata.chunkLength())));
         }
 
-        public ByteBuffer allocateBuffer(int size)
+        ByteBuffer allocateBuffer(int size)
         {
+            //O_DIRECT requires length to be aligned to page size
+            if ((size & (MemoryUtil.pageSize() - 1)) != 0)
+                size = (size + MemoryUtil.pageSize() - 1) & ~(MemoryUtil.pageSize() - 1);
             return metadata.compressor().preferredBufferType().allocate(size);
         }
 
@@ -113,7 +130,6 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         {
             CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
 
-
             // accesses must always be aligned
             assert (position & -uncompressed.capacity()) == position;
             assert position <= fileLength;
@@ -121,9 +137,13 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             CompressionMetadata.Chunk chunk = metadata.chunkFor(position);
             ByteBuffer currentCompressed = compressedHolder.get();
 
-            if (currentCompressed.capacity() < chunk.length)
+            //O_DIRECT read positions must be aligned to DMA size
+            long alignedOffset = (chunk.offset & 511) == 0 ? chunk.offset : (chunk.offset - 511) & ~511;
+            int alignmentShift = Ints.checkedCast(chunk.offset - alignedOffset);
+
+            if (currentCompressed.capacity() < chunk.length + Integer.BYTES + alignmentShift)
             {
-                currentCompressed = allocateBuffer(chunk.length);
+                currentCompressed = allocateBuffer(chunk.length + Integer.BYTES + alignmentShift);
                 compressedHolder.set(currentCompressed);
             }
             else
@@ -131,20 +151,23 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 currentCompressed.clear();
             }
 
-            currentCompressed.limit(chunk.length);
+            currentCompressed.limit(chunk.length + Integer.BYTES + alignmentShift);
             ByteBuffer compressed = currentCompressed;
 
-            channel.read(compressed, chunk.offset, new CompletionHandler<Integer, ByteBuffer>()
+
+            channel.read(compressed, alignedOffset, new CompletionHandler<Integer, ByteBuffer>()
             {
                 public void completed(Integer result, ByteBuffer attachment)
                 {
-                    if (result != chunk.length)
+                    if (result < chunk.length + Integer.BYTES)
                     {
                         futureBuffer.completeExceptionally(new CorruptBlockException(channel.filePath() + " result = "+ result, chunk));
                         return;
                     }
 
                     compressed.flip();
+                    compressed.limit(chunk.length + alignmentShift);
+                    compressed.position(alignmentShift);
                     uncompressed.clear();
 
                     try
@@ -153,38 +176,31 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                     }
                     catch (IOException e)
                     {
+
                         futureBuffer.completeExceptionally(new CorruptBlockException(channel.filePath(), chunk, e));
                         return;
                     }
                     finally
                     {
+                        compressed.position(alignmentShift);
                         uncompressed.flip();
                     }
 
                     if (getCrcCheckChance() > ThreadLocalRandom.current().nextDouble())
                     {
-                        compressed.rewind();
                         int checksum = (int) ChecksumType.CRC32.of(compressed);
 
-                        compressed.clear().limit(Integer.BYTES);
-                        channel.read(compressed, chunk.offset + chunk.length, new CompletionHandler<Integer, ByteBuffer>()
+                        //Change the limit to include the checksum
+                        compressed.limit(result);
+                        compressed.position(chunk.length + alignmentShift);
+
+                        if (compressed.remaining() < Integer.BYTES || compressed.getInt() != checksum)
                         {
-                            public void completed(Integer result, ByteBuffer attachment)
-                            {
-                                if (result != Integer.BYTES || compressed.getInt(0) != checksum)
-                                {
-                                    futureBuffer.completeExceptionally(new CorruptBlockException(channel.filePath(), chunk));
-                                    return;
-                                }
+                            futureBuffer.completeExceptionally(new CorruptBlockException(channel.filePath(), chunk));
+                            return;
+                        }
 
-                                futureBuffer.complete(uncompressed);
-                            }
-
-                            public void failed(Throwable exc, ByteBuffer attachment)
-                            {
-                                futureBuffer.completeExceptionally(exc);
-                            }
-                        });
+                        futureBuffer.complete(uncompressed);
                     }
                     else
                     {
