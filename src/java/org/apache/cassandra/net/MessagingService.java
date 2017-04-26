@@ -432,8 +432,7 @@ public final class MessagingService implements MessagingServiceMBean
                                                                         MessageCallback<Q> callback)
     {
         messageInterceptors.interceptRequest(request,
-                                             rq -> StageManager.getStage(rq.stage())
-                                                               .maybeExecuteImmediately(() -> consumer.accept(rq)),
+                                             rq -> rq.executor().execute(() -> consumer.accept(rq), ExecutorLocals.create()),
                                              callback);
     }
 
@@ -742,8 +741,8 @@ public final class MessagingService implements MessagingServiceMBean
         if (state != null)
             state.trace("{} message received from {}", message.verb(), message.from());
 
-        StageManager.getStage(message.stage()).execute(new MessageDeliveryTask(message),
-                                                       ExecutorLocals.create(state));
+        message.executor().execute(new MessageDeliveryTask(message),
+                                   ExecutorLocals.create(state));
     }
 
     // Only required by legacy serialization. Can inline in previous call when we get rid of that.

@@ -27,6 +27,7 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -111,7 +112,7 @@ public class KeyCollisionTest
 
         public ByteSource asByteComparableSource()
         {
-            return IntegerType.instance.asByteComparableSource(IntegerType.instance.decompose(token));
+            return IntegerType.instance.asByteComparableSource(LongType.instance.decompose(token));
         }
 
         @Override

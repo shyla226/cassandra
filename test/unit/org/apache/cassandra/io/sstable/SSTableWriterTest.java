@@ -49,7 +49,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
     {
         AtomicReference<SSTableReader> reader = new AtomicReference<>();
         writer.setMaxDataAge(1000).openEarly(rdr -> reader.set(rdr));
-        addUpdatesToWriter(cfs, writer, list.subList(min, max));
+        addUpdatesToWriter(cfs, writer, list);
         assertNotNull(reader.get());
         return reader.get();
     }

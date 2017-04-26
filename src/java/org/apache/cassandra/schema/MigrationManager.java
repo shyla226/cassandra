@@ -204,10 +204,10 @@ public class MigrationManager
 
     private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate)
     {
-        announceNewTable(cfm, announceLocally, throwOnDuplicate, FBUtilities.timestampMicros());
+        return announceNewTable(cfm, announceLocally, throwOnDuplicate, FBUtilities.timestampMicros());
     }
 
-    private static void announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate, long timestamp)
+    private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate, long timestamp)
     {
         cfm.validate();
 
