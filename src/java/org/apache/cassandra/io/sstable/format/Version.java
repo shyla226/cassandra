@@ -35,8 +35,6 @@ import org.apache.cassandra.db.EncodingVersion;
  */
 public abstract class Version
 {
-    private static final Pattern VALIDATION = Pattern.compile("[a-z]+");
-
     protected final String version;
     protected final SSTableFormat format;
     protected Version(SSTableFormat format, String version)
@@ -65,16 +63,6 @@ public abstract class Version
     public SSTableFormat getSSTableFormat()
     {
         return format;
-    }
-
-    /**
-     * @param ver SSTable version
-     * @return True if the given version string matches the format.
-     * @see #version
-     */
-    public static boolean validate(String ver)
-    {
-        return ver != null && VALIDATION.matcher(ver).matches();
     }
 
     abstract public boolean isCompatible();

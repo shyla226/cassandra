@@ -1,4 +1,9 @@
 4.0
+ * Cleanup isIncremental/repairedAt usage (CASSANDRA-13430)
+ * Change protocol to allow sending key space independent of query string (CASSANDRA-10145)
+ * Make gc_log and gc_warn settable at runtime (CASSANDRA-12661)
+ * Take number of files in L0 in account when estimating remaining compaction tasks (CASSANDRA-13354)
+ * Skip building views during base table streams on range movements (CASSANDRA-13065)
  * Improve error messages for +/- operations on maps and tuples (CASSANDRA-13197)
  * Remove deprecated repair JMX APIs (CASSANDRA-11530)
  * Fix version check to enable streaming keep-alive (CASSANDRA-12929)
@@ -48,9 +53,15 @@
  * cqlsh auto completion: refactor definition of compaction strategy options (CASSANDRA-12946)
  * Add support for arithmetic operators (CASSANDRA-11935)
  * Add histogram for delay to deliver hints (CASSANDRA-13234)
+ * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
 
 
 3.11.0
+ * V5 protocol flags decoding broken (CASSANDRA-13443)
+ * Use write lock not read lock for removing sstables from compaction strategies. (CASSANDRA-13422)
+ * Use corePoolSize equal to maxPoolSize in JMXEnabledThreadPoolExecutors (CASSANDRA-13329)
+ * Avoid rebuilding SASI indexes containing no values (CASSANDRA-12962)
+ * Add charset to Analyser input stream (CASSANDRA-13151)
  * Fix testLimitSSTables flake caused by concurrent flush (CASSANDRA-12820)
  * cdc column addition strikes again (CASSANDRA-13382)
  * Fix static column indexes (CASSANDRA-13277)
@@ -70,7 +81,18 @@
  * NoReplicationTokenAllocator should work with zero replication factor (CASSANDRA-12983)
  * Address message coalescing regression (CASSANDRA-12676)
  * Delete illegal character from StandardTokenizerImpl.jflex (CASSANDRA-13417)
+ * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
+ * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
+ * Fail repair if insufficient responses received (CASSANDRA-13397)
+ * Fix SSTableLoader fail when the loaded table contains dropped columns (CASSANDRA-13276)
+ * Avoid name clashes in CassandraIndexTest (CASSANDRA-13427)
+ * Handling partially written hint files (CASSANDRA-12728)
+ * Interrupt replaying hints on decommission (CASSANDRA-13308)
+ * Handling partially written hint files (CASSANDRA-12728)
+ * Fix NPE issue in StorageService (CASSANDRA-13060)
+ * Make reading of range tombstones more reliable (CASSANDRA-12811)
+ * Fix startup problems due to schema tables not completely flushed (CASSANDRA-12213)
  * Fix view builder bug that can filter out data on restart (CASSANDRA-13405)
  * Fix 2i page size calculation when there are no regular columns (CASSANDRA-13400)
  * Fix the conversion of 2.X expired rows without regular column data (CASSANDRA-13395)
@@ -108,7 +130,10 @@ Merged from 3.0:
  * Provide user workaround when system_schema.columns does not contain entries
    for a table that's in system_schema.tables (CASSANDRA-13180)
  * Nodetool upgradesstables/scrub/compact ignores system tables (CASSANDRA-13410)
+ * Fix schema version calculation for rolling upgrades (CASSANDRA-13441)
 Merged from 2.2:
+ * Avoid starting gossiper in RemoveTest (CASSANDRA-13407)
+ * Fix weightedSize() for row-cache reported by JMX and NodeTool (CASSANDRA-13393)
  * Fix JVM metric names (CASSANDRA-13103)
  * Honor truststore-password parameter in cassandra-stress (CASSANDRA-12773)
  * Discard in-flight shadow round responses (CASSANDRA-12653)
@@ -127,6 +152,8 @@ Merged from 2.2:
  * Fix negative mean latency metric (CASSANDRA-12876)
  * Use only one file pointer when creating commitlog segments (CASSANDRA-12539)
 Merged from 2.1:
+ * Fix 2ndary index queries on partition keys for tables with static columns (CASSANDRA-13147)
+ * Fix ParseError unhashable type list in cqlsh copy from (CASSANDRA-13364)
  * Remove unused repositories (CASSANDRA-13278)
  * Log stacktrace of uncaught exceptions (CASSANDRA-13108)
  * Use portable stderr for java error in startup (CASSANDRA-13211)

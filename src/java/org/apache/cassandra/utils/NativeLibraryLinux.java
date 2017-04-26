@@ -23,13 +23,14 @@ import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
 
 /**
  * A {@code NativeLibraryWrapper} implementation for Linux.
  * <p>
  * When JNA is initialized, all methods that have the 'native' keyword
- * will be attmpted to be linked against. As Java doesn't have the equivalent
+ * will be attempted to be linked against. As Java doesn't have the equivalent
  * of a #ifdef, this means if a native method like posix_fadvise is defined in the
  * class but not available on the target operating system (e.g.
  * posix_fadvise is not availble on Darwin/Mac) this will cause the entire
@@ -76,6 +77,7 @@ public class NativeLibraryLinux implements NativeLibraryWrapper
     private static native int close(int fd) throws LastErrorException;
     private static native Pointer strerror(int errnum) throws LastErrorException;
     private static native long getpid() throws LastErrorException;
+    private static native int mlock(Pointer addr, NativeLong len) throws LastErrorException;
 
     public int callMlockall(int flags) throws UnsatisfiedLinkError, RuntimeException
     {
@@ -120,6 +122,11 @@ public class NativeLibraryLinux implements NativeLibraryWrapper
     public long callGetpid() throws UnsatisfiedLinkError, RuntimeException
     {
         return getpid();
+    }
+
+    public int callMlock(long address, long length) throws UnsatisfiedLinkError, RuntimeException
+    {
+        return mlock(new Pointer(address), new NativeLong(length));
     }
 
     public boolean isAvailable()

@@ -40,6 +40,7 @@ import org.junit.Test;
 
 import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
@@ -84,6 +85,7 @@ import org.apache.cassandra.index.sasi.memory.IndexMemtable;
 import org.apache.cassandra.index.sasi.plan.QueryController;
 import org.apache.cassandra.index.sasi.plan.QueryPlan;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -91,6 +93,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.CsFlow;
@@ -1612,6 +1615,11 @@ public class SASIIndexTest
             {
                 return UTF8Type.instance.compare(a, b);
             }
+
+            public ByteSource asByteComparableSource(ByteBuffer b)
+            {
+                return UTF8Type.instance.asByteComparableSource(b);
+            }
         };
 
         // first let's check that we get 'false' for 'isLiteral' if we don't set the option with special comparator
@@ -1918,6 +1926,22 @@ public class SASIIndexTest
                              CQLTester.row("Pavel", "BY", 28, "xedin", 182, 2.0));
         CQLTester.assertRows(executeCQL(CLUSTERING_CF_NAME_1, "SELECT * FROM %s.%s WHERE score < 2.0 AND nickname = 'jrwest' ALLOW FILTERING"),
                              CQLTester.row("Jordan", "US", 27, "jrwest", 182, 1.0));
+    }
+
+    @Test
+    public void testIndexRebuild() throws Exception
+    {
+        ColumnFamilyStore store = Keyspace.open(KS_NAME).getColumnFamilyStore(CLUSTERING_CF_NAME_1);
+
+        executeCQL(CLUSTERING_CF_NAME_1, "INSERT INTO %s.%s (name, nickname) VALUES (?, ?)", "Alex", "ifesdjeen");
+
+        store.forceBlockingFlush();
+
+        for (Index index : store.indexManager.listIndexes())
+        {
+            SASIIndex idx = (SASIIndex) index;
+            Assert.assertFalse(idx.getIndex().init(store.getLiveSSTables()).iterator().hasNext());
+        }
     }
 
     @Test

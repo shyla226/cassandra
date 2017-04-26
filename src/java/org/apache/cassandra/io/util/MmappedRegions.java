@@ -21,9 +21,18 @@ package org.apache.cassandra.io.util;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.mos.MemoryOnlyStatus;
+import org.apache.cassandra.db.mos.MemoryLockedBuffer;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -36,6 +45,8 @@ import static org.apache.cassandra.utils.Throwables.perform;
 
 public class MmappedRegions extends SharedCloseableImpl
 {
+    private static final Logger logger = LoggerFactory.getLogger(MmappedRegions.class);
+
     /** In a perfect world, MAX_SEGMENT_SIZE would be final, but we need to test with a smaller size */
     public static int MAX_SEGMENT_SIZE = Integer.MAX_VALUE;
 
@@ -56,27 +67,20 @@ public class MmappedRegions extends SharedCloseableImpl
      */
     private volatile State copy;
 
-    private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length)
-    {
-        this(new State(channel), metadata, length);
-    }
-
-    private MmappedRegions(State state, CompressionMetadata metadata, long length)
+    private MmappedRegions(State state, CompressionMetadata metadata)
     {
         super(new Tidier(state));
-
         this.state = state;
+        updateState(metadata);
+        this.copy = new State(state);
+    }
 
-        if (metadata != null)
-        {
-            assert length == 0 : "expected no length with metadata";
-            updateState(metadata);
-        }
-        else if (length > 0)
-        {
-            updateState(length);
-        }
-
+    private MmappedRegions(State state, long length, int chunkSize)
+    {
+        super(new Tidier(state));
+        this.state = state;
+        if (length > 0)
+            updateState(length, chunkSize);
         this.copy = new State(state);
     }
 
@@ -88,12 +92,12 @@ public class MmappedRegions extends SharedCloseableImpl
 
     public static MmappedRegions empty(ChannelProxy channel)
     {
-        return new MmappedRegions(channel, null, 0);
+        return new MmappedRegions(new State(channel), 0, 0);
     }
 
     /**
      * @param channel file to map. the MmappedRegions instance will hold shared copy of given channel.
-     * @param metadata
+     * @param metadata - the compression metadata
      * @return new instance
      */
     public static MmappedRegions map(ChannelProxy channel, CompressionMetadata metadata)
@@ -101,15 +105,15 @@ public class MmappedRegions extends SharedCloseableImpl
         if (metadata == null)
             throw new IllegalArgumentException("metadata cannot be null");
 
-        return new MmappedRegions(channel, metadata, 0);
+        return new MmappedRegions(new State(channel), metadata);
     }
 
-    public static MmappedRegions map(ChannelProxy channel, long length)
+    public static MmappedRegions map(ChannelProxy channel, long length, int chunkSize)
     {
         if (length <= 0)
             throw new IllegalArgumentException("Length must be positive");
 
-        return new MmappedRegions(channel, null, length);
+        return new MmappedRegions(new State(channel), length, chunkSize);
     }
 
     /**
@@ -126,8 +130,10 @@ public class MmappedRegions extends SharedCloseableImpl
         return copy == null;
     }
 
-    public void extend(long length)
+    public void extend(long length, int chunkSize)
     {
+        // We cannot enforce length to be a multiple of chunkSize (at the very least the last extend on a file
+        // will not satisfy this), so we hope the caller knows what they are doing.
         if (length < 0)
             throw new IllegalArgumentException("Length must not be negative");
 
@@ -136,17 +142,19 @@ public class MmappedRegions extends SharedCloseableImpl
         if (length <= state.length)
             return;
 
-        updateState(length);
+        updateState(length, chunkSize);
         copy = new State(state);
     }
 
-    private void updateState(long length)
+    private void updateState(long length, int chunkSize)
     {
+        // make sure the regions span whole chunks
+        long maxSize = (MAX_SEGMENT_SIZE / chunkSize) * chunkSize;
         state.length = length;
         long pos = state.getPosition();
         while (pos < length)
         {
-            long size = Math.min(MAX_SEGMENT_SIZE, length - pos);
+            long size = Math.min(maxSize, length - pos);
             state.add(pos, size);
             pos += size;
         }
@@ -197,6 +205,21 @@ public class MmappedRegions extends SharedCloseableImpl
     {
         assert !isCleanedUp() : "Attempted to use closed region";
         return state.floor(position);
+    }
+
+    public void lock(MemoryOnlyStatus memoryOnlyStatus)
+    {
+        state.lock(memoryOnlyStatus);
+    }
+
+    public void unlock(MemoryOnlyStatus memoryOnlyStatus)
+    {
+        state.unlock(memoryOnlyStatus);
+    }
+
+    public List<MemoryLockedBuffer> getLockedMemory()
+    {
+        return state.getLockedMemory();
     }
     
     public void closeQuietly()
@@ -260,6 +283,11 @@ public class MmappedRegions extends SharedCloseableImpl
         /** The index to the last region added */
         private int last;
 
+        /** The list of memory buffers that were locked in RAM,
+         * if any - this will be null if not locking buffers in RAM. */
+        @Nullable
+        private List<MemoryLockedBuffer> lockedBuffers;
+
         private State(ChannelProxy channel)
         {
             this.channel = channel.sharedCopy();
@@ -276,6 +304,7 @@ public class MmappedRegions extends SharedCloseableImpl
             this.offsets = original.offsets;
             this.length = original.length;
             this.last = original.last;
+            this.lockedBuffers = original.lockedBuffers;
         }
 
         private boolean isEmpty()
@@ -319,6 +348,40 @@ public class MmappedRegions extends SharedCloseableImpl
 
             offsets[last] = pos;
             buffers[last] = buffer;
+        }
+
+        /**
+         * Lock all the buffers in RAM, if possible.
+         */
+        public void lock(MemoryOnlyStatus memoryOnlyStatus)
+        {
+            if (lockedBuffers != null)
+                throw new IllegalStateException(String.format("Attempted to lock memory for %s twice", channel.filePath()));
+
+            logger.debug("Locking file {} in RAM", channel.filePath());
+            lockedBuffers = Arrays.stream(buffers).filter(Objects::nonNull).map(memoryOnlyStatus::lock).collect(Collectors.toList());
+        }
+
+        /**
+         * Unlock all the buffers that were previously locked RAM, if any.
+         */
+        public void unlock(MemoryOnlyStatus memoryOnlyStatus)
+        {
+            if (lockedBuffers == null)
+                throw new IllegalStateException(String.format("Attempted to unlock memory for %s without any previous locking",
+                                                              channel.filePath()));
+
+            logger.debug("Unlocking file {} from RAM", channel.filePath());
+            lockedBuffers.stream().forEach(memoryOnlyStatus::unlock);
+            lockedBuffers = null;
+        }
+
+        /**
+         * @return - all memory locked buffers, if any.
+         */
+        public List<MemoryLockedBuffer> getLockedMemory()
+        {
+            return lockedBuffers == null ? Collections.emptyList() : lockedBuffers;
         }
 
         private Throwable close(Throwable accumulate)

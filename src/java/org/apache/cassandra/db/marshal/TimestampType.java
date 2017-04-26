@@ -33,6 +33,7 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TimestampSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
@@ -59,6 +60,11 @@ public class TimestampType extends TemporalType<Date>
     public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         return LongType.compareLongs(o1, o2);
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        return ByteSource.optionalSignedFixedLengthNumber(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

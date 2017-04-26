@@ -62,6 +62,7 @@
     <property name="test.long.src" value="${test.dir}/long"/>
     <property name="test.burn.src" value="${test.dir}/burn"/>
     <property name="test.microbench.src" value="${test.dir}/microbench"/>
+    <property name="test.dse.src" value="${test.dir}/dse"/>
     <property name="dist.dir" value="${build.dir}/dist"/>
     <property name="tmp.dir" value="${java.io.tmpdir}"/>
 
@@ -97,6 +98,7 @@
     <property name="test.timeout" value="240000" />
     <property name="test.long.timeout" value="600000" />
     <property name="test.burn.timeout" value="600000" />
+    <property name="test.dse.timeout" value="600000" />
 
     <!-- default for cql tests. Can be override by -Dcassandra.test.use_prepared=false -->
     <property name="cassandra.test.use_prepared" value="true" />
@@ -450,6 +452,15 @@
           <dependency groupId="org.jctools" artifactId="jctools-core" version="2.0"/>
           <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava" version="2.0.4"/>
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.9.4" />
+          <!-- dependencies for the DSE test framework-->
+          <dependency groupId="org.apache.velocity" artifactId="velocity" version="1.7" scope="test">
+            <exclusion groupId="commons-lang" artifactId="commons-lang"/>
+          </dependency>
+          <dependency groupId="com.googlecode.junit-toolbox" artifactId="junit-toolbox" version="2.2" scope="test"/>
+          <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk15on" version="1.54" scope="test"/>
+          <dependency groupId="org.bouncycastle" artifactId="bcprov-jdk15on" version="1.54" scope="test"/>
+          <dependency groupId="com.googlecode.mobilityrpc" artifactId="mobility-rpc" version="1.2.1" scope="test"/>
+          <!-- END of dependencies for the DSE test framework-->
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -593,6 +604,15 @@
         <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees"/>
         <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine"/>
         <dependency groupId="org.jctools" artifactId="jctools-core"/>
+        <!-- dependencies for the DSE test framework-->
+        <dependency groupId="org.apache.velocity" artifactId="velocity" version="1.7" scope="test">
+          <exclusion groupId="commons-lang" artifactId="commons-lang"/>
+        </dependency>
+        <dependency groupId="com.googlecode.junit-toolbox" artifactId="junit-toolbox" version="2.2" scope="test"/>
+        <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk15on" version="1.54" scope="test"/>
+        <dependency groupId="org.bouncycastle" artifactId="bcprov-jdk15on" version="1.54" scope="test"/>
+        <dependency groupId="com.googlecode.mobilityrpc" artifactId="mobility-rpc" version="1.2.1" scope="test"/>
+        <!-- END of dependencies for the DSE test framework-->
       </artifact:pom>
       <!-- this build-deps-pom-sources "artifact" is the same as build-deps-pom but only with those
            artifacts that have "-source.jar" files -->
@@ -1237,6 +1257,7 @@
      <src path="${test.long.src}"/>
      <src path="${test.burn.src}"/>
      <src path="${test.microbench.src}"/>
+     <src path="${test.dse.src}"/>
     </javac>
 
     <!-- Non-java resources needed by the test suite -->
@@ -1564,8 +1585,14 @@
     </sequential>
   </target>
 
+  <target name="test-dse" depends="build-test" description="Execute DSE tests">
+      <testmacro inputdir="${test.dse.src}"
+                 timeout="${test.dse.timeout}">
+      </testmacro>
+  </target>
+
   <target name="test-all"
-          depends="eclipse-warnings,test,long-test,test-compression,stress-test"
+          depends="eclipse-warnings,test,long-test,test-compression,stress-test,test-dse"
           description="Run all tests except for those under test-burn" />
 
   <!-- Use JaCoCo ant extension without needing externally saved lib -->

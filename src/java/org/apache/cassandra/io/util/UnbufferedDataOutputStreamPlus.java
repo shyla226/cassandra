@@ -378,7 +378,7 @@ public abstract class UnbufferedDataOutputStreamPlus extends DataOutputStreamPlu
     }
 
     @Override
-    public <R> R applyToChannel(Function<WritableByteChannel, R> f) throws IOException
+    public <R> R applyToChannel(ThrowingFunction<WritableByteChannel, R> f) throws IOException
     {
         return f.apply(channel);
     }

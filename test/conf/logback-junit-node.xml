@@ -1,0 +1,35 @@
+<!--
+~ Copyright DataStax, Inc.
+~
+~ Please see the included license file for details.
+-->
+
+<!--
+ Used by DSE node spawned during testing
+-->
+<configuration>
+
+    <!--
+    Send all events via network and log them there.
+    -->
+    <appender name="SOCKET" class="com.datastax.dse.framework.logback.SocketAppender">
+        <remoteHost>127.0.0.1</remoteHost>
+        <port>12345</port>
+        <reconnectionDelay>1 seconds</reconnectionDelay>
+        <nodeId>NODE-${nodeid}</nodeId>
+        <eventDelayLimit>120 seconds</eventDelayLimit>
+    </appender>
+
+    <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+        <includeCallerData>true</includeCallerData>
+        <appender-ref ref="SOCKET"/>
+    </appender>
+
+    <root level="DEBUG">
+        <appender-ref ref="ASYNC"/>
+    </root>
+
+    <logger name="com.cryptsoft" level="OFF"/>
+    <logger name="org.apache.directory" level="INFO"/>
+    <logger name="org.apache.hadoop.conf.Configuration" level="INFO"/>
+</configuration>

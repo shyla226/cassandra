@@ -676,6 +676,13 @@ public class DatabaseDescriptor
                 break;
         }
 
+        if (conf.max_memory_to_lock_mb < 0)
+            throw new ConfigurationException("max_memory_to_lock_mb must be be >= 0");
+
+        if (conf.max_memory_to_lock_fraction < 0.0 || conf.max_memory_to_lock_fraction > 1.0)
+            throw new ConfigurationException("max_memory_to_lock_fraction must be 0.0 <= max_memory_to_lock_fraction <= 1.0");
+
+
         try
         {
             ParameterizedClass strategy = conf.back_pressure_strategy != null ? conf.back_pressure_strategy : RateBasedBackPressure.withDefaultParams();
@@ -2315,6 +2322,21 @@ public class DatabaseDescriptor
     public static void setIdealConsistencyLevel(ConsistencyLevel cl)
     {
         conf.ideal_consistency_level = cl;
+    }
+
+    public static long getMaxMemoryToLockBytes()
+    {
+        if (conf.max_memory_to_lock_mb > 0)
+        {
+            return ((long) conf.max_memory_to_lock_mb) * 1024 * 1024;
+        }
+
+        long system_memory_in_mb = Long.getLong("dse.system_memory_in_mb", -1); // backward compatibility for when this feature was in DSE
+        if (system_memory_in_mb == -1)
+        {
+            system_memory_in_mb = Long.getLong("system_memory_in_mb", 2048); // calculated and set in cassandra-env.sh
+        }
+        return (long) (conf.max_memory_to_lock_fraction * (system_memory_in_mb * 1024 * 1024));
     }
 
     public static int getMetricsHistogramUpdateTimeMillis()

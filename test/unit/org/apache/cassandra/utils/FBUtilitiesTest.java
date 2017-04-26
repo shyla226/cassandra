@@ -179,4 +179,20 @@ public class FBUtilitiesTest
 
         FBUtilities.reset();
     }
+
+    @Test
+    public void testAlign()
+    {
+        assertEquals(0, FBUtilities.align(0, 4096));
+
+        assertEquals(4096, FBUtilities.align(1, 4096));
+        assertEquals(4096, FBUtilities.align(4095, 4096));
+        assertEquals(4096, FBUtilities.align(4096, 4096));
+
+        assertEquals(8192, FBUtilities.align(4097, 4096));
+        assertEquals(8192, FBUtilities.align(8191, 4096));
+        assertEquals(8192, FBUtilities.align(8192, 4096));
+
+        assertEquals(12288, FBUtilities.align(8193, 4096));
+    }
 }

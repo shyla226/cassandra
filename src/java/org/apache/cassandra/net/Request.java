@@ -112,9 +112,9 @@ public class Request<P, Q> extends Message<P>
                              new Data<>(payload));
     }
 
-    public boolean isRequest()
+    public Type type()
     {
-        return true;
+        return Type.REQUEST;
     }
 
     /**
@@ -144,7 +144,7 @@ public class Request<P, Q> extends Message<P>
      * @param payload the payload to send as response.
      * @return the response message for responding to this request with {@code payload}.
      */
-    Response<Q> respond(Q payload)
+    public Response<Q> respond(Q payload)
     {
         return new Response<>(local,
                               from(),

@@ -18,6 +18,8 @@
 package org.apache.cassandra.io.sstable.metadata;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 
 import com.google.common.collect.Lists;
@@ -150,7 +152,7 @@ public class MetadataSerializer implements IMetadataSerializer
     private void rewriteSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> currentComponents) throws IOException
     {
         String filePath = descriptor.tmpFilenameFor(Component.STATS);
-        try (DataOutputStreamPlus out = new BufferedDataOutputStreamPlus(new FileOutputStream(filePath)))
+        try (DataOutputStreamPlus out = new BufferedDataOutputStreamPlus(Files.newByteChannel(new File(filePath).toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)))
         {
             serialize(currentComponents, out, descriptor.version);
             out.flush();

@@ -290,6 +290,11 @@ JVM_OPTS="$JVM_OPTS -Dcom.sun.management.jmxremote.password.file=/etc/cassandra/
 # to the location of the native libraries.
 JVM_OPTS="$JVM_OPTS -Djava.library.path=$CASSANDRA_HOME/lib/sigar-bin"
 
+# APOLLO-342: we need to expose the available system memory so that the
+# MemoryOnlyStrategy can do proper fraction calculations.
+# See max_memory_to_lock_fraction setting in cassandra.yaml for details.
+JVM_OPTS="$JVM_OPTS -Dsystem_memory_in_mb=$system_memory_in_mb"
+
 # Disable Agrona bounds check for extra performance
 JVM_OPTS="$JVM_OPTS -Dagrona.disable.bounds.checks=TRUE"
 

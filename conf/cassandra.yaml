@@ -711,16 +711,12 @@ snapshot_before_compaction: false
 auto_snapshot: true
 
 # Granularity of the collation index of rows within a partition.
-# Increase if your rows are large, or if you have a very large
-# number of rows per partition.  The competing goals are these:
-#
-# - a smaller granularity means more index entries are generated
-#   and looking up rows withing the partition by collation column
-#   is faster
-# - but, Cassandra will keep the collation index in memory for hot
-#   rows (as part of the key cache), so a larger granularity means
-#   you can cache more hot rows
-column_index_size_in_kb: 64
+# Smaller granularity means better search times, especially if
+# the partition is in disk cache, but also higher size of the
+# row index and the associated memory cost for keeping that cached.
+# The performance of lower density nodes may benefit from decreasing
+# this number to 4, 2 or 1kb.
+column_index_size_in_kb: 16
 
 # Per sstable indexed key cache entries (the collation index in memory
 # mentioned above) exceeding this size will not be held on heap.
@@ -987,10 +983,6 @@ inter_dc_tcp_nodelay: false
 tracetype_query_ttl: 86400
 tracetype_repair_ttl: 604800
 
-# By default, Cassandra logs GC Pauses greater than 200 ms at INFO level
-# This threshold can be adjusted to minimize logging if necessary
-# gc_log_threshold_in_ms: 200
-
 # If unset, all GC Pauses greater than gc_log_threshold_in_ms will log at
 # INFO level
 # UDFs (user defined functions) are disabled by default.
@@ -1068,10 +1060,14 @@ unlogged_batch_across_partitions_warn_threshold: 10
 # Log a warning when compacting partitions larger than this value
 compaction_large_partition_warning_threshold_mb: 100
 
+# GC Pauses greater than 200 ms will be logged at INFO level
+# This threshold can be adjusted to minimize logging if necessary
+# gc_log_threshold_in_ms: 200
+
 # GC Pauses greater than gc_warn_threshold_in_ms will be logged at WARN level
-# Adjust the threshold based on your application throughput requirement
-# By default, Cassandra logs GC Pauses greater than 200 ms at INFO level
-gc_warn_threshold_in_ms: 1000
+# Adjust the threshold based on your application throughput requirement. Setting to 0
+# will deactivate the feature.
+# gc_warn_threshold_in_ms: 1000
 
 # Maximum size of any value in SSTables. Safety measure to detect SSTable corruption
 # early. Any value size larger than this threshold will result into marking an SSTable
@@ -1166,3 +1162,9 @@ continuous_paging:
 # level for writes without timing out. This is different from the consistency level requested by
 # each write which may be lower in order to facilitate availability.
 # ideal_consistency_level: EACH_QUORUM
+
+# Memory limit for Apollo In-Memory tables as a fraction of system memory (the default is 0.2, or 20%)
+max_memory_to_lock_fraction: 0.20
+
+# # Can also be specified as a maximum in MB; the fraction value is ignored if this is set to a non-zero value.
+#max_memory_to_lock_mb: 1337

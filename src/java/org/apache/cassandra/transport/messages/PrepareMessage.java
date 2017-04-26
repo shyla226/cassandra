@@ -62,7 +62,7 @@ public class PrepareMessage extends Message.Request
         {
             if (state.shouldTraceRequest(isTracingRequested()))
             {
-                state.createTracingSession();
+                state.createTracingSession(getCustomPayload());
                 Tracing.instance.begin("Preparing CQL3 query", state.getClientAddress(), ImmutableMap.of("query", query));
             }
 

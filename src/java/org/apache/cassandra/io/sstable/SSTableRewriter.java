@@ -18,7 +18,9 @@
 package org.apache.cassandra.io.sstable;
 
 import java.lang.ref.WeakReference;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -29,12 +31,11 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -70,10 +71,9 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
     private final List<SSTableWriter> writers = new ArrayList<>();
     private final boolean keepOriginals; // true if we do not want to obsolete the originals
     private MutableKeyCacheKey tmpKey;
-    private final SSTableReader originals[];
 
     private SSTableWriter writer;
-    private Map<DecoratedKey, RowIndexEntry> cachedKeys = new HashMap<>();
+    private Collection<DecoratedKey> cachedKeys = new ArrayList<>();
 
     // for testing (TODO: remove when have byteman setup)
     private boolean throwEarly, throwLate;
@@ -96,7 +96,6 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         this.maxAge = maxAge;
         this.keepOriginals = keepOriginals;
         this.preemptiveOpenInterval = preemptiveOpenInterval;
-        this.originals = transaction.originals().toArray(new SSTableReader[]{});
     }
 
     @Deprecated
@@ -136,31 +135,9 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
     public RowIndexEntry append(UnfilteredRowIterator partition)
     {
         // we do this before appending to ensure we can resetAndTruncate() safely if the append fails
-        DecoratedKey key = partition.partitionKey();
-        maybeReopenEarly(key);
+        maybeReopenEarly();
         RowIndexEntry index = writer.append(partition);
-        if (!transaction.isOffline() && index != null && preemptiveOpenInterval != Long.MAX_VALUE && !disableIncrementalKeyCacheMigration)
-        {
-            for (SSTableReader reader : originals)
-            {
-                /*
-                 * Skip whole sstables if possible
-                 */
-                if (key.getToken().compareTo(reader.first.getToken()) < 0 || key.getToken().compareTo(reader.last.getToken()) > 0)
-                    continue;
-
-                if (tmpKey == null)
-                    tmpKey = new MutableKeyCacheKey(reader.metadata(), reader.descriptor, key.getKey());
-                else
-                    tmpKey.mutate(reader.descriptor, key.getKey());
-
-                if (reader.getCachedPosition(tmpKey, false) != null)
-                {
-                    cachedKeys.put(key, index);
-                    break;
-                }
-            }
-        }
+        prepForKeyCacheInvalidation(partition);
         return index;
     }
 
@@ -179,29 +156,20 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         }
     }
 
-    private void maybeReopenEarly(DecoratedKey key)
+    private void maybeReopenEarly()
     {
         if (writer.getFilePointer() - currentlyOpenedEarlyAt > preemptiveOpenInterval)
         {
-            if (transaction.isOffline())
+            if (!transaction.isOffline())
             {
-                for (SSTableReader reader : transaction.originals())
-                {
-                    RowIndexEntry index = reader.getPosition(key, SSTableReader.Operator.GE);
-                    NativeLibrary.trySkipCache(reader.getFilename(), 0, index == null ? 0 : index.position);
-                }
-            }
-            else
-            {
-                SSTableReader reader = writer.setMaxDataAge(maxAge).openEarly();
-                if (reader != null)
+                writer.setMaxDataAge(maxAge).openEarly(reader ->
                 {
                     transaction.update(reader, false);
-                    currentlyOpenedEarlyAt = writer.getFilePointer();
                     moveStarts(reader, reader.last);
                     transaction.checkpoint();
-                }
+                });
             }
+            currentlyOpenedEarlyAt = writer.getFilePointer();
         }
     }
 
@@ -245,18 +213,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             return;
 
         newReader.setupOnline();
-        List<DecoratedKey> invalidateKeys = null;
-        if (!cachedKeys.isEmpty())
-        {
-            invalidateKeys = new ArrayList<>(cachedKeys.size());
-            for (Map.Entry<DecoratedKey, RowIndexEntry> cacheKey : cachedKeys.entrySet())
-            {
-                invalidateKeys.add(cacheKey.getKey());
-                newReader.cacheKey(cacheKey.getKey(), cacheKey.getValue());
-            }
-        }
 
-        cachedKeys.clear();
         for (SSTableReader sstable : transaction.originals())
         {
             // we call getCurrentReplacement() to support multiple rewriters operating over the same source readers at once.
@@ -267,43 +224,81 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             if (latest.first.compareTo(lowerbound) > 0)
                 continue;
 
-            Runnable runOnClose = invalidateKeys != null ? new InvalidateKeys(latest, invalidateKeys) : null;
             if (lowerbound.compareTo(latest.last) >= 0)
             {
                 if (!transaction.isObsolete(latest))
                 {
-                    if (runOnClose != null)
-                    {
-                        latest.runOnClose(runOnClose);
-                    }
+                    scheduleKeyCacheInvalidation(latest);
                     transaction.obsolete(latest);
                 }
                 continue;
             }
+            cachedKeys.clear();
 
             DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
             assert newStart != null;
-            SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
+            SSTableReader replacement = latest.cloneWithNewStart(newStart);
             transaction.update(replacement, true);
         }
     }
 
-    private static final class InvalidateKeys implements Runnable
+    @SuppressWarnings("resource")
+    private void scheduleKeyCacheInvalidation(SSTableReader table)
+    {
+        if (!cachedKeys.isEmpty() && table instanceof BigTableReader)
+        {
+            table.runOnClose(new InvalidateKeys((BigTableReader) table, cachedKeys));
+        }
+    }
+
+
+    private void prepForKeyCacheInvalidation(UnfilteredRowIterator partition)
+    {
+        if (!transaction.isOffline() && preemptiveOpenInterval != Long.MAX_VALUE && !disableIncrementalKeyCacheMigration)
+        {
+            for (SSTableReader rdr : transaction.originals())
+            {
+                /*
+                 * Skip whole sstables if possible
+                 */
+                if (!(rdr instanceof BigTableReader))
+                    continue;
+                BigTableReader reader = (BigTableReader) rdr;
+                DecoratedKey key = partition.partitionKey();
+                if (key.getToken().compareTo(reader.first.getToken()) < 0 || key.getToken().compareTo(reader.last.getToken()) > 0)
+                    continue;
+
+                if (tmpKey == null)
+                    tmpKey = new MutableKeyCacheKey(reader.metadata(), reader.descriptor, key.getKey());
+                else
+                    tmpKey.mutate(reader.descriptor, key.getKey());
+
+                if (reader.getCachedPosition(tmpKey, false) != null)
+                {
+                    cachedKeys.add(key);
+                    break;
+                }
+            }
+        }
+    }
+
+    private static final class InvalidateKeys implements AutoCloseable
     {
         final List<KeyCacheKey> cacheKeys = new ArrayList<>();
         final WeakReference<InstrumentingCache<KeyCacheKey, ?>> cacheRef;
 
-        private InvalidateKeys(SSTableReader reader, Collection<DecoratedKey> invalidate)
+        private InvalidateKeys(BigTableReader reader, Collection<DecoratedKey> invalidate)
         {
             this.cacheRef = new WeakReference<>(reader.getKeyCache());
             if (cacheRef.get() != null)
             {
                 for (DecoratedKey key : invalidate)
+
                     cacheKeys.add(reader.getCacheKey(key));
             }
         }
 
-        public void run()
+        public void close()
         {
             for (KeyCacheKey key : cacheKeys)
             {

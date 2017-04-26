@@ -186,7 +186,7 @@ public abstract class HintMessage
 
         public Hint hint()
         {
-            // Encoded is just used during dispatch where we explicitely want to avoid decoding the hint, so calling
+            // Encoded is just used during dispatch where we explicitly want to avoid decoding the hint, so calling
             // this is a misuse and we don't allow it.
             throw new UnsupportedOperationException();
         }

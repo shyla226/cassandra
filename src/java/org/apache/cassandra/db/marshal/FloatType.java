@@ -27,6 +27,7 @@ import org.apache.cassandra.serializers.FloatSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 
 public class FloatType extends NumberType<Float>
@@ -52,6 +53,11 @@ public class FloatType extends NumberType<Float>
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
 
         return compose(o1).compareTo(compose(o2));
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        return ByteSource.optionalSignedFixedLengthFloat(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

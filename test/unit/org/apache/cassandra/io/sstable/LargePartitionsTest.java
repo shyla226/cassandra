@@ -86,19 +86,14 @@ public class LargePartitionsTest extends CQLTester
 
         measured("flush for " + name, () -> flush(true));
 
-        CacheService.instance.keyCache.clear();
-
         measured("compact for " + name, () -> {
-            keyCacheMetrics("before compaction");
             compact();
-            keyCacheMetrics("after compaction");
         });
 
         measured("SELECTs 1 for " + name, () -> selects(partitionKBytes, totalKBytes));
 
         measured("SELECTs 2 for " + name, () -> selects(partitionKBytes, totalKBytes));
 
-        CacheService.instance.keyCache.clear();
         measured("Scan for " + name, () -> scan(partitionKBytes, totalKBytes));
     }
 
@@ -111,10 +106,7 @@ public class LargePartitionsTest extends CQLTester
             execute("SELECT val FROM %s WHERE pk=? AND ck=?",
                     Long.toBinaryString(pk),
                     Long.toBinaryString(ck)).one();
-            if (i % 1000 == 0)
-                keyCacheMetrics("after " + i + " selects");
         }
-        keyCacheMetrics("after all selects");
     }
 
     private void scan(long partitionKBytes, long totalKBytes) throws Throwable
@@ -125,20 +117,7 @@ public class LargePartitionsTest extends CQLTester
         while (iter.hasNext())
         {
             iter.next();
-            if (i++ % 1000 == 0)
-                keyCacheMetrics("after " + i + " iteration");
         }
-        keyCacheMetrics("after all iteration");
-    }
-
-    private static void keyCacheMetrics(String title)
-    {
-        CacheMetrics metrics = CacheService.instance.keyCache.getMetrics();
-        System.out.println("Key cache metrics " + title + ": capacity:" + metrics.capacity.getValue() +
-                           " size:"+metrics.size.getValue()+
-                           " entries:" + metrics.entries.getValue() +
-                           " hit-rate:"+metrics.hitRate.getValue() +
-                           " one-min-rate:"+metrics.oneMinuteHitRate.getValue());
     }
 
     @Test

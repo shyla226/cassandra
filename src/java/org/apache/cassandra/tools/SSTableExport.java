@@ -36,11 +36,13 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.dht.*;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.KeyIterator;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -129,6 +131,32 @@ public class SSTableExport
         return StreamSupport.stream(splititer, false);
     }
 
+    private static Stream<DecoratedKey> iterToStream(PartitionIndexIterator iter)
+    {
+        final Iterator<DecoratedKey> iterator = new Iterator<DecoratedKey>() {
+            public boolean hasNext()
+            {
+                return iter.key() != null;
+            }
+
+            public DecoratedKey next() {
+                try
+                {
+                    DecoratedKey key = iter.key();
+                    iter.advance();
+                    return key;
+                } catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        return StreamSupport.stream(
+                Spliterators.spliteratorUnknownSize(iterator,
+                                                    Spliterator.ORDERED | Spliterator.IMMUTABLE),
+                false);
+    }
+
     /**
      * Given arguments specifying an SSTable, and optionally an output file, export the contents of the SSTable to JSON.
      *
@@ -176,7 +204,7 @@ public class SSTableExport
             TableMetadata metadata = metadataFromSSTable(desc);
             if (cmd.hasOption(ENUMERATE_KEYS_OPTION))
             {
-                try (KeyIterator iter = new KeyIterator(desc, metadata))
+                try (PartitionIndexIterator iter = desc.getFormat().getReaderFactory().keyIterator(desc, metadata))
                 {
                     JsonTransformer.keysToJson(null, iterToStream(iter),
                                                cmd.hasOption(RAW_TIMESTAMPS),

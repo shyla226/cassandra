@@ -25,11 +25,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Hex;
-import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.*;
 
 import org.apache.commons.lang3.ArrayUtils;
 
@@ -87,6 +83,11 @@ public class ByteOrderedPartitioner implements IPartitioner
 
             BytesToken o = (BytesToken) other;
             return FBUtilities.compareUnsigned(token, o.token, 0, 0, token.length, o.token.length);
+        }
+
+        public ByteSource asByteComparableSource()
+        {
+            return ByteSource.of(token);
         }
 
         @Override

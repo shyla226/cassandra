@@ -67,6 +67,8 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.mos.MemoryOnlyStatus;
+import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token.TokenFactory;
@@ -249,7 +251,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             jmxObjectName = new ObjectName("org.apache.cassandra.db:type=StorageService");
             mbs.registerMBean(this, jmxObjectName);
+
             mbs.registerMBean(StreamManager.instance, new ObjectName(StreamManager.OBJECT_NAME));
+            mbs.registerMBean(MemoryOnlyStatus.instance, new ObjectName(MemoryOnlyStatusMBean.MBEAN_NAME));
         }
         catch (Exception e)
         {
@@ -553,8 +557,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             // Ensure StorageProxy is initialized on start-up; see CASSANDRA-3797.
             Class.forName("org.apache.cassandra.service.StorageProxy");
-            // also IndexSummaryManager, which is otherwise unreferenced
-            Class.forName("org.apache.cassandra.io.sstable.IndexSummaryManager");
         }
         catch (ClassNotFoundException e)
         {
@@ -1107,7 +1109,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             RangeStreamer streamer = new RangeStreamer(tokenMetadata,
                                                        null,
                                                        FBUtilities.getBroadcastAddress(),
-                                                       "Rebuild",
+                                                       StreamOperation.REBUILD,
                                                        useStrictConsistency && !replacing,
                                                        DatabaseDescriptor.getEndpointSnitch(),
                                                        streamStateStore,
@@ -2029,12 +2031,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private boolean isStatus(InetAddress endpoint, String status)
     {
-        return Gossiper.instance.getEndpointStateForEndpoint(endpoint).getStatus().equals(status);
+        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        return state != null && state.getStatus().equals(status);
     }
 
     public boolean isRpcReady(InetAddress endpoint)
     {
-        return Gossiper.instance.getEndpointStateForEndpoint(endpoint).isRpcReady();
+        EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        return state != null && state.isRpcReady();
     }
 
     /**
@@ -2558,7 +2562,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
 
-        StreamPlan stream = new StreamPlan("Restore replica count");
+        StreamPlan stream = new StreamPlan(StreamOperation.RESTORE_REPLICA_COUNT);
         for (String keyspaceName : rangesToFetch.keySet())
         {
             for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : rangesToFetch.get(keyspaceName))
@@ -3877,7 +3881,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private class RangeRelocator
     {
-        private final StreamPlan streamPlan = new StreamPlan("Relocation");
+        private final StreamPlan streamPlan = new StreamPlan(StreamOperation.RELOCATION);
 
         private RangeRelocator(Collection<Token> tokens, List<String> keyspaceNames)
         {
@@ -4688,7 +4692,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             sessionsToStreamByKeyspace.put(keyspace, rangesPerEndpoint);
         }
 
-        StreamPlan streamPlan = new StreamPlan("Unbootstrap");
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.DECOMMISSION);
 
         // Vinculate StreamStateStore to current StreamPlan to update transferred ranges per StreamSession
         streamPlan.listeners(streamStateStore);

@@ -467,4 +467,30 @@ public class AlterTest extends CQLTester
 
         assertEmpty(execute("SELECT * FROM %s"));
     }
+
+    /**
+     * As above, checking the reverse iterator.
+     */
+    @Test
+    public void testAlterOnlyColumnBehaviorReversed() throws Throwable
+    {
+        testAlterOnlyColumnBehaviorReversed(true);
+        testAlterOnlyColumnBehaviorReversed(false);
+    }
+
+    private void testAlterOnlyColumnBehaviorReversed(boolean flushAfterInsert) throws Throwable
+    {
+        createTable("CREATE TABLE %s(k int, l int, x int, y int, PRIMARY KEY (k, l))");
+
+        execute("UPDATE %s SET x = 1 WHERE k = 0 AND l = 0");
+
+        assertRows(execute("SELECT * FROM %s"), row(0, 0, 1, null));
+
+        if (flushAfterInsert)
+            flush();
+
+        execute("ALTER TABLE %s DROP x");
+
+        assertEmpty(execute("SELECT * FROM %s WHERE k = 0 ORDER BY l DESC"));
+    }
 }

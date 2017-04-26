@@ -509,9 +509,14 @@ public abstract class CQLTester
 
     public void compact()
     {
+        compact(KEYSPACE);
+    }
+
+    public void compact(String keyspace)
+    {
         try
         {
-            ColumnFamilyStore store = getCurrentColumnFamilyStore();
+            ColumnFamilyStore store = getCurrentColumnFamilyStore(keyspace);
             if (store != null)
                 store.forceMajorCompaction();
         }
@@ -654,7 +659,7 @@ public abstract class CQLTester
         return createTable(KEYSPACE, query);
     }
 
-    protected String createTable(String keyspace, String query)
+    public String createTable(String keyspace, String query)
     {
         String currentTable = createTableName();
         String fullQuery = formatQuery(keyspace, query);
@@ -692,9 +697,14 @@ public abstract class CQLTester
         QueryProcessor.executeOnceInternal(fullQuery).blockingGet();
     }
 
-    protected void dropTable(String query)
+    public void dropTable(String query)
     {
-        dropFormattedTable(String.format(query, KEYSPACE + "." + currentTable()));
+       dropTable(KEYSPACE, query);
+    }
+
+    public void dropTable(String keyspace, String query)
+    {
+        dropFormattedTable(String.format(query, keyspace + "." + currentTable()));
     }
 
     protected void dropFormattedTable(String formattedQuery)
@@ -853,7 +863,7 @@ public abstract class CQLTester
         return executeFormattedQuery(formatQuery(query), values);
     }
 
-    protected UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
     {
         UntypedResultSet rs;
         if (usePrepared)

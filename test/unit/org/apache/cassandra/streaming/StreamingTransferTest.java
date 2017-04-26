@@ -136,14 +136,14 @@ public class StreamingTransferTest
     @Test
     public void testEmptyStreamPlan() throws Exception
     {
-        StreamResultFuture futureResult = new StreamPlan("StreamingTransferTest").execute();
+        StreamResultFuture futureResult = new StreamPlan(StreamOperation.OTHER).execute();
         final UUID planId = futureResult.planId;
         Futures.addCallback(futureResult, new FutureCallback<StreamState>()
         {
             public void onSuccess(StreamState result)
             {
                 assert planId.equals(result.planId);
-                assert result.description.equals("StreamingTransferTest");
+                assert result.streamOperation == StreamOperation.OTHER;
                 assert result.sessions.isEmpty();
             }
 
@@ -164,14 +164,14 @@ public class StreamingTransferTest
         ranges.add(new Range<>(Murmur3Partitioner.instance.getMinimumToken(), new Murmur3Partitioner.LongToken(1)));
         ranges.add(new Range<>(new Murmur3Partitioner.LongToken(2), Murmur3Partitioner.instance.getMinimumToken()));
 
-        StreamResultFuture futureResult = new StreamPlan("StreamingTransferTest")
+        StreamResultFuture futureResult = new StreamPlan(StreamOperation.OTHER)
                                                   .requestRanges(LOCAL, LOCAL, KEYSPACE2, ranges)
                                                   .execute();
 
         UUID planId = futureResult.planId;
         StreamState result = futureResult.get();
         assert planId.equals(result.planId);
-        assert result.description.equals("StreamingTransferTest");
+        assert result.streamOperation == StreamOperation.OTHER;
 
         // we should have completed session with empty transfer
         assert result.sessions.size() == 1;
@@ -263,7 +263,7 @@ public class StreamingTransferTest
         ranges.add(new Range<>(
                 Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(1))),
                 Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(0)))));
-        StreamPlan streamPlan = new StreamPlan("StreamingTransferTest").transferRanges(LOCAL, cfs.keyspace.getName(), ranges, cfs.getTableName());
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferRanges(LOCAL, cfs.keyspace.getName(), ranges, cfs.getTableName());
         streamPlan.execute().get();
         verifyConnectionsAreClosed();
 
@@ -281,7 +281,7 @@ public class StreamingTransferTest
 
     private void transfer(SSTableReader sstable, List<Range<Token>> ranges) throws Exception
     {
-        StreamPlan streamPlan = new StreamPlan("StreamingTransferTest").transferFiles(LOCAL, makeStreamingDetails(ranges, Refs.tryRef(Arrays.asList(sstable))));
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferFiles(LOCAL, makeStreamingDetails(ranges, Refs.tryRef(Arrays.asList(sstable))));
         streamPlan.execute().get();
         verifyConnectionsAreClosed();
 
@@ -324,7 +324,7 @@ public class StreamingTransferTest
         {
             details.add(new StreamSession.SSTableStreamingSections(sstables.get(sstable),
                                                                    sstable.getPositionsForRanges(ranges),
-                                                                   sstable.estimatedKeysForRanges(ranges), sstable.getSSTableMetadata().repairedAt));
+                                                                   sstable.estimatedKeysForRanges(ranges)));
         }
         return details;
     }

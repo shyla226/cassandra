@@ -156,9 +156,6 @@ public class TrackerTest
 
         Assert.assertEquals(3, tracker.view.get().sstables.size());
 
-        for (SSTableReader reader : readers)
-            Assert.assertTrue(reader.isKeyCacheSetup());
-
         Assert.assertEquals(17 + 121 + 9, cfs.metric.liveDiskSpaceUsed.getCount());
     }
 
@@ -177,9 +174,6 @@ public class TrackerTest
         tracker.addSSTables(copyOf(readers));
 
         Assert.assertEquals(3, tracker.view.get().sstables.size());
-
-        for (SSTableReader reader : readers)
-            Assert.assertTrue(reader.isKeyCacheSetup());
 
         Assert.assertEquals(17 + 121 + 9, cfs.metric.liveDiskSpaceUsed.getCount());
         Assert.assertEquals(1, listener.senders.size());
@@ -308,7 +302,6 @@ public class TrackerTest
         Assert.assertEquals(prev2, ((MemtableDiscardedNotification) listener.received.get(0)).memtable);
         Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(1)).added);
         listener.received.clear();
-        Assert.assertTrue(reader.isKeyCacheSetup());
         Assert.assertEquals(10, cfs.metric.liveDiskSpaceUsed.getCount());
 
         // test invalidated CFS

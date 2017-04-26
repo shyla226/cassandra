@@ -196,10 +196,9 @@ public class ConnectionHandler
                     FBUtilities.getBroadcastAddress(),
                     session.sessionIndex(),
                     session.planId(),
-                    session.description(),
+                    session.streamOperation(),
                     !isOutgoingHandler,
                     session.keepSSTableLevel(),
-                    session.isIncremental(),
                     session.getPendingRepair());
             ByteBuffer messageBuf = message.createMessage(false, version);
             DataOutputStreamPlus out = getWriteChannel(socket);

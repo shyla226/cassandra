@@ -348,7 +348,7 @@ public class StressMetrics implements MeasurementSink
     // PRINT FORMATTING
 
     public static final String HEADFORMAT = "%-10s%10s,%8s,%8s,%8s,%8s,%8s,%8s,%8s,%8s,%8s,%7s,%9s,%7s,%7s,%8s,%8s,%8s,%8s";
-    public static final String ROWFORMAT =  "%-10s%10d,%8.0f,%8.0f,%8.0f,%8.1f,%8.1f,%8.1f,%8.1f,%8.1f,%8.1f,%7.1f,%9.5f,%7d,%7.0f,%8.0f,%8.0f,%8.0f,%8.0f";
+    public static final String ROWFORMAT =  "%-10s%10d,%8.0f,%8.0f,%8.0f,%8.3f,%8.3f,%8.3f,%8.3f,%8.2f,%8.1f,%7.1f,%9.5f,%7d,%7.0f,%8.0f,%8.0f,%8.0f,%8.0f";
     public static final String[] HEADMETRICS = new String[]{"type", "total ops","op/s","pk/s","row/s","mean","med",".95",".99",".999","max","time","stderr", "errors", "gc: #", "max ms", "sum ms", "sdv ms", "mb"};
     public static final String HEAD = String.format(HEADFORMAT, (Object[]) HEADMETRICS);
 
@@ -393,12 +393,12 @@ public class StressMetrics implements MeasurementSink
         output.println(String.format("Op rate                   : %,8.0f op/s  %s", history.opRate(), opHistory.opRates()));
         output.println(String.format("Partition rate            : %,8.0f pk/s  %s", history.partitionRate(), opHistory.partitionRates()));
         output.println(String.format("Row rate                  : %,8.0f row/s %s", history.rowRate(), opHistory.rowRates()));
-        output.println(String.format("Latency mean              : %6.1f ms %s", history.meanLatencyMs(), opHistory.meanLatencies()));
-        output.println(String.format("Latency median            : %6.1f ms %s", history.medianLatencyMs(), opHistory.medianLatencies()));
-        output.println(String.format("Latency 95th percentile   : %6.1f ms %s", history.latencyAtPercentileMs(95.0), opHistory.latenciesAtPercentile(95.0)));
-        output.println(String.format("Latency 99th percentile   : %6.1f ms %s", history.latencyAtPercentileMs(99.0), opHistory.latenciesAtPercentile(99.0)));
-        output.println(String.format("Latency 99.9th percentile : %6.1f ms %s", history.latencyAtPercentileMs(99.9), opHistory.latenciesAtPercentile(99.9)));
-        output.println(String.format("Latency max               : %6.1f ms %s", history.maxLatencyMs(), opHistory.maxLatencies()));
+        output.println(String.format("Latency mean              : %6.3f ms %s", history.meanLatencyMs(), opHistory.meanLatencies()));
+        output.println(String.format("Latency median            : %6.3f ms %s", history.medianLatencyMs(), opHistory.medianLatencies()));
+        output.println(String.format("Latency 95th percentile   : %6.3f ms %s", history.latencyAtPercentileMs(95.0), opHistory.latenciesAtPercentile(95.0)));
+        output.println(String.format("Latency 99th percentile   : %6.3f ms %s", history.latencyAtPercentileMs(99.0), opHistory.latenciesAtPercentile(99.0)));
+        output.println(String.format("Latency 99.9th percentile : %6.3f ms %s", history.latencyAtPercentileMs(99.9), opHistory.latenciesAtPercentile(99.9)));
+        output.println(String.format("Latency max               : %6.3f ms %s", history.maxLatencyMs(), opHistory.maxLatencies()));
         output.println(String.format("Total partitions          : %,10d %s",   history.partitionCount, opHistory.partitionCounts()));
         output.println(String.format("Total errors              : %,10d %s",   history.errorCount, opHistory.errorCounts()));
         output.println(String.format("Total GC count            : %,1.0f", totalGcStats.count));

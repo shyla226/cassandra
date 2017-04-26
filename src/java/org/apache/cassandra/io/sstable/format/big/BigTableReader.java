@@ -17,15 +17,31 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
+import java.io.DataInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.nio.file.Files;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
@@ -34,16 +50,24 @@ import org.apache.cassandra.db.columniterator.SSTableReversedIterator;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
-import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.
@@ -53,14 +77,195 @@ public class BigTableReader extends SSTableReader
 {
     private static final Logger logger = LoggerFactory.getLogger(BigTableReader.class);
 
+    protected FileHandle ifile;
+    protected IndexSummary indexSummary;
+
+    public final BigRowIndexEntry.IndexSerializer rowIndexEntrySerializer;
+
+    protected InstrumentingCache<KeyCacheKey, BigRowIndexEntry> keyCache;
+
+    protected final AtomicLong keyCacheHit = new AtomicLong(0);
+    protected final AtomicLong keyCacheRequest = new AtomicLong(0);
+
     BigTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header)
     {
         super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
+
+        this.rowIndexEntrySerializer = new BigRowIndexEntry.Serializer(descriptor.version,
+                                                                       header);
+    }
+
+    protected void loadIndex(boolean preloadIfMemmapped) throws IOException
+    {
+        if (!components.contains(Component.PRIMARY_INDEX))
+        {
+            // avoid any reading of the missing primary index component.
+            // this should only happen during StandaloneScrubber
+            return;
+        }
+
+        try(FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
+                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+                .withChunkCache(ChunkCache.instance))
+        {
+            loadSummary();
+
+            long indexFileLength = new File(descriptor.filenameFor(Component.PRIMARY_INDEX)).length();
+            int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
+            ifile = ibuilder.bufferSize(indexBufferSize).complete();
+        }
+    }
+
+    /**
+     * Load index summary from Summary.db file if it exists.
+     *
+     * if loaded index summary has different index interval from current value stored in schema,
+     * then Summary.db file will be deleted and this returns false to rebuild summary.
+     *
+     * @return true if index summary is loaded successfully from Summary.db file.
+     */
+    @SuppressWarnings("resource")
+    public boolean loadSummary()
+    {
+        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
+        if (!summariesFile.exists())
+            return false;
+
+        DataInputStream iStream = null;
+        try
+        {
+            iStream = new DataInputStream(Files.newInputStream(summariesFile.toPath()));
+            indexSummary = IndexSummary.serializer.deserialize(
+                    iStream, getPartitioner(),
+                    metadata().params.minIndexInterval, metadata().params.maxIndexInterval);
+            first = decorateKey(ByteBufferUtil.readWithLength(iStream));
+            last = decorateKey(ByteBufferUtil.readWithLength(iStream));
+        }
+        catch (IOException e)
+        {
+            if (indexSummary != null)
+                indexSummary.close();
+            logger.trace("Cannot deserialize SSTable Summary File {}: {}", summariesFile.getPath(), e.getMessage());
+            // corrupted; delete it and fall back to creating a new summary
+            FileUtils.closeQuietly(iStream);
+            // delete it and fall back to creating a new summary
+            FileUtils.deleteWithConfirm(summariesFile);
+            return false;
+        }
+        finally
+        {
+            FileUtils.closeQuietly(iStream);
+        }
+
+        return true;
+    }
+
+    protected void releaseIndex()
+    {
+        if (ifile != null)
+        {
+            ifile.close();
+            ifile = null;
+        }
+
+        if (indexSummary != null)
+        {
+            indexSummary.close();
+            indexSummary = null;
+        }
+    }
+
+    /**
+     * Clone this reader with the new open reason and set the clone as replacement.
+     *
+     * @param reason the {@code OpenReason} for the replacement.
+     *
+     * @return the cloned reader. That reader is set as a replacement by the method.
+     */
+    protected SSTableReader clone(OpenReason reason)
+    {
+        BigTableReader replacement = internalOpen(descriptor,
+                                                  components,
+                                                  metadata,
+                                                  ifile.sharedCopy(),
+                                                  dataFile.sharedCopy(),
+                                                  indexSummary.sharedCopy(),
+                                                  bf.sharedCopy(),
+                                                  maxDataAge,
+                                                  sstableMetadata,
+                                                  reason,
+                                                  header);
+        replacement.first = first;
+        replacement.last = last;
+        replacement.isSuspect.set(isSuspect.get());
+        return replacement;
+    }
+
+    /**
+     * Open a RowIndexedReader which already has its state initialized (by SSTableWriter).
+     */
+    static BigTableReader internalOpen(Descriptor desc,
+                                      Set<Component> components,
+                                      TableMetadataRef metadata,
+                                      FileHandle ifile,
+                                      FileHandle dfile,
+                                      IndexSummary indexSummary,
+                                      IFilter bf,
+                                      long maxDataAge,
+                                      StatsMetadata sstableMetadata,
+                                      OpenReason openReason,
+                                      SerializationHeader header)
+    {
+        assert desc != null && ifile != null && dfile != null && indexSummary != null && bf != null && sstableMetadata != null;
+
+        // Make sure the SSTableReader internalOpen part does the same.
+        assert desc.getFormat() == BigFormat.instance;
+        BigTableReader reader = BigFormat.readerFactory.open(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header);
+
+        reader.bf = bf;
+        reader.ifile = ifile;
+        reader.dataFile = dfile;
+        reader.indexSummary = indexSummary;
+        reader.setup(true);
+
+        return reader;
+    }
+
+    @Override
+    protected void setup(boolean trackHotness)
+    {
+        super.setup(trackHotness);
+        tidy.addCloseable(ifile);
+        tidy.addCloseable(indexSummary);
+    }
+
+    @Override
+    public void setupOnline()
+    {
+        super.setupOnline();
+        // under normal operation we can do this at any time, but SSTR is also used outside C* proper,
+        // e.g. by BulkLoader, which does not initialize the cache.  As a kludge, we set up the cache
+        // here when we know we're being wired into the rest of the server infrastructure.
+        keyCache = CacheService.instance.keyCache;
+        logger.trace("key cache contains {}/{} keys", keyCache.size(), keyCache.getCapacity());
+    }
+
+    public boolean isKeyCacheSetup()
+    {
+        return keyCache != null;
+    }
+
+    @Override
+    public void addTo(Ref.IdentityCollection identities)
+    {
+        super.addTo(identities);
+        ifile.addTo(identities);
+        indexSummary.addTo(identities);
     }
 
     public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
     {
-        RowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ);
+        BigRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ);
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
@@ -74,61 +279,150 @@ public class BigTableReader extends SSTableReader
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
         return reversed
-             ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, ifile)
-             : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, ifile);
+             ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns)
+             : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns);
     }
 
     /**
-     * @param columns the columns to return.
-     * @param dataRange filter to use when reading the columns
-     * @return A Scanner for seeking over the rows of the SSTable.
+     * Gets the position in the index file to start scanning to find the given key (at most indexInterval keys away,
+     * modulo downsampling of the index summary). Always returns a {@code value >= 0}
      */
-    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange)
+    public long getIndexScanPosition(PartitionPosition key)
     {
-        return BigTableScanner.getScanner(this, columns, dataRange);
+        if (openReason == OpenReason.MOVED_START && key.compareTo(first) < 0)
+            key = first;
+
+        return getIndexScanPositionFromBinarySearchResult(indexSummary.binarySearch(key), indexSummary);
     }
 
-    /**
-     * Direct I/O SSTableScanner over an iterator of bounds.
-     *
-     * @param boundsIterator the keys to cover
-     * @return A Scanner for seeking over the rows of the SSTable.
-     */
-    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> boundsIterator)
+    public static long getIndexScanPositionFromBinarySearchResult(int binarySearchResult, IndexSummary referencedIndexSummary)
     {
-        return BigTableScanner.getScanner(this, boundsIterator);
-    }
-
-    /**
-     * Direct I/O SSTableScanner over the full sstable.
-     *
-     * @return A Scanner for reading the full SSTable.
-     */
-    public ISSTableScanner getScanner()
-    {
-        return BigTableScanner.getScanner(this);
-    }
-
-    /**
-     * Direct I/O SSTableScanner over a defined collection of ranges of tokens.
-     *
-     * @param ranges the range of keys to cover
-     * @return A Scanner for seeking over the rows of the SSTable.
-     */
-    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
-    {
-        if (ranges != null)
-            return BigTableScanner.getScanner(this, ranges);
+        if (binarySearchResult == -1)
+            return 0;
         else
-            return getScanner();
+            return referencedIndexSummary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult));
     }
 
-
-    @SuppressWarnings("resource") // caller to close
-    @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, RowIndexEntry position, boolean tombstoneOnly)
+    public static int getIndexSummaryIndexFromBinarySearchResult(int binarySearchResult)
     {
-        return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
+        if (binarySearchResult < 0)
+        {
+            // binary search gives us the first index _greater_ than the key searched for,
+            // i.e., its insertion position
+            int greaterThan = (binarySearchResult + 1) * -1;
+            if (greaterThan == 0)
+                return -1;
+            return greaterThan - 1;
+        }
+        else
+        {
+            return binarySearchResult;
+        }
+    }
+
+    public DecoratedKey keyAt(long indexPosition) throws IOException
+    {
+        DecoratedKey key;
+        try (FileDataInput in = ifile.createReader(indexPosition))
+        {
+            if (in.isEOF())
+                return null;
+
+            key = decorateKey(ByteBufferUtil.readWithShortLength(in));
+
+            // hint read path about key location if caching is enabled
+            // this saves index summary lookup and index file iteration which whould be pretty costly
+            // especially in presence of promoted column indexes
+            if (isKeyCacheSetup())
+                cacheKey(key, rowIndexEntrySerializer.deserialize(in, in.getFilePointer()));
+        }
+
+        return key;
+    }
+
+    public KeyCacheKey getCacheKey(DecoratedKey key)
+    {
+        return new KeyCacheKey(metadata(), descriptor, key.getKey());
+    }
+
+    public void cacheKey(DecoratedKey key, BigRowIndexEntry info)
+    {
+        CachingParams caching = metadata().params.caching;
+
+        if (!caching.cacheKeys() || keyCache == null || keyCache.getCapacity() == 0)
+            return;
+
+        KeyCacheKey cacheKey = new KeyCacheKey(metadata(), descriptor, key.getKey());
+        logger.trace("Adding cache entry for {} -> {}", cacheKey, info);
+        keyCache.put(cacheKey, info);
+    }
+
+    public BigRowIndexEntry getCachedPosition(DecoratedKey key, boolean updateStats)
+    {
+        return getCachedPosition(new KeyCacheKey(metadata(), descriptor, key.getKey()), updateStats);
+    }
+
+    public BigRowIndexEntry getCachedPosition(KeyCacheKey unifiedKey, boolean updateStats)
+    {
+        if (keyCacheEnabled())
+        {
+            if (updateStats)
+            {
+                BigRowIndexEntry cachedEntry = keyCache.get(unifiedKey);
+                keyCacheRequest.incrementAndGet();
+                if (cachedEntry != null)
+                {
+                    keyCacheHit.incrementAndGet();
+                    bloomFilterTracker.addTruePositive();
+                }
+                return cachedEntry;
+            }
+            else
+            {
+                return keyCache.getInternal(unifiedKey);
+            }
+        }
+        return null;
+    }
+
+    private boolean keyCacheEnabled()
+    {
+        return keyCache != null && keyCache.getCapacity() > 0 && metadata().params.caching.cacheKeys();
+    }
+
+    public InstrumentingCache<KeyCacheKey, BigRowIndexEntry> getKeyCache()
+    {
+        return keyCache;
+    }
+
+    /**
+     * @return Number of key cache hit
+     */
+    public long getKeyCacheHit()
+    {
+        return keyCacheHit.get();
+    }
+
+    /**
+     * @return Number of key cache request
+     */
+    public long getKeyCacheRequest()
+    {
+        return keyCacheRequest.get();
+    }
+
+    /**
+     * Get position updating key cache and stats.
+     * @see #getPosition(PartitionPosition, SSTableReader.Operator, boolean)
+     */
+    public BigRowIndexEntry getPosition(PartitionPosition key, Operator op)
+    {
+        return getPosition(key, op, true, false);
+    }
+
+    public BigRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats)
+    {
+        return getPosition(key, op, updateCacheAndStats, false);
     }
 
     /**
@@ -138,7 +432,7 @@ public class BigTableReader extends SSTableReader
      * @param updateCacheAndStats true if updating stats and cache
      * @return The index entry corresponding to the key, or null if the key is not present
      */
-    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast)
+    protected BigRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast)
     {
         if (op == Operator.EQ)
         {
@@ -155,7 +449,7 @@ public class BigTableReader extends SSTableReader
         {
             DecoratedKey decoratedKey = (DecoratedKey)key;
             KeyCacheKey cacheKey = new KeyCacheKey(metadata(), descriptor, decoratedKey.getKey());
-            RowIndexEntry cachedPosition = getCachedPosition(cacheKey, updateCacheAndStats);
+            BigRowIndexEntry cachedPosition = getCachedPosition(cacheKey, updateCacheAndStats);
             if (cachedPosition != null)
             {
                 Tracing.trace("Key cache hit for sstable {}", descriptor.generation);
@@ -241,7 +535,7 @@ public class BigTableReader extends SSTableReader
                 if (opSatisfied)
                 {
                     // read data position from index entry
-                    RowIndexEntry indexEntry = rowIndexEntrySerializer.deserialize(in, in.getFilePointer());
+                    BigRowIndexEntry indexEntry = rowIndexEntrySerializer.deserialize(in, in.getFilePointer());
                     if (exactMatch && updateCacheAndStats)
                     {
                         assert key instanceof DecoratedKey; // key can be == to the index key only if it's a true row key
@@ -250,7 +544,7 @@ public class BigTableReader extends SSTableReader
                         if (logger.isTraceEnabled())
                         {
                             // expensive sanity check!  see CASSANDRA-4687
-                            try (FileDataInput fdi = dfile.createReader(indexEntry.position))
+                            try (FileDataInput fdi = dataFile.createReader(indexEntry.position))
                             {
                                 DecoratedKey keyInDisk = decorateKey(ByteBufferUtil.readWithShortLength(fdi));
                                 if (!keyInDisk.equals(key))
@@ -263,11 +557,11 @@ public class BigTableReader extends SSTableReader
                     }
                     if (op == Operator.EQ && updateCacheAndStats)
                         bloomFilterTracker.addTruePositive();
-                    Tracing.trace("Partition index with {} entries found for sstable {}", indexEntry.columnsIndexCount(), descriptor.generation);
+                    Tracing.trace("Partition index with {} entries found for sstable {}", indexEntry.rowIndexCount(), descriptor.generation);
                     return indexEntry;
                 }
 
-                RowIndexEntry.Serializer.skip(in, descriptor.version);
+                BigRowIndexEntry.Serializer.skip(in, descriptor.version);
             }
         }
         catch (IOException e)
@@ -282,5 +576,45 @@ public class BigTableReader extends SSTableReader
         return null;
     }
 
+    @Override
+    public long estimatedKeys()
+    {
+        return indexSummary.getEstimatedKeyCount();
+    }
 
+    @Override
+    public RowIndexEntry getExactPosition(DecoratedKey key)
+    {
+        return getPosition(key, Operator.EQ);
+    }
+
+    @Override
+    public boolean contains(DecoratedKey key)
+    {
+        return getExactPosition(key) != null;
+    }
+
+    @Override
+    public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
+    {
+        return new PartitionIterator(this, left, inclusiveLeft ? -1 : 0, right, inclusiveRight ? 0 : -1);
+    }
+
+    @Override
+    public PartitionIndexIterator allKeysIterator() throws IOException
+    {
+        return new PartitionIterator(this);
+    }
+
+    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    {
+        if (ifile == null)
+            return null;
+        return new ScrubIterator(ifile, rowIndexEntrySerializer);
+    }
+
+    protected FileHandle[] getFilesToBeLocked()
+    {
+        return new FileHandle[] { dataFile, ifile };
+    }
 }

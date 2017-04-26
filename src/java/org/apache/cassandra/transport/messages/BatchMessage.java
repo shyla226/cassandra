@@ -216,7 +216,7 @@ public class BatchMessage extends Message.Request
 
     private void setUpTracing(QueryState state)
     {
-        state.createTracingSession();
+        state.createTracingSession(getCustomPayload());
 
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
         if (options.getConsistency() != null)

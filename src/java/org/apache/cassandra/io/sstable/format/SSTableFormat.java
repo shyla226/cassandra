@@ -19,10 +19,9 @@ package org.apache.cassandra.io.sstable.format;
 
 import com.google.common.base.CharMatcher;
 
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.RowIndexEntry;
-import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 
 /**
  * Provides the accessors to data on disk.
@@ -38,19 +37,38 @@ public interface SSTableFormat
     SSTableWriter.Factory getWriterFactory();
     SSTableReader.Factory getReaderFactory();
 
-    RowIndexEntry.IndexSerializer<?> getIndexSerializer(TableMetadata metadata, Version version, SerializationHeader header);
+    public static SSTableFormat current()
+    {
+        return Type.current().info;
+    }
+
+    public static Type streamWriteFormat()
+    {
+        // When we receive streams we write them in trie format regardless if they came from big format source.
+        // This relies on compatible sstable formats.
+        return Type.current();
+    }
+
+    /**
+     * @param ver SSTable version
+     * @return True if the given version string matches the format.
+     */
+    public boolean validateVersion(String ver);
 
     public static enum Type
     {
         //The original sstable format
-        BIG("big", BigFormat.instance);
+        BIG("big", BigFormat.instance),
+
+        //Sstable format with trie indices
+        TRIE_INDEX("bti", TrieIndexFormat.instance);
 
         public final SSTableFormat info;
         public final String name;
 
         public static Type current()
         {
-            return BIG;
+            return TRIE_INDEX;
         }
 
         private Type(String name, SSTableFormat info)
@@ -61,6 +79,15 @@ public interface SSTableFormat
 
             this.name = name;
             this.info = info;
+        }
+
+        /**
+         * @param ver SSTable version
+         * @return True if the given version string matches the format.
+         */
+        public boolean validateVersion(String ver)
+        {
+            return info.validateVersion(ver);
         }
 
         public static Type validate(String name)

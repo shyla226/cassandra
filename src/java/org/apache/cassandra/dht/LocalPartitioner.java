@@ -27,6 +27,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.CachedHashDecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.HeapAllocator;
 
@@ -154,6 +155,11 @@ public class LocalPartitioner implements IPartitioner
         {
             assert getPartitioner() == o.getPartitioner();
             return comparator.compare(token, ((LocalToken) o).token);
+        }
+
+        public ByteSource asByteComparableSource()
+        {
+            return comparator.asByteComparableSource(token);
         }
 
         @Override

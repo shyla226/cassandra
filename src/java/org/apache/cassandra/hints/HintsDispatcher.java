@@ -26,6 +26,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 import com.google.common.util.concurrent.RateLimiter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.hints.HintsVerbs.HintsVersion;
@@ -36,6 +38,7 @@ import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Response;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 /**
@@ -45,6 +48,8 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
  */
 final class HintsDispatcher implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(HintsDispatcher.class);
+
     private enum Action { CONTINUE, ABORT }
 
     private final HintsReader reader;
@@ -117,13 +122,14 @@ final class HintsDispatcher implements AutoCloseable
         Collection<Callback> callbacks = new ArrayList<>();
 
         /*
-         * If hints file messaging version matches the version of the target host, we'll use the optimised path -
-         * skipping the redundant decoding/encoding cycle of the already encoded hint.
+         * If hints file messaging version matches the version of the target host (and we're not delivering to the
+         * localhost), we'll use the optimised path - skipping the redundant decoding/encoding cycle of the already
+         * encoded hint.
          *
          * If that is not the case, we'll need to perform conversion to a newer (or an older) format, and decoding the hint
          * is an unavoidable intermediate step.
          */
-        Action action = reader.descriptor().version == version
+        Action action = reader.descriptor().version == version && !address.equals(FBUtilities.getBroadcastAddress())
                       ? sendHints(page.buffersIterator(), callbacks, this::sendEncodedHint)
                       : sendHints(page.hintsIterator(), callbacks, this::sendHint);
 
@@ -196,7 +202,7 @@ final class HintsDispatcher implements AutoCloseable
 
     private static final class Callback implements MessageCallback<EmptyPayload>
     {
-        enum Outcome { SUCCESS, TIMEOUT, FAILURE }
+        enum Outcome { SUCCESS, TIMEOUT, FAILURE, INTERRUPTED }
 
         private final long start = System.nanoTime();
         private final SimpleCondition condition = new SimpleCondition();
@@ -219,7 +225,8 @@ final class HintsDispatcher implements AutoCloseable
             }
             catch (InterruptedException e)
             {
-                throw new AssertionError(e);
+                logger.warn("Hint dispatch was interrupted", e);
+                return Outcome.INTERRUPTED;
             }
 
             return timedOut ? Outcome.TIMEOUT : outcome;

@@ -184,7 +184,6 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              String keyspace,
                                              RepairParallelism parallelismDegree,
                                              Set<InetAddress> endpoints,
-                                             long repairedAt,
                                              boolean isConsistent,
                                              boolean pullRepair,
                                              ListeningExecutorService executor,
@@ -196,7 +195,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (cfnames.length == 0)
             return null;
 
-        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, repairedAt, isConsistent, pullRepair, cfnames);
+        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isConsistent, pullRepair, cfnames);
 
         sessions.put(session.getId(), session);
         // register listeners
@@ -371,28 +370,33 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             }
             else
             {
-                status.set(false);
-                failedNodes.add(neighbour.getHostAddress());
-                prepareLatch.countDown();
+                // bailout early to avoid potentially waiting for a long time.
+                failRepair(parentRepairSession, "Endpoint not alive: " + neighbour);
             }
         }
         try
         {
-            prepareLatch.await(DatabaseDescriptor.getRpcTimeout(), TimeUnit.MILLISECONDS);
+            // Failed repair is expensive so we wait for longer time.
+            if (!prepareLatch.await(1, TimeUnit.HOURS)) {
+                failRepair(parentRepairSession, "Did not get replies from all endpoints.");
+            }
         }
         catch (InterruptedException e)
         {
-            removeParentRepairSession(parentRepairSession);
-            throw new RuntimeException("Did not get replies from all endpoints. List of failed endpoint(s): " + failedNodes, e);
+            failRepair(parentRepairSession, "Interrupted while waiting for prepare repair response.");
         }
 
         if (!status.get())
         {
-            removeParentRepairSession(parentRepairSession);
-            throw new RuntimeException("Did not get positive replies from all endpoints. List of failed endpoint(s): " + failedNodes);
+            failRepair(parentRepairSession, "Got negative replies from endpoints " + failedNodes);
         }
 
         return parentRepairSession;
+    }
+
+    private void failRepair(UUID parentRepairSession, String errorMsg) {
+        removeParentRepairSession(parentRepairSession);
+        throw new RuntimeException(errorMsg);
     }
 
     public void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal)
@@ -480,7 +484,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (desc.parentSessionId != null && ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId) != null)
             repairedAt = ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId).getRepairedAt();
 
-        StreamingRepairTask task = new StreamingRepairTask(desc, sync, repairedAt, isConsistent(desc.parentSessionId));
+        StreamingRepairTask task = new StreamingRepairTask(desc, sync, isConsistent(desc.parentSessionId) ? desc.parentSessionId : null);
         task.run();
     }
 

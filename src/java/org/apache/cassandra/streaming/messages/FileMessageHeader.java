@@ -20,6 +20,7 @@ package org.apache.cassandra.streaming.messages;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
@@ -34,6 +35,7 @@ import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
+import org.apache.cassandra.utils.UUIDSerializer;
 
 /**
  * StreamingFileHeader is appended before sending actual data to describe what it's sending.
@@ -59,6 +61,7 @@ public class FileMessageHeader
     public final CompressionInfo compressionInfo;
     private final CompressionMetadata compressionMetadata;
     public final long repairedAt;
+    public final UUID pendingRepair;
     public final int sstableLevel;
     public final SerializationHeader.Component header;
 
@@ -73,6 +76,7 @@ public class FileMessageHeader
                              List<Pair<Long, Long>> sections,
                              CompressionInfo compressionInfo,
                              long repairedAt,
+                             UUID pendingRepair,
                              int sstableLevel,
                              SerializationHeader.Component header)
     {
@@ -85,6 +89,7 @@ public class FileMessageHeader
         this.compressionInfo = compressionInfo;
         this.compressionMetadata = null;
         this.repairedAt = repairedAt;
+        this.pendingRepair = pendingRepair;
         this.sstableLevel = sstableLevel;
         this.header = header;
         this.size = calculateSize();
@@ -98,6 +103,7 @@ public class FileMessageHeader
                              List<Pair<Long, Long>> sections,
                              CompressionMetadata compressionMetadata,
                              long repairedAt,
+                             UUID pendingRepair,
                              int sstableLevel,
                              SerializationHeader.Component header)
     {
@@ -110,6 +116,7 @@ public class FileMessageHeader
         this.compressionInfo = null;
         this.compressionMetadata = compressionMetadata;
         this.repairedAt = repairedAt;
+        this.pendingRepair = pendingRepair;
         this.sstableLevel = sstableLevel;
         this.header = header;
         this.size = calculateSize();
@@ -161,6 +168,7 @@ public class FileMessageHeader
         sb.append(", transfer size: ").append(size());
         sb.append(", compressed?: ").append(isCompressed());
         sb.append(", repairedAt: ").append(repairedAt);
+        sb.append(", pendingRepair: ").append(pendingRepair);
         sb.append(", level: ").append(sstableLevel);
         sb.append(')');
         return sb.toString();
@@ -210,6 +218,11 @@ public class FileMessageHeader
                 compressionInfo = new CompressionInfo(header.compressionMetadata.getChunksForSections(header.sections), header.compressionMetadata.parameters);
             CompressionInfo.serializers.get(version).serialize(compressionInfo, out);
             out.writeLong(header.repairedAt);
+            out.writeBoolean(header.pendingRepair != null);
+            if (header.pendingRepair != null)
+            {
+                UUIDSerializer.serializer.serialize(header.pendingRepair, out);
+            }
             out.writeInt(header.sstableLevel);
 
             SerializationHeader.serializer.serialize(header.version, header.header, out);
@@ -220,8 +233,9 @@ public class FileMessageHeader
         {
             TableId tableId = TableId.deserialize(in);
             int sequenceNumber = in.readInt();
-            Version sstableVersion = SSTableFormat.Type.current().info.getVersion(in.readUTF());
+            String versionString = in.readUTF();
             SSTableFormat.Type format = SSTableFormat.Type.validate(in.readUTF());
+            Version sstableVersion = format.info.getVersion(versionString);
 
             long estimatedKeys = in.readLong();
             int count = in.readInt();
@@ -230,10 +244,11 @@ public class FileMessageHeader
                 sections.add(Pair.create(in.readLong(), in.readLong()));
             CompressionInfo compressionInfo = CompressionInfo.serializers.get(version).deserialize(in);
             long repairedAt = in.readLong();
+            UUID pendingRepair = in.readBoolean() ? UUIDSerializer.serializer.deserialize(in) : null;
             int sstableLevel = in.readInt();
             SerializationHeader.Component header =  SerializationHeader.serializer.deserialize(sstableVersion, in);
 
-            return new FileMessageHeader(tableId, sequenceNumber, sstableVersion, format, estimatedKeys, sections, compressionInfo, repairedAt, sstableLevel, header);
+            return new FileMessageHeader(tableId, sequenceNumber, sstableVersion, format, estimatedKeys, sections, compressionInfo, repairedAt, pendingRepair, sstableLevel, header);
         }
 
         public long serializedSize(FileMessageHeader header)
@@ -251,6 +266,9 @@ public class FileMessageHeader
                 size += TypeSizes.sizeof(section.right);
             }
             size += CompressionInfo.serializers.get(version).serializedSize(header.compressionInfo);
+            size += TypeSizes.sizeof(header.repairedAt);
+            size += TypeSizes.sizeof(header.pendingRepair != null);
+            size += header.pendingRepair != null ? UUIDSerializer.serializer.serializedSize(header.pendingRepair) : 0;
             size += TypeSizes.sizeof(header.sstableLevel);
 
             size += SerializationHeader.serializer.serializedSize(header.version, header.header);

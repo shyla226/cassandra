@@ -378,7 +378,7 @@ public abstract class CassandraIndex implements Index
 
             public Completable insertRow(Row row)
             {
-                if (row.isStatic() != indexedColumn.isStatic())
+                if (row.isStatic() && !indexedColumn.isStatic() && !indexedColumn.isPartitionKey())
                     return Completable.complete();
 
                 if (isPrimaryKeyIndex())

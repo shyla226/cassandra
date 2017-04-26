@@ -45,6 +45,7 @@ import org.github.jamm.Unmetered;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 import static org.apache.cassandra.db.marshal.AbstractType.ComparisonType.CUSTOM;
 
@@ -512,5 +513,21 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
 
         return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+    }
+
+    /**
+     * Converts the given clustering of prefix into a ByteSource which preserves this comparator's order when compared
+     * byte by byte.
+     */
+    public ByteSource asByteComparableSource(ByteBuffer byteBuffer)
+    {
+        switch (comparisonType)
+        {
+        case BYTE_ORDER:
+            return ByteSource.of(byteBuffer);
+        default:
+            // default is only good for byte comparable
+            throw new UnsupportedOperationException(getClass().getSimpleName() + " does not implement asByteComparableSource");
+        }
     }
 }

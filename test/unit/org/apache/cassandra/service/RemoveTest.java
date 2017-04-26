@@ -56,8 +56,10 @@ public class RemoveTest
         DatabaseDescriptor.daemonInitialization();
     }
 
+    static final IPartitioner partitioner = RandomPartitioner.instance;
     StorageService ss = StorageService.instance;
     TokenMetadata tmd = ss.getTokenMetadata();
+    static IPartitioner oldPartitioner;
     ArrayList<Token> endpointTokens = new ArrayList<Token>();
     ArrayList<Token> keyTokens = new ArrayList<Token>();
     List<InetAddress> hosts = new ArrayList<InetAddress>();
@@ -68,7 +70,13 @@ public class RemoveTest
     @BeforeClass
     public static void setupClass() throws ConfigurationException
     {
-        SchemaLoader.loadSchema();
+        oldPartitioner = StorageService.instance.setPartitionerUnsafe(partitioner);
+    }
+
+    @AfterClass
+    public static void tearDownClass()
+    {
+        StorageService.instance.setPartitionerUnsafe(oldPartitioner);
     }
 
     @Before
@@ -77,9 +85,9 @@ public class RemoveTest
         tmd.clearUnsafe();
 
         // create a ring of 5 nodes
-        Util.createInitialRing(ss, Util.testPartitioner(), endpointTokens, keyTokens, hosts, hostIds, 6);
+        Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 6);
 
-        Gossiper.instance.start(1);
+        MessagingService.instance().listen();
         removalhost = hosts.get(5);
         hosts.remove(removalhost);
         removalId = hostIds.get(5);
@@ -89,7 +97,7 @@ public class RemoveTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().clearInterceptors();
         MessagingService.instance().clearCallbacksUnsafe();
         MessagingService.instance().shutdown();
     }

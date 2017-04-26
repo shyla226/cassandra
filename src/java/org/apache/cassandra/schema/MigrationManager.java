@@ -199,10 +199,15 @@ public class MigrationManager
      */
     public static Completable forceAnnounceNewTable(TableMetadata cfm)
     {
-        return announceNewTable(cfm, false, false);
+        return announceNewTable(cfm, false, false, 0);
     }
 
     private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate)
+    {
+        announceNewTable(cfm, announceLocally, throwOnDuplicate, FBUtilities.timestampMicros());
+    }
+
+    private static void announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate, long timestamp)
     {
         cfm.validate();
 
@@ -215,7 +220,7 @@ public class MigrationManager
             return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
 
         logger.info("Create new table: {}", cfm);
-        return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, FBUtilities.timestampMicros()), announceLocally);
+        return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
     }
 
     public static Completable announceNewView(ViewMetadata view, boolean announceLocally) throws ConfigurationException

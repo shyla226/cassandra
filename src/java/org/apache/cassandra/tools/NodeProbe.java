@@ -66,6 +66,7 @@ import org.apache.cassandra.gms.FailureDetectorMBean;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.GossiperMBean;
 import org.apache.cassandra.db.HintedHandOffManager;
+import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
@@ -124,6 +125,7 @@ public class NodeProbe implements AutoCloseable
     private HintedHandOffManagerMBean hhProxy;
     private BatchlogManagerMBean bmProxy;
     private ActiveRepairServiceMBean arsProxy;
+    private MemoryOnlyStatusMBean mosProxy;
     private boolean failed;
 
     /**
@@ -218,6 +220,7 @@ public class NodeProbe implements AutoCloseable
             bmProxy = JMX.newMBeanProxy(mbeanServerConn, name, BatchlogManagerMBean.class);
             name = new ObjectName(ActiveRepairServiceMBean.MBEAN_NAME);
             arsProxy = JMX.newMBeanProxy(mbeanServerConn, name, ActiveRepairServiceMBean.class);
+            mosProxy = JMX.newMBeanProxy(mbeanServerConn, new ObjectName(MemoryOnlyStatusMBean.MBEAN_NAME), MemoryOnlyStatusMBean.class);
         }
         catch (MalformedObjectNameException e)
         {
@@ -1519,6 +1522,11 @@ public class NodeProbe implements AutoCloseable
     public ActiveRepairServiceMBean getRepairServiceProxy()
     {
         return arsProxy;
+    }
+
+    public MemoryOnlyStatusMBean getMemoryOnlyStatusProxy()
+    {
+        return mosProxy;
     }
 }
 

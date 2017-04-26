@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 
@@ -37,12 +38,22 @@ import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static junit.framework.Assert.fail;
+import static org.junit.Assert.fail;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class SSTableWriterTest extends SSTableWriterTestBase
 {
+    SSTableReader openEarly(ColumnFamilyStore cfs, SSTableWriter writer, List<DecoratedKey> list)
+    {
+        AtomicReference<SSTableReader> reader = new AtomicReference<>();
+        writer.setMaxDataAge(1000).openEarly(rdr -> reader.set(rdr));
+        addUpdatesToWriter(cfs, writer, list.subList(min, max));
+        assertNotNull(reader.get());
+        return reader.get();
+    }
+
     @Test
     public void testAbortTxnWithOpenEarlyShouldRemoveSSTable() throws InterruptedException
     {
@@ -54,16 +65,13 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
         try (SSTableWriter writer = getWriter(cfs, dir, txn))
         {
-            final List<DecoratedKey> keys = generateKeys(cfs, 20000);
+            final List<DecoratedKey> keys = generateKeys(cfs, 30000);
             addUpdatesToWriter(cfs, writer, keys.subList(0, 10000));
 
-            SSTableReader s = writer.setMaxDataAge(1000).openEarly();
+            SSTableReader s = openEarly(cfs, writer, keys.subList(10000, 20000));
             assert s != null;
             assertFileCounts(dir.list());
-
-            addUpdatesToWriter(cfs, writer, keys.subList(10000, 20000));
-
-            SSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
+            SSTableReader s2 = openEarly(cfs, writer, keys.subList(20000, 30000));
             assertTrue(s.last.compareTo(s2.last) < 0);
             assertFileCounts(dir.list());
             s.selfRef().release();

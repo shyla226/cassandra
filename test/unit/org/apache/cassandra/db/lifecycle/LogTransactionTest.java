@@ -17,6 +17,13 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
+import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertNull;
+import static junit.framework.Assert.fail;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
 import java.io.File;
 import java.io.IOError;
 import java.io.IOException;
@@ -30,20 +37,22 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 import junit.framework.Assert;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.*;
-import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormatUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.MockSchema;
@@ -797,7 +806,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
             assertEquals(numNewFiles - 1, tmpFiles.size());
 
             File ssTable2DataFile = new File(sstable2.descriptor.filenameFor(Component.DATA));
-            File ssTable2IndexFile = new File(sstable2.descriptor.filenameFor(Component.PRIMARY_INDEX));
+            File ssTable2IndexFile = new File(sstable2.descriptor.filenameFor(Component.PARTITION_INDEX));
 
             assertTrue(tmpFiles.contains(ssTable2DataFile));
             assertTrue(tmpFiles.contains(ssTable2IndexFile));
@@ -1165,8 +1174,8 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
     private static SSTableReader sstable(File dataFolder, ColumnFamilyStore cfs, int generation, int size) throws IOException
     {
-        Descriptor descriptor = new Descriptor(dataFolder, cfs.keyspace.getName(), cfs.getTableName(), generation, SSTableFormat.Type.BIG);
-        Set<Component> components = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.TOC);
+        Descriptor descriptor = new Descriptor(dataFolder, cfs.keyspace.getName(), cfs.getTableName(), generation, SSTableFormat.Type.TRIE_INDEX);
+        Set<Component> components = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.ROW_INDEX, Component.TOC);
         for (Component component : components)
         {
             File file = new File(descriptor.filenameFor(component));
@@ -1179,23 +1188,13 @@ public class LogTransactionTest extends AbstractTransactionalTest
         }
 
         FileHandle dFile = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).complete();
-        FileHandle iFile = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX)).complete();
+        FileHandle iFile = new FileHandle.Builder(descriptor.filenameFor(Component.ROW_INDEX)).complete();
 
-        SerializationHeader header = SerializationHeader.make(cfs.metadata(), Collections.emptyList());
-        StatsMetadata metadata = (StatsMetadata) new MetadataCollector(cfs.metadata().comparator)
-                                                 .finalizeMetadata(cfs.metadata().partitioner.getClass().getCanonicalName(), 0.01f, -1, null, header)
-                                                 .get(MetadataType.STATS);
-        SSTableReader reader = SSTableReader.internalOpen(descriptor,
-                                                          components,
-                                                          cfs.metadata,
-                                                          dFile,
-                                                          iFile,
-                                                          MockSchema.indexSummary.sharedCopy(),
-                                                          new AlwaysPresentFilter(),
-                                                          1L,
-                                                          metadata,
-                                                          SSTableReader.OpenReason.NORMAL,
-                                                          header);
+        SSTableReader reader = TrieIndexFormatUtil.emptyReader(descriptor,
+                                                         components,
+                                                         cfs.metadata,
+                                                         dFile,
+                                                         iFile);
         reader.first = reader.last = MockSchema.readerBounds(generation);
         return reader;
     }

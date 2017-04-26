@@ -94,7 +94,6 @@ public class SchemaLoader
         String ks5 = testName + "Keyspace5";
         String ks6 = testName + "Keyspace6";
         String ks7 = testName + "Keyspace7";
-        String ks_kcs = testName + "KeyCacheSpace";
         String ks_rcs = testName + "RowCacheSpace";
         String ks_ccs = testName + "CounterCacheSpace";
         String ks_nocommit = testName + "NoCommitlogSpace";
@@ -195,14 +194,6 @@ public class SchemaLoader
         schema.add(KeyspaceMetadata.create(ks7,
                 KeyspaceParams.simple(1),
                 Tables.of(customIndexCFMD(ks7, "Indexed1").build())));
-
-        // KeyCacheSpace
-        schema.add(KeyspaceMetadata.create(ks_kcs,
-                KeyspaceParams.simple(1),
-                Tables.of(
-                standardCFMD(ks_kcs, "Standard1").build(),
-                standardCFMD(ks_kcs, "Standard2").build(),
-                standardCFMD(ks_kcs, "Standard3").build())));
 
         // RowCacheSpace
         schema.add(KeyspaceMetadata.create(ks_rcs,

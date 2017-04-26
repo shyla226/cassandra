@@ -21,7 +21,7 @@ package org.apache.cassandra.schema;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.util.*;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.ImmutableSet;
@@ -32,35 +32,18 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.io.sstable.metadata.MetadataType;
-import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormatUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.Memory;
-import org.apache.cassandra.schema.CachingParams;
-import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.AlwaysPresentFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class MockSchema
 {
-    static
-    {
-        Memory offsets = Memory.allocate(4);
-        offsets.setInt(0, 0);
-        indexSummary = new IndexSummary(Murmur3Partitioner.instance, offsets, 0, Memory.allocate(4), 0, 0, 0, 1);
-    }
     private static final AtomicInteger id = new AtomicInteger();
     public static final Keyspace ks = Keyspace.mockKS(KeyspaceMetadata.create("mockks", KeyspaceParams.simpleTransient(1)));
 
-    public static final IndexSummary indexSummary;
     private static final FileHandle RANDOM_ACCESS_READER_FACTORY = new FileHandle.Builder(temp("mocksegmentedfile").getAbsolutePath()).complete();
 
     public static Memtable memtable(ColumnFamilyStore cfs)
@@ -88,8 +71,8 @@ public class MockSchema
         Descriptor descriptor = new Descriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
                                                cfs.keyspace.getName(),
                                                cfs.getTableName(),
-                                               generation, SSTableFormat.Type.BIG);
-        Set<Component> components = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.TOC);
+                                               generation, SSTableFormat.Type.TRIE_INDEX);
+        Set<Component> components = ImmutableSet.of(Component.DATA, Component.PARTITION_INDEX, Component.TOC);
         for (Component component : components)
         {
             File file = new File(descriptor.filenameFor(component));
@@ -116,13 +99,8 @@ public class MockSchema
                 throw new RuntimeException(e);
             }
         }
-        SerializationHeader header = SerializationHeader.make(cfs.metadata(), Collections.emptyList());
-        StatsMetadata metadata = (StatsMetadata) new MetadataCollector(cfs.metadata().comparator)
-                                                 .finalizeMetadata(cfs.metadata().partitioner.getClass().getCanonicalName(), 0.01f, -1, null, header)
-                                                 .get(MetadataType.STATS);
-        SSTableReader reader = SSTableReader.internalOpen(descriptor, components, cfs.metadata,
-                                                          RANDOM_ACCESS_READER_FACTORY.sharedCopy(), RANDOM_ACCESS_READER_FACTORY.sharedCopy(), indexSummary.sharedCopy(),
-                                                          new AlwaysPresentFilter(), 1L, metadata, SSTableReader.OpenReason.NORMAL, header);
+        SSTableReader reader = TrieIndexFormatUtil.emptyReader(descriptor, components, cfs.metadata,
+                                                               RANDOM_ACCESS_READER_FACTORY.sharedCopy(), RANDOM_ACCESS_READER_FACTORY.sharedCopy());
         reader.first = reader.last = readerBounds(generation);
         if (!keepRef)
             reader.selfRef().release();

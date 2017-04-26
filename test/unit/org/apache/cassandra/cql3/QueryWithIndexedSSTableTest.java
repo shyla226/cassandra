@@ -23,7 +23,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -43,7 +43,7 @@ public class QueryWithIndexedSSTableTest extends CQLTester
 
         // We create a partition that is big enough that the underlying sstable will be indexed
         // For that, we use a large-ish number of row, and a value that isn't too small.
-        String text = TombstonesWithIndexedSSTableTest.makeRandomString(VALUE_LENGTH);
+        String text = makeRandomString(VALUE_LENGTH);
         for (int i = 0; i < ROWS; i++)
             execute("INSERT INTO %s(k, t, v) VALUES (?, ?, ?)", 0, i, text + i);
 
@@ -72,13 +72,12 @@ public class QueryWithIndexedSSTableTest extends CQLTester
     }
 
     // Creates a random string 
-    public static String makeRandomSt(int length)
+    public static String makeRandomString(int length)
     {
         Random random = new Random();
-        char[] chars = new char[26];
-        int i = 0;
-        for (char c = 'a'; c <= 'z'; c++)
-            chars[i++] = c;
+        char[] chars = new char[length];
+        for (int i = 0; i < length; ++i)
+            chars[i++] = (char) ('a' + random.nextInt('z' - 'a' + 1));
         return new String(chars);
     }
 }

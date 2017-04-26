@@ -22,9 +22,13 @@ import java.net.InetAddress;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+
 import org.apache.cassandra.concurrent.TracingAwareExecutor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.tracing.Tracing;
 
 /**
@@ -39,7 +43,42 @@ import org.apache.cassandra.tracing.Tracing;
  */
 public abstract class Message<P>
 {
-    public enum Kind {
+    /**
+     * Whether the message is a request or response.
+     * <p>
+     * Note: even though this is mostly a boolean information, we have an enum for the sake of interceptors
+     * ({@link Interceptor}) as a way to indicate that you may want to intercept requests, responses or
+     * both of them.
+     */
+    public enum Type
+    {
+        REQUEST, RESPONSE;
+
+        public static ImmutableSet<Type> all()
+        {
+            return Sets.immutableEnumSet(REQUEST, RESPONSE);
+        }
+    }
+
+    /**
+     * Whether the message is a locally delivered one or a remote one.
+     * <p>
+     * Note: even though this is mostly a boolean information, we have an enum for the sake of interceptors
+     * ({@link Interceptor}) as a way to indicate that you may want to intercept only locally delivered
+     * messages, only remote ones or both of them.
+     */
+    public enum Locality
+    {
+        LOCAL, REMOTE;
+
+        public static ImmutableSet<Locality> all()
+        {
+            return Sets.immutableEnumSet(LOCAL, REMOTE);
+        }
+    }
+
+    enum Kind
+    {
         GOSSIP, SMALL, LARGE;
 
         @Override
@@ -126,9 +165,9 @@ public abstract class Message<P>
             return null;
         }
 
-        public boolean isRequest()
+        public Type type()
         {
-            return false;
+            return null;
         }
 
         public Message<Void> addParameters(MessageParameters parameters)
@@ -221,12 +260,20 @@ public abstract class Message<P>
     }
 
     /**
+     * The type of message this is, request or response.
+     */
+    public abstract Type type();
+
+    /**
      * Whether this is a request message.
      *
      * @return {@code true} if it is a request message (in which case it can be safely casted to a {@link Request}),
      * {@code false} if it is a response one (in which case it can be safely casted to a {@link Response}).
      */
-    public abstract boolean isRequest();
+    public boolean isRequest()
+    {
+        return type() == Type.REQUEST;
+    }
 
     /**
      * Whether this is a response message.
@@ -235,7 +282,7 @@ public abstract class Message<P>
      */
     public boolean isResponse()
     {
-        return !isRequest();
+        return type() == Type.RESPONSE;
     }
 
     /**
@@ -294,7 +341,12 @@ public abstract class Message<P>
      */
     public boolean isLocal()
     {
-        return to.equals(from);
+        return locality() == Locality.LOCAL;
+    }
+
+    public Locality locality()
+    {
+        return to.equals(from) ? Locality.LOCAL : Locality.REMOTE;
     }
 
     /**
@@ -351,7 +403,11 @@ public abstract class Message<P>
     @Override
     public String toString()
     {
-        return String.format("%s@%d: %s %s %s", verb(), id(), from(), isRequest() ? "->" : "<-", to());
+        return String.format("%s (%d): %s",
+                             verb(),
+                             id(),
+                             isRequest() ? String.format("%s -> %s", from(), to())
+                                         : String.format("%s <- %s", to(), from()));
     }
 
     public interface Serializer

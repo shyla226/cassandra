@@ -29,6 +29,8 @@ import org.junit.*;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.net.interceptors.InterceptionContext;
+import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -116,19 +118,19 @@ public class DataResolverTest
     }
 
     @Before
-    public void injectMessageSink()
+    public void injectInterceptor()
     {
-        // install an IMessageSink to capture all messages
+        // install an interceptor to capture all messages
         // so we can inspect them during tests
         messageRecorder = new MessageRecorder();
-        MessagingService.instance().addMessageSink(messageRecorder);
+        MessagingService.instance().addInterceptor(messageRecorder);
     }
 
     @After
-    public void removeMessageSink()
+    public void removeInterceptor()
     {
         // should be unnecessary, but good housekeeping
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().clearInterceptors();
     }
 
     /**
@@ -985,21 +987,17 @@ public class DataResolverTest
         return new SingletonUnfilteredPartitionIterator(PartitionUpdate.fullPartitionDelete(table, dk, timestamp, nowInSec).unfilteredIterator());
     }
 
-    private static class MessageRecorder implements IMessageSink
+    private static class MessageRecorder implements Interceptor
     {
         Map<InetAddress, Request<Mutation, EmptyPayload>> sent = new HashMap<>();
 
         @SuppressWarnings("unchecked")
-        public boolean allowOutgoingMessage(Message message, MessageCallback<?> callback)
+        public <M extends Message<?>> void intercept(M message, InterceptionContext<M> context)
         {
-            if (message.isRequest())
+            if (message.isRequest() && context.isSending())
                 sent.put(message.to(), (Request<Mutation, EmptyPayload>)message);
-            return false;
-        }
 
-        public boolean allowIncomingMessage(Message message)
-        {
-            return false;
+            context.drop(message);
         }
     }
 

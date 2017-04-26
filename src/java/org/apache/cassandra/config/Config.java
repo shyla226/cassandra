@@ -269,7 +269,7 @@ public class Config
     public volatile int index_summary_resize_interval_in_minutes = 60;
 
     public int gc_log_threshold_in_ms = 200;
-    public int gc_warn_threshold_in_ms = 0;
+    public int gc_warn_threshold_in_ms = 1000;
 
     // TTL for different types of trace events.
     public int tracetype_query_ttl = (int) TimeUnit.DAYS.toSeconds(1);
@@ -344,6 +344,10 @@ public class Config
 
     /** The configuration for continuous paging */
     public ContinuousPagingConfig continuous_paging = new ContinuousPagingConfig();
+
+    // main memory options
+    public int max_memory_to_lock_mb = 0;
+    public double max_memory_to_lock_fraction = 0.20;
 
     /** How often histograms used by JMX metrics are updated, in milliseconds */
     public int metrics_histogram_update_interval_millis = 1000;

@@ -29,6 +29,7 @@ import org.apache.cassandra.serializers.IntegerSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 public final class IntegerType extends NumberType<BigInteger>
 {
@@ -128,6 +129,74 @@ public final class IntegerType extends NumberType<BigInteger>
         }
 
         return 0;
+    }
+
+    /**
+     * Constructs a byte-comparable representation of the number.
+     * We represent it as
+     *    <zero or more length_bytes where length = 128> <length_byte> <first_significant_byte> <zero or more bytes>
+     * where a length_byte is:
+     *    - 0x80 + (length - 1) for positive numbers (so that longer length sorts bigger)
+     *    - 0x7F - (length - 1) for negative numbers (so that longer length sorts smaller)
+     * we don't need to sign-invert the first significant byte as the order there is already determined by the length
+     * byte.
+     *
+     * Examples:
+     *    0             as 8000
+     *    1             as 8001
+     *    127           as 807F
+     *    255           as 80FF
+     *    2^32-1        as 837FFFFFFF
+     *    2^32          as 8380000000
+     *    2^33          as 840100000000
+     */
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        int p = buf.position();
+        final int limit = buf.limit();
+        if (p == limit)
+            return null;
+
+        // skip padding
+        final byte signbyte = buf.get(p);
+        if (signbyte == 0 || signbyte == -1)
+            while (p + 1 < limit && buf.get(++p) == signbyte) {}
+        final int startpos = p;
+
+        return new ByteSource.WithToString()
+        {
+            int pos = startpos;
+            int sizeToReport = limit - startpos;
+            boolean sizeReported = false;
+
+            public void reset()
+            {
+                pos = startpos;
+                sizeToReport = limit - startpos;
+                sizeReported = false;
+            }
+
+            public int next()
+            {
+                if (!sizeReported)
+                {
+                    int v = sizeToReport;
+                    if (v >= 128)
+                        v = 128;
+                    else
+                        sizeReported = true;
+
+                    sizeToReport -= v;
+                    return signbyte >= 0
+                            ? 0x80 + (v - 1)
+                            : 0x7F - (v - 1);
+                }
+                if (pos == limit)
+                    return END_OF_STREAM;
+
+                return buf.get(pos++) & 0xFF;
+            }
+        };
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

@@ -87,9 +87,9 @@ public class Response<Q> extends Message<Q>
         return localTestResponse(verb, EmptyPayload.instance);
     }
 
-    public boolean isRequest()
+    public Type type()
     {
-        return false;
+        return Type.RESPONSE;
     }
 
     public Verb<?, Q> verb()
@@ -114,7 +114,7 @@ public class Response<Q> extends Message<Q>
         return false;
     }
 
-    void deliverTo(MessageCallback<Q> callback)
+    public void deliverTo(MessageCallback<Q> callback)
     {
         callback.onResponse(this);
     }

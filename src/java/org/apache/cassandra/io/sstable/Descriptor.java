@@ -241,8 +241,6 @@ public class Descriptor
         }
 
         String versionString = tokens.get(0);
-        if (!Version.validate(versionString))
-            throw invalidSSTable(name, "invalid version %s", versionString);
 
         int generation;
         try
@@ -264,6 +262,8 @@ public class Descriptor
         {
             throw invalidSSTable(name, "unknown 'format' part (%s)", formatString);
         }
+        if (!format.validateVersion(versionString))
+            throw invalidSSTable(name, "invalid version %s", versionString);
 
         Component component = Component.parse(tokens.get(3));
 

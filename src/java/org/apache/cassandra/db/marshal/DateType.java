@@ -31,6 +31,7 @@ import org.apache.cassandra.serializers.TimestampSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 
 /**
  * This is the old version of TimestampType, but has been replaced as it wasn't comparing pre-epoch timestamps
@@ -48,6 +49,12 @@ public class DateType extends AbstractType<Date>
     public boolean isEmptyValueMeaningless()
     {
         return true;
+    }
+
+    public ByteSource asByteComparableSource(ByteBuffer buf)
+    {
+        // While BYTE_ORDER would still work for this type, making use of the fixed length is more efficient.
+        return ByteSource.optionalFixedLength(buf);
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

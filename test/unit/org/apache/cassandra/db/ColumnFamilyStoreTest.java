@@ -279,9 +279,9 @@ public class ColumnFamilyStoreTest
         for (int version = 1; version <= 2; ++version)
         {
             Descriptor existing = new Descriptor(cfs.getDirectories().getDirectoryForNewSSTables(), KEYSPACE2, CF_STANDARD1, version,
-                                                 SSTableFormat.Type.BIG);
-            Descriptor desc = new Descriptor(Directories.getBackupsDirectory(existing), KEYSPACE2, CF_STANDARD1, version, SSTableFormat.Type.BIG);
-            for (Component c : new Component[]{ Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.STATS })
+                                                 SSTableFormat.Type.TRIE_INDEX);
+            Descriptor desc = new Descriptor(Directories.getBackupsDirectory(existing), KEYSPACE2, CF_STANDARD1, version, SSTableFormat.Type.TRIE_INDEX);
+            for (Component c : SSTableReader.requiredComponents(desc))
                 assertTrue("Cannot find backed-up file:" + desc.filenameFor(c), new File(desc.filenameFor(c)).exists());
         }
     }

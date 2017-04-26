@@ -31,10 +31,12 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -105,6 +107,11 @@ public class KeyCollisionTest
         // convenience method for testing
         public BigIntegerToken(String token) {
             this(Long.valueOf(token));
+        }
+
+        public ByteSource asByteComparableSource()
+        {
+            return IntegerType.instance.asByteComparableSource(IntegerType.instance.decompose(token));
         }
 
         @Override
