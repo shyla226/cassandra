@@ -58,7 +58,6 @@ public class RemoveTest
 
     StorageService ss = StorageService.instance;
     TokenMetadata tmd = ss.getTokenMetadata();
-    static IPartitioner oldPartitioner;
     ArrayList<Token> endpointTokens = new ArrayList<Token>();
     ArrayList<Token> keyTokens = new ArrayList<Token>();
     List<InetAddress> hosts = new ArrayList<InetAddress>();
@@ -66,16 +65,21 @@ public class RemoveTest
     InetAddress removalhost;
     UUID removalId;
 
+    @BeforeClass
+    public static void setupClass() throws ConfigurationException
+    {
+        SchemaLoader.loadSchema();
+    }
+
     @Before
     public void setup() throws IOException, ConfigurationException
     {
         tmd.clearUnsafe();
-        IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
 
         // create a ring of 5 nodes
-        Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 6);
+        Util.createInitialRing(ss, Util.testPartitioner(), endpointTokens, keyTokens, hosts, hostIds, 6);
 
-        MessagingService.instance().listen();
+        Gossiper.instance.start(1);
         removalhost = hosts.get(5);
         hosts.remove(removalhost);
         removalId = hostIds.get(5);
@@ -151,6 +155,7 @@ public class RemoveTest
 
         for (InetAddress host : hosts)
             MessagingService.instance().sendSingleTarget(Verbs.OPERATIONS.REPLICATION_FINISHED.newRequest(host, EmptyPayload.instance));
+        // FIXME: We don't receive the messages for the other hosts.
 
         remover.join();
 
