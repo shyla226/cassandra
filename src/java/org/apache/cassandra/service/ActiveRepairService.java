@@ -64,6 +64,7 @@ import org.apache.cassandra.net.FailureResponse;
 import org.apache.cassandra.net.MessageCallback;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.net.Response;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.RepairParallelism;
@@ -186,6 +187,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              Set<InetAddress> endpoints,
                                              boolean isConsistent,
                                              boolean pullRepair,
+                                             PreviewKind previewKind,
                                              ListeningExecutorService executor,
                                              String... cfnames)
     {
@@ -195,7 +197,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (cfnames.length == 0)
             return null;
 
-        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isConsistent, pullRepair, cfnames);
+        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isConsistent, pullRepair, previewKind, cfnames);
 
         sessions.put(session.getId(), session);
         // register listeners
@@ -338,7 +340,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     {
         // we only want repairedAt for incremental repairs, for non incremental repairs, UNREPAIRED_SSTABLE will preserve repairedAt on streamed sstables
         long repairedAt = options.isIncremental() ? Clock.instance.currentTimeMillis() : ActiveRepairService.UNREPAIRED_SSTABLE;
-        registerParentRepairSession(parentRepairSession, coordinator, columnFamilyStores, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal());
+        registerParentRepairSession(parentRepairSession, coordinator, columnFamilyStores, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
         final CountDownLatch prepareLatch = new CountDownLatch(endpoints.size());
         final AtomicBoolean status = new AtomicBoolean(true);
         final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
@@ -365,7 +367,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         {
             if (FailureDetector.instance.isAlive(neighbour))
             {
-                PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal());
+                PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
                 MessagingService.instance().send(Verbs.REPAIR.PREPARE.newRequest(neighbour, message), callback);
             }
             else
@@ -399,7 +401,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         throw new RuntimeException(errorMsg);
     }
 
-    public void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal)
+    public void registerParentRepairSession(UUID parentRepairSession, InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal, PreviewKind previewKind)
     {
         assert isIncremental || repairedAt == ActiveRepairService.UNREPAIRED_SSTABLE;
         if (!registeredForEndpointChanges)
@@ -409,7 +411,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             registeredForEndpointChanges = true;
         }
 
-        parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal));
+        parentRepairSessions.put(parentRepairSession, new ParentRepairSession(coordinator, columnFamilyStores, ranges, isIncremental, repairedAt, isGlobal, previewKind));
     }
 
     public ParentRepairSession getParentRepairSession(UUID parentSessionId)
@@ -461,8 +463,14 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
 
         ActiveRepairService.instance.consistent.local.maybeSetRepairing(desc.parentSessionId);
-        Validator validator = new Validator(desc, from, request.gcBefore, isConsistent(desc.parentSessionId));
+        Validator validator = new Validator(desc, from, request.gcBefore, isConsistent(desc.parentSessionId), previewKind(desc.parentSessionId));
         CompactionManager.instance.submitValidation(store, validator);
+    }
+
+    private PreviewKind previewKind(UUID sessionID)
+    {
+        ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
+        return prs != null ? prs.previewKind : PreviewKind.NONE;
     }
 
     public void handleValidationComplete(InetAddress from, ValidationComplete validation)
@@ -480,11 +488,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         RepairJobDesc desc = sync.desc;
         // forwarded sync request
         logger.debug("Syncing {}", sync);
-        long repairedAt = ActiveRepairService.UNREPAIRED_SSTABLE;
-        if (desc.parentSessionId != null && ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId) != null)
-            repairedAt = ActiveRepairService.instance.getParentRepairSession(desc.parentSessionId).getRepairedAt();
-
-        StreamingRepairTask task = new StreamingRepairTask(desc, sync, isConsistent(desc.parentSessionId) ? desc.parentSessionId : null);
+        StreamingRepairTask task = new StreamingRepairTask(desc, sync, isConsistent(desc.parentSessionId) ? desc.parentSessionId : null, sync.previewKind);
         task.run();
     }
 
@@ -495,7 +499,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (session == null)
             return;
 
-        session.syncComplete(desc, sync.nodes, sync.success);
+        session.syncComplete(desc, sync.nodes, sync.success, sync.summaries);
     }
 
     public void handlePrepare(InetAddress from, PrepareMessage prepareMessage)
@@ -516,7 +520,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                     prepareMessage.ranges,
                                     prepareMessage.isIncremental,
                                     prepareMessage.timestamp,
-                                    prepareMessage.isGlobal);
+                                    prepareMessage.isGlobal,
+                                    prepareMessage.previewKind);
     }
 
     public void handleSnapshot(InetAddress from, SnapshotMessage snapshotMessage)
@@ -557,8 +562,9 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         public final boolean isGlobal;
         public final long repairedAt;
         public final InetAddress coordinator;
+        public final PreviewKind previewKind;
 
-        public ParentRepairSession(InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal)
+        public ParentRepairSession(InetAddress coordinator, List<ColumnFamilyStore> columnFamilyStores, Collection<Range<Token>> ranges, boolean isIncremental, long repairedAt, boolean isGlobal, PreviewKind previewKind)
         {
             this.coordinator = coordinator;
             for (ColumnFamilyStore cfs : columnFamilyStores)
@@ -569,6 +575,27 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             this.repairedAt = repairedAt;
             this.isIncremental = isIncremental;
             this.isGlobal = isGlobal;
+            this.previewKind = previewKind;
+        }
+
+        public boolean isPreview()
+        {
+            return previewKind != PreviewKind.NONE;
+        }
+
+        public Predicate<SSTableReader> getPreviewPredicate()
+        {
+            switch (previewKind)
+            {
+                case ALL:
+                    return (s) -> true;
+                case REPAIRED:
+                    return (s) -> s.isRepaired();
+                case UNREPAIRED:
+                    return (s) -> !s.isRepaired();
+                default:
+                    throw new RuntimeException("Can't get preview predicate for preview kind " + previewKind);
+            }
         }
 
         public synchronized void maybeSnapshot(TableId tableId, UUID parentSessionId)

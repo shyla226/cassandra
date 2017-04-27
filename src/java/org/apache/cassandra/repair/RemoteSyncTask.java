@@ -33,6 +33,8 @@ import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncRequest;
+import org.apache.cassandra.streaming.PreviewKind;
+import org.apache.cassandra.streaming.SessionSummary;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -50,9 +52,10 @@ public class RemoteSyncTask extends SyncTask
     private final RepairSession session;
 
     public RemoteSyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, RepairSession session,
-                          Executor taskExecutor, SyncTask next, Map<InetAddress, Set<RangeHash>> receivedRangeCache)
+                          Executor taskExecutor, SyncTask next, Map<InetAddress, Set<RangeHash>> receivedRangeCache,
+                          PreviewKind previewKind)
     {
-        super(desc, r1, r2, taskExecutor, next, receivedRangeCache);
+        super(desc, r1, r2, taskExecutor, next, receivedRangeCache, previewKind);
         this.session = session;
     }
 
@@ -68,25 +71,25 @@ public class RemoteSyncTask extends SyncTask
         ranges.add(StreamingRepairTask.RANGE_SEPARATOR);
         ranges.addAll(transferToRight);
 
-        SyncRequest request = new SyncRequest(desc, local, r1.endpoint, r2.endpoint, ranges);
+        SyncRequest request = new SyncRequest(desc, local, r1.endpoint, r2.endpoint, ranges, previewKind);
         String message = String.format("Forwarding streaming repair of %d ranges to %s%s (to be streamed with %s)",
                                        transferToLeft.size(), request.src, transferToLeft.size() != transferToRight.size()?
                                                                            String.format(" and %d ranges from", transferToRight.size()) : "",
                                        request.dst);
-        logger.info("[repair #{}] {}", desc.sessionId, message);
+        logger.info("{} {}", previewKind.logPrefix(desc.sessionId), message);
         Tracing.traceRepair(message);
         MessagingService.instance().send(Verbs.REPAIR.SYNC_REQUEST.newRequest(request.src, request));
     }
 
-    public void syncComplete(boolean success)
+    public void syncComplete(boolean success, List<SessionSummary> summaries)
     {
         if (success)
         {
-            set(stat);
+            set(stat.withSummaries(summaries));
         }
         else
         {
-            setException(new RepairException(desc, String.format("Sync failed between %s and %s", r1.endpoint, r2.endpoint)));
+            setException(new RepairException(desc, previewKind, String.format("Sync failed between %s and %s", r1.endpoint, r2.endpoint)));
         }
     }
 }
