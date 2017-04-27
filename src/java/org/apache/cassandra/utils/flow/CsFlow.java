@@ -27,6 +27,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -38,6 +39,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -524,9 +526,14 @@ public abstract class CsFlow<T>
         final CsSubscription sub;
         final BiFunction<O, T, O> reducer;
         O current;
-        volatile boolean requesting;
-        volatile boolean received;
         private StackTraceElement[] stackTrace;
+
+        enum State {
+            OUT_OF_LOOP,
+            IN_LOOP_REQUESTED,
+            IN_LOOP_READY,
+        }
+        AtomicReference<State> state = new AtomicReference<>(State.OUT_OF_LOOP);
 
         ReduceSubscriber(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
         {
@@ -550,27 +557,35 @@ public abstract class CsFlow<T>
             // next request within this call. If not, the loop is still going in another thread and we can still signal
             // it to continue (making sure we don't leave while receiving the signal).
 
-            synchronized (this)
-            {
-                if (requesting)
-                    return;
-                requesting = true;
-            }
+            if (!state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
+                return;
+            requestLoop();
+        }
 
+        private void requestLoop()
+        {
             while (true)
             {
-                received = false;
+                // The loop can only be entered in IN_LOOP_READY
+                if (!verifyStateChange(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
+                    return;
+
                 sub.request();
 
-                synchronized (this)
-                {
-                    if (!received)
-                    {
-                        requesting = false;
-                        break;
-                    }
-                }
+                // If we didn't receive item, leave
+                if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.OUT_OF_LOOP))
+                    break;
             }
+        }
+
+        private boolean verifyStateChange(State from, State to)
+        {
+            State prev = state.getAndSet(to);
+            if (prev == from)
+                return true;
+
+            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
+            return false;
         }
 
         public void onNext(T item)
@@ -585,8 +600,12 @@ public abstract class CsFlow<T>
                 return;
             }
 
-            received = true;
-            request();
+            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
+                return;
+
+            // We must be out of the loop if the above failed; re-start looping.
+            if (verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_READY))
+                requestLoop();
         }
 
         public void close() throws Exception
@@ -1016,11 +1035,9 @@ public abstract class CsFlow<T>
     public CsFlow<T> delayOnNext(long sleepFor, TimeUnit timeUnit)
     {
         return apply(((subscriber, source, next) ->
-                      ForkJoinPool.commonPool().submit(() ->
-                                                       {
-                                                           Uninterruptibles.sleepUninterruptibly(sleepFor, timeUnit);
-                                                           subscriber.onNext(next);
-                                                       })));
+                      Schedulers.computation().scheduleDirect(() -> subscriber.onNext(next),
+                                                              sleepFor,
+                                                              timeUnit)));
     }
 
     /**

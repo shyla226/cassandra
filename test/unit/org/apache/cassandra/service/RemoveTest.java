@@ -56,7 +56,6 @@ public class RemoveTest
         DatabaseDescriptor.daemonInitialization();
     }
 
-    static final IPartitioner partitioner = RandomPartitioner.instance;
     StorageService ss = StorageService.instance;
     TokenMetadata tmd = ss.getTokenMetadata();
     static IPartitioner oldPartitioner;
@@ -67,22 +66,11 @@ public class RemoveTest
     InetAddress removalhost;
     UUID removalId;
 
-    @BeforeClass
-    public static void setupClass() throws ConfigurationException
-    {
-        oldPartitioner = StorageService.instance.setPartitionerUnsafe(partitioner);
-    }
-
-    @AfterClass
-    public static void tearDownClass()
-    {
-        StorageService.instance.setPartitionerUnsafe(oldPartitioner);
-    }
-
     @Before
     public void setup() throws IOException, ConfigurationException
     {
         tmd.clearUnsafe();
+        IPartitioner partitioner = DatabaseDescriptor.getPartitioner();
 
         // create a ring of 5 nodes
         Util.createInitialRing(ss, partitioner, endpointTokens, keyTokens, hosts, hostIds, 6);

@@ -20,6 +20,7 @@ package org.apache.cassandra.utils.flow;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Operator for grouping elements of a CsFlow. Used with {@link CsFlow#group(GroupOp)}.
@@ -61,10 +62,16 @@ public interface GroupOp<I, O>
         final GroupOp<I, O> mapper;
         final CsSubscription source;
         volatile boolean completeOnNextRequest;
-        volatile boolean requesting;
-        volatile boolean requested;
         I first;
         List<I> entries;
+
+        enum State
+        {
+            OUT_OF_LOOP,
+            IN_LOOP_READY,
+            IN_LOOP_REQUESTED
+        }
+        AtomicReference<State> state = new AtomicReference<>(State.OUT_OF_LOOP);
 
         public Subscription(CsSubscriber<O> subscriber, GroupOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
@@ -124,32 +131,39 @@ public interface GroupOp<I, O>
             // So if a request was issued in response to onNext which an ongoing request triggered (and thus control
             // will return to the request loop after the onNext and request chains return), mark it and process
             // it when control returns to the loop.
-            synchronized (this)
-            {
-                assert !requested;
-                requested = true;
-                if (requesting)
-                    return;
-                requesting = true;
-            }
 
+            if (state.compareAndSet(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
+                // Another call (concurrent or in the call chain) has the loop and we successfully told it to continue.
+                return;
+
+            // If the above failed, we must be OUT_OF_LOOP (possibly just concurrently transitioned out of it).
+            // Since there can be no other concurrent access, we can grab the loop now.
+            if (!verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_REQUESTED))
+                return;
+
+            // We got the loop.
             while (true)
             {
-                requested = false;
+                verifyStateChange(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY);
                 if (!completeOnNextRequest)
                     source.request();
                 else
                     subscriber.onComplete();
 
-                synchronized (this)
-                {
-                    if (!requested)
-                    {
-                        requesting = false;
-                        break;
-                    }
-                }
+                // If we didn't get another request, leave.
+                if (state.compareAndSet(State.IN_LOOP_READY, State.OUT_OF_LOOP))
+                    return;
             }
+        }
+
+        private boolean verifyStateChange(State from, State to)
+        {
+            State prev = state.getAndSet(to);
+            if (prev == from)
+                return true;
+
+            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
+            return false;
         }
 
         public void close() throws Exception

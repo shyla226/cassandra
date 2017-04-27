@@ -32,6 +32,7 @@ import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -61,9 +62,9 @@ public class MergeTest
     }
 
     static int ITERATOR_COUNT = 15;
-    static int LIST_LENGTH = 2500;
-    static boolean BENCHMARK = false;
-    static int DELAY_CHANCE = 3;            // 1/this of the inputs will be async delayed randomly, 0 for all
+    static int LIST_LENGTH = 4500;
+    static int DELAY_CHANCE = 9;            // 1/this of the inputs will be async delayed randomly, 0 for all
+    static int SCHEDULE_CHANCE = 4;
     Random rand = new Random();
 
     @Test
@@ -500,12 +501,14 @@ public class MergeTest
         return lists.stream().map(list -> maybeDelayed(CsFlow.fromIterable(list))).collect(Collectors.toList());
     }
     
-    <T> CsFlow<T> maybeDelayed(CsFlow<T> CsFlow)
+    <T> CsFlow<T> maybeDelayed(CsFlow<T> flow)
     {
         if (rand.nextInt(DELAY_CHANCE) == 0)
-            return CsFlow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS);
+            return flow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS);
+        else if (rand.nextInt(SCHEDULE_CHANCE) == 0)
+            return flow.lift(Threads.requestOnIo());
         else
-            return CsFlow;
+            return flow;
     }
     
     public <T> List<CLI<T>> closeableIterators(List<List<T>> iterators)

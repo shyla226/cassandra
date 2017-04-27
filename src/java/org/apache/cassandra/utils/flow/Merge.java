@@ -195,9 +195,10 @@ public class Merge<In, Out> extends CsFlow<Out>
         {
             // Set to 1 initially to guard so we don't get called while we are increasing advancing.
             // It must be 0 before we are called.
-            if (!advancing.compareAndSet(0, 1))
+            int prev = advancing.getAndIncrement();
+            if (prev != 0)
             {
-                subscriber.onError(new AssertionError("Merge advance called while another has " + advancing.get() + " outstanding requests.\n\t" + this));
+                subscriber.onError(new AssertionError("Merge advance called while another has " + prev + " outstanding requests.\n\t" + this));
                 return;
             }
 
