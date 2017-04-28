@@ -34,6 +34,7 @@ import org.apache.cassandra.net.VerbGroup;
 import org.apache.cassandra.net.VerbHandlers;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.streaming.messages.StreamMessage;
 import org.apache.cassandra.utils.versioning.Version;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -43,13 +44,16 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
 
     public enum RepairVersion implements Version<RepairVersion>
     {
-        OSS_30(BoundsVersion.OSS_30);
+        OSS_30(BoundsVersion.OSS_30, StreamMessage.StreamVersion.OSS_30),
+        OSS_40(BoundsVersion.OSS_30, StreamMessage.StreamVersion.OSS_40); // Adds session summary to repair messages
 
         public final BoundsVersion boundsVersion;
+        public final StreamMessage.StreamVersion streamVersion;
 
-        RepairVersion(BoundsVersion boundsVersion)
+        RepairVersion(BoundsVersion boundsVersion, StreamMessage.StreamVersion streamVersion)
         {
             this.boundsVersion = boundsVersion;
+            this.streamVersion = streamVersion;
         }
 
         public static <T> Versioned<RepairVersion, T> versioned(Function<RepairVersion, ? extends T> function)

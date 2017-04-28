@@ -39,6 +39,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.ValidationComplete;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTree;
@@ -76,22 +77,25 @@ public class Validator implements Runnable
     // last key seen
     private DecoratedKey lastKey;
 
-    public Validator(RepairJobDesc desc, InetAddress initiator, int gcBefore)
+    private final PreviewKind previewKind;
+
+    public Validator(RepairJobDesc desc, InetAddress initiator, int gcBefore, PreviewKind previewKind)
     {
-        this(desc, initiator, gcBefore, false, false);
+        this(desc, initiator, gcBefore, false, false, previewKind);
     }
 
-    public Validator(RepairJobDesc desc, InetAddress initiator, int gcBefore, boolean isConsistent)
+    public Validator(RepairJobDesc desc, InetAddress initiator, int gcBefore, boolean isConsistent, PreviewKind previewKind)
     {
-        this(desc, initiator, gcBefore, false, isConsistent);
+        this(desc, initiator, gcBefore, false, isConsistent, previewKind);
     }
 
-    public Validator(RepairJobDesc desc, InetAddress initiator, int gcBefore, boolean evenTreeDistribution, boolean isConsistent)
+    public Validator(RepairJobDesc desc, InetAddress initiator, int gcBefore, boolean evenTreeDistribution, boolean isConsistent, PreviewKind previewKind)
     {
         this.desc = desc;
         this.initiator = initiator;
         this.gcBefore = gcBefore;
         this.isConsistent = isConsistent;
+        this.previewKind = previewKind;
         validated = 0;
         range = null;
         ranges = null;
@@ -290,7 +294,7 @@ public class Validator implements Runnable
         // respond to the request that triggered this validation
         if (!initiator.equals(FBUtilities.getBroadcastAddress()))
         {
-            logger.info("[repair #{}] Sending completed merkle tree to {} for {}.{}", desc.sessionId, initiator, desc.keyspace, desc.columnFamily);
+            logger.info("{} Sending completed merkle tree to {} for {}.{}", previewKind.logPrefix(desc.sessionId), initiator, desc.keyspace, desc.columnFamily);
             Tracing.traceRepair("Sending completed merkle tree to {} for {}.{}", initiator, desc.keyspace, desc.columnFamily);
         }
         MessagingService.instance().send(Verbs.REPAIR.VALIDATION_COMPLETE.newRequest(initiator, new ValidationComplete(desc, trees)));

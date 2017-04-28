@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collections;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -33,6 +34,7 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncComplete;
 import org.apache.cassandra.repair.messages.SyncRequest;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.StreamEvent;
 import org.apache.cassandra.streaming.StreamEventHandler;
@@ -52,6 +54,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     private final RepairJobDesc desc;
     private final SyncRequest request;
     private final UUID pendingRepair;
+    private final PreviewKind previewKind;
 
     // Since adding transferToLeft and transferToRight fields to SyncRequest would require
     // a protocol version change, we separate those by an empty range (MIN_VALUE, MIN_VALUE)
@@ -59,11 +62,12 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     public static final Range<Token> RANGE_SEPARATOR = new Range<>(MessagingService.globalPartitioner().getMinimumToken(),
                                                                    MessagingService.globalPartitioner().getMinimumToken());
 
-    public StreamingRepairTask(RepairJobDesc desc, SyncRequest request, UUID pendingRepair)
+    public StreamingRepairTask(RepairJobDesc desc, SyncRequest request, UUID pendingRepair, PreviewKind previewKind)
     {
         this.desc = desc;
         this.request = request;
         this.pendingRepair = pendingRepair;
+        this.previewKind = previewKind;
     }
 
     public void run()
@@ -100,7 +104,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
         logger.info(String.format("[streaming task #%s] Performing streaming repair of %d ranges to and %d ranges from %s.",
                                   desc.sessionId, toTransfer.size(), toRequest.size(), request.dst));
 
-        return new StreamPlan(StreamOperation.REPAIR, 1, false, false, pendingRepair)
+        return new StreamPlan(StreamOperation.REPAIR, 1, false, false, pendingRepair, previewKind)
                .listeners(this)
                .flushBeforeTransfer(false) // flush is disabled for repair
                .requestRanges(dest, preferred, desc.keyspace, toRequest, desc.columnFamily) // request ranges from the remote node
@@ -118,8 +122,8 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
      */
     public void onSuccess(StreamState state)
     {
-        logger.info("[repair #{}] streaming task succeed, returning response to {}", desc.sessionId, request.initiator);
-        MessagingService.instance().send(Verbs.REPAIR.SYNC_COMPLETE.newRequest(request.initiator, new SyncComplete(desc, request.src, request.dst, true)));
+        logger.info("{} streaming task succeed, returning response to {}", previewKind.logPrefix(desc.sessionId), request.initiator);
+        MessagingService.instance().send(Verbs.REPAIR.SYNC_COMPLETE.newRequest(request.initiator, new SyncComplete(desc, request.src, request.dst, true, state.createSummaries())));
     }
 
     /**
@@ -127,6 +131,6 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
      */
     public void onFailure(Throwable t)
     {
-        MessagingService.instance().send(Verbs.REPAIR.SYNC_COMPLETE.newRequest(request.initiator, new SyncComplete(desc, request.src, request.dst, false)));
+        MessagingService.instance().send(Verbs.REPAIR.SYNC_COMPLETE.newRequest(request.initiator, new SyncComplete(desc, request.src, request.dst, false, Collections.emptyList())));
     }
 }

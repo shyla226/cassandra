@@ -1,4 +1,6 @@
 4.0
+ * Start compaction when incremental repair finishes (CASSANDRA-13454)
+ * Add repair streaming preview (CASSANDRA-13257)
  * Cleanup isIncremental/repairedAt usage (CASSANDRA-13430)
  * Change protocol to allow sending key space independent of query string (CASSANDRA-10145)
  * Make gc_log and gc_warn settable at runtime (CASSANDRA-12661)
@@ -57,6 +59,7 @@
 
 
 3.11.0
+ * Fix compaction-stress by using daemonInitialization (CASSANDRA-13188)
  * V5 protocol flags decoding broken (CASSANDRA-13443)
  * Use write lock not read lock for removing sstables from compaction strategies. (CASSANDRA-13422)
  * Use corePoolSize equal to maxPoolSize in JMXEnabledThreadPoolExecutors (CASSANDRA-13329)

@@ -32,6 +32,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -55,6 +56,7 @@ public class StreamInitMessage
             out.writeBoolean(message.pendingRepair != null);
             if (message.pendingRepair != null)
                 UUIDSerializer.serializer.serialize(message.pendingRepair, out);
+            out.writeInt(message.previewKind.getSerializationVal());
         }
 
         public StreamInitMessage deserialize(DataInputPlus in) throws IOException
@@ -67,7 +69,8 @@ public class StreamInitMessage
             boolean keepSSTableLevel = in.readBoolean();
 
             UUID pendingRepair = in.readBoolean() ? UUIDSerializer.serializer.deserialize(in) : null;
-            return new StreamInitMessage(from, sessionIndex, planId, StreamOperation.fromString(description), sentByInitiator, keepSSTableLevel, pendingRepair);
+            PreviewKind previewKind = PreviewKind.deserialize(in.readInt());
+            return new StreamInitMessage(from, sessionIndex, planId, StreamOperation.fromString(description), sentByInitiator, keepSSTableLevel, pendingRepair, previewKind);
         }
 
         public long serializedSize(StreamInitMessage message)
@@ -81,6 +84,7 @@ public class StreamInitMessage
             size += TypeSizes.sizeof(message.pendingRepair != null);
             if (message.pendingRepair != null)
                 size += UUIDSerializer.serializer.serializedSize(message.pendingRepair);
+            size += TypeSizes.sizeof(message.previewKind.getSerializationVal());
             return size;
         }
     });
@@ -94,8 +98,9 @@ public class StreamInitMessage
     public final boolean isForOutgoing;
     public final boolean keepSSTableLevel;
     public final UUID pendingRepair;
+    public final PreviewKind previewKind;
 
-    public StreamInitMessage(InetAddress from, int sessionIndex, UUID planId, StreamOperation streamOperation, boolean isForOutgoing, boolean keepSSTableLevel, UUID pendingRepair)
+    public StreamInitMessage(InetAddress from, int sessionIndex, UUID planId, StreamOperation streamOperation, boolean isForOutgoing, boolean keepSSTableLevel, UUID pendingRepair, PreviewKind previewKind)
     {
         this.from = from;
         this.sessionIndex = sessionIndex;
@@ -104,6 +109,7 @@ public class StreamInitMessage
         this.isForOutgoing = isForOutgoing;
         this.keepSSTableLevel = keepSSTableLevel;
         this.pendingRepair = pendingRepair;
+        this.previewKind = previewKind;
     }
 
     /**

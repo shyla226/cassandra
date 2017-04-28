@@ -31,7 +31,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.streaming.StreamResultFuture;
 import org.apache.cassandra.streaming.messages.StreamInitMessage;
 import org.apache.cassandra.streaming.messages.StreamMessage;
-import org.apache.cassandra.streaming.messages.StreamMessage.StreamVersion;
 
 /**
  * Thread to consume stream init messages.
@@ -58,8 +57,7 @@ public class IncomingStreamingConnection extends Thread implements Closeable
     {
         try
         {
-            StreamVersion streamVersion = StreamVersion.of(version);
-
+            StreamMessage.StreamVersion streamVersion = StreamMessage.StreamVersion.of(version);
             // streaming connections are per-session and have a fixed version.
             // we can't do anything with a wrong-version stream connection, so drop it.
             if (streamVersion == null)
@@ -77,7 +75,9 @@ public class IncomingStreamingConnection extends Thread implements Closeable
             // The receiving side distinguish two connections by looking at StreamInitMessage#isForOutgoing.
             // Note: we cannot use the same socket for incoming and outgoing streams because we want to
             // parallelize said streams and the socket is blocking, so we might deadlock.
-            StreamResultFuture.initReceivingSide(init.sessionIndex, init.planId, init.streamOperation, init.from, this, init.isForOutgoing, streamVersion, init.keepSSTableLevel, init.pendingRepair);
+            StreamResultFuture.initReceivingSide(init.sessionIndex, init.planId, init.streamOperation, init.from, this,
+                                                 init.isForOutgoing, streamVersion, init.keepSSTableLevel, init.pendingRepair,
+                                                 init.previewKind);
         }
         catch (Throwable t)
         {

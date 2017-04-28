@@ -36,6 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MerkleTree;
@@ -53,6 +54,7 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
     protected final RepairJobDesc desc;
     protected final TreeResponse r1;
     protected final TreeResponse r2;
+    protected final PreviewKind previewKind;
     private final Executor taskExecutor;
     private final SyncTask next;
     private final Map<InetAddress, Set<RangeHash>> receivedRangeCache;
@@ -60,11 +62,12 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
     protected volatile SyncStat stat;
 
     public SyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, Executor taskExecutor, SyncTask next,
-                    Map<InetAddress, Set<RangeHash>> receivedRangeCache)
+                    Map<InetAddress, Set<RangeHash>> receivedRangeCache, PreviewKind previewKind)
     {
         this.desc = desc;
         this.r1 = r1;
         this.r2 = r2;
+        this.previewKind = previewKind;
         this.taskExecutor = taskExecutor;
         this.next = next;
         this.receivedRangeCache = receivedRangeCache;
@@ -83,7 +86,7 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
             stat = new SyncStat(new NodePair(r1.endpoint, r2.endpoint), diffs.size());
 
             // choose a repair method based on the significance of the difference
-            String format = String.format("[repair #%s] Endpoints %s and %s %%s for %s", desc.sessionId, r1.endpoint, r2.endpoint, desc.columnFamily);
+            String format = String.format("%s Endpoints %s and %s %%s for %s", previewKind.logPrefix(desc.sessionId), r1.endpoint, r2.endpoint, desc.columnFamily);
             if (diffs.isEmpty())
             {
                 logger.info(String.format(format, "are consistent"));

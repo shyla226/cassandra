@@ -29,14 +29,14 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
-
 
 public class PrepareMessage extends RepairMessage<PrepareMessage>
 {
@@ -57,6 +57,7 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
             out.writeBoolean(message.isIncremental);
             out.writeLong(message.timestamp);
             out.writeBoolean(message.isGlobal);
+            out.writeInt(message.previewKind.getSerializationVal());
         }
 
         public PrepareMessage deserialize(DataInputPlus in) throws IOException
@@ -73,7 +74,8 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
             boolean isIncremental = in.readBoolean();
             long timestamp = in.readLong();
             boolean isGlobal = in.readBoolean();
-            return new PrepareMessage(parentRepairSession, tableIds, ranges, isIncremental, timestamp, isGlobal);
+            PreviewKind previewKind = PreviewKind.deserialize(in.readInt());
+            return new PrepareMessage(parentRepairSession, tableIds, ranges, isIncremental, timestamp, isGlobal, previewKind);
         }
 
         public long serializedSize(PrepareMessage message)
@@ -88,6 +90,7 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
             size += TypeSizes.sizeof(message.isIncremental);
             size += TypeSizes.sizeof(message.timestamp);
             size += TypeSizes.sizeof(message.isGlobal);
+            size += TypeSizes.sizeof(message.previewKind.getSerializationVal());
             return size;
         }
     });
@@ -99,8 +102,10 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
     public final boolean isIncremental;
     public final long timestamp;
     public final boolean isGlobal;
+    public final PreviewKind previewKind;
 
-    public PrepareMessage(UUID parentRepairSession, List<TableId> tableIds, Collection<Range<Token>> ranges, boolean isIncremental, long timestamp, boolean isGlobal)
+    public PrepareMessage(UUID parentRepairSession, List<TableId> tableIds, Collection<Range<Token>> ranges, boolean isIncremental, long timestamp, boolean isGlobal,
+                          PreviewKind previewKind)
     {
         super(null);
         this.parentRepairSession = parentRepairSession;
@@ -109,6 +114,7 @@ public class PrepareMessage extends RepairMessage<PrepareMessage>
         this.isIncremental = isIncremental;
         this.timestamp = timestamp;
         this.isGlobal = isGlobal;
+        this.previewKind = previewKind;
     }
 
     @Override

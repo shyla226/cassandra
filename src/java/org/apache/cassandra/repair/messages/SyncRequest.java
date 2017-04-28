@@ -37,6 +37,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.utils.versioning.Versioned;
+import org.apache.cassandra.streaming.PreviewKind;
 
 /**
  * Body part of SYNC_REQUEST repair message.
@@ -60,6 +61,7 @@ public class SyncRequest extends RepairMessage<SyncRequest>
                 MessagingService.validatePartitioner(range);
                 AbstractBounds.tokenSerializer.serialize(range, out, version.boundsVersion);
             }
+            out.writeInt(message.previewKind.getSerializationVal());
         }
 
         public SyncRequest deserialize(DataInputPlus in) throws IOException
@@ -72,7 +74,8 @@ public class SyncRequest extends RepairMessage<SyncRequest>
             List<Range<Token>> ranges = new ArrayList<>(rangesCount);
             for (int i = 0; i < rangesCount; ++i)
                 ranges.add((Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version.boundsVersion));
-            return new SyncRequest(desc, owner, src, dst, ranges);
+            PreviewKind previewKind = PreviewKind.deserialize(in.readInt());
+            return new SyncRequest(desc, owner, src, dst, ranges, previewKind);
         }
 
         public long serializedSize(SyncRequest message)
@@ -82,6 +85,7 @@ public class SyncRequest extends RepairMessage<SyncRequest>
             size += TypeSizes.sizeof(message.ranges.size());
             for (Range<Token> range : message.ranges)
                 size += AbstractBounds.tokenSerializer.serializedSize(range, version.boundsVersion);
+            size += TypeSizes.sizeof(message.previewKind.getSerializationVal());
             return size;
         }
     });
@@ -90,14 +94,16 @@ public class SyncRequest extends RepairMessage<SyncRequest>
     public final InetAddress src;
     public final InetAddress dst;
     public final Collection<Range<Token>> ranges;
+    public final PreviewKind previewKind;
 
-    public SyncRequest(RepairJobDesc desc, InetAddress initiator, InetAddress src, InetAddress dst, Collection<Range<Token>> ranges)
+    public SyncRequest(RepairJobDesc desc, InetAddress initiator, InetAddress src, InetAddress dst, Collection<Range<Token>> ranges, PreviewKind previewKind)
     {
         super(desc);
         this.initiator = initiator;
         this.src = src;
         this.dst = dst;
         this.ranges = ranges;
+        this.previewKind = previewKind;
     }
 
     @Override
@@ -110,13 +116,14 @@ public class SyncRequest extends RepairMessage<SyncRequest>
                initiator.equals(req.initiator) &&
                src.equals(req.src) &&
                dst.equals(req.dst) &&
-               ranges.equals(req.ranges);
+               ranges.equals(req.ranges) &&
+               previewKind == req.previewKind;
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(desc, initiator, src, dst, ranges);
+        return Objects.hash(desc, initiator, src, dst, ranges, previewKind);
     }
 
     public MessageSerializer<SyncRequest> serializer(RepairVersion version)
@@ -137,6 +144,7 @@ public class SyncRequest extends RepairMessage<SyncRequest>
                 ", src=" + src +
                 ", dst=" + dst +
                 ", ranges=" + ranges +
+                ", previewKind=" + previewKind +
                 "} " + super.toString();
     }
 }

@@ -65,10 +65,12 @@ public class ConnectionHandler
 
     private IncomingMessageHandler incoming;
     private OutgoingMessageHandler outgoing;
+    private final boolean isPreview;
 
-    ConnectionHandler(StreamSession session, int incomingSocketTimeout)
+    ConnectionHandler(StreamSession session, int incomingSocketTimeout, boolean isPreview)
     {
         this.session = session;
+        this.isPreview = isPreview;
         this.incoming = new IncomingMessageHandler(session, incomingSocketTimeout);
         this.outgoing = new OutgoingMessageHandler(session);
     }
@@ -143,6 +145,9 @@ public class ConnectionHandler
         if (outgoing.isClosed())
             throw new RuntimeException("Outgoing stream handler has been closed");
 
+        if (message.type == StreamMessage.Type.FILE && isPreview)
+            throw new RuntimeException("Cannot send file messages for preview streaming sessions");
+
         outgoing.enqueue(message);
     }
 
@@ -199,7 +204,8 @@ public class ConnectionHandler
                     session.streamOperation(),
                     !isOutgoingHandler,
                     session.keepSSTableLevel(),
-                    session.getPendingRepair());
+                    session.getPendingRepair(),
+                    session.getPreviewKind());
             ByteBuffer messageBuf = message.createMessage(false, version);
             DataOutputStreamPlus out = getWriteChannel(socket);
             out.write(messageBuf);

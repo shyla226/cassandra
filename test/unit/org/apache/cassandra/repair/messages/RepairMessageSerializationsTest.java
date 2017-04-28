@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import com.google.common.collect.Lists;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -41,13 +42,17 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.repair.NodePair;
+import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.messages.RepairVerbs.RepairVersion;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.streaming.SessionSummary;
+import org.apache.cassandra.streaming.StreamSummary;
 import org.apache.cassandra.utils.MerkleTrees;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.versioning.Version;
+import org.apache.cassandra.utils.UUIDGen;
 
 public class RepairMessageSerializationsTest
 {
@@ -146,7 +151,7 @@ public class RepairMessageSerializationsTest
         InetAddress src = InetAddress.getByName("127.0.0.2");
         InetAddress dst = InetAddress.getByName("127.0.0.3");
 
-        SyncRequest msg = new SyncRequest(buildRepairJobDesc(), initiator, src, dst, buildTokenRanges());
+        SyncRequest msg = new SyncRequest(buildRepairJobDesc(), initiator, src, dst, buildTokenRanges(), PreviewKind.NONE);
         serializeRoundTrip(msg, SyncRequest.serializers.get(CURRENT_VERSION));
     }
 
@@ -155,16 +160,22 @@ public class RepairMessageSerializationsTest
     {
         InetAddress src = InetAddress.getByName("127.0.0.2");
         InetAddress dst = InetAddress.getByName("127.0.0.3");
-        SyncComplete msg = new SyncComplete(buildRepairJobDesc(), new NodePair(src, dst), true);
-        serializeRoundTrip(msg, SyncComplete.serializers.get(CURRENT_VERSION));
+        List<SessionSummary> summaries = new ArrayList<>();
+        summaries.add(new SessionSummary(src, dst,
+                                         Lists.newArrayList(new StreamSummary(TableId.fromUUID(UUIDGen.getTimeUUID()), 5, 100)),
+                                         Lists.newArrayList(new StreamSummary(TableId.fromUUID(UUIDGen.getTimeUUID()), 500, 10))
+        ));
+        SyncComplete msg = new SyncComplete(buildRepairJobDesc(), new NodePair(src, dst), true, summaries);
+        serializeRoundTrip(msg, SyncComplete.serializers.get(RepairVersion.OSS_40));
     }
 
     @Test
     public void prepareMessage() throws IOException
     {
         PrepareMessage msg = new PrepareMessage(UUID.randomUUID(), new ArrayList<TableId>() {{add(TableId.generate());}},
-                                                buildTokenRanges(), true, 100000L, false);
-        serializeRoundTrip(msg, PrepareMessage.serializers.get(CURRENT_VERSION));
+                                                buildTokenRanges(), true, 100000L, false,
+                                                PreviewKind.NONE);
+        serializeRoundTrip(msg, PrepareMessage.serializers.get(RepairVersion.OSS_40));
     }
 
     @Test

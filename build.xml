@@ -1780,7 +1780,7 @@
     ]]>
   </scriptdef>
 
-  <target name="test" depends="build-test" description="Parallel Test Runner">
+  <target name="test" depends="build-test,stress-build" description="Parallel Test Runner">
     <path id="all-test-classes-path">
       <fileset dir="${test.unit.src}" includes="**/${test.name}.java" />
       <!--fileset dir="${test.unit.src}" includes="org/apache/cassandra/cql3/*Test.java" /-->
