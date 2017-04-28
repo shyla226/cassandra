@@ -59,15 +59,15 @@ import org.openjdk.jmh.infra.Blackhole;
 public class ExecutorMicroBench {
     @State(Scope.Thread)
     public static class MonitoredState {
-        @Param({"1000"})
+        @Param({"10"})
         public int count;
+        public int value = 0;
 
         public MonitoredEpollEventLoopGroup executor;
 
         @Setup
         public void setup() {
-            System.err.println("Here");
-            executor = new MonitoredEpollEventLoopGroup(Runtime.getRuntime().availableProcessors() - 1);
+            executor = new MonitoredEpollEventLoopGroup(1);
         }
 
         @TearDown
@@ -80,14 +80,15 @@ public class ExecutorMicroBench {
     @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"1000"})
+        @Param({"10"})
         public int count;
+        public int value = 0;
 
         public EpollEventLoopGroup executor;
 
         @Setup
         public void setup() {
-            executor = new EpollEventLoopGroup(Runtime.getRuntime().availableProcessors() - 1);
+            executor = new EpollEventLoopGroup(1);
         }
 
         @TearDown
@@ -104,24 +105,42 @@ public class ExecutorMicroBench {
         }
     }
 
+    static void run2(ExecutorState state, CountDownLatch cdl)
+    {
+        if (++state.value == state.count)
+        {
+            state.value = 0;
+            cdl.countDown();
+        }
+        else
+        {
+            state.executor.submit(() -> run2(state, cdl));
+        }
+    }
+
+
     @Benchmark
     public void executor(ExecutorState state, Blackhole bh) throws Exception {
 
         CountDownLatch cdl = new CountDownLatch(1);
 
-        int c = state.count;
-        for (int i = 0; i < c; i++) {
-            int j = i;
-            state.executor.submit(() -> {
-                if (j == c - 1) {
-                    cdl.countDown();
-                }
-            });
-        }
-
-        await(c, cdl);
+        state.executor.submit(() -> run2(state, cdl));
+        await(state.count, cdl);
     }
 
+
+    static void run1(MonitoredState state, CountDownLatch cdl)
+    {
+        if (++state.value == state.count)
+        {
+            state.value = 0;
+            cdl.countDown();
+        }
+        else
+        {
+            state.executor.submit(() -> run1(state, cdl));
+        }
+    }
 
 
     @Benchmark
@@ -129,16 +148,9 @@ public class ExecutorMicroBench {
 
         CountDownLatch cdl = new CountDownLatch(1);
 
-        int c = state.count;
-        for (int i = 0; i < c; i++) {
-            int j = i;
-            state.executor.submit(()-> {
-                if (j == c - 1)
-                    cdl.countDown();
-            });
-        }
+        state.executor.submit(() -> run1(state, cdl));
 
-        await(c, cdl);
+        await(state.count, cdl);
     }
 
 
