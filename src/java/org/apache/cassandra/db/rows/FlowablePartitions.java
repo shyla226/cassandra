@@ -133,7 +133,7 @@ public class FlowablePartitions
     {
         CsFlow<Unfiltered> data = CsFlow.fromIterable(() -> iter);
         if (callOn != null)
-            Threads.requestOn(callOn);
+            data = data.lift(Threads.requestOn(callOn));
         Row staticRow = iter.staticRow();
         return new FlowableUnfilteredPartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), iter.partitionLevelDeletion(), iter.columns(), iter.isReverseOrder(), iter.stats()),
                                                staticRow,

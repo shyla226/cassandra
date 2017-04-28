@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
@@ -69,6 +70,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrderSimple;
+import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.memory.HeapPool;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.apache.cassandra.utils.memory.MemtablePool;
@@ -137,11 +139,7 @@ public class Memtable implements Comparable<Memtable>
     // We index the memtable by PartitionPosition only for the purpose of being able
     // to select key range using Token.KeyBound. However put() ensures that we
     // actually only store DecoratedKey.
-    // TODO - TPC: I changed a TreeMap back to a ConcurrentSkipListMap because methods like
-    // getSortedSubrange() are not thread safe and were causing deadlocks when flushing, whilst
-    // it's great to partition on write, I really think reading from non-thread safe maps is a pain
-    // e.g. flushing, range queries, etc. Depending on what we decide, we can simplify makePartitionIterator()
-    private final List<ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition>> partitions;
+    private final List<TreeMap<PartitionPosition, AtomicBTreePartition>> partitions;
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
     private final List<Token> rangeList;
@@ -198,15 +196,15 @@ public class Memtable implements Comparable<Memtable>
         return NettyRxScheduler.getRangeList(cfs.keyspace, true);
     }
 
-    private List<ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
+    private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
     {
         if (!hasSplits)
-            return Collections.singletonList(new ConcurrentSkipListMap<>());
+            return Collections.singletonList(new TreeMap<>());
 
         int capacity = rangeList.size();
-        ArrayList<ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
+        ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
         for (int i = 0; i < capacity; i++)
-            partitionMapContainer.add(new ConcurrentSkipListMap<>());
+            partitionMapContainer.add(new TreeMap<>());
         return partitionMapContainer;
     }
 
@@ -308,6 +306,8 @@ public class Memtable implements Comparable<Memtable>
         return allocator.isLive();
     }
 
+    // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
+    // been issued and all writes to the memtable have completed
     public boolean isClean()
     {
         for (Map<PartitionPosition, AtomicBTreePartition> memtableSubrange : partitions)
@@ -457,20 +457,19 @@ public class Memtable implements Comparable<Memtable>
         {
             final int coreId = i;
 
-            all.add(() ->
-                                   {
-                                       ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(coreId);
-                                       SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
+            all.add(() -> {
+               TreeMap<PartitionPosition, AtomicBTreePartition> memtableSubrange = partitions.get(coreId);
+               SortedMap<PartitionPosition, AtomicBTreePartition> trimmedMemtableSubrange;
 
-                                       if (startIsMin)
-                                           trimmedMemtableSubrange = stopIsMin ? memtableSubrange : memtableSubrange.headMap(keyRange.right, includeStop);
-                                       else
-                                           trimmedMemtableSubrange = stopIsMin
-                                                                     ? memtableSubrange.tailMap(keyRange.left, includeStart)
-                                                                     : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
+               if (startIsMin)
+                   trimmedMemtableSubrange = stopIsMin ? memtableSubrange : memtableSubrange.headMap(keyRange.right, includeStop);
+               else
+                   trimmedMemtableSubrange = stopIsMin
+                                             ? memtableSubrange.tailMap(keyRange.left, includeStart)
+                                             : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-                                       return CsFlow.fromIterable(trimmedMemtableSubrange.keySet());
-                                   });
+               return CsFlow.fromIterable(trimmedMemtableSubrange.keySet()).lift(Threads.requestOnCore(coreId));
+           });
 
             // For system tables we just use the first core
             if (!hasSplits)
@@ -490,11 +489,13 @@ public class Memtable implements Comparable<Memtable>
                           });
     }
 
+    // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
+    // been issued and all writes to the memtable have completed
     private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getAllSortedPartitions()
     {
         List<Set<PartitionPosition>> keySetList = new ArrayList<>(partitions.size());
         List<Iterator<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
-        for (ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
         {
             keySetList.add(partitionSubrange.navigableKeySet());
             partitionSetList.add(partitionSubrange.values().iterator());
@@ -502,11 +503,13 @@ public class Memtable implements Comparable<Memtable>
         return Pair.create(keySetList, partitionSetList);
     }
 
+    // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
+    // been issued and all writes to the memtable have completed
     private Pair<List<Set<PartitionPosition>>, List<Iterator<AtomicBTreePartition>>> getSortedSubrange(PartitionPosition from, PartitionPosition to)
     {
         List<Set<PartitionPosition>> keySetList = new ArrayList<>(partitions.size());
         List<Iterator<AtomicBTreePartition>> partitionSetList = new ArrayList<>(partitions.size());
-        for (ConcurrentSkipListMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
+        for (TreeMap<PartitionPosition, AtomicBTreePartition> partitionSubrange : partitions)
         {
             SortedMap<PartitionPosition, AtomicBTreePartition> submap = partitionSubrange.subMap(from, to);
             // TreeMap returns these in normal sorted order

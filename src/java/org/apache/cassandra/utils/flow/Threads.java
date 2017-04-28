@@ -23,9 +23,6 @@ import java.util.concurrent.Callable;
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
 
 public class Threads
 {
