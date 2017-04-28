@@ -201,6 +201,9 @@ public class PartitionsPublisher
          */
         private volatile boolean completed;
 
+        /** Any error that might have been received */
+        private volatile  Throwable error;
+
         /**
          * Set to true when we have released the upstream resources.
          */
@@ -295,7 +298,8 @@ public class PartitionsPublisher
                     for (Transformation transformation : transformations)
                         runWithFailure(transformation::onClose);
 
-                    runWithFailure(subscriber::onComplete);
+                    if (error == null)
+                        runWithFailure(subscriber::onComplete);
                 }
                 finally
                 {
@@ -307,14 +311,8 @@ public class PartitionsPublisher
         @Override
         public void onError(Throwable error)
         {
-            if (!completed)
-            {
-                //logger.debug("{} - onError {}", hashCode(), error);
-                completed = true;
-
-                subscriber.onError(error);
-                handleFailure(error);
-            }
+            //logger.debug("{} - onError {}", hashCode(), error);
+            handleFailure(error);
         }
 
         private void release()
@@ -355,9 +353,17 @@ public class PartitionsPublisher
         private void handleFailure(Throwable t)
         {
             JVMStabilityInspector.inspectThrowable(t);
-            logger.error("Failed with {}", t.getMessage(), t);
+            // TODO - some exceptions are expected and should not be reported, e.g. AbortedOperationException,
+            // other are not expected and should be reported
+            logger.info("Got failure {}/{}", t.getClass().getName(), t.getMessage());
 
-            release();
+            if (error == null)
+            {
+                this.error = t;
+                subscriber.onError(t);
+            }
+
+            close();
         }
     }
 
@@ -457,6 +463,7 @@ public class PartitionsPublisher
                 catch (Throwable t)
                 {
                     outerSubscription.handleFailure(t);
+                    return;
                 }
 
                 if (item == null)
@@ -476,6 +483,7 @@ public class PartitionsPublisher
                 catch (Throwable t)
                 {
                     outerSubscription.handleFailure(t);
+                    return;
                 }
             }
 
@@ -501,7 +509,6 @@ public class PartitionsPublisher
         public void onError(Throwable error)
         {
             //logger.debug("{} - onError item", outerSubscription.hashCode());
-
             outerSubscription.onError(error);
         }
 
@@ -512,8 +519,15 @@ public class PartitionsPublisher
                 partitionPublished = true;
                 for (Transformation transformation : outerSubscription.transformations)
                 {
-                    try { partition = transformation.applyToPartition(partition); }
-                    catch (Throwable t) { outerSubscription.handleFailure(t); }
+                    try
+                    {
+                        partition = transformation.applyToPartition(partition);
+                    }
+                    catch (Throwable t)
+                    {
+                        outerSubscription.handleFailure(t);
+                        return false;
+                    }
 
                     if (partition == null)
                     { // the partition was suppressed by a transformation
@@ -522,8 +536,15 @@ public class PartitionsPublisher
                 }
 
                 //logger.debug("{} - publishing partition", outerSubscription.hashCode());
-                try { subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData)); }
-                catch (Throwable t)  { outerSubscription.handleFailure(t); }
+                try
+                {
+                    subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData));
+                }
+                catch (Throwable t)
+                {
+                    outerSubscription.handleFailure(t);
+                    return false;
+                }
             }
 
             // the partition was published, either now or earlier

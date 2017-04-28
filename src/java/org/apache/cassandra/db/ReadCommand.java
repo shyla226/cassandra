@@ -56,8 +56,6 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.Serializer;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -422,6 +420,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             private int tombstones = 0;
 
             private DecoratedKey currentKey;
+
             @Override
             public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition iter)
             {
@@ -468,7 +467,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 }
             }
 
-            public void onComplete()
+            @Override
+            public void onClose()
             {
                 recordLatency(metric, System.nanoTime() - startTimeNanos);
 

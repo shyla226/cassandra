@@ -702,6 +702,7 @@ public class SelectStatement implements CQLStatement
                     break;
             }
 
+            partitions.close();
             maybeReschedule(builder);
         }
 
@@ -744,7 +745,7 @@ public class SelectStatement implements CQLStatement
             pager = null;
 
             schedulingTimeNano = System.nanoTime();
-            Schedulers.io().scheduleDirect(() -> retrieveMultiplePages(pagingState, builder));
+            StageManager.getStage(Stage.CONTINUOUS_PAGING).submit(() -> retrieveMultiplePages(pagingState, builder));
         }
     }
 
