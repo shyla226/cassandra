@@ -60,7 +60,7 @@ public abstract class CsFlow<T>
 
     // Flow manipulation methods and implementations follow
 
-    public static final boolean DEBUG_ENABLED = true;//System.getProperty("cassandra.debugcsflow", "false").equalsIgnoreCase("true");
+    public static final boolean DEBUG_ENABLED = System.getProperty("cassandra.debugcsflow", "false").equalsIgnoreCase("true");
 
     /**
      * Interface for abstracting away the gory details of operations with flowables. Used with {@link #apply}.
