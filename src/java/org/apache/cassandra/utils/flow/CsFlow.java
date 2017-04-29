@@ -24,7 +24,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -518,29 +517,44 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, BiFunction)},
-     * {@link #reduceWith(Supplier, BiFunction)} and {@link #reduceToFuture(Object, BiFunction)}.
+     * A utility class to manage the request loop.
+     * <p>
+     * Requests have to be performed in a loop in order to avoid growing
+     * the stack indefinitely because calling {@link CsSubscription#request()} may result
+     * in a recursive call to {@link CsSubscriber#onNext(Object)} or {@link CsSubscriber#onComplete()}.
+     * Whilst we don't need to request anything when onComplete is called, we need to call request()
+     * exactly once when onNext is called.
+     * <p>
+     * In addition to recursions, we also need to handle races between the request loop and onNext, which
+     * could be called from a different thread at any time.
+     * <p>
+     * This is handled with a small state machine that controls whether we are in the loop and whether an
+     * item has been received. The call to request is a no-op if we are already in the loop. Once in the loop,
+     * after calling request we try to exit the loop, but if {@link RequestLoop#onNext()} has been called
+     * recursively or has raced with the request loop, then we fail to exit the loop and continue with the next
+     * request. onNext will try to transition from in_loop_requested to in_loop_ready and if it succeeds then
+     * it is done since the loop is still in place, if it instead has failed then we must be out of the loop and
+     * hence requestLoop() must be called again.
      */
-    abstract static private class ReduceSubscriber<T, O> implements CsSubscriber<T>, CsSubscription
+    public final static class RequestLoop
     {
-        final CsSubscription sub;
-        final BiFunction<O, T, O> reducer;
-        O current;
-        private StackTraceElement[] stackTrace;
-
-        enum State {
-            OUT_OF_LOOP,
-            IN_LOOP_REQUESTED,
-            IN_LOOP_READY,
-        }
-        AtomicReference<State> state = new AtomicReference<>(State.OUT_OF_LOOP);
-
-        ReduceSubscriber(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
+        private enum State
         {
-            this.reducer = reducer;
-            sub = source.subscribe(this);
-            current = seed;
-            stackTrace = maybeGetStackTrace();
+            OUT_OF_LOOP,
+            IN_LOOP_READY,
+            IN_LOOP_REQUESTED
+        }
+
+        private final AtomicReference<State> state;
+        private final CsSubscriber subscriber;
+        private final CsSubscription subscription;
+        private volatile boolean released;
+
+        public RequestLoop(CsSubscriber subscriber, CsSubscription subscription)
+        {
+            this.state = new AtomicReference<>(State.OUT_OF_LOOP);
+            this.subscriber = subscriber;
+            this.subscription = subscription;
         }
 
         public void request()
@@ -557,20 +571,20 @@ public abstract class CsFlow<T>
             // next request within this call. If not, the loop is still going in another thread and we can still signal
             // it to continue (making sure we don't leave while receiving the signal).
 
-            if (!state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
-                return;
-            requestLoop();
+            if (state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
+                requestLoop();
+
         }
 
         private void requestLoop()
         {
-            while (true)
+            while (!released)
             {
                 // The loop can only be entered in IN_LOOP_READY
                 if (!verifyStateChange(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
                     return;
 
-                sub.request();
+                subscription.request();
 
                 // If we didn't receive item, leave
                 if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.OUT_OF_LOOP))
@@ -584,8 +598,55 @@ public abstract class CsFlow<T>
             if (prev == from)
                 return true;
 
-            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
+            subscriber.onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
             return false;
+        }
+
+        public void onNext()
+        {
+            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
+                return;
+
+            // We must be out of the loop if the above failed; re-start looping.
+            if (verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_READY))
+                requestLoop();
+        }
+
+        public void release()
+        {
+            released = true;
+        }
+
+        public boolean isReleased()
+        {
+            return released;
+        }
+    }
+
+    /**
+     * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, BiFunction)},
+     * {@link #reduceWith(Supplier, BiFunction)} and {@link #reduceToFuture(Object, BiFunction)}.
+     */
+    abstract static private class ReduceSubscriber<T, O> implements CsSubscriber<T>, CsSubscription
+    {
+        final CsSubscription sub;
+        final RequestLoop requestLoop;
+        final BiFunction<O, T, O> reducer;
+        O current;
+        private StackTraceElement[] stackTrace;
+
+        ReduceSubscriber(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
+        {
+            this.reducer = reducer;
+            sub = source.subscribe(this);
+            requestLoop = new RequestLoop(this, sub);
+            current = seed;
+            stackTrace = maybeGetStackTrace();
+        }
+
+        public void request()
+        {
+            requestLoop.request();
         }
 
         public void onNext(T item)
@@ -600,12 +661,7 @@ public abstract class CsFlow<T>
                 return;
             }
 
-            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
-                return;
-
-            // We must be out of the loop if the above failed; re-start looping.
-            if (verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_READY))
-                requestLoop();
+           requestLoop.onNext();
         }
 
         public void close() throws Exception

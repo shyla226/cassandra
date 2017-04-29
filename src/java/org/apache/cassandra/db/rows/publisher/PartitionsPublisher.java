@@ -185,11 +185,10 @@ public class PartitionsPublisher
          */
         private volatile InnerSubscription innerSubscription = null;
 
-        /** The number of partitions requested */
-        private volatile int requested;
-
-        /** The number of partitions received */
-        private volatile int received;
+        /**
+         * The request loop keeps track of when we should request the next item;
+         */
+        private CsFlow.RequestLoop requestLoop;
 
         /**
          * Set to true when the downstream has closed the subscription
@@ -203,11 +202,6 @@ public class PartitionsPublisher
 
         /** Any error that might have been received */
         private volatile  Throwable error;
-
-        /**
-         * Set to true when we have released the upstream resources.
-         */
-        private volatile boolean released;
 
         private OuterSubscription(PartitionsPublisher publisher, PartitionsSubscriber<Unfiltered> subscriber)
         {
@@ -237,43 +231,21 @@ public class PartitionsPublisher
         private void subscribe() throws Exception
         {
             subscription = source.get().subscribe(this);
+            requestLoop = new CsFlow.RequestLoop(this, subscription);
 
-            requested = 1;
-            received = 0;
-            request();
-        }
-
-        private void request()
-        {
-            if (closed || stop.isSignalled)
-            {
-                onComplete();
-                return;
-            }
-
-            while ((requested - received) == 1 && !released)
-            {
-                //logger.debug("{} - requesting", hashCode());
-                assert innerSubscription == null : "Cannot request with a pending inner subscription";
-
-                subscription.request();
-                requested++;
-            }
+            requestLoop.request();
         }
 
         private void onInnerSubscriptionClosed()
         {
             innerSubscription = null;
-            received++;
-
-            request();
+            requestLoop.onNext();
         }
 
         @Override
         public void onNext(FlowableUnfilteredPartition partition)
         {
             //logger.debug("{} - onNext", hashCode());
-
             if (closed || stop.isSignalled)
             {
                 onComplete();
@@ -296,10 +268,10 @@ public class PartitionsPublisher
                 try
                 {
                     for (Transformation transformation : transformations)
-                        runWithFailure(transformation::onClose);
+                        transformation.onClose();
 
                     if (error == null)
-                        runWithFailure(subscriber::onComplete);
+                        subscriber.onComplete();
                 }
                 finally
                 {
@@ -311,16 +283,24 @@ public class PartitionsPublisher
         @Override
         public void onError(Throwable error)
         {
-            //logger.debug("{} - onError {}", hashCode(), error);
-            handleFailure(error);
+            JVMStabilityInspector.inspectThrowable(error);
+            //logger.debug("{}/{}", error.getClass().getName(), error.getMessage());
+
+            if (this.error == null)
+            {
+                this.error = error;
+                subscriber.onError(error);
+            }
+
+            release();
         }
 
         private void release()
         {
-            if (!released)
+            if (!requestLoop.isReleased())
             {
                 //logger.debug("{} - releasing", hashCode());
-                released = true;
+                requestLoop.release();
 
                 if (innerSubscription != null)
                     innerSubscription.close();
@@ -330,40 +310,6 @@ public class PartitionsPublisher
 
                 source.close();
             }
-        }
-
-        @FunctionalInterface
-        public interface RunnableWithFailure
-        {
-            void run() throws Exception;
-        }
-
-        private void runWithFailure(RunnableWithFailure runnable)
-        {
-            try
-            {
-                runnable.run();
-            }
-            catch (Throwable t)
-            {
-                handleFailure(t);
-            }
-        }
-
-        private void handleFailure(Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            // TODO - some exceptions are expected and should not be reported, e.g. AbortedOperationException,
-            // other are not expected and should be reported
-            logger.info("Got failure {}/{}", t.getClass().getName(), t.getMessage());
-
-            if (error == null)
-            {
-                this.error = t;
-                subscriber.onError(t);
-            }
-
-            close();
         }
     }
 
@@ -378,9 +324,9 @@ public class PartitionsPublisher
         private FlowableUnfilteredPartition partition;
         private CsSubscription subscription;
         private boolean partitionPublished;
-        private volatile long requested;
-        private volatile long received;
+        private CsFlow.RequestLoop requestLoop;
         private volatile boolean closed;
+        private volatile boolean released;
 
         InnerSubscription(OuterSubscription outerSubscription, PartitionsSubscriber subscriber, FlowableUnfilteredPartition partition)
         {
@@ -406,30 +352,14 @@ public class PartitionsPublisher
             try
             {
                 subscription = this.partition.content.subscribe(this);
+                requestLoop = new CsFlow.RequestLoop(this, subscription);
             }
             catch (Throwable t)
             {
-                outerSubscription.handleFailure(t);
+                outerSubscription.onError(t);
             }
 
-            requested = 1;
-            received = 0;
-            request();
-        }
-
-        public void request()
-        {
-            // we start in subscribe() with requested = 1 and received = 0 and we
-            // enter the loop. If request() calls onNext() recursively, then both
-            // received and requested are incremented and we keep on looping.
-            // Otherwise requested is incremented but received is not incremented
-            // until onNext() is called, which in turn calls request() again, this
-            // time with received incremented and we should enter the loop again
-            while ((requested - received) == 1)
-            {
-                subscription.request(); // this might recursively calls onNext
-                requested++;
-            }
+            requestLoop.request();
         }
 
         @Override
@@ -441,7 +371,7 @@ public class PartitionsPublisher
                 partition.hasData = true;
 
             if (!maybePublishPartition())
-            { // partition was suppressed
+            { // partition was suppressed, close silently without calling onComplete
                 //logger.debug("{} - partition suppressed", outerSubscription.hashCode());
                 close();
                 return;
@@ -456,50 +386,28 @@ public class PartitionsPublisher
 
             for (Transformation transformation : outerSubscription.transformations)
             {
-                try
-                {
-                    item = transformation.applyToUnfiltered(item);
-                }
-                catch (Throwable t)
-                {
-                    outerSubscription.handleFailure(t);
-                    return;
-                }
-
+                item = transformation.applyToUnfiltered(item);
                 if (item == null)
-                {
-                    //logger.debug("{} - suppressed by {}", outerSubscription.hashCode(), transformation);
                     break;
-                }
             }
 
             if (item != null)
             {
                 //logger.debug("{} - Publishing {}", outerSubscription.hashCode(), item.toString(partition.header.metadata));
-                try
-                {
-                    subscriber.onNext(item);
-                }
-                catch (Throwable t)
-                {
-                    outerSubscription.handleFailure(t);
-                    return;
-                }
+                subscriber.onNext(item);
             }
 
-            received++;
-            request();
+            requestLoop.onNext();
         }
 
         @Override
         public void onComplete()
         {
             //logger.debug("{} - onComplete item", outerSubscription.hashCode());
-
             if (maybePublishPartition())
             {
                 for (Transformation transformation : outerSubscription.transformations)
-                    outerSubscription.runWithFailure(transformation::onPartitionClose);
+                    transformation.onPartitionClose();
             }
 
             close();
@@ -508,8 +416,9 @@ public class PartitionsPublisher
         @Override
         public void onError(Throwable error)
         {
-            //logger.debug("{} - onError item", outerSubscription.hashCode());
+            //logger.debug("{} - onError item", outerSubscription.hashCode(), error);
             outerSubscription.onError(error);
+            close();
         }
 
         private boolean maybePublishPartition()
@@ -519,16 +428,7 @@ public class PartitionsPublisher
                 partitionPublished = true;
                 for (Transformation transformation : outerSubscription.transformations)
                 {
-                    try
-                    {
-                        partition = transformation.applyToPartition(partition);
-                    }
-                    catch (Throwable t)
-                    {
-                        outerSubscription.handleFailure(t);
-                        return false;
-                    }
-
+                    partition = transformation.applyToPartition(partition);
                     if (partition == null)
                     { // the partition was suppressed by a transformation
                         return false;
@@ -536,15 +436,7 @@ public class PartitionsPublisher
                 }
 
                 //logger.debug("{} - publishing partition", outerSubscription.hashCode());
-                try
-                {
-                    subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData));
-                }
-                catch (Throwable t)
-                {
-                    outerSubscription.handleFailure(t);
-                    return false;
-                }
+                subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData));
             }
 
             // the partition was published, either now or earlier
@@ -553,8 +445,13 @@ public class PartitionsPublisher
 
         private void close()
         {
-            FileUtils.closeQuietly(subscription);
-            outerSubscription.onInnerSubscriptionClosed();
+            //logger.debug("{} - closing {}", outerSubscription.hashCode(), released);
+            if (!released)
+            {
+                released = true;
+                FileUtils.closeQuietly(subscription);
+                outerSubscription.onInnerSubscriptionClosed();
+            }
         }
     }
 

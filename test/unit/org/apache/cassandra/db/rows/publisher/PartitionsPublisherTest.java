@@ -21,6 +21,8 @@ package org.apache.cassandra.db.rows.publisher;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
@@ -35,6 +37,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -130,8 +133,7 @@ public class PartitionsPublisherTest extends CQLTester
         assertRowCount(execute("SELECT * FROM %s WHERE k1 IN (0, 3, 6)"), 3 * rowCount);
     }
 
-    @Test
-    public void testReduce() throws Throwable
+    private void createData() throws Throwable
     {
         createTable("CREATE TABLE %s (p text, c text, v text, s text static, PRIMARY KEY (p, c))");
 
@@ -143,6 +145,12 @@ public class PartitionsPublisherTest extends CQLTester
         execute("INSERT INTO %s(p, c, v, s) values (?, ?, ?, ?)", "p3", "k1", "v1", "sv3");
         execute("INSERT INTO %s(p, c, v) values (?, ?, ?)", "p3", "k2", "v2");
         execute("INSERT INTO %s(p, c, v) values (?, ?, ?)", "p3", "k3", "v3");
+    }
+
+    @Test
+    public void testReduce() throws Throwable
+    {
+        createData();
 
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
         List<ImmutableBTreePartition> results = ImmutableBTreePartition.create(cmd.executeLocally()).blockingGet();
@@ -151,25 +159,17 @@ public class PartitionsPublisherTest extends CQLTester
     }
 
     @Test
-    public void testCancelPartition() throws Throwable
+    public void testCancelFullPartition() throws Throwable
     {
-        createTable("CREATE TABLE %s (p text, c text, v text, s text static, PRIMARY KEY (p, c))");
+        createData();
 
-        execute("INSERT INTO %s(p, c, v, s) values (?, ?, ?, ?)", "p1", "k1", "v1", "sv1");
-        execute("INSERT INTO %s(p, c, v) values (?, ?, ?)", "p1", "k2", "v2");
-
-        execute("INSERT INTO %s(p, s) values (?, ?)", "p2", "sv2");
-
-        execute("INSERT INTO %s(p, c, v, s) values (?, ?, ?, ?)", "p3", "k1", "v1", "sv3");
-        execute("INSERT INTO %s(p, c, v) values (?, ?, ?)", "p3", "k2", "v2");
-        execute("INSERT INTO %s(p, c, v) values (?, ?, ?)", "p3", "k3", "v3");
+        final CountDownLatch latch = new CountDownLatch(1);
 
         class Subscriber implements PartitionsSubscriber<Unfiltered>
         {
-            int numRows = 0;
-            boolean firstPartReceived;
-            boolean completed;
-            Throwable error;
+            volatile int numRows = 0;
+            volatile boolean firstPartReceived;
+            volatile Throwable error;
             PartitionsSubscription subscription;
 
            public void onSubscribe(PartitionsSubscription subscription)
@@ -177,7 +177,7 @@ public class PartitionsPublisherTest extends CQLTester
                this.subscription = subscription;
            }
 
-            public void onNextPartition(PartitionTrait partition) throws Exception
+            public void onNextPartition(PartitionTrait partition)
             {
                 if (!firstPartReceived)
                 {
@@ -189,7 +189,7 @@ public class PartitionsPublisherTest extends CQLTester
                 }
             }
 
-            public void onNext(Unfiltered item) throws Exception
+            public void onNext(Unfiltered item)
             {
                 numRows++;
             }
@@ -199,7 +199,110 @@ public class PartitionsPublisherTest extends CQLTester
                 this.error = error;
             }
 
-            public void onComplete() throws Exception
+            public void onComplete()
+            {
+                latch.countDown();
+            }
+        };
+
+        final ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
+        final Subscriber subscriber = new Subscriber();
+        cmd.executeLocally().subscribe(subscriber);
+
+        boolean completed = latch.await(15, TimeUnit.SECONDS);
+        assertTrue("Subscriber was not completed", completed);
+
+        assertNull(subscriber.error);
+        assertEquals(2, subscriber.numRows); // only two rows in the first partition
+    }
+
+    @Test
+    public void testCancelHalfPartition() throws Throwable
+    {
+        createData();
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final int numExpectedRows = 4; // first row of third partition, see createData()
+
+        class Subscriber implements PartitionsSubscriber<Unfiltered>
+        {
+            volatile int numRows = 0;
+            volatile Throwable error;
+            PartitionsSubscription subscription;
+
+            public void onSubscribe(PartitionsSubscription subscription)
+            {
+                this.subscription = subscription;
+            }
+
+            public void onNextPartition(PartitionTrait partition)
+            {
+            }
+
+            public void onNext(Unfiltered item)
+            {
+                numRows++;
+                if (numRows == numExpectedRows)
+                    subscription.close();
+            }
+
+            public void onError(Throwable error)
+            {
+                this.error = error;
+            }
+
+            public void onComplete()
+            {
+                latch.countDown();
+            }
+        };
+
+        final ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
+        final Subscriber subscriber = new Subscriber();
+        cmd.executeLocally().subscribe(subscriber);
+
+        boolean completed = latch.await(15, TimeUnit.SECONDS);
+        assertTrue("Subscriber was not completed", completed);
+
+        assertNull(subscriber.error);
+        assertEquals(numExpectedRows, subscriber.numRows);
+    }
+
+    @Test
+    public void testExceptionInOnNext() throws Throwable
+    {
+        createData();
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final RuntimeException exc = new RuntimeException("Test exception");
+
+        class Subscriber implements PartitionsSubscriber<Unfiltered>
+        {
+            volatile Throwable error;
+            volatile boolean completed;
+            PartitionsSubscription subscription;
+
+            public void onSubscribe(PartitionsSubscription subscription)
+            {
+                this.subscription = subscription;
+            }
+
+            public void onNextPartition(PartitionTrait partition)
+            {
+            }
+
+            public void onNext(Unfiltered item)
+            {
+                throw exc;
+            }
+
+            public void onError(Throwable error)
+            {
+                this.error = error;
+                latch.countDown();
+            }
+
+            public void onComplete()
             {
                 completed = true;
             }
@@ -209,8 +312,58 @@ public class PartitionsPublisherTest extends CQLTester
         final Subscriber subscriber = new Subscriber();
         cmd.executeLocally().subscribe(subscriber);
 
-        assertNull(subscriber.error);
-        assertTrue(subscriber.completed);
-        assertEquals(2, subscriber.numRows); // only two rows in the first partition
+        boolean errorReceived = latch.await(15, TimeUnit.SECONDS);
+        assertTrue("Error was not received", errorReceived);
+
+        assertEquals("Unexpected error received: " + subscriber.error, exc, subscriber.error);
+        assertFalse("onComplete should not have been called", subscriber.completed);
+    }
+
+    @Test
+    public void testExceptionInOnComplete() throws Throwable
+    {
+        createData();
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final RuntimeException exc = new RuntimeException("Test exception");
+
+        class Subscriber implements PartitionsSubscriber<Unfiltered>
+        {
+            volatile Throwable error;
+            PartitionsSubscription subscription;
+
+            public void onSubscribe(PartitionsSubscription subscription)
+            {
+                this.subscription = subscription;
+            }
+
+            public void onNextPartition(PartitionTrait partition)
+            {
+            }
+
+            public void onNext(Unfiltered item)
+            {
+            }
+
+            public void onError(Throwable error)
+            {
+                this.error = error;
+                latch.countDown();
+            }
+
+            public void onComplete()
+            {
+                throw exc;
+            }
+        };
+
+        final ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore()).build();
+        final Subscriber subscriber = new Subscriber();
+        cmd.executeLocally().subscribe(subscriber);
+
+        boolean errorReceived = latch.await(15, TimeUnit.SECONDS);
+        assertTrue("Error was not received", errorReceived);
+
+        assertEquals("Unexpected error received: " + subscriber.error, exc, subscriber.error);
     }
 }

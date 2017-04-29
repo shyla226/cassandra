@@ -46,7 +46,7 @@ public interface PartitionsSubscriber<T extends Unfiltered>
      *
      * @param partition - the partition information
      */
-    public void onNextPartition(PartitionTrait partition) throws Exception;
+    public void onNextPartition(PartitionTrait partition);
 
     /**
      * A new item is available, an item is either an Unfiltered or a Row depending
@@ -54,7 +54,7 @@ public interface PartitionsSubscriber<T extends Unfiltered>
      *
      * @param item - the next item to process
      */
-    public void onNext(T item) throws Exception;
+    public void onNext(T item);
 
     /**
      * An error has occurred.
@@ -64,8 +64,7 @@ public interface PartitionsSubscriber<T extends Unfiltered>
     public void onError(Throwable error);
 
     /**
-     * The stream is finished. This is sent when the data is completed or after an error
-     * has been reported.
+     * The stream is finished. This is sent when the data is completed.
      */
-    public void onComplete() throws Exception;
+    public void onComplete();
 }

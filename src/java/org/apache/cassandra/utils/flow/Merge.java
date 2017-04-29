@@ -480,7 +480,7 @@ public class Merge<In, Out> extends CsFlow<Out>
 
         private void onAdvance(In next)
         {
-            assert state == State.AWAITING_ADVANCE;
+            assert next == null || state == State.AWAITING_ADVANCE : "Unexpected state: " + state;
             item = next;
             state = State.ADVANCED;
             merger.onAdvance();

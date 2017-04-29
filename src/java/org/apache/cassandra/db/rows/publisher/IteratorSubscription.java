@@ -35,6 +35,7 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * Subscribe to {@link PartitionsPublisher} to conver asynchronous events back to an iterator.
@@ -78,7 +79,7 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
         this.subscription = subscription;
     }
 
-    public void onNextPartition(PartitionTrait partition) throws Exception
+    public void onNextPartition(PartitionTrait partition)
     {
         if (current != null)
         {
@@ -90,26 +91,35 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
         Uninterruptibles.putUninterruptibly(queue, current);
     }
 
-    public void onNext(Unfiltered item) throws Exception
+    public void onNext(Unfiltered item)
     {
         assert current != null : "No current inner iterator";
         current.put(item);
     }
 
-    public void onComplete() throws Exception
+    public void onComplete()
     {
         if (current != null)
+        {
             current.put(PartitionIterator.POISON_PILL);
+            current = null;
+        }
 
         Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
     }
 
     public void onError(Throwable error)
     {
-        this.error = error;
-
         if (current != null)
+        {
+            current.error = error;
             current.put(PartitionIterator.POISON_PILL);
+            current = null;
+        }
+        else
+        {
+            this.error = error;
+        }
 
         Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
     }
@@ -151,6 +161,7 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 
         private final BlockingQueue<T> queue;
         private final PartitionsSubscription subscription;
+        private Throwable error;
 
         private PartitionIterator(PartitionTrait partition, PartitionsSubscription subscription)
         {
@@ -162,7 +173,7 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 
         public void close()
         {
-            if (subscription != null && hasNext())
+            if (subscription != null)
                 subscription.closePartition(partitionKey());
         }
 
@@ -177,6 +188,9 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 
             if (logger.isTraceEnabled())
                 logger.trace("{} - Iterator returns {}", hashCode(), ret.toString(metadata));
+
+            if (error != null)
+                throw Exceptions.propagate(error);
 
             return ret == POISON_PILL ? endOfData() : ret;
         }

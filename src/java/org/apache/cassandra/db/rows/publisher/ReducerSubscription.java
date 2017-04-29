@@ -74,7 +74,7 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
         this.subscription = subscription;
     }
 
-    public void onNextPartition(PartitionTrait partition) throws Exception
+    public void onNextPartition(PartitionTrait partition)
     {
         try
         {
@@ -95,7 +95,7 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
         }
     }
 
-    public void onNext(Unfiltered item) throws Exception
+    public void onNext(Unfiltered item)
     {
         try
         {
@@ -125,7 +125,7 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
     }
 
     @Override
-    public void onComplete() throws Exception
+    public void onComplete()
     {
         assert result != null;
         if (partitionResult != null)
@@ -133,7 +133,7 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
         downstream.onSuccess(result);
     }
 
-    private void completePartition(R2 partitionResult) throws Exception
+    private void completePartition(R2 partitionResult)
     {
         try
         {
