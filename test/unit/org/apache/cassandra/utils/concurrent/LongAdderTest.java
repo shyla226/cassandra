@@ -29,7 +29,7 @@ import org.junit.Test;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.util.concurrent.EventExecutor;
 import junit.framework.Assert;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class LongAdderTest
@@ -119,13 +119,13 @@ public class LongAdderTest
     @Test
     public void testNettyEventLoops() throws InterruptedException
     {
-        final int numCores = NettyRxScheduler.getNumCores();
+        final int numCores = TPCScheduler.getNumCores();
         final int numThreads = numCores * 2; // half TPC threads and half non-TPC threads
         final int numUpdtes = 1000;
         final LongAdder longAdder = new LongAdder();
         EpollEventLoopGroup tpcLoops = new EpollEventLoopGroup(numCores,
-                                                            new NettyRxScheduler.NettyRxThreadFactory("eventLoopBench",
-                                                                                                      Thread.MAX_PRIORITY));
+                                                            new TPCScheduler.NettyRxThreadFactory("eventLoopBench",
+                                                                                                  Thread.MAX_PRIORITY));
 
         EpollEventLoopGroup otherLoops = new EpollEventLoopGroup(numThreads - numCores);
 
@@ -136,7 +136,7 @@ public class LongAdderTest
         {
             loop.submit(() ->
                          {
-                             NettyRxScheduler.register(loop, cpuId.getAndIncrement());
+                             TPCScheduler.register(loop, cpuId.getAndIncrement());
                              latchForSetup.countDown();
                          });
         }
@@ -145,7 +145,7 @@ public class LongAdderTest
 
         // fail test early if for any reason Rx scheduler not setup correctly
         for (int i = 0; i < numCores; i++)
-            Assert.assertNotNull(NettyRxScheduler.getForCore(i));
+            Assert.assertNotNull(TPCScheduler.getForCore(i));
 
         // test increment of counter
         final CountDownLatch latchForIncrement = new CountDownLatch(numThreads);

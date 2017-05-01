@@ -34,7 +34,7 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.SetMultimap;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -87,7 +87,7 @@ public class SSTableOfflineRelevel
         }
 
         Util.initDatabaseDescriptor();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         boolean dryRun = args[0].equals("--dry-run");
         String keyspace = args[args.length - 2];

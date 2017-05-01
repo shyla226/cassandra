@@ -29,12 +29,10 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.StorageService;
@@ -46,7 +44,7 @@ public class GossiperTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
     static final IPartitioner partitioner = new Murmur3Partitioner();
     StorageService ss = StorageService.instance;

@@ -30,8 +30,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.UDHelper;
@@ -59,7 +58,7 @@ public class CQLSSTableWriterTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
 
     @BeforeClass

@@ -32,7 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.LongOpOrderTester;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -68,11 +68,11 @@ public class OpOrderTest
     public void testOpOrder() throws InterruptedException
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
         Thread.setDefaultUncaughtExceptionHandler(handler);
 
 //        order = new OpOrderSimple();
-        order = NettyRxScheduler.newOpOrderThreaded(this);
+        order = TPCScheduler.newOpOrderThreaded(this);
         currentState = new State();
 
         ExecutorService consumerExec = Executors.newFixedThreadPool(CONSUMERS);
@@ -128,7 +128,7 @@ public class OpOrderTest
             Thread.sleep(0, ThreadLocalRandom.current().nextInt(50000));
         }
 
-        for (int i = 0; i < NettyRxScheduler.NUM_NETTY_THREADS; ++i)
+        for (int i = 0; i < TPCScheduler.NUM_NETTY_THREADS; ++i)
         {
             Producer[] producers = new Producer[PRODUCERS_PER_THREAD];
             Scheduler scheduler = new SchedulerNettyWDelay(i);
@@ -143,7 +143,7 @@ public class OpOrderTest
         logger.info(msg);
         Assert.assertTrue(msg, consumerExec.isTerminated());
         Assert.assertEquals(msg, 0L, errors.get());
-        Assert.assertTrue(msg,totalOpCount.get() > 1000 * PRODUCERS_PER_THREAD * NettyRxScheduler.NUM_NETTY_THREADS);
+        Assert.assertTrue(msg,totalOpCount.get() > 1000 * PRODUCERS_PER_THREAD * TPCScheduler.NUM_NETTY_THREADS);
         Assert.assertTrue(msg,totalBarrierCount.get() > 100 * CONSUMERS);
     }
 
@@ -236,10 +236,10 @@ public class OpOrderTest
 
     class SchedulerNetty implements Scheduler
     {
-        NettyRxScheduler s;
+        TPCScheduler s;
         SchedulerNetty(int id)
         {
-            s = NettyRxScheduler.getForCore(id);
+            s = TPCScheduler.getForCore(id);
         }
 
         public void schedule(Runnable runnable)
@@ -257,10 +257,10 @@ public class OpOrderTest
 
     class SchedulerNettyWDelay implements Scheduler
     {
-        NettyRxScheduler s;
+        TPCScheduler s;
         SchedulerNettyWDelay(int id)
         {
-            s = NettyRxScheduler.getForCore(id);
+            s = TPCScheduler.getForCore(id);
         }
         int scheduled;
 

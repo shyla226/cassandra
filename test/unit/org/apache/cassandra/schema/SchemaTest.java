@@ -24,7 +24,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.gms.Gossiper;
@@ -39,7 +39,7 @@ public class SchemaTest
     public static void setupDatabaseDescriptor()
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
 
     @Test

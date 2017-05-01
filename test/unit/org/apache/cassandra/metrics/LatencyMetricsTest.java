@@ -21,7 +21,7 @@ package org.apache.cassandra.metrics;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static junit.framework.Assert.assertFalse;
@@ -32,7 +32,7 @@ public class LatencyMetricsTest
     public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
 
     /**

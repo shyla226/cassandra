@@ -28,8 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
-import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -44,7 +43,6 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.WrappedRunnable;
 
 public class MigrationManager
 {
@@ -389,7 +387,7 @@ public class MigrationManager
 
         if (announceLocally)
             return Completable.fromRunnable(() -> Schema.instance.merge(migration))
-                              .subscribeOn(NettyRxScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                              .subscribeOn(TPCScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
                                            ImmediateThinScheduler.INSTANCE);
         else
             return announce(migration);

@@ -32,7 +32,7 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.*;
@@ -358,7 +358,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-                                      NettyRxScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
+                                      TPCScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
     }
 
     /**
@@ -963,9 +963,9 @@ public class SinglePartitionReadCommand extends ReadCommand
              + ClusteringIndexFilter.serializers.get(version).serializedSize(clusteringIndexFilter());
     }
 
-    public NettyRxScheduler getScheduler()
+    public TPCScheduler getScheduler()
     {
-        return NettyRxScheduler.getForKey(metadata().keyspace, partitionKey());
+        return TPCScheduler.getForKey(metadata().keyspace, partitionKey());
     }
 
     /**

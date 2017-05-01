@@ -71,7 +71,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
     public MonitoredEpollEventLoopGroup(int nThreads)
     {
-        this(nThreads, new NettyRxScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
+        this(nThreads, new TPCScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
     }
 
     /**
@@ -86,7 +86,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     @VisibleForTesting
     public MonitoredEpollEventLoopGroup(int nThreads, String name)
     {
-        this(nThreads, new NettyRxScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
+        this(nThreads, new TPCScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
 
         CountDownLatch ready = new CountDownLatch(eventLoops.length);
 
@@ -97,7 +97,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             eventLoops[i].schedule(() -> {
                 try
                 {
-                    NettyRxScheduler.register(loop, cpuId);
+                    TPCScheduler.register(loop, cpuId);
                 }
                 catch (Exception ex)
                 {

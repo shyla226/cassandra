@@ -28,7 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -54,7 +54,7 @@ public class LongStreamingTest
     {
         DatabaseDescriptor.daemonInitialization();
         StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
 

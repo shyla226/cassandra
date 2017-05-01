@@ -27,7 +27,7 @@ import java.util.stream.StreamSupport;
 
 import org.apache.commons.cli.*;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -67,7 +67,7 @@ public class SSTableExport
     static
     {
         DatabaseDescriptor.toolInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         Option optKey = new Option(KEY_OPTION, true, "Partition key");
         // Number of times -k <key> can be passed on the command line.

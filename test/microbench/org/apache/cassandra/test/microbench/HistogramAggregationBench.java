@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.metrics.Histogram;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -64,7 +64,7 @@ public class HistogramAggregationBench
     {
         histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
 
-        int numCores = NettyRxScheduler.getNumCores();
+        int numCores = TPCScheduler.getNumCores();
         Thread[] threads = new Thread[numCores];
         for (int c = 0; c < numCores; c++)
         {

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +48,6 @@ import io.reactivex.internal.disposables.EmptyDisposable;
 import io.reactivex.internal.disposables.ListCompositeDisposable;
 import io.reactivex.internal.schedulers.ScheduledRunnable;
 import io.reactivex.plugins.RxJavaPlugins;
-import io.reactivex.schedulers.Schedulers;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -79,15 +77,15 @@ import org.slf4j.LoggerFactory;
  * and locks.
  *
  */
-public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
+public class TPCScheduler extends Scheduler implements TracingAwareExecutor
 {
-    private static final Logger logger = LoggerFactory.getLogger(NettyRxScheduler.class);
+    private static final Logger logger = LoggerFactory.getLogger(TPCScheduler.class);
 
-    public final static FastThreadLocal<NettyRxScheduler> localNettyEventLoop = new FastThreadLocal<NettyRxScheduler>()
+    public final static FastThreadLocal<TPCScheduler> localNettyEventLoop = new FastThreadLocal<TPCScheduler>()
     {
-        protected NettyRxScheduler initialValue()
+        protected TPCScheduler initialValue()
         {
-            return new NettyRxScheduler(GlobalEventExecutor.INSTANCE, Integer.MAX_VALUE);
+            return new TPCScheduler(GlobalEventExecutor.INSTANCE, Integer.MAX_VALUE);
         }
     };
 
@@ -103,14 +101,14 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     private final static AtomicBoolean nettyEventGroupRegistered = new AtomicBoolean(false);
 
     //Each array entry maps to a cpuId.
-    final static NettyRxScheduler[] perCoreSchedulers = new NettyRxScheduler[NUM_NETTY_THREADS];
+    final static TPCScheduler[] perCoreSchedulers = new TPCScheduler[NUM_NETTY_THREADS];
 
     final static OpOrderThreaded.ThreadIdentifier threadIdentifier = new OpOrderThreaded.ThreadIdentifier()
     {
         public int idFor(Thread t)
         {
-            if (t instanceof NettyRxThread)
-                return ((NettyRxThread)t).getCpuId();
+            if (t instanceof TPCThread)
+                return ((TPCThread)t).getCpuId();
             return NUM_NETTY_THREADS;
 
 //          This is what we should be doing:
@@ -149,11 +147,11 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         scheduleDirect(new ExecutorLocals.WrappedRunnable(runnable, locals));
     }
 
-    private final static class NettyRxThread extends FastThreadLocalThread
+    private final static class TPCThread extends FastThreadLocalThread
     {
         private int cpuId;
 
-        public NettyRxThread(ThreadGroup group, Runnable target, String name)
+        public TPCThread(ThreadGroup group, Runnable target, String name)
         {
             super(group, target, name);
             this.cpuId = perCoreSchedulers.length; // this means this is not a TPC thread
@@ -184,7 +182,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
         protected Thread newThread(Runnable r, String name)
         {
-            return new NettyRxThread(this.threadGroup, r, name);
+            return new TPCThread(this.threadGroup, r, name);
         }
     }
 
@@ -201,7 +199,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
     public final Thread cpuThread;
 
     /** Return a thread local instance of this class */
-    public static NettyRxScheduler instance()
+    public static TPCScheduler instance()
     {
         return localNettyEventLoop.get();
     }
@@ -219,7 +217,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
             final int cpuId = i;
             final EventLoop loop = workerGroup.next();
             loop.schedule(() -> {
-                NettyRxScheduler.register(loop, cpuId);
+                TPCScheduler.register(loop, cpuId);
                 logger.info("Allocated netty {} thread to {}", workerGroup, Thread.currentThread().getName());
 
                 ready.countDown();
@@ -230,16 +228,16 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         initRx();
     }
 
-    public static synchronized NettyRxScheduler register(EventExecutor loop, int cpuId)
+    public static synchronized TPCScheduler register(EventExecutor loop, int cpuId)
     {
         assert loop.inEventLoop();
         assert cpuId >= 0 && cpuId < perCoreSchedulers.length;
         assert perCoreSchedulers[cpuId] == null;
 
         Thread t = Thread.currentThread();
-        assert t instanceof NettyRxThread;
+        assert t instanceof TPCThread;
 
-        NettyRxScheduler scheduler = new NettyRxScheduler(loop, cpuId);
+        TPCScheduler scheduler = new TPCScheduler(loop, cpuId);
         localNettyEventLoop.set(scheduler);
         perCoreSchedulers[cpuId] = scheduler;
 
@@ -249,7 +247,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     /**
      * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
-     * core is valid via {@link NettyRxScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
+     * core is valid via {@link TPCScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
      */
     public static int getCoreId()
@@ -259,12 +257,12 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     /**
      * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
-     * core is valid via {@link NettyRxScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
+     * core is valid via {@link TPCScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
      */
     public static int getCoreId(Thread t)
     {
-        return t instanceof NettyRxThread ? ((NettyRxThread)t).getCpuId() : perCoreSchedulers.length;
+        return t instanceof TPCThread ? ((TPCThread)t).getCpuId() : perCoreSchedulers.length;
     }
 
     /**
@@ -276,8 +274,8 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
      */
     public static int getCoreId(Scheduler scheduler)
     {
-        if (scheduler instanceof NettyRxScheduler)
-            return ((NettyRxScheduler)scheduler).cpuId;
+        if (scheduler instanceof TPCScheduler)
+            return ((TPCScheduler)scheduler).cpuId;
 
         return Integer.MAX_VALUE;
     }
@@ -287,7 +285,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         return isValidCoreId(getCoreId());
     }
 
-    private NettyRxScheduler(EventExecutorGroup eventLoop, int cpuId)
+    private TPCScheduler(EventExecutorGroup eventLoop, int cpuId)
     {
         assert eventLoop != null;
         assert cpuId >= 0;
@@ -295,8 +293,8 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
         this.cpuId = cpuId;
         this.cpuThread = Thread.currentThread();
 
-        if (isValidCoreId(cpuId) && cpuThread instanceof NettyRxThread)
-            ((NettyRxThread)cpuThread).setCpuId(cpuId);
+        if (isValidCoreId(cpuId) && cpuThread instanceof TPCThread)
+            ((TPCThread)cpuThread).setCpuId(cpuId);
     }
 
     public static int getNumCores()
@@ -325,7 +323,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
      *
      * @return - the scheduler of the core specified, or the scheduler of core zero if not yet assigned
      */
-    public static NettyRxScheduler getForCore(int core)
+    public static TPCScheduler getForCore(int core)
     {
         return perCoreSchedulers[core];
     }
@@ -337,7 +335,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     /**
      * Return the id of the core that is assigned to run operations on the specified keyspace
-     * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.
+     * and partition key, see {@link TPCScheduler#perCoreSchedulers}.
      * <p>
      * Core zero is returned if {@link StorageService} is not yet initialized,
      * since in this case we cannot assign any partition key to any core.
@@ -387,7 +385,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     /**
      * Return the Netty rx scheduler of the core that is assigned to run operations on the specified keyspace
-     * and partition key, see {@link NettyRxScheduler#perCoreSchedulers}.
+     * and partition key, see {@link TPCScheduler#perCoreSchedulers}.
      * <p>
      * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
      * since in this case we cannot assign any partition key to any core.
@@ -398,7 +396,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
      * @return the Netty RX scheduler
      */
     @Inline
-    public static NettyRxScheduler getForKey(String keyspaceName, DecoratedKey key)
+    public static TPCScheduler getForKey(String keyspaceName, DecoratedKey key)
     {
         return getForCore(getCoreForKey(keyspaceName, key));
     }
@@ -599,7 +597,7 @@ public class NettyRxScheduler extends Scheduler implements TracingAwareExecutor
 
     private static void initRx()
     {
-        RxJavaPlugins.setComputationSchedulerHandler((s) -> NettyRxScheduler.instance());
+        RxJavaPlugins.setComputationSchedulerHandler((s) -> TPCScheduler.instance());
         RxJavaPlugins.setErrorHandler(e -> CassandraDaemon.defaultExceptionHandler.accept(Thread.currentThread(), e));
 
         /**

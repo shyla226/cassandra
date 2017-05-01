@@ -40,7 +40,7 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.schema.*;
@@ -186,7 +186,7 @@ public abstract class CQLTester
         DatabaseDescriptor.daemonInitialization();
 
         //Required early for TPC
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         // Cleanup first
         try

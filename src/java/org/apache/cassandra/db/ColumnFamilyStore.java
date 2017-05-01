@@ -232,7 +232,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private final Tracker data;
 
     /* The read order, used to track accesses to off-heap memtable storage */
-    public final OpOrder readOrdering = NettyRxScheduler.newOpOrderThreaded(this);
+    public final OpOrder readOrdering = TPCScheduler.newOpOrderThreaded(this);
 
     /* This is used to generate the next index for a SSTable */
     private final AtomicInteger fileIndexGenerator = new AtomicInteger(0);
@@ -1371,8 +1371,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public Completable apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
         Completable ret = applyInternal(update, indexer, opGroup, commitLogPosition);
-        NettyRxScheduler scheduler = NettyRxScheduler.getForKey(this.keyspace.getName(), update.partitionKey());
-        return scheduler.cpuId == NettyRxScheduler.getCoreId() ? ret : ret.subscribeOn(scheduler);
+        TPCScheduler scheduler = TPCScheduler.getForKey(this.keyspace.getName(), update.partitionKey());
+        return scheduler.cpuId == TPCScheduler.getCoreId() ? ret : ret.subscribeOn(scheduler);
     }
 
     Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)

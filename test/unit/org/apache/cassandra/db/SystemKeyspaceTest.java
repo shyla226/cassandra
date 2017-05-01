@@ -25,7 +25,7 @@ import java.util.*;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -44,7 +44,7 @@ public class SystemKeyspaceTest
     public static void prepSnapshotTracker()
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         if (FBUtilities.isWindows)
             WindowsFailedSnapshotTracker.deleteOldSnapshots();

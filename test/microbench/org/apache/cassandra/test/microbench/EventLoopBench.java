@@ -30,7 +30,7 @@ import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -80,7 +80,7 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loops = new EpollEventLoopGroup(2, new NettyRxScheduler.NettyRxThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
+            loops = new EpollEventLoopGroup(2, new TPCScheduler.NettyRxThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
             if (!Epoll.isAvailable())
                 throw new RuntimeException("Epoll Not available");
 
@@ -89,20 +89,20 @@ public class EventLoopBench {
             EventExecutor loop1 = loops.next();
             CountDownLatch latch = new CountDownLatch(2);
             loop1.submit(() -> {
-                NettyRxScheduler.register(loop1, 0);
+                TPCScheduler.register(loop1, 0);
                 latch.countDown();
             });
 
             EventExecutor loop2 = loops.next();
             loop2.submit(() -> {
-                NettyRxScheduler.register(loop2, 1);
+                TPCScheduler.register(loop2, 1);
                 latch.countDown();
             });
 
             latch.await();
 
             //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(NettyRxScheduler.getForCore(0)).observeOn(NettyRxScheduler.getForCore(1));
+            rx2 = Observable.fromArray(arr).subscribeOn(TPCScheduler.getForCore(0)).observeOn(TPCScheduler.getForCore(1));
         }
 
         @TearDown
@@ -136,20 +136,20 @@ public class EventLoopBench {
             EventExecutor loop1 = loops.next();
             CountDownLatch latch = new CountDownLatch(2);
             loop1.submit(() -> {
-                NettyRxScheduler.register(loop1, 0);
+                TPCScheduler.register(loop1, 0);
                 latch.countDown();
             });
 
             EventExecutor loop2 = loops.next();
             loop2.submit(() -> {
-                NettyRxScheduler.register(loop2, 1);
+                TPCScheduler.register(loop2, 1);
                 latch.countDown();
             });
 
             latch.await();
 
             //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(NettyRxScheduler.getForCore(0)).observeOn(NettyRxScheduler.getForCore(1));
+            rx2 = Observable.fromArray(arr).subscribeOn(TPCScheduler.getForCore(0)).observeOn(TPCScheduler.getForCore(1));
         }
 
         @TearDown

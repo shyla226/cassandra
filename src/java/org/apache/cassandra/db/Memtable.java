@@ -28,10 +28,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -193,7 +192,7 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return null;
 
-        return NettyRxScheduler.getRangeList(cfs.keyspace, true);
+        return TPCScheduler.getRangeList(cfs.keyspace, true);
     }
 
     private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
@@ -453,7 +452,7 @@ public class Memtable implements Comparable<Memtable>
 
         ArrayList<Callable<CsFlow<PartitionPosition>>> all = new ArrayList<>(partitions.size());
 
-        for (int i = 0; i < NettyRxScheduler.getNumCores(); i++)
+        for (int i = 0; i < TPCScheduler.getNumCores(); i++)
         {
             final int coreId = i;
 
@@ -485,7 +484,7 @@ public class Memtable implements Comparable<Memtable>
                               ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
 
                               return FlowablePartitions.fromIterator(filter.getUnfilteredRowIterator(columnFilter, getPartitionMapFor(key).get(position)),
-                                                                     NettyRxScheduler.getForKey(cfs.keyspace.getName(), key));
+                                                                     TPCScheduler.getForKey(cfs.keyspace.getName(), key));
                           });
     }
 

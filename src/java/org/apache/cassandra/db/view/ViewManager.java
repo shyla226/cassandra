@@ -26,8 +26,7 @@ import com.google.common.util.concurrent.Striped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.db.*;
@@ -54,7 +53,7 @@ public class ViewManager
 {
     private static final Logger logger = LoggerFactory.getLogger(ViewManager.class);
 
-    private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(NettyRxScheduler.NUM_NETTY_THREADS * 1024, 1);
+    private static final Striped<Semaphore> SEMAPHORES = Striped.lazyWeakSemaphore(TPCScheduler.NUM_NETTY_THREADS * 1024, 1);
 
     private static final boolean enableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_enable_coordinator_batchlog");
 

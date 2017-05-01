@@ -34,7 +34,7 @@ import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
 
-import static org.apache.cassandra.concurrent.NettyRxScheduler.NUM_NETTY_THREADS;
+import static org.apache.cassandra.concurrent.TPCScheduler.NUM_NETTY_THREADS;
 
 /**
  * Handles native transport server lifecycle and associated resources. Lazily initialized.

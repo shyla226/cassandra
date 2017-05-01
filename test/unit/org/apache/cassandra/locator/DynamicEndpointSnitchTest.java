@@ -22,7 +22,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -41,7 +41,7 @@ public class DynamicEndpointSnitchTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
 
     private static void setScores(DynamicEndpointSnitch dsnitch,  int rounds, List<InetAddress> hosts, Integer... scores) throws InterruptedException

@@ -28,14 +28,12 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.ExponentiallyDecayingReservoir;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.PropertyFileSnitch;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
@@ -55,7 +53,7 @@ public class ShadowRoundTest
     {
         System.setProperty("cassandra.config", "cassandra-seeds.yaml");
 
-        NettyRxScheduler.register();
+        TPCScheduler.register();
         DatabaseDescriptor.daemonInitialization();
         IEndpointSnitch snitch = new PropertyFileSnitch();
         DatabaseDescriptor.setEndpointSnitch(snitch);

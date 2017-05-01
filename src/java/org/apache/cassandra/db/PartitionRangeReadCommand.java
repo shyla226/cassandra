@@ -26,7 +26,7 @@ import com.google.common.collect.Iterables;
 
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -338,9 +338,9 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DataRange.serializers.get(version).serializedSize(dataRange(), metadata());
     }
 
-    public NettyRxScheduler getScheduler()
+    public TPCScheduler getScheduler()
     {
-        return NettyRxScheduler.instance();
+        return TPCScheduler.instance();
     }
 
     private static class Deserializer extends SelectionDeserializer

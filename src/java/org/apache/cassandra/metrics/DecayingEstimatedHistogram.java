@@ -37,7 +37,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import org.agrona.concurrent.AtomicBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.utils.EstimatedHistogram;
 
 /**
@@ -386,7 +386,7 @@ final class DecayingEstimatedHistogram implements Histogram
             this.recorders = new CopyOnWriteArrayList<>();
             this.decayLandmark = clock.getTime();
             this.snapshot = new Snapshot(this);
-            this.coreId = NettyRxScheduler.getNextCore();
+            this.coreId = TPCScheduler.getNextCore();
             this.scheduled = new AtomicBoolean(false);
             this.isComposite = isComposite;
 
@@ -404,13 +404,13 @@ final class DecayingEstimatedHistogram implements Histogram
                 return;
 
             if (scheduled.compareAndSet(false, true))
-                NettyRxScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPCScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         void scheduleIfComposite()
         {
             if (updateIntervalMillis > 0 && isComposite)
-                NettyRxScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPCScheduler.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         @Override
@@ -601,7 +601,7 @@ final class DecayingEstimatedHistogram implements Histogram
         Recorder(BucketProperties bucketProperties, ForwardDecayingReservoir reservoir)
         {
             this.bucketProperties = bucketProperties;
-            this.numCores = NettyRxScheduler.getNumCores();
+            this.numCores = TPCScheduler.getNumCores();
             this.buffers = new Buffer[numCores + 1];
             this.reservoir = reservoir;
 
@@ -618,12 +618,12 @@ final class DecayingEstimatedHistogram implements Histogram
         {
             reservoir.maybeSchedule();
 
-            int coreId = NettyRxScheduler.getCoreId();
+            int coreId = TPCScheduler.getCoreId();
 
             Buffer buffer = buffers[coreId];
             if (buffer == null)
             {
-                assert NettyRxScheduler.isValidCoreId(coreId);
+                assert TPCScheduler.isValidCoreId(coreId);
                 buffer = buffers[coreId] = new Buffer(bucketProperties);
             }
 

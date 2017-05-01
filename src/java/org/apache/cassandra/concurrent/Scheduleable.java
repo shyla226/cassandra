@@ -26,5 +26,5 @@ package org.apache.cassandra.concurrent;
  */
 public interface Scheduleable
 {
-    NettyRxScheduler getScheduler();
+    TPCScheduler getScheduler();
 }

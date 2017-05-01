@@ -24,14 +24,13 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -85,7 +84,7 @@ public class Keyspace
 
     //OpOrder is defined globally since we need to order writes across
     //Keyspaces in the case of Views (batchlog of view mutations)
-    public static final OpOrder writeOrder = NettyRxScheduler.newOpOrderThreaded(Keyspace.class);
+    public static final OpOrder writeOrder = TPCScheduler.newOpOrderThreaded(Keyspace.class);
 
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
@@ -542,7 +541,7 @@ public class Keyspace
                                 if (logger.isTraceEnabled())
                                     logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
                                 return Completable.defer(() -> applyInternal(mutation, writeCommitLog, true, isDroppable))
-                                        .observeOn(NettyRxScheduler.instance());
+                                        .observeOn(TPCScheduler.instance());
                             }
                         }
                         else
@@ -664,7 +663,7 @@ public class Keyspace
         // avoid that. Note that this check should be postponed to when the subscriber subscribes because
         // there is a small chance that the caller may change thread after creating the single but we know
         // this is not currently the case.
-        if (NettyRxScheduler.getCoreId() != NettyRxScheduler.getCoreId(schedulerForPartition))
+        if (TPCScheduler.getCoreId() != TPCScheduler.getCoreId(schedulerForPartition))
             return c.subscribeOn(schedulerForPartition);
 
         return c;

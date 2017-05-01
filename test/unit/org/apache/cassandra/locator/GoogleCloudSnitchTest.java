@@ -24,7 +24,7 @@ import java.net.InetAddress;
 import java.util.EnumMap;
 import java.util.Map;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -48,7 +48,7 @@ public class GoogleCloudSnitchTest
     public static void setup() throws Exception
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
         SchemaLoader.mkdirs();
         SchemaLoader.cleanup();
         Keyspace.setInitialized();

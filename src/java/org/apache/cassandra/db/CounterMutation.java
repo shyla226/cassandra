@@ -32,7 +32,7 @@ import com.google.common.util.concurrent.Striped;
 import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
@@ -116,7 +116,7 @@ public class CounterMutation implements IMutation, Scheduleable
         return applyCounterMutation(System.nanoTime());
     }
 
-    public NettyRxScheduler getScheduler()
+    public TPCScheduler getScheduler()
     {
         return mutation.getScheduler();
     }
@@ -141,7 +141,7 @@ public class CounterMutation implements IMutation, Scheduleable
                                     {
                                         Tracing.trace("Failed to acquire counter locks, scheduling retry");
                                         return Single.defer(() -> this.applyCounterMutation(startTime))
-                                                     .subscribeOn(NettyRxScheduler.instance());
+                                                     .subscribeOn(TPCScheduler.instance());
                                     }
 
                                     // TODO this will need to become async to handle disk reads

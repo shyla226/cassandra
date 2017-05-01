@@ -18,13 +18,12 @@
 */
 package org.apache.cassandra.utils.concurrent;
 
-import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 
 import junit.framework.Assert;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 @Ignore
@@ -34,7 +33,7 @@ public abstract class AbstractTransactionalTest
     public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
 
     protected abstract TestableTransaction newTest() throws Exception;

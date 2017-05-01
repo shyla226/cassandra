@@ -36,7 +36,7 @@ import java.util.zip.CRC32;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
@@ -91,7 +91,7 @@ public abstract class CommitLogSegment
     static final int SYNC_MARKER_SIZE = 4 + 4;
 
     // The OpOrder used to order appends wrt sync
-    private final OpOrder appendOrder = NettyRxScheduler.newOpOrderThreaded(this);
+    private final OpOrder appendOrder = TPCScheduler.newOpOrderThreaded(this);
 
     private final AtomicInteger allocatePosition = new AtomicInteger();
 

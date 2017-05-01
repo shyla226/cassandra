@@ -22,7 +22,7 @@ import java.util.concurrent.Callable;
 
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 
 public class Threads
 {
@@ -39,10 +39,10 @@ public class Threads
 
         public void request()
         {
-            if (NettyRxScheduler.getCoreId() == coreId)
+            if (TPCScheduler.getCoreId() == coreId)
                 source.request();
             else
-                NettyRxScheduler.getForCore(coreId).scheduleDirect(source::request);
+                TPCScheduler.getForCore(coreId).scheduleDirect(source::request);
         }
 
         public void close() throws Exception
@@ -52,7 +52,7 @@ public class Threads
         }
     }
 
-    final static CsFlow.Operator<?, ?> REQUEST_ON_CORE[] = new CsFlow.Operator[NettyRxScheduler.NUM_NETTY_THREADS];
+    final static CsFlow.Operator<?, ?> REQUEST_ON_CORE[] = new CsFlow.Operator[TPCScheduler.NUM_NETTY_THREADS];
     static
     {
         for (int i = 0; i < REQUEST_ON_CORE.length; ++i)
@@ -94,8 +94,8 @@ public class Threads
 
     public static <T> CsFlow.Operator<T, T> requestOn(Scheduler scheduler)
     {
-        if (scheduler instanceof NettyRxScheduler)
-            return requestOnCore(((NettyRxScheduler) scheduler).cpuId);
+        if (scheduler instanceof TPCScheduler)
+            return requestOnCore(((TPCScheduler) scheduler).cpuId);
         else if (scheduler == Schedulers.io())
             return requestOnIo();
         else
@@ -133,10 +133,10 @@ public class Threads
             switch (requested++)
             {
             case 0:
-                if (NettyRxScheduler.getCoreId() == coreId)
+                if (TPCScheduler.getCoreId() == coreId)
                     evaluate();
                 else
-                    NettyRxScheduler.getForCore(coreId).scheduleDirect(this::evaluate);
+                    TPCScheduler.getForCore(coreId).scheduleDirect(this::evaluate);
                 break;
             default:
                 // Assuming no need to switch threads for no work.

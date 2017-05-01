@@ -34,23 +34,17 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Iterables;
 
 import com.codahale.metrics.Snapshot;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.metrics.Timer;
-import org.apache.cassandra.schema.SchemaMigration;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.GossipDigestAck;
-import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
-import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
 
 
 import org.junit.AfterClass;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -84,7 +78,7 @@ public class MessagingServiceTest
     public static void beforeClass() throws UnknownHostException
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         DatabaseDescriptor.setBackPressureStrategy(new MockBackPressureStrategy(Collections.emptyMap()));
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.0.0.1"));

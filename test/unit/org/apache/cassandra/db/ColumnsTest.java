@@ -26,7 +26,7 @@ import java.util.function.Predicate;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.junit.AfterClass;
 import org.junit.Test;
 
@@ -48,7 +48,7 @@ public class ColumnsTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
     }
 
     private static final TableMetadata TABLE_METADATA = MockSchema.newCFS().metadata();

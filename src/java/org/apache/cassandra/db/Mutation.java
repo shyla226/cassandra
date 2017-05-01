@@ -20,14 +20,11 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
 
 import io.reactivex.Completable;
-import io.reactivex.Scheduler;
-import io.reactivex.Single;
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
+
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -231,9 +228,9 @@ public class Mutation implements IMutation, Scheduleable
         return new Mutation(ks, key, modifications);
     }
 
-    public NettyRxScheduler getScheduler()
+    public TPCScheduler getScheduler()
     {
-        return NettyRxScheduler.getForKey(getKeyspaceName(), key());
+        return TPCScheduler.getForKey(getKeyspaceName(), key());
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

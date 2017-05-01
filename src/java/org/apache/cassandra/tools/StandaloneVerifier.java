@@ -18,7 +18,7 @@
  */
 package org.apache.cassandra.tools;
 
-import org.apache.cassandra.concurrent.NettyRxScheduler;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -49,7 +49,7 @@ public class StandaloneVerifier
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
-        NettyRxScheduler.register();
+        TPCScheduler.register();
 
         try
         {
