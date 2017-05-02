@@ -169,7 +169,7 @@ public class LocalSessions
      */
     public void cancelSession(UUID sessionID, boolean force)
     {
-        logger.debug("cancelling session {}", sessionID);
+        logger.info("Cancelling local repair session {}", sessionID);
         LocalSession session = getSession(sessionID);
         Preconditions.checkArgument(session != null, "Session {} does not exist", sessionID);
         Preconditions.checkArgument(force || session.coordinator.equals(getBroadcastAddress()),
@@ -235,10 +235,10 @@ public class LocalSessions
      */
     public void cleanup()
     {
-        logger.debug("Running LocalSessions.cleanup");
+        logger.trace("Running LocalSessions.cleanup");
         if (!isNodeInitialized())
         {
-            logger.debug("node not initialized, aborting local session cleanup");
+            logger.trace("node not initialized, aborting local session cleanup");
             return;
         }
         Set<LocalSession> currentSessions = new HashSet<>(sessions.values());
@@ -254,7 +254,7 @@ public class LocalSessions
                 }
                 else if (shouldDelete(session, now))
                 {
-                    logger.warn("Auto deleting repair session {}", session);
+                    logger.debug("Auto deleting repair session {}", session);
                     deleteSession(session.sessionID);
                 }
                 else if (shouldCheckStatus(session, now))
@@ -449,6 +449,7 @@ public class LocalSessions
     // TODO: the test could probably use the messaging service mocking instead
     protected void send(OneWayRequest<? extends RepairMessage<?>> request)
     {
+        logger.trace("sending {} to {}", request.payload(), request.to());
         MessagingService.instance().send(request);
     }
 
@@ -459,7 +460,7 @@ public class LocalSessions
             Preconditions.checkArgument(session.getState().canTransitionTo(state),
                                         "Invalid state transition %s -> %s",
                                         session.getState(), state);
-            logger.debug("Setting LocalSession state from {} -> {} for {}", session.getState(), state, session.sessionID);
+            logger.trace("Changing LocalSession state from {} -> {} for {}", session.getState(), state, session.sessionID);
             boolean wasCompleted = session.isCompleted();
             session.setState(state);
             session.setLastUpdate();
@@ -479,7 +480,7 @@ public class LocalSessions
 
     public void failSession(UUID sessionID, boolean sendMessage)
     {
-        logger.debug("failing session {}", sessionID);
+        logger.info("Failing local repair session {}", sessionID);
         LocalSession session = getSession(sessionID);
         if (session != null)
         {
@@ -491,7 +492,7 @@ public class LocalSessions
 
     public synchronized void deleteSession(UUID sessionID)
     {
-        logger.debug("deleting session {}", sessionID);
+        logger.debug("Deleting local repair session {}", sessionID);
         LocalSession session = getSession(sessionID);
         Preconditions.checkArgument(session.isCompleted(), "Cannot delete incomplete sessions");
 
@@ -517,7 +518,7 @@ public class LocalSessions
      */
     public void handlePrepareMessage(InetAddress from, PrepareConsistentRequest request)
     {
-        logger.debug("received {} from {}", request, from);
+        logger.trace("received {} from {}", request, from);
         UUID sessionID = request.parentSession;
         InetAddress coordinator = request.coordinator;
         Set<InetAddress> peers = request.participants;
@@ -529,14 +530,14 @@ public class LocalSessions
         }
         catch (Throwable e)
         {
-            logger.debug("Error retrieving ParentRepairSession for session {}, responding with failure", sessionID);
+            logger.trace("Error retrieving ParentRepairSession for session {}, responding with failure", sessionID);
             send(Verbs.REPAIR.FAILED_SESSION.newRequest(coordinator, new FailSession(sessionID)));
             return;
         }
 
         LocalSession session = createSessionUnsafe(sessionID, parentSession, peers);
         putSessionUnsafe(session);
-        logger.debug("created local session for {}", sessionID);
+        logger.info("Beginning local incremental repair session {}", session);
 
         ExecutorService executor = Executors.newFixedThreadPool(parentSession.getColumnFamilyStores().size());
 
@@ -545,7 +546,7 @@ public class LocalSessions
         {
             public void onSuccess(@Nullable Object result)
             {
-                logger.debug("pending anti-compaction for {} completed", sessionID);
+                logger.debug("Prepare phase for incremental repair session {} completed", sessionID);
                 setStateAndSave(session, PREPARED);
                 send(Verbs.REPAIR.CONSISTENT_RESPONSE.newRequest(coordinator, new PrepareConsistentResponse(sessionID, getBroadcastAddress(), true)));
                 executor.shutdown();
@@ -553,7 +554,7 @@ public class LocalSessions
 
             public void onFailure(Throwable t)
             {
-                logger.debug("pending anti-compaction for {} failed", sessionID);
+                logger.error(String.format("Prepare phase for incremental repair session %s failed", sessionID), t);
                 failSession(sessionID);
                 executor.shutdown();
             }
@@ -565,19 +566,19 @@ public class LocalSessions
         LocalSession session = getSession(sessionID);
         if (session != null && session.getState() != REPAIRING)
         {
-            logger.debug("Setting local session {} to REPAIRING", session);
+            logger.debug("Setting local incremental repair session {} to REPAIRING", session);
             setStateAndSave(session, REPAIRING);
         }
     }
 
     public void handleFinalizeProposeMessage(InetAddress from, FinalizePropose propose)
     {
-        logger.debug("received {} from {}", propose, from);
+        logger.trace("received {} from {}", propose, from);
         UUID sessionID = propose.sessionID;
         LocalSession session = getSession(sessionID);
         if (session == null)
         {
-            logger.debug("No LocalSession found for session {}, responding with failure", sessionID);
+            logger.debug("Received FinalizePropose message for unknown repair session {}, responding with failure", sessionID);
             send(Verbs.REPAIR.FAILED_SESSION.newRequest(from, new FailSession(sessionID)));
             return;
         }
@@ -586,10 +587,11 @@ public class LocalSessions
         {
             setStateAndSave(session, FINALIZE_PROMISED);
             send(Verbs.REPAIR.FINALIZE_PROMISE.newRequest(from, new FinalizePromise(sessionID, getBroadcastAddress(), true)));
+            logger.debug("Received FinalizePropose message for incremental repair session {}, responded with FinalizePromise");
         }
         catch (IllegalArgumentException e)
         {
-            logger.error("error setting session to FINALIZE_PROMISED", e);
+            logger.error(String.format("Error handling FinalizePropose message for %s", session), e);
             failSession(sessionID);
         }
     }
@@ -616,26 +618,28 @@ public class LocalSessions
      */
     public void handleFinalizeCommitMessage(InetAddress from, FinalizeCommit commit)
     {
-        logger.debug("received {} from {}", commit, from);
+        logger.trace("received {} from {}", commit, from);
         UUID sessionID = commit.sessionID;
         LocalSession session = getSession(sessionID);
         if (session == null)
         {
-            logger.warn("Received finalize commit message for unknown session {}", sessionID);
+            logger.warn("Ignoring FinalizeCommit message for unknown repair session {}", sessionID);
             return;
         }
 
         setStateAndSave(session, FINALIZED);
+        logger.info("Finalized local repair session {}", sessionID);
     }
 
     public void handleFailSessionMessage(InetAddress from, FailSession msg)
     {
-        logger.debug("received {} from {}", msg, from);
+        logger.trace("received {} from {}", msg, from);
         failSession(msg.sessionID, false);
     }
 
     public void sendStatusRequest(LocalSession session)
     {
+        logger.debug("Attempting to learn the outcome of unfinished local incremental repair session {}", session.sessionID);
         StatusRequest request = new StatusRequest(session.sessionID);
         for (InetAddress participant : session.participants)
         {
@@ -646,7 +650,7 @@ public class LocalSessions
 
     public void handleStatusRequest(InetAddress from, StatusRequest request)
     {
-        logger.debug("received {} from {}", request, from);
+        logger.trace("received {} from {}", request, from);
         UUID sessionID = request.sessionID;
         LocalSession session = getSession(sessionID);
         if (session == null)
@@ -657,17 +661,18 @@ public class LocalSessions
         else
         {
             send(Verbs.REPAIR.STATUS_RESPONSE.newRequest(from, new StatusResponse(sessionID, session.getState())));
+            logger.debug("Responding to status response message for incremental repair session {} with local state {}", sessionID, session.getState());
         }
     }
 
     public void handleStatusResponse(InetAddress from, StatusResponse response)
     {
-        logger.debug("received {} from {}", response, from);
+        logger.trace("received {} from {}", response, from);
         UUID sessionID = response.sessionID;
         LocalSession session = getSession(sessionID);
         if (session == null)
         {
-            logger.warn("Received status response message for unknown session {}", sessionID);
+            logger.warn("Received StatusResponse message for unknown repair session {}", sessionID);
             return;
         }
 
@@ -676,10 +681,11 @@ public class LocalSessions
         if (response.state == FINALIZED || response.state == FAILED)
         {
             setStateAndSave(session, response.state);
+            logger.info("Unfinished local incremental repair session {} set to state {}", sessionID, response.state);
         }
         else
         {
-            logger.debug("{} is not actionable");
+            logger.debug("Received StatusResponse for repair session {} with state {}, which is not actionable. Doing nothing.", sessionID, response.state);
         }
     }
 
