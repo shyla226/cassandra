@@ -29,6 +29,7 @@ import io.netty.channel.epoll.Epoll;
 import io.netty.channel.nio.NioEventLoopGroup;
 
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
@@ -41,12 +42,12 @@ import static org.apache.cassandra.concurrent.TPCScheduler.NUM_NETTY_THREADS;
  */
 public class NativeTransportService
 {
+    private static final int pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
+
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
     public static final EventLoopGroup eventLoopGroup = makeWorkerGroup();
 
     private List<Server> servers = Collections.emptyList();
-
-    private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
 
     private boolean initialized = false;
 
@@ -76,7 +77,7 @@ public class NativeTransportService
         }
         else
         {
-            NioEventLoopGroup ret = new NioEventLoopGroup(NUM_NETTY_THREADS);
+            NioEventLoopGroup ret = new NioEventLoopGroup(NUM_NETTY_THREADS, new TPCScheduler.NettyRxThreadFactory(NioEventLoopGroup.class, Thread.MAX_PRIORITY));
             ret.setIoRatio(pIO);
 
             logger.info("Using Java NIO event loops");
