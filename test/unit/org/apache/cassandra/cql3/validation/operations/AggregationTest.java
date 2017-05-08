@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
@@ -37,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.joran.ReconfigureOnChangeTask;
 import ch.qos.logback.classic.spi.TurboFilterList;
 import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
@@ -57,6 +59,7 @@ import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
+import static ch.qos.logback.core.CoreConstants.RECONFIGURE_ON_CHANGE_TASK;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -920,6 +923,51 @@ public class AggregationTest extends CQLTester
         execute("DROP FUNCTION " + fState + "(int, int)");
 
         assertInvalidMessage("Unknown function", "SELECT " + a + "(b) FROM %s");
+    }
+
+    @Test
+    public void testJavaAggregateEmpty() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int primary key, b int)");
+
+        String fState = createFunction(KEYSPACE,
+                                       "int, int",
+                                       "CREATE FUNCTION %s(a int, b int) " +
+                                       "CALLED ON NULL INPUT " +
+                                       "RETURNS int " +
+                                       "LANGUAGE java " +
+                                       "AS 'return Integer.valueOf((a!=null?a.intValue():0) + b.intValue());'");
+
+        String a = createAggregate(KEYSPACE,
+                                   "int, int",
+                                   "CREATE AGGREGATE %s(int) " +
+                                   "SFUNC " + shortFunctionName(fState) + " " +
+                                   "STYPE int");
+
+        assertRows(execute("SELECT " + a + "(b) FROM %s"), row(new Object[]{null}));
+    }
+
+    @Test
+    public void testJavaAggregateStateEmpty() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int primary key, b uuid)");
+
+        String fState = createFunction(KEYSPACE,
+                                       "int, int",
+                                       "CREATE FUNCTION %s(state map<uuid, int>, type uuid) " +
+                                       "RETURNS NULL ON NULL INPUT " +
+                                       "RETURNS map<uuid, int> " +
+                                       "LANGUAGE java " +
+                                       "AS 'return state;'");
+
+        String a = createAggregate(KEYSPACE,
+                                   "int, int",
+                                   "CREATE AGGREGATE %s(uuid) " +
+                                   "SFUNC " + shortFunctionName(fState) + " " +
+                                   "STYPE map<uuid, int> " +
+                                   "INITCOND {}");
+
+        assertRows(execute("SELECT " + a + "(b) FROM %s"), row(Collections.emptyMap()));
     }
 
     @Test
@@ -1823,6 +1871,16 @@ public class AggregationTest extends CQLTester
                 break;
             }
         }
+
+        ReconfigureOnChangeTask roct = (ReconfigureOnChangeTask) ctx.getObject(RECONFIGURE_ON_CHANGE_TASK);
+        if (roct != null)
+        {
+            // New functionality in logback - they replaced ReconfigureOnChangeFilter (which runs in the logging code)
+            // with an async ReconfigureOnChangeTask - i.e. in a thread that does not become sandboxed.
+            // Let the test run anyway, just we cannot reconfigure it (and it is pointless to reconfigure).
+            return;
+        }
+
         assertTrue("ReconfigureOnChangeFilter not in logback's turbo-filter list - do that by adding scan=\"true\" to logback-test.xml's configuration element", done);
     }
 

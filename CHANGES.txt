@@ -1,4 +1,6 @@
 4.0
+ * Fix WriteResponseHandlerTest is sensitive to test execution order (CASSANDRA-13421)
+ * Improve incremental repair logging (CASSANDRA-13468)
  * Start compaction when incremental repair finishes (CASSANDRA-13454)
  * Add repair streaming preview (CASSANDRA-13257)
  * Cleanup isIncremental/repairedAt usage (CASSANDRA-13430)
@@ -59,6 +61,7 @@
 
 
 3.11.0
+ * UDA fails without input rows (CASSANDRA-13399)
  * Fix compaction-stress by using daemonInitialization (CASSANDRA-13188)
  * V5 protocol flags decoding broken (CASSANDRA-13443)
  * Use write lock not read lock for removing sstables from compaction strategies. (CASSANDRA-13422)

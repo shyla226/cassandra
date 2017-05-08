@@ -8,6 +8,7 @@ dse 6.0.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Update to logback-1.2.3 and redefine default rotation policy (APOLLO-643)
  * Guard mapped memory accesses with an assertion instead of segfaulting JVM (APOLLO-586)
  * Backport follow-up commit to CASSANDRA-12929
  * Fix version check to enable streaming keep-alive (backport CASSANDRA-12929)
