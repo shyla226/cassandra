@@ -314,29 +314,9 @@ public class Util
         }
     }
 
-//    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
-//    {
-//        return command.executeLocally()
-//                      .concatMap(partition -> ImmutableBTreePartition.create(partition).toFlowable())
-//                      .filter(ImmutableBTreePartition::notEmpty)
-//                      .toList()
-//                      .blockingGet();
-//    }
-
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (UnfilteredPartitionIterator iterator = command.executeForTests())
-        {
-            while (iterator.hasNext())
-            {
-                try (UnfilteredRowIterator partition = iterator.next())
-                {
-                    results.add(ImmutableBTreePartition.create(partition));
-                }
-            }
-        }
-        return results;
+        return ImmutableBTreePartition.create(command.executeLocally()).blockingGet();
     }
 
     public static List<FilteredPartition> getAll(ReadCommand command)

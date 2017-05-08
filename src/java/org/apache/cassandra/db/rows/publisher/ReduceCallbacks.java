@@ -20,9 +20,7 @@ package org.apache.cassandra.db.rows.publisher;
 
 import java.util.concurrent.Callable;
 
-
 import io.reactivex.functions.BiFunction;
-import io.reactivex.functions.Function;
 import io.reactivex.functions.Function3;
 import org.apache.cassandra.db.rows.PartitionTrait;
 import org.apache.cassandra.db.rows.Unfiltered;
@@ -72,16 +70,16 @@ public class ReduceCallbacks<R1, R2>
     }
 
     /**
-     * Return a set of callbacks for the trivial case where a single result builder is all that's required
-     * for the client to consume partitions and unfiltered items.
+     * Return a set of callbacks for the case where the client needs to accumulate partitions and unfiltered
+     * rows onto a single result.
      *
-     * @param result - the result needed by the callbacks to reduce partitions and items
+     * @param result - the final result
      * @param partitionConsumer - the partition reducer
      * @param unfilteredConsumer - the item reducer
      * @param <R> - the type of result
      * @return - a set of callbacks to be used when calling {@link PartitionsPublisher#reduce(ReduceCallbacks)}
      */
-    public static <R> ReduceCallbacks<R, R> trivial(R result,
+    public static <R> ReduceCallbacks<R, R> create(R result,
                                                     BiFunction<R, PartitionTrait, R> partitionConsumer,
                                                     BiFunction<R, Unfiltered, R> unfilteredConsumer)
     {
@@ -89,5 +87,42 @@ public class ReduceCallbacks<R1, R2>
                                      (r1, partition) -> partitionConsumer.apply(result, partition),
                                      (r1, r2, unfiltered) -> unfilteredConsumer.apply(result, unfiltered),
                                      (r1, r2, partition) -> result);
+    }
+
+    /**
+     * Return a set of callbacks for the case where the client needs to accumulate partitions and unfiltered
+     * rows onto a single result, and the partition result is the same as the actual partition.
+     *
+     * @param result - the final result
+     * @param partitionConsumer - the partition reducer
+     * @param unfilteredConsumer - the item reducer
+     * @param <R> - the type of result
+     * @return - a set of callbacks to be used when calling {@link PartitionsPublisher#reduce(ReduceCallbacks)}
+     */
+    public static <R> ReduceCallbacks<R, PartitionTrait> create(R result,
+                                                   BiFunction<R, PartitionTrait, PartitionTrait> partitionConsumer,
+                                                   Function3<R, PartitionTrait, Unfiltered, PartitionTrait> unfilteredConsumer)
+    {
+        return new ReduceCallbacks<>(() -> result,
+                                     (r1, partition) -> partitionConsumer.apply(result, partition),
+                                     (r1, partition, unfiltered) -> unfilteredConsumer.apply(result, partition, unfiltered),
+                                     (r1, r2, partition) -> result);
+    }
+
+    /**
+     * Return a set of callbacks for the case where the client needs to accumulate only partitions, whereas
+     * the unfiltered rows can be ignored.
+     *
+     * @param result - the result needed by the callbacks to reduce partitions and items
+     * @param partitionConsumer - the partition reducer
+     * @param <R> - the type of result
+     * @return - a set of callbacks to be used when calling {@link PartitionsPublisher#reduce(ReduceCallbacks)}
+     */
+    public static <R> ReduceCallbacks<R, R> create(R result, BiFunction<R, PartitionTrait, R> partitionConsumer)
+    {
+        return new ReduceCallbacks<>(() -> result,
+                                     (r1, partition) -> partitionConsumer.apply(result, partition),
+                                     (r1, r2, unfiltered) -> null, // this will close the partition
+                                     (r1, r2, partition) -> r2); //return the last value produced by the partition consumer
     }
 }

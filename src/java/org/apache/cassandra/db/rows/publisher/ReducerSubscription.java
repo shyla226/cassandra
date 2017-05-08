@@ -58,7 +58,7 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
         assert subscription == null: "Can only subscribe once";
 
         try {
-            result = ObjectHelper.requireNonNull(callbacks.resultSupplier.call(), "The seedSupplier returned a null value");
+            result = callbacks.resultSupplier.call();
         } catch (Throwable ex) {
             Exceptions.throwIfFatal(ex);
             EmptyDisposable.error(ex, observer);
@@ -85,7 +85,10 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
             partitionResult = callbacks.partitionSupplier.apply(result, partition);
 
             if (partitionResult == null)
+            {
                 subscription.closePartition(partition.partitionKey());
+                completePartition(partitionResult);
+            }
         }
         catch (Throwable t)
         {
@@ -105,8 +108,8 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
                 partitionResult = callbacks.itemReducer.apply(result, current, item);
                 if (partitionResult == null)
                 {
-                    completePartition(current);
                     subscription.closePartition(partition.partitionKey());
+                    completePartition(current);
                 }
             }
         }
@@ -127,7 +130,6 @@ class ReducerSubscription<R1, R2> extends Single<R1> implements PartitionsSubscr
     @Override
     public void onComplete()
     {
-        assert result != null;
         if (partitionResult != null)
             completePartition(partitionResult);
         downstream.onSuccess(result);

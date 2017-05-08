@@ -40,11 +40,10 @@ import org.junit.Test;
 
 import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.db.rows.FlowablePartitions;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.PartitionTrait;
+import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
+import org.apache.cassandra.db.rows.publisher.ReduceCallbacks;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.Util;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
@@ -74,7 +73,6 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -88,7 +86,6 @@ import org.apache.cassandra.index.sasi.memory.IndexMemtable;
 import org.apache.cassandra.index.sasi.plan.QueryController;
 import org.apache.cassandra.index.sasi.plan.QueryPlan;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -99,7 +96,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.flow.CsFlow;
 
 public class SASIIndexTest
 {
@@ -1352,12 +1348,8 @@ public class SASIIndexTest
         }
 
         // to make sure that query doesn't fail in normal conditions
-
-        try (ReadExecutionController controller = command.executionController())
-        {
-            Set<String> rows = getKeys(FlowablePartitions.toPartitions(new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller), command.metadata()));
-            Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2", "key3", "key4" }, rows.toArray(new String[rows.size()])));
-        }
+        Set<String> rows = getKeys(PartitionsPublisher.create(command, (controller) -> new QueryPlan(store, command, DatabaseDescriptor.getRangeRpcTimeout()).execute(controller)));
+        Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2", "key3", "key4" }, rows.toArray(new String[rows.size()])));
     }
 
     @Test
@@ -1574,7 +1566,7 @@ public class SASIIndexTest
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1" }, rows.toArray(new String[rows.size()])));
 
         rows = getIndexed(store, 10, buildExpression(name, Operator.EQ, UTF8Type.instance.decompose("Pave")));
-        Assert.assertTrue(rows.isEmpty());
+        Assert.assertTrue(rows.toString(), rows.isEmpty());
 
         rows = getIndexed(store, 10, buildExpression(name, Operator.EQ, UTF8Type.instance.decompose("Pavel")));
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1" }, rows.toArray(new String[rows.size()])));
@@ -2372,7 +2364,7 @@ public class SASIIndexTest
 
     private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
     {
-        UnfilteredPartitionIterator currentPage;
+        PartitionsPublisher currentPage;
         Set<DecoratedKey> uniqueKeys = new TreeSet<>();
 
         DecoratedKey lastKey = null;
@@ -2385,53 +2377,28 @@ public class SASIIndexTest
             if (currentPage == null)
                 break;
 
-            while (currentPage.hasNext())
+            try
             {
-                try (UnfilteredRowIterator row = currentPage.next())
-                {
-                    uniqueKeys.add(row.partitionKey());
-                    lastKey = row.partitionKey();
-                    count.incrementAndGet();
-                }
-            }
+                final DecoratedKey current = lastKey;
+                lastKey = currentPage.reduce(ReduceCallbacks.create(current,
+                                                       (key, partition) -> {
+                                                            uniqueKeys.add(partition.partitionKey());
+                                                            count.incrementAndGet();
+                                                            return partition.partitionKey();
+                                                       })).blockingGet();
 
-            currentPage.close();
+            }
+            catch (Exception e)
+            {
+                throw Throwables.propagate(e);
+            }
         }
         while (count.get() == pageSize);
 
         return uniqueKeys;
     }
 
-//    private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
-//    {
-//        Flowable<FlowableUnfilteredPartition> currentPage;
-//        Set<DecoratedKey> uniqueKeys = new TreeSet<>();
-//
-//        DecoratedKey lastKey = null;
-//
-//        AtomicInteger count = new AtomicInteger();
-//        do
-//        {
-//            count.set(0);
-//            currentPage = getIndexed(store, ColumnFilter.all(store.metadata()), lastKey, pageSize, expressions);
-//            if (currentPage == null)
-//                break;
-//
-//            lastKey = currentPage.lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys))
-//                                 .map(key ->
-//                                      {
-//                                          uniqueKeys.add(key);
-//                                          count.incrementAndGet();
-//                                          return key;
-//                                      })
-//                                 .blockingLast(null);
-//        }
-//        while (count.get() == pageSize);
-//
-//        return uniqueKeys;
-//    }
-
-    private static UnfilteredPartitionIterator getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
+    private static PartitionsPublisher getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
     {
         DataRange range = (startKey == null)
                             ? DataRange.allData(PARTITIONER)
@@ -2449,7 +2416,7 @@ public class SASIIndexTest
                                                             range,
                                                             Optional.empty());
 
-        return command.executeForTests();
+        return command.executeLocally();
     }
 
     private static Mutation newMutation(String key, String firstName, String lastName, int age, long timestamp)
@@ -2468,39 +2435,31 @@ public class SASIIndexTest
         return rm;
     }
 
-    private static Set<String> getKeys(final UnfilteredPartitionIterator rows)
+    private static Set<String> getKeys(final PartitionsPublisher publisher)
     {
         try
         {
-            return new TreeSet<String>()
-            {{
-                while (rows.hasNext())
-                {
-                    try (UnfilteredRowIterator row = rows.next())
+            return publisher.reduce(ReduceCallbacks.create(
+                new TreeSet<String>(),
+                (set, partition) -> {
+                    if (!partition.staticRow().isEmpty() || !partition.partitionLevelDeletion().isLive())
                     {
-                        if (!row.isEmpty())
-                            add(AsciiType.instance.compose(row.partitionKey().getKey()));
+                        set.add(AsciiType.instance.compose(partition.partitionKey().getKey()));
+                        return null; // closes the partition
                     }
-                }
-            }};
+                    return partition;
+                },
+                (set, partition, unfiltered) -> {
+                    if (partition != null)
+                        set.add(AsciiType.instance.compose(partition.partitionKey().getKey()));
+                    return null; // closes the partition
+                })).blockingGet();
         }
-        finally
+        catch (Exception e)
         {
-            rows.close();
+            throw Throwables.propagate(e);
         }
     }
-
-//    private static Set<String> getKeys(final Flowable<FlowableUnfilteredPartition> rows)
-//    {
-//        Flowable<DecoratedKey> fs = rows.lift(FlowableUtils.concatMapLazy(Util::nonEmptyKeys));
-//
-//        return fs.reduce(new TreeSet<String>(),
-//                           (set, pk) ->
-//                           {
-//                               set.add(AsciiType.instance.compose(pk.getKey()));
-//                               return set;
-//                           }).blockingGet();
-//    }
 
     private static List<String> convert(final Set<DecoratedKey> keys)
     {

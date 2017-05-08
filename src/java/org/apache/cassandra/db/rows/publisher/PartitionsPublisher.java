@@ -326,7 +326,6 @@ public class PartitionsPublisher
         private boolean partitionPublished;
         private CsFlow.RequestLoop requestLoop;
         private volatile boolean closed;
-        private volatile boolean released;
 
         InnerSubscription(OuterSubscription outerSubscription, PartitionsSubscriber subscriber, FlowableUnfilteredPartition partition)
         {
@@ -435,7 +434,7 @@ public class PartitionsPublisher
                     }
                 }
 
-                //logger.debug("{} - publishing partition", outerSubscription.hashCode());
+                //logger.debug("{} - publishing partition {}", outerSubscription.hashCode(), partition.header.partitionKey);
                 subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData));
             }
 
@@ -445,10 +444,10 @@ public class PartitionsPublisher
 
         private void close()
         {
-            //logger.debug("{} - closing {}", outerSubscription.hashCode(), released);
-            if (!released)
+            //logger.debug("{} - closing {}", outerSubscription.hashCode(), requestLoop.isReleased());
+            if (!requestLoop.isReleased())
             {
-                released = true;
+                requestLoop.release();
                 FileUtils.closeQuietly(subscription);
                 outerSubscription.onInnerSubscriptionClosed();
             }

@@ -298,9 +298,9 @@ public abstract class UnfilteredPartitionIterators
 
     public static Single<MessageDigest> digest(PartitionsPublisher partitions, MessageDigest digest, DigestVersion version)
     {
-        return partitions.reduce(ReduceCallbacks.trivial(digest,
-                                                         (s, partition) -> UnfilteredRowIterators.digestPartition(partition, digest, version),
-                                                         (s, unfiltered) -> UnfilteredRowIterators.digestUnfiltered(unfiltered, digest)));
+        return partitions.reduce(ReduceCallbacks.create(digest,
+                                                        (s, partition) -> UnfilteredRowIterators.digestPartition(partition, digest, version),
+                                                        (s, unfiltered) -> UnfilteredRowIterators.digestUnfiltered(unfiltered, digest)));
     }
 
     public static Serializer serializerForIntraNode(EncodingVersion version)
