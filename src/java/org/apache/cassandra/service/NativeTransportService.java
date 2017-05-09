@@ -31,6 +31,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
@@ -79,6 +80,7 @@ public class NativeTransportService
         {
             NioEventLoopGroup ret = new NioEventLoopGroup(NUM_NETTY_THREADS, new TPCScheduler.NettyRxThreadFactory(NioEventLoopGroup.class, Thread.MAX_PRIORITY));
             ret.setIoRatio(pIO);
+            ApproximateTime.schedule(ret.next());
 
             logger.info("Using Java NIO event loops");
             logger.info("Netting ioWork ratio to {}", pIO);
