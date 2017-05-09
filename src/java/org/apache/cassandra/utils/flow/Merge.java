@@ -27,8 +27,9 @@ import org.junit.Ignore;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
-/** Merges sorted input iterators which individually contain unique items. */
-// Not closeable -- the subscription is where that belongs, via the cancel method.
+/**
+ * Merges sorted input flows which individually contain unique items.
+ */
 public class Merge<In, Out> extends CsFlow<Out>
 {
     protected final Reducer<In,Out> reducer;
@@ -167,11 +168,6 @@ public class Merge<In, Out> extends CsFlow<Out>
             needingAdvance = size;
         }
 
-        public void request()
-        {
-            advance();
-        }
-
         @Override
         public void close() throws Exception
         {
@@ -193,7 +189,7 @@ public class Merge<In, Out> extends CsFlow<Out>
          * the heap if the number of consumed elements is high (as it is in the initial heap construction). With non- or
          * lightly-overlapping iterators the procedure finishes after just one (resp. a couple of) comparisons.
          */
-        private void advance()
+        public void request()
         {
             // Set to 1 initially to guard so we don't get called while we are increasing advancing.
             // It must be 0 before we are called.
@@ -207,37 +203,36 @@ public class Merge<In, Out> extends CsFlow<Out>
             for (int i = needingAdvance - 1; i >= 0; --i)
             {
                 Candidate<In> candidate = heap[i];
-                /**
+                /*
                  *  needingAdvance runs to the maximum index (and deepest-right node) that may need advancing;
                  *  since the equal items that were consumed at-once may occur in sub-heap "veins" of equality,
                  *  not all items above this deepest-right position may have been consumed; these already form
                  *  valid sub-heaps and can be skipped-over entirely
                  */
-                if (candidate.needsAdvance())
+                if (candidate.needsRequest())
                 {
                     advancing.incrementAndGet();
-                    candidate.advance();        // this can be jumping to/spawning another thread, or calling onAdvance()
+                    candidate.request();        // this can be jumping to/spawning another thread, or calling onAdvance()
                 }
             }
             onAdvance();
         }
 
-        // This can come concurrently!
-        public void onAdvance()
+        /**
+         * Called when a child has returned an item in response to a request from the method above.
+         * This can come concurrently since children can be performing requests in separate threads.
+         */
+        void onAdvance()
         {
+            // Count how many we have left to receive and just exit if we don't have all.
             if (advancing.decrementAndGet() > 0)
                 return;
 
-            // only one thread can be here
+            // Only one thread can reach this point.
             for (int i = needingAdvance - 1; i >= 0; --i)
             {
                 Candidate<In> candidate = heap[i];
-                /**
-                 *  needingAdvance runs to the maximum index (and deepest-right node) that may need advancing;
-                 *  since the equal items that were consumed at-once may occur in sub-heap "veins" of equality,
-                 *  not all items above this deepest-right position may have been consumed; these already form
-                 *  valid sub-heaps and can be skipped-over entirely
-                 */
+                // The test below should now be true for every item that hit needsRequest() in the loop above.
                 if (candidate.justAdvanced())
                     replaceAndSink(heap[i], i);
             }
@@ -281,7 +276,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             if (error != null)
                 subscriber.onError(error);
             else if (item != null)
-                subscriber.onNext(item);    // usually requests; make sure we don't double-advance or miss a request
+                subscriber.onNext(item);    // usually requests
             else
                 request();           // reducer rejected its input; get another set
         }
@@ -414,7 +409,7 @@ public class Merge<In, Out> extends CsFlow<Out>
         }
     }
 
-    // Holds and is comparable by the head item of an iterator it owns
+    // Holds and is comparable by the head item of an flow it has subscribed to
     protected final static class Candidate<In> implements Comparable<Candidate<In>>, CsSubscriber<In>, AutoCloseable
     {
         private final ManyToOne<In, ?> merger;
@@ -444,13 +439,12 @@ public class Merge<In, Out> extends CsFlow<Out>
             source = iter.subscribe(this);
         }
 
-        public boolean needsAdvance()
+        public boolean needsRequest()
         {
             return state == State.NEEDS_REQUEST;
         }
 
-        /** @return this if our iterator had an item, and it is now available, otherwise null */
-        protected void advance()
+        protected void request()
         {
             assert state == State.NEEDS_REQUEST;
             assert item == null;

@@ -728,7 +728,6 @@ public abstract class CsFlow<T>
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
-     * @throws Exception
      */
     public <O> CompletableFuture<O> reduceToFuture(O seed, BiFunction<O, T, O> reducer)
     {
@@ -795,7 +794,6 @@ public abstract class CsFlow<T>
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
-     * @throws Exception
      */
     public <O> CsFlow<O> reduceWith(Supplier<O> seedSupplier, BiFunction<O, T, O> reducer)
     {
@@ -1102,6 +1100,7 @@ public abstract class CsFlow<T>
      */
     public long countBlocking() throws Exception
     {
+        // Note: using AtomicLong to avoid boxing a long at every iteration.
         return reduceBlocking(new AtomicLong(0),
                               (count, value) ->
                               {
