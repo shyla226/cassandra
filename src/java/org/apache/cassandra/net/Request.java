@@ -108,7 +108,10 @@ public class Request<P, Q> extends Message<P>
                              to,
                              id,
                              verb,
-                             new Data<>(payload));
+                             new Data<>(payload,
+                                        -1,
+                                        System.currentTimeMillis(),
+                                        verb.isOneWay() ? Long.MAX_VALUE : verb.timeoutSupplier().get(payload)));
     }
 
     public Type type()

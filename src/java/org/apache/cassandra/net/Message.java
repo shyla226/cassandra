@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.interceptors.Interceptor;
@@ -308,17 +309,21 @@ public abstract class Message<P>
     
     /**
      * Whether the message is timed out and can be dropped.
+     *
+     * @param currentTimeMillis the current time in milliseconds.
      */
-    boolean isTimedOut()
+    boolean isTimedOut(long currentTimeMillis)
     {
-        // Note: we used to have a list of droppable verbs (it's still in OSS too) but we don't anymore (since APOLLO-497).
+        // Note1: we used to have a list of droppable verbs (it's still in OSS too) but we don't anymore (since APOLLO-497).
         // Instead, all two-way verbs can be dropped once timed out. The rational is that any two-way verb better have a
         // timeout (failure happens, we should not wait indefinitely), but then once that timeout elapses, whomever sent
         // the message will have given up on the response _and_ will have taken any actions necessary on the assumption
         // that the message didn't make it through. So there is no reason not to drop a timed out message, and dropping them
         // is desirable to help recover more quickly when overwhelmed. And not having a list that we're bound to forget
         // to update at times is a plus.
-        return !verb().isOneWay() && lifetimeMillis() > timeoutMillis();
+        // Note2: this is called pretty often and the precision isn't _that_ important (timeouts are expressed in seconds),
+        // so using ApproximateTime is appropriate.
+        return !verb().isOneWay() && (currentTimeMillis - operationStartMillis()) > timeoutMillis();
     }
 
     /**
