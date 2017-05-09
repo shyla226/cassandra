@@ -3090,4 +3090,12 @@ public class StorageProxy implements StorageProxyMBean
     {
         return Schema.instance.getNumberOfTables();
     }
+
+    public int getOtcBacklogExpirationInterval() {
+        return DatabaseDescriptor.getOtcBacklogExpirationInterval();
+    }
+
+    public void setOtcBacklogExpirationInterval(int intervalInMillis) {
+        DatabaseDescriptor.setOtcBacklogExpirationInterval(intervalInMillis);
+    }
 }
