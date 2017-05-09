@@ -502,10 +502,9 @@ public class CassandraRoleManager implements IRoleManager
     private Role getRoleFromTable(String name, SelectStatement statement, Function<UntypedResultSet.Row, Role> function)
     throws RequestExecutionException, RequestValidationException
     {
-        ResultMessage.Rows rows = (ResultMessage.Rows)
-            TPCUtils.blockingGet(statement.execute(QueryState.forInternalCalls(),
-            QueryOptions.forInternalCalls(consistencyForRole(name), Collections.singletonList(ByteBufferUtil.bytes(name))),
-            System.nanoTime()));
+        ResultMessage.Rows rows = TPCUtils.blockingGet(statement.execute(QueryState.forInternalCalls(),
+                                                                         QueryOptions.forInternalCalls(consistencyForRole(name), Collections.singletonList(ByteBufferUtil.bytes(name))),
+                                                                         System.nanoTime()));
 
         if (rows.result.isEmpty())
             return NULL_ROLE;

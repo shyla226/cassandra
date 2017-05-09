@@ -298,7 +298,7 @@ public class SelectStatement implements CQLStatement
         // Nothing to do, all validation has been done by RawStatement.prepare()
     }
 
-    public Single<? extends ResultMessage> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -512,7 +512,7 @@ public class SelectStatement implements CQLStatement
         return process(partitions, options, nowInSec, userLimit).map(ResultMessage.Rows::new);
     }
 
-    public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
+    public Single<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
         return executeInternal(state, options, FBUtilities.nowInSeconds(), System.nanoTime());
     }
