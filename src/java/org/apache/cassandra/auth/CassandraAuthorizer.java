@@ -205,7 +205,7 @@ public class CassandraAuthorizer implements IAuthorizer
         QueryProcessor.instance.processBatch(batch,
                                              QueryState.forInternalCalls(),
                                              BatchQueryOptions.withoutPerStatementVariables(QueryOptions.DEFAULT),
-                                             System.nanoTime());
+                                             System.nanoTime()).blockingGet();
 
     }
 

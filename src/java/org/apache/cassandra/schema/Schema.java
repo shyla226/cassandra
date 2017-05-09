@@ -31,7 +31,6 @@ import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.KeyspaceNotDefinedException;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;

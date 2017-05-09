@@ -22,6 +22,7 @@ import java.util.*;
 
 import io.reactivex.Single;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.PermissionDetails;
@@ -91,20 +92,22 @@ public class ListPermissionsStatement extends AuthorizationStatement
     // TODO: Create a new ResultMessage type (?). Rows will do for now.
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        List<PermissionDetails> details = new ArrayList<PermissionDetails>();
+        return Single.fromCallable(() -> {
+            List<PermissionDetails> details = new ArrayList<PermissionDetails>();
 
-        if (resource != null && recursive)
-        {
-            for (IResource r : Resources.chain(resource))
-                details.addAll(list(state, r));
-        }
-        else
-        {
-            details.addAll(list(state, resource));
-        }
+            if (resource != null && recursive)
+            {
+                for (IResource r : Resources.chain(resource))
+                    details.addAll(list(state, r));
+            }
+            else
+            {
+                details.addAll(list(state, resource));
+            }
 
-        Collections.sort(details);
-        return Single.just(resultMessage(details));
+            Collections.sort(details);
+            return resultMessage(details);
+        }).subscribeOn(Schedulers.io()); // authorizer.grant() ultimately results in a blockingGet() so stay away from core threads
     }
 
     private Set<PermissionDetails> list(ClientState state, IResource resource)

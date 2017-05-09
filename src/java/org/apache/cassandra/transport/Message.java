@@ -609,6 +609,8 @@ public abstract class Message
 
                     // onError
                     t -> {
+                        //logger.info("Responding with error: {}, v={} ON {}", t.getMessage(), connection.getVersion(), Thread.currentThread().getName());
+
                         JVMStabilityInspector.inspectThrowable(t);
                         UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
                         Message response = ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId());

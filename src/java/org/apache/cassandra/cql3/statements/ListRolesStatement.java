@@ -26,6 +26,7 @@ import com.google.common.collect.Lists;
 
 import io.reactivex.Single;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.IRoleManager;
@@ -84,27 +85,29 @@ public class ListRolesStatement extends AuthorizationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
-        boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
-                                                       .authorize(state.getUser(), RoleResource.root())
-                                                       .contains(CorePermission.DESCRIBE);
-        if (hasRootLevelSelect)
-        {
-            if (grantee == null)
-                return resultMessage(DatabaseDescriptor.getRoleManager().getAllRoles());
+        return Single.defer(() -> {
+            // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
+            boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
+                                                           .authorize(state.getUser(), RoleResource.root())
+                                                           .contains(CorePermission.DESCRIBE);
+            if (hasRootLevelSelect)
+            {
+                if (grantee == null)
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getAllRoles());
+                else
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
+            }
             else
-                return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
-        }
-        else
-        {
-            RoleResource currentUser = RoleResource.role(state.getUser().getName());
-            if (grantee == null)
-                return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(currentUser, recursive));
-            if (DatabaseDescriptor.getRoleManager().getRoles(currentUser, true).contains(grantee))
-                return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
-            else
-                throw new UnauthorizedException(String.format("You are not authorized to view roles granted to %s ", grantee.getRoleName()));
-        }
+            {
+                RoleResource currentUser = RoleResource.role(state.getUser().getName());
+                if (grantee == null)
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(currentUser, recursive));
+                if (DatabaseDescriptor.getRoleManager().getRoles(currentUser, true).contains(grantee))
+                    return resultMessage(DatabaseDescriptor.getRoleManager().getRoles(grantee, recursive));
+                else
+                    return Single.error(new UnauthorizedException(String.format("You are not authorized to view roles granted to %s ", grantee.getRoleName())));
+            }
+        }).subscribeOn(Schedulers.io()); // role manager.getRoles() ultimately results in a blockingGet() so stay away from core threads
     }
 
     private Single<ResultMessage> resultMessage(Set<RoleResource> roles)

@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IRoleManager.Option;
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -90,8 +91,10 @@ public class AlterRoleStatement extends AuthenticationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        if (!opts.isEmpty())
-            DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-        return Single.just(new ResultMessage.Void());
+        return Single.fromCallable(() -> {
+           if (!opts.isEmpty())
+               DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
+           return (ResultMessage)(new ResultMessage.Void());
+       }).subscribeOn(Schedulers.io()); // alterRole ultimately calls a blockingGet
     }
 }

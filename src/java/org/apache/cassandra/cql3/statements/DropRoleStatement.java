@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.auth.Roles;
@@ -69,14 +70,17 @@ public class DropRoleStatement extends AuthenticationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        // not rejected in validate()
-        if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return Single.just(new ResultMessage.Void());
+        return Single.fromCallable(() -> {
 
-        // clean up grants and permissions of/on the dropped role.
-        DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
-        DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
-        DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
-        return Single.just(new ResultMessage.Void());
+            // not rejected in validate()
+            if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
+                return new ResultMessage.Void();
+
+            // clean up grants and permissions of/on the dropped role.
+            DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
+            DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
+            DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
+            return (ResultMessage)(new ResultMessage.Void());
+        }).subscribeOn(Schedulers.io()); // isExistingRole and the revoke methods ultimately call blockingGet
     }
 }

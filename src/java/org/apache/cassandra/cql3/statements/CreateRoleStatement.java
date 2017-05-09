@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
 
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthenticatedUser;
@@ -72,13 +73,15 @@ public class CreateRoleStatement extends AuthenticationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException
     {
-        // not rejected in validate()
-        if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return Single.just(new ResultMessage.Void());
+        return Single.fromCallable(() -> {
+            // not rejected in validate()
+            if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
+                return new ResultMessage.Void();
 
-        DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
-        grantPermissionsToCreator(state);
-        return Single.just(new ResultMessage.Void());
+            DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
+            grantPermissionsToCreator(state);
+            return (ResultMessage)(new ResultMessage.Void());
+        }).subscribeOn(Schedulers.io()); // isExistingRole and createRole ultimately call a blockingGet
     }
 
     /**
