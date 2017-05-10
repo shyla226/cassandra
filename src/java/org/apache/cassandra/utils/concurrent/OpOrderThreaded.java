@@ -118,7 +118,7 @@ public class OpOrderThreaded implements OpOrder
             if (orderOnOrBefore == null)
                 return true;
             // we subtract to permit wrapping round the full range of Long - so we only need to ensure
-            // there are never Long.MAX_VALUE * 2 total Group objects in existence at any one timem which will
+            // there are never Long.MAX_VALUE * 2 total Group objects in existence at any one time which will
             // take care of itself
             return orderOnOrBefore[0].id - ((OpOrderSimple.Group) group).id >= 0;
         }
