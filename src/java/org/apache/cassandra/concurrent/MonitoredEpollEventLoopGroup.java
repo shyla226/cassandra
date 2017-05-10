@@ -24,19 +24,20 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
-
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
 import io.netty.channel.MultithreadEventLoopGroup;
+import io.netty.channel.SelectStrategy;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.epoll.Native;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
+import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
 
 import io.netty.util.internal.logging.InternalLogger;
@@ -49,30 +50,40 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
 
+/**
+ * Groups our TPC event loops.
+ * <p>
+ * This is mainly a container for our per-core event loop threads, implemented by {@link SingleCoreEventLoop}, that are
+ * in charge of executing all-the-things[1]. In particular, the event loops execute both our internal Apollo tasks as
+ * well as Netty's tasks, which is why it extends Netty's {@link MultithreadEventLoopGroup}.
+ * <p>
+ * When an event loop has no work to do for some time, it will eventually park itself (see {@link SingleCoreEventLoop}
+ * for details) and so the group uses a monitoring thread that continuously check if a parked event loop needs to be
+ * un-parked.
+ *
+ * [1]: not exactly everything yet, but they should  eventually.
+ */
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 {
-    private static String DEBUG_RUNNING_TIME_NAME = "cassandra.debug_tpc_task_running_time_seconds";
-    private static long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
-                                                                                TimeUnit.SECONDS);
+    private static final String DEBUG_RUNNING_TIME_NAME = "cassandra.debug_tpc_task_running_time_seconds";
+    private static final long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
+                                                                                      TimeUnit.SECONDS);
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(MonitoredEpollEventLoopGroup.class);
 
     @Contended
-    private SingleCoreEventLoop[] initLoops;
-
-    @Contended
-    private Thread[] initThreads;
-
-    @Contended
     private final SingleCoreEventLoop[] eventLoops;
-
-    @Contended
-    private final Thread[] runningThreads;
 
     private final Thread monitorThread;
 
     private volatile boolean shutdown;
 
+    /**
+     * Creates new a {@code MonitoredEpollEventLoopGroup} using the provided number of event loops.
+     *
+     * @param nThreads the number of event loops to use (not that every loop is exactly one thread, but the group also
+     *                 use an additional thread for monitoring).
+     */
     public MonitoredEpollEventLoopGroup(int nThreads)
     {
         this(nThreads, new TPCScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
@@ -98,7 +109,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         {
             final int cpuId = i;
             EventLoop loop = eventLoops[i];
-            eventLoops[i].schedule(() -> {
+            loop.schedule(() -> {
                 try
                 {
                     TPCScheduler.register(loop, cpuId);
@@ -117,20 +128,14 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         Uninterruptibles.awaitUninterruptibly(ready);
     }
 
-    /**
-     * We pass default args for the newChild() since we need to init the data lazily
-     * @param nThreads
-     * @param threadFactory
-     * @param args
-     */
-    public MonitoredEpollEventLoopGroup(int nThreads, ThreadFactory threadFactory, Object... args)
+    private MonitoredEpollEventLoopGroup(int nThreads, ThreadFactory threadFactory)
     {
-        super(nThreads, threadFactory, nThreads, threadFactory, new AtomicInteger(0), args);
+        // The 1st threadFactory is for the super class ctor, the 2nd one is so it gets passed to newChild()
+        super(nThreads, threadFactory, threadFactory);
 
-        eventLoops = initLoops;
-        runningThreads = initThreads;
+        this.eventLoops = extractEventLoopArray();
 
-        monitorThread = threadFactory.newThread(() -> {
+        monitorThread = new Thread(() -> {
             int length = eventLoops.length;
 
             while (!shutdown)
@@ -147,17 +152,25 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 eventLoops[i].unpark();
         });
 
-        monitorThread.setName("netty-monitor-event-loop-thread");
+        monitorThread.setName("CoreThreadMonitor");
+        monitorThread.setPriority(Thread.MAX_PRIORITY);
         monitorThread.setDaemon(true);
         monitorThread.start();
+    }
+
+    private SingleCoreEventLoop[] extractEventLoopArray()
+    {
+        SingleCoreEventLoop[] loops = new SingleCoreEventLoop[executorCount()];
+        int i = 0;
+        for (EventExecutor eventExecutor : this)
+            loops[i++] = (SingleCoreEventLoop)eventExecutor;
+        return loops;
     }
 
     @Override
     public void shutdown()
     {
-        for (EventLoop loop : eventLoops)
-            loop.shutdown();
-
+        super.shutdown();
         shutdown = true;
     }
 
@@ -165,89 +178,50 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
     public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException
     {
         long start = System.nanoTime();
-        long timeoutNanos = TimeUnit.NANOSECONDS.convert(timeout, unit);
-
-        monitorThread.join(timeoutNanos / 1000000, (int)(timeoutNanos % 1000000));
-        if (monitorThread.isAlive())
+        if (!super.awaitTermination(timeout, unit))
             return false;
 
-        for (EventLoop loop : eventLoops)
-        {
-            long elapsed = System.nanoTime() - start;
-            timeoutNanos -= elapsed;
-            if (timeoutNanos <= 0)
-                return false;
+        long elapsedNanos = System.nanoTime() - start;
+        long timeLeftNanos = TimeUnit.NANOSECONDS.convert(timeout, unit) - elapsedNanos;
 
-            if (!loop.awaitTermination(timeoutNanos, TimeUnit.NANOSECONDS))
-                return false;
-        }
-
-        return true;
-    }
-
-    private synchronized void maybeInit(int nThreads, ThreadFactory threadFactory)
-    {
-        if (initLoops != null)
-            return;
-
-        initLoops = new SingleCoreEventLoop[nThreads];
-        initThreads = new Thread[nThreads];
-
-        CountDownLatch ready = new CountDownLatch(nThreads);
-        for (int i = 0; i < nThreads; i++)
-        {
-            initLoops[i] = new SingleCoreEventLoop(this, new MonitorableExecutor(threadFactory, i), i, nThreads);
-
-            //Start the loop which sets the Thread
-            initLoops[i].submit(ready::countDown);
-        }
-
-        Uninterruptibles.awaitUninterruptibly(ready);
+        monitorThread.join(timeLeftNanos / 1_000_000L, (int)(timeLeftNanos % 1_000_000L));
+        return !monitorThread.isAlive();
     }
 
     protected EventLoop newChild(Executor executor, Object... args) throws Exception
     {
-        assert args.length >= 2 : args.length;
-        maybeInit((int)args[0], (ThreadFactory)args[1]);
-
-        int offset = ((AtomicInteger)args[2]).getAndIncrement();
-        if (offset >= initLoops.length)
-            throw new RuntimeException("Trying to allocate more children than passed to the group");
-
-        return initLoops[offset];
+        assert args.length >= 1 : args.length;
+        return new SingleCoreEventLoop(this, new MonitorableExecutor((ThreadFactory) args[0]));
     }
 
-    private class MonitorableExecutor implements Executor
+    private static class MonitorableExecutor implements Executor
     {
-        final int offset;
-        final ThreadFactory threadFactory;
+        private final ThreadFactory threadFactory;
+        Thread thread;
 
-        MonitorableExecutor(ThreadFactory threadFactory, int offset)
+        private MonitorableExecutor(ThreadFactory threadFactory)
         {
             this.threadFactory = threadFactory;
-            this.offset = offset;
         }
 
         public void execute(Runnable command)
         {
-            Thread t = threadFactory.newThread(command);
-            t.setDaemon(true);
-            initThreads[offset] = t;
-
-            t.start();
+            thread = threadFactory.newThread(command);
+            thread.setDaemon(true);
+            thread.start();
         }
     }
 
-    private enum CoreState
+    private static class SingleCoreEventLoop extends EpollEventLoop
     {
-        PARKED,
-        WORKING
-    }
+        private enum CoreState
+        {
+            PARKED,
+            WORKING
+        }
 
-    private static class SingleCoreEventLoop extends EpollEventLoop implements Runnable
-    {
         private final MonitoredEpollEventLoopGroup parent;
-        private final int threadOffset;
+        private final Thread thread;
 
         private static final int busyExtraSpins =  1024 * 128;
         private static final int yieldExtraSpins = 1024 * 8;
@@ -267,66 +241,70 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         private volatile long lastDrainTime;
 
-        private SingleCoreEventLoop(MonitoredEpollEventLoopGroup parent, Executor executor, int threadOffset, int totalCores)
+        private SingleCoreEventLoop(MonitoredEpollEventLoopGroup parent, MonitorableExecutor executor)
         {
             super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject());
 
             this.parent = parent;
-            this.threadOffset = threadOffset;
             this.externalQueue = new MpscArrayQueue<>(1 << 16);
             this.internalQueue = new ArrayDeque<>(1 << 16);
 
             this.state = CoreState.WORKING;
             this.lastDrainTime = -1;
+
+            // Start the loop which sets the Thread
+            Futures.getUnchecked(submit(() -> {}));
+
+            this.thread = executor.thread;
+            assert this.thread != null;
         }
 
-        public void run()
+        /**
+         * The actual event loop.
+         * <p>
+         * Each loop consists in checking for both events on epoll and tasks on our internal/external queues.
+         * Any available work is executed and we then loop.
+         */
+        @Override
+        protected void run()
         {
-            try
+            while (!parent.shutdown)
             {
-                while (!parent.shutdown)
+                //deal with spurious wake-ups
+                if (state == CoreState.WORKING)
                 {
-                    //deal with spurious wakeups
-                    if (state == CoreState.WORKING)
+                    int spins = 0;
+                    while (!parent.shutdown)
                     {
-                        int spins = 0;
-                        while (!parent.shutdown)
+                        int drained = drain();
+                        if (drained > 0)
                         {
-                            int drained = drain();
-                            if (drained > 0 || ++spins < busyExtraSpins)
-                            {
-                                if (drained > 0)
-                                    spins = 0;
-
+                            spins = 0;
+                        }
+                        else
+                        {
+                            ++spins;
+                            if (spins < busyExtraSpins)
                                 continue;
-                            }
                             else if (spins < busyExtraSpins + yieldExtraSpins)
-                            {
                                 Thread.yield();
-                            }
                             else if (spins < busyExtraSpins + yieldExtraSpins + parkExtraSpins)
-                            {
                                 LockSupport.parkNanos(1);
-                            }
                             else
                                 break;
                         }
                     }
-
-                    if (isShuttingDown()) {
-                        closeAll();
-                        if (confirmShutdown()) {
-                            return;
-                        }
-                    }
-
-                    //Nothing todo; park
-                    park();
                 }
-            }
-            finally
-            {
 
+                if (isShuttingDown())
+                {
+                    closeAll();
+                    if (confirmShutdown())
+                        return;
+                }
+
+                //Nothing todo; park
+                park();
             }
         }
 
@@ -339,7 +317,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         private void unpark()
         {
             state = CoreState.WORKING;
-            LockSupport.unpark(parent.runningThreads[threadOffset]);
+            LockSupport.unpark(thread);
         }
 
         private void checkLongRunningTasks(long nanoTime)
@@ -348,7 +326,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             {
                 logger.debug("Detected task running for {} seconds for thread with stack:\n{}",
                              TimeUnit.SECONDS.convert(Math.abs(nanoTime - lastDrainTime), TimeUnit.NANOSECONDS),
-                             FBUtilities.Debug.getStackTrace(parent.runningThreads[threadOffset]));
+                             FBUtilities.Debug.getStackTrace(thread));
 
                 lastDrainTime = -1;
             }
@@ -365,30 +343,26 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                 unpark();
         }
 
-        public void addTask(Runnable task)
+        @Override
+        protected void addTask(Runnable task)
         {
             Thread currentThread = Thread.currentThread();
 
-            if (parent.runningThreads != null)
+            // Side-note: 'thread' will be null the very first time this is called for the empty task submitted in the
+            // ctor to kick-start the loop. This is fine, but that means 'thread' shouldn't be de-referenced.
+            if (currentThread == thread)
             {
-                if (currentThread == parent.runningThreads[threadOffset])
-                {
-                    if (!internalQueue.offer(task))
-                        throw new RuntimeException("Backpressure");
-                }
-                else
-                {
-                    if (!externalQueue.relaxedOffer(task))
-                        throw new RuntimeException("Backpressure");
-                }
+                if (!internalQueue.offer(task))
+                    reject(task);
             }
             else
             {
-                task.run();
+                if (!externalQueue.relaxedOffer(task))
+                    reject(task);
             }
         }
 
-        int drain()
+        private int drain()
         {
             if (DEBUG_RUNNING_TIME_NANOS > 0)
                 lastDrainTime = nanoTime();
@@ -397,7 +371,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             return drainTasks() + processed;
         }
 
-        int drainEpoll()
+        private int drainEpoll()
         {
             try
             {
@@ -413,9 +387,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                     t = this.selectStrategy.calculateStrategy(this.selectNowSupplier, hasTasks());
                     switch (t)
                     {
-                        case -2:
+                        case SelectStrategy.CONTINUE:
                             return 0;
-                        case -1:
+                        case SelectStrategy.SELECT:
                             t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
                             if (this.wakenUp == 1)
                             {
@@ -450,7 +424,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         }
 
         @Inline
-        int drainTasks()
+        private int drainTasks()
         {
             int processed = 0;
 
@@ -508,29 +482,25 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Inline
         boolean isEmpty()
         {
-            boolean empty = !hasTasks();
+            if (hasTasks())
+                return false;
 
             try
             {
-                int t;
-                if (empty)
-                {
-                    t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
+                int t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
 
-                    if (t > 0)
-                        pendingEpollEvents = t;
-                    else
-                        Native.eventFdWrite(this.eventFd.intValue(), 1L);
+                if (t > 0)
+                    pendingEpollEvents = t;
+                else
+                    Native.eventFdWrite(this.eventFd.intValue(), 1L);
 
-                    return t <= 0;
-                }
+                return t <= 0;
             }
             catch (Exception e)
             {
                 logger.error("Error selecting socket ", e);
+                return true;
             }
-
-            return empty;
         }
 
         protected static long nanoTime()
@@ -539,7 +509,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         }
 
         @Inline
-        void fetchFromDelayedQueue(long nanoTime)
+        private void fetchFromDelayedQueue(long nanoTime)
         {
             Runnable scheduledTask = pollScheduledTask(nanoTime);
             while (scheduledTask != null)
