@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Ignore;
 
@@ -255,7 +256,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             }
 
             reducer.onKeyChange();
-            assert !heap[0].equalParent;
+
             heap[0].consume(reducer);
             final int size = this.size;
             final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
@@ -271,14 +272,17 @@ public class Merge<In, Out> extends CsFlow<Out>
             }
             needingAdvance = i;
 
-            Out item = reducer.getReduced();
             Throwable error = reducer.getErrors();
             if (error != null)
                 subscriber.onError(error);
-            else if (item != null)
-                subscriber.onNext(item);    // usually requests
             else
-                request();           // reducer rejected its input; get another set
+            {
+                Out item = reducer.getReduced();
+                if (item != null)
+                    subscriber.onNext(item);    // usually requests
+                else
+                    request();           // reducer rejected its input; get another set
+            }
         }
 
         /**
@@ -426,7 +430,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             PROCESSED
             // eventually SMALLER_SIBLING, EQUAL_PARENT (imply PROCESSED)
         };
-        private State state;
+        private AtomicReference<State> state = new AtomicReference<>(State.NEEDS_REQUEST);
 
         boolean equalParent;
 
@@ -435,20 +439,37 @@ public class Merge<In, Out> extends CsFlow<Out>
             this.merger = merger;
             this.comp = comp;
             this.idx = idx;
-            this.state = State.NEEDS_REQUEST;
             source = iter.subscribe(this);
         }
 
         public boolean needsRequest()
         {
-            return state == State.NEEDS_REQUEST;
+            return state.get() == State.NEEDS_REQUEST;
+        }
+
+        private void verifyStateChange(State from, State to, boolean itemShouldBeNull)
+        {
+            State prev = state.getAndSet(to);
+            if (prev == from && (!itemShouldBeNull || item == null))
+                return;
+
+            throw onOurError(new AssertionError("Invalid state " + prev +
+                                                (item == null ? "/" : "/non-") + "null item to transition " +
+                                                from + (itemShouldBeNull ? "/null item" : "") + "->" + to + " in loop of " + this));
+        }
+
+        private AssertionError onOurError(AssertionError e)
+        {
+            // We are in a bad state. We can't expect to pass this error through the merge, so pass on to subscriber
+            // directly and abort everything we can.
+            merger.subscriber.onError(e);
+            return e;
         }
 
         protected void request()
         {
-            assert state == State.NEEDS_REQUEST;
-            assert item == null;
-            state = State.AWAITING_ADVANCE;
+            verifyStateChange(State.NEEDS_REQUEST, State.AWAITING_ADVANCE, true);
+
             source.request();
         }
 
@@ -468,31 +489,38 @@ public class Merge<In, Out> extends CsFlow<Out>
         @Override
         public void onNext(In next)
         {
-            assert next != null;
-            onAdvance(next);
+            if (next != null)
+                onAdvance(next);
+            else
+                onError(new AssertionError("null item in onNext call of " + this));
         }
 
         private void onAdvance(In next)
         {
-            assert next == null || state == State.AWAITING_ADVANCE : "Unexpected state: " + state;
+            verifyStateChange(State.AWAITING_ADVANCE, State.ADVANCED, true);
+
             item = next;
-            state = State.ADVANCED;
             merger.onAdvance();
         }
 
         public boolean justAdvanced()
         {
-            if (state == State.PROCESSED)
+            if (state.get() == State.PROCESSED)
                 return false;
 
-            assert state == State.ADVANCED;
-            state = State.PROCESSED;
+            verifyStateChange(State.ADVANCED, State.PROCESSED, false);
+
             return true;
         }
 
         public int compareTo(Candidate<In> that)
         {
-            assert this.state == State.PROCESSED && that.state == State.PROCESSED;
+            if (this.state.get() != State.PROCESSED || that.state.get() != State.PROCESSED)
+            {
+                Candidate<In> invalid = this.state.get() != State.PROCESSED ? this : that;
+                throw onOurError(new AssertionError("Comparing unprocessed item " + invalid + " in state " + invalid.state.get()));
+            }
+
             if (this.error != null || that.error != null)
                 return ((this.error != null) ? -1 : 0) - ((that.error != null) ? -1 : 0);
 
@@ -503,8 +531,8 @@ public class Merge<In, Out> extends CsFlow<Out>
 
         public void consume(Reducer<In, ?> reducer)
         {
-            assert state == State.PROCESSED : "Was expecting State.PROCESSED, got: " + state.toString();
-            state = State.NEEDS_REQUEST;
+            verifyStateChange(State.PROCESSED, State.NEEDS_REQUEST, false);
+
             if (error != null)
                 reducer.error(error);
             else
