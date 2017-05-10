@@ -183,47 +183,52 @@ public abstract class CQLTester
             return;
         }
 
-        DatabaseDescriptor.daemonInitialization();
-
-        //Required early for TPC
-        TPCScheduler.register();
-
-        // Cleanup first
         try
         {
-            cleanupAndLeaveDirs();
-        }
-        catch (IOException e)
-        {
-            logger.error("Failed to cleanup and recreate directories.");
-            throw new RuntimeException(e);
-        }
+            DatabaseDescriptor.daemonInitialization();
 
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
-        {
-            public void uncaughtException(Thread t, Throwable e)
+            //Required early for TPC
+            TPCScheduler.register();
+
+            // Cleanup first
+            try
             {
-                logger.error("Fatal exception in thread " + t, e);
+                cleanupAndLeaveDirs();
             }
-        });
+            catch (IOException e)
+            {
+                logger.error("Failed to cleanup and recreate directories.");
+                throw new RuntimeException(e);
+            }
 
-        ThreadAwareSecurityManager.install();
+            Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler()
+            {
+                public void uncaughtException(Thread t, Throwable e)
+                {
+                    logger.error("Fatal exception in thread " + t, e);
+                }
+            });
 
-        Keyspace.setInitialized();
-        SystemKeyspace.persistLocalMetadata();
+            ThreadAwareSecurityManager.install();
 
-        SystemKeyspace.finishStartup();
-        SystemKeyspace.persistLocalMetadata();
-        StorageService.instance.populateTokenMetadata();
+            Keyspace.setInitialized();
+            SystemKeyspace.persistLocalMetadata();
 
-        preJoinHook.run();
+            SystemKeyspace.finishStartup();
+            SystemKeyspace.persistLocalMetadata();
+            StorageService.instance.populateTokenMetadata();
 
-        //TPC requires local vnodes to be generated so we need to
-        //put the SS through join.
-        StorageService.instance.initServer();
+            preJoinHook.run();
 
-        // signal to any other waiting test that the server is ready
-        serverReady.countDown();
+            //TPC requires local vnodes to be generated so we need to
+            //put the SS through join.
+            StorageService.instance.initServer();
+        }
+        finally
+        {
+            // signal to any other waiting test that the server is ready
+            serverReady.countDown();
+        }
     }
 
     public static void cleanupAndLeaveDirs() throws IOException

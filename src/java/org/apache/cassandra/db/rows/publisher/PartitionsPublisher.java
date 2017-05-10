@@ -23,6 +23,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -321,6 +323,8 @@ public class PartitionsPublisher
     {
         private final OuterSubscription outerSubscription;
         private final PartitionsSubscriber subscriber;
+        private final DecoratedKey partitionKey;
+        @Nullable // will be null if transformations suppress it
         private FlowableUnfilteredPartition partition;
         private CsSubscription subscription;
         private boolean partitionPublished;
@@ -331,6 +335,7 @@ public class PartitionsPublisher
         {
             this.outerSubscription = outerSubscription;
             this.subscriber = subscriber;
+            this.partitionKey = partition.header.partitionKey;
             this.partition = partition;
             this.partitionPublished = false;
 
@@ -340,13 +345,14 @@ public class PartitionsPublisher
 
         DecoratedKey partitionKey()
         {
-            return partition.header.partitionKey;
+            return partitionKey;
         }
 
         // we cannot subscribe in the constructor because the atomic reference is not set yet
         public void subscribe()
         {
             assert this.subscription == null : "onSubscribe should have been called only once";
+            assert this.partition != null : "partition should have been available when subscribing";
 
             try
             {
@@ -366,7 +372,7 @@ public class PartitionsPublisher
         {
             //logger.debug("{} - onNext item", outerSubscription.hashCode());
 
-            if (!partition.hasData)
+            if (partition != null && !partition.hasData)
                 partition.hasData = true;
 
             if (!maybePublishPartition())
@@ -376,7 +382,7 @@ public class PartitionsPublisher
                 return;
             }
 
-            if (closed || partition.stop.isSignalled)
+            if (closed || (partition != null && partition.stop.isSignalled))
             {
                 //logger.debug("{} - closed or stop signalled {}, {}", outerSubscription.hashCode(), closed, partition.stop.isSignalled);
                 onComplete();
@@ -438,8 +444,8 @@ public class PartitionsPublisher
                 subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData));
             }
 
-            // the partition was published, either now or earlier
-            return true;
+            // the partition was published earlier if it isn't null, otherwise it was suppressed and we return false
+            return partition != null;
         }
 
         private void close()

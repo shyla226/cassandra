@@ -576,15 +576,6 @@ public class Keyspace
               });
           });
 
-        // Switch to the correct core - normally verb handlers already execute on the correct core but
-        // other callers may not ensure this and so we must check again here. However, we don't want to pay
-        // the price of a double schedule if we are already running on the right core and this check should
-        // avoid that. Note that this check should be postponed to when the subscriber subscribes because
-        // there is a small chance that the caller may change thread after creating the single but we know
-        // this is not currently the case.
-        if (TPCScheduler.getCoreId() != TPCScheduler.getCoreId(schedulerForPartition))
-            return c.subscribeOn(schedulerForPartition);
-
         return c;
     }
 
