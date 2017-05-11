@@ -1132,7 +1132,6 @@ back_pressure_strategy:
 #
 # otc_backlog_expiration_interval_ms: 200
 
-
 # Continuous paging settings. When requested by the client, pages are pushed continuously to the client.
 # Use these settings to control continuous paging parameters such as the maximum memory used,
 # (max_concurrent_sessions * max_session_pages * max_page_size_mb, by default 24 x 4 x 8 = 768 mb),
