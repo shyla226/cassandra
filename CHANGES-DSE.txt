@@ -1,4 +1,5 @@
 DSE 5.0.9
+ * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)
 Merged from DSE 4.8.14:
  * Integrate top threads command in nodetool (APOLLO-652)
 
