@@ -130,7 +130,7 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
                                    .timeout(DatabaseDescriptor::getCounterWriteRpcTimeout)
                                    .withBackPressure()
                                    .handler(COUNTER_FORWARDING_HANDLER);
-        READ_REPAIR = helper.ackedRequest("VIEW_WRITE", Mutation.class)
+        READ_REPAIR = helper.ackedRequest("READ_REPAIR", Mutation.class)
                             .stage(Stage.MUTATION)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                             .handler(WRITE_HANDLER);
