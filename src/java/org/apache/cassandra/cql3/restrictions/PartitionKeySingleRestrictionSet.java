@@ -127,8 +127,9 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     {
         if (isEmpty())
             return false;
+
         // slice or has unrestricted key component
-        return hasUnrestrictedPartitionKeyComponents(cfm) || hasSlice();
+        return hasUnrestrictedPartitionKeyComponents(cfm) || hasSlice() || hasContains();
     }
 
     @Override
