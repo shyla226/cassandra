@@ -213,6 +213,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static final boolean joinRing = Boolean.parseBoolean(System.getProperty("cassandra.join_ring", "true"));
     private boolean replacing;
 
+    /**
+     * Whether partitioning sstables by token range is enabled when there are multiple disk
+     */
+    private static final boolean SPLIT_SSTABLES_BY_TOKEN_RANGE = Boolean.parseBoolean(System.getProperty("cassandra.split_sstables_by_token_range", "true"));
+
     private final StreamStateStore streamStateStore = new StreamStateStore();
 
     /** This method updates the local token on disk  */
@@ -4931,7 +4936,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
     {
-        if (!cfs.getPartitioner().splitter().isPresent())
+        if (!cfs.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
             return null;
 
         Collection<Range<Token>> lr;
