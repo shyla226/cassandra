@@ -38,7 +38,6 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
  */
 public class SelectOrderedPartitionerTest extends CQLTester
 {
-
     @BeforeClass
     public static void setUp()
     {

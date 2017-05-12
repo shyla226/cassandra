@@ -622,7 +622,7 @@ public class Keyspace
                 TEST_FAIL_MV_LOCKS_COUNT--;
 
             if (lock == null)
-            {
+            { // the lock could not be acquired, release previous locks and either fail or try again later
                 for (int j = 0; j < i; j++)
                 {
                     ViewManager.release(locks[j]);
@@ -631,7 +631,7 @@ public class Keyspace
 
                 //throw WTE only if request is droppable
                 if (isDroppable && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
-                {
+                { // we've waited for too long, give up
                     if (logger.isTraceEnabled())
                         logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
 
@@ -640,17 +640,17 @@ public class Keyspace
                     return;
                 }
                 else
-                {
+                { // reschedule for later
                     if (logger.isTraceEnabled())
                         logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
 
                     // This view update can't happen right now, so schedule another attempt later.
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable), 1, TimeUnit.MILLISECONDS);
+                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable));
                     return;
                 }
             }
             else
-            {
+            { // the lock was acquired, carry on
                 if (logger.isTraceEnabled())
                     logger.trace("Acquired lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
                 locks[i] = lock;

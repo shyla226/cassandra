@@ -25,8 +25,8 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
@@ -73,6 +73,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static junit.framework.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Base class for CQL tests.
@@ -101,7 +102,15 @@ public abstract class CQLTester
     private static final Map<ProtocolVersion, Cluster> clusters = new HashMap<>();
     private static final Map<ProtocolVersion, Session> sessions = new HashMap<>();
 
-    private static AtomicBoolean serverPrepared = new AtomicBoolean(false);
+    private enum ServerStatus
+    {
+        NONE,
+        PENDING,
+        INITIALIZED,
+        FAILED
+    };
+
+    private static AtomicReference<ServerStatus> serverStatus = new AtomicReference<>(ServerStatus.NONE);
     private static CountDownLatch serverReady = new CountDownLatch(1);
 
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
@@ -120,8 +129,6 @@ public abstract class CQLTester
 
     static
     {
-        DatabaseDescriptor.daemonInitialization();
-
         // The latest versions might not be supported yet by the java driver
         for (ProtocolVersion version : ProtocolVersion.SUPPORTED)
         {
@@ -136,8 +143,6 @@ public abstract class CQLTester
             }
         }
 
-        nativeAddr = DatabaseDescriptor.getRpcAddress();
-
         // Register an EndpointSnitch which returns fixed values for test.
         DatabaseDescriptor.setEndpointSnitch(new AbstractEndpointSnitch()
         {
@@ -146,6 +151,13 @@ public abstract class CQLTester
             @Override public int compareEndpoints(InetAddress target, InetAddress a1, InetAddress a2) { return 0; }
         });
 
+        // call after setting the snitch so that DD.applySnitch will not set the snitch to the conf snitch. On slow
+        // Jenkins machines, DynamicEndpointSnitch::updateScores may initialize SS with a wrong TMD before we have a
+        // chance to change the partitioner, so changing the DD snitch is not enough, we must prevent the config snitch
+        // from being initialized.
+        DatabaseDescriptor.daemonInitialization();
+
+        nativeAddr = DatabaseDescriptor.getRpcAddress();
         nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 
@@ -171,7 +183,10 @@ public abstract class CQLTester
 
     public static void prepareServer()
     {
-        if (!serverPrepared.compareAndSet(false, true))
+        if (serverStatus.get() == ServerStatus.INITIALIZED)
+            return;
+
+        if (!serverStatus.compareAndSet(ServerStatus.NONE, ServerStatus.PENDING))
         {   // Once per-JVM is enough, the first test to execute gets to initialize the server,
             // unless sub-classes call this method from static initialization methods such as
             // requireNetwork(). Note that this method cannot be called by the base class setUp
@@ -179,14 +194,28 @@ public abstract class CQLTester
             // sub-classed. Normally we run tests sequentially but, to be safe, this ensures
             // that if 2 tests execute in parallel, only one test initializes the server and the
             // other test waits.
-            assertTrue(Uninterruptibles.awaitUninterruptibly(serverReady, 1, TimeUnit.MINUTES));
+
+            // if we couldn't set the server status to pending because another test previously failed
+            // then abort without waiting
+            if (serverStatus.get() == ServerStatus.FAILED)
+                fail("A previous test failed to initialize the server");
+
+            // if we've raced with another test then wait for a sufficient amount of time (Jenkins is quite slow)
+            Uninterruptibles.awaitUninterruptibly(serverReady, 3, TimeUnit.MINUTES);
+
+            // now check again if the test that ran in parallel failed
+            if (serverStatus.get() == ServerStatus.FAILED)
+                fail("A previous test failed to initialize the server: " + serverStatus);
+
+            // otherwise the server must have been initialized
+            assertTrue("Unexpected server status: " + serverStatus, serverStatus.get() == ServerStatus.INITIALIZED);
             return;
         }
 
+        assertTrue("Unexpected server status: " + serverStatus, serverStatus.get() == ServerStatus.PENDING);
+
         try
         {
-            DatabaseDescriptor.daemonInitialization();
-
             //Required early for TPC
             TPCScheduler.register();
 
@@ -223,6 +252,16 @@ public abstract class CQLTester
             //TPC requires local vnodes to be generated so we need to
             //put the SS through join.
             StorageService.instance.initServer();
+
+            logger.info("Server initialized");
+            boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.INITIALIZED);
+            assertTrue("Unexpected server status: " + serverStatus, ret);
+        }
+        catch (Throwable t)
+        {
+            logger.error("Failed to initialize the server: {}", t.getMessage(), t);
+            boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.FAILED);
+            assertTrue("Unexpected server status: " + serverStatus, ret);
         }
         finally
         {
@@ -960,7 +999,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1037,7 +1076,7 @@ public abstract class CQLTester
                 }
             }
 
-            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s)." +
+            fail(String.format("Got more rows than expected. Expected %d but got %d (using protocol version %s)." +
                                       "\nReceived rows:\n%s",
                                       rows.length, i, protocolVersion,
                                       Arrays.stream(formattedRows).map(Arrays::toString).collect(Collectors.toList())));
@@ -1062,7 +1101,7 @@ public abstract class CQLTester
                                                                            .codecFor(type);
 
                 if (!Objects.equal(expected.get(j), actual.get(j)))
-                    Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
+                    fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
                                               "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
                                               "(using protocol version %d)",
                                               i, j, meta.getName(j), type,
@@ -1103,7 +1142,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1127,7 +1166,7 @@ public abstract class CQLTester
                 {
                     Object actualValueDecoded = actualValue == null ? null : column.type.getSerializer().deserialize(actualValue);
                     if (!Objects.equal(expected[j], actualValueDecoded))
-                        Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
+                        fail(String.format("Invalid value for row %d column %d (%s of type %s), expected <%s> but got <%s>",
                                                   i,
                                                   j,
                                                   column.name,
@@ -1155,7 +1194,7 @@ public abstract class CQLTester
                 }
                 logger.info("Extra row num {}: {}", i, str.toString());
             }
-            Assert.fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
+            fail(String.format("Got more rows than expected. Expected %d but got %d.", rows.length, i));
         }
 
         assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", rows.length>i ? "less" : "more", rows.length, i), i == rows.length);
@@ -1179,7 +1218,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (rows.length > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", rows.length));
+                fail(String.format("No rows returned by query but %d expected", rows.length));
             return;
         }
 
@@ -1220,11 +1259,11 @@ public abstract class CQLTester
                 sb.append(extraRows.stream().collect(Collectors.joining("\n    ")));
                 if (!missing.isEmpty())
                     sb.append("\nMissing Rows:\n    ").append(missingRows.stream().collect(Collectors.joining("\n    ")));
-                Assert.fail(sb.toString());
+                fail(sb.toString());
             }
 
             if (!missing.isEmpty())
-                Assert.fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
+                fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
         }
 
         assert ignoreExtra || expectedRows.size() == actualRows.size();
@@ -1269,7 +1308,7 @@ public abstract class CQLTester
         if (result == null)
         {
             if (numExpectedRows > 0)
-                Assert.fail(String.format("No rows returned by query but %d expected", numExpectedRows));
+                fail(String.format("No rows returned by query but %d expected", numExpectedRows));
             return;
         }
 
@@ -1290,7 +1329,7 @@ public abstract class CQLTester
                 iter.next();
                 i++;
             }
-            Assert.fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
+            fail(String.format("Got less rows than expected. Expected %d but got %d.", numExpectedRows, i));
         }
 
         assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
@@ -1327,7 +1366,7 @@ public abstract class CQLTester
     {
         if (result == null)
         {
-            Assert.fail("No rows returned by query.");
+            fail("No rows returned by query.");
             return;
         }
 
@@ -1395,13 +1434,13 @@ public abstract class CQLTester
             String q = USE_PREPARED_VALUES
                        ? query + " (values: " + formatAllValues(values) + ")"
                        : replaceValues(query, values);
-            Assert.fail("Query should be invalid but no error was thrown. Query is: " + q);
+            fail("Query should be invalid but no error was thrown. Query is: " + q);
         }
         catch (Exception e)
         {
             if (exception != null && !exception.isAssignableFrom(e.getClass()))
             {
-                Assert.fail("Query should be invalid but wrong error was thrown. " +
+                fail("Query should be invalid but wrong error was thrown. " +
                             "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
                             "Query is: " + queryInfo(query, values));
             }
@@ -1427,7 +1466,7 @@ public abstract class CQLTester
         }
         catch(SyntaxException e)
         {
-            Assert.fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
+            fail(String.format("Expected query syntax to be valid but was invalid. Query is: %s; Error is %s",
                                       query, e.getMessage()));
         }
     }
@@ -1442,7 +1481,7 @@ public abstract class CQLTester
         try
         {
             execute(query, values);
-            Assert.fail("Query should have invalid syntax but no error was thrown. Query is: " + queryInfo(query, values));
+            fail("Query should have invalid syntax but no error was thrown. Query is: " + queryInfo(query, values));
         }
         catch (SyntaxException e)
         {

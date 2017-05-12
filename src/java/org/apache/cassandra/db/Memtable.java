@@ -213,23 +213,10 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return partitions.get(0);
 
-        // Deal with localPartitioner tables
-        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
-            key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
+        int coreId = TPCScheduler.getCoreForKey(cfs.metadata.keyspace, key);
+        assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id: " + Integer.toString(coreId);
 
-        Token keyToken = key.getToken();
-
-        Token rangeStart = rangeList.get(0);
-        for (int i = 1; i < rangeList.size(); i++)
-        {
-            Token next = rangeList.get(i);
-            if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
-                return partitions.get(i - 1);
-
-            rangeStart = next;
-        }
-
-        throw new IllegalStateException(String.format("Unable to map %s to Memtable map for %s.%s", key, cfs.keyspace.getName(), cfs.getTableName()));
+        return partitions.get(coreId);
     }
 
     public MemtableAllocator getAllocator()

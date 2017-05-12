@@ -868,12 +868,15 @@ public class DatabaseDescriptor
     // definitely not safe for tools + clients - implicitly instantiates StorageService
     public static void applySnitch()
     {
+        if (snitch == null)
+        { // if set by tests, don't change it
         /* end point snitch */
-        if (conf.endpoint_snitch == null)
-        {
-            throw new ConfigurationException("Missing endpoint_snitch directive", false);
+            if (conf.endpoint_snitch == null)
+            {
+                throw new ConfigurationException("Missing endpoint_snitch directive", false);
+            }
+            snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
         }
-        snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
         EndpointSnitchInfo.create();
 
         localDC = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
