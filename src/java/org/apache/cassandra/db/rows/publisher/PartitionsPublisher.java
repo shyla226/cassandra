@@ -261,6 +261,10 @@ public class PartitionsPublisher
                     if (error == null)
                         subscriber.onComplete();
                 }
+                catch(Throwable t)
+                {
+                    onError(t);
+                }
                 finally
                 {
                     release();
@@ -333,52 +337,68 @@ public class PartitionsPublisher
         @Override
         public void onNext(Unfiltered item)
         {
-            //logger.debug("{} - onNext item", outerSubscription.hashCode());
-
-            if (partition != null && !partition.hasData)
-                partition.hasData = true;
-
-            if (!maybePublishPartition())
-            { // partition was suppressed, close silently without calling onComplete
-                //logger.debug("{} - partition suppressed", outerSubscription.hashCode());
-                close();
-                return;
-            }
-
-            if (closed || (partition != null && partition.stop.isSignalled))
+            try
             {
-                //logger.debug("{} - closed or stop signalled {}, {}", outerSubscription.hashCode(), closed, partition.stop.isSignalled);
-                onComplete();
-                return;
-            }
+                //logger.debug("{} - onNext item", outerSubscription.hashCode());
 
-            for (Transformation transformation : outerSubscription.transformations)
+                if (partition != null && !partition.hasData)
+                    partition.hasData = true;
+
+                if (!maybePublishPartition())
+                { // partition was suppressed, close silently without calling onComplete
+                    //logger.debug("{} - partition suppressed", outerSubscription.hashCode());
+                    close();
+                    return;
+                }
+
+                if (closed || (partition != null && partition.stop.isSignalled))
+                {
+                    //logger.debug("{} - closed or stop signalled {}, {}", outerSubscription.hashCode(), closed, partition.stop.isSignalled);
+                    onComplete();
+                    return;
+                }
+
+                for (Transformation transformation : outerSubscription.transformations)
+                {
+                    item = transformation.applyToUnfiltered(item);
+                    if (item == null)
+                        break;
+                }
+
+                if (item != null)
+                {
+                    //logger.debug("{} - Publishing {}", outerSubscription.hashCode(), item.toString(partition.header.metadata));
+                    subscriber.onNext(item);
+                }
+
+                super.onNext(item);
+            }
+            catch (Throwable t)
             {
-                item = transformation.applyToUnfiltered(item);
-                if (item == null)
-                    break;
+                onError(t);
             }
-
-            if (item != null)
-            {
-                //logger.debug("{} - Publishing {}", outerSubscription.hashCode(), item.toString(partition.header.metadata));
-                subscriber.onNext(item);
-            }
-
-            super.onNext(item);
         }
 
         @Override
         public void onComplete()
         {
             //logger.debug("{} - onComplete item", outerSubscription.hashCode());
-            if (maybePublishPartition())
+            try
             {
-                for (Transformation transformation : outerSubscription.transformations)
-                    transformation.onPartitionClose();
+                if (maybePublishPartition())
+                {
+                    for (Transformation transformation : outerSubscription.transformations)
+                        transformation.onPartitionClose();
+                }
             }
-
-            close();
+            catch (Throwable t)
+            {
+                onError(t);
+            }
+            finally
+            {
+                close();
+            }
         }
 
         @Override

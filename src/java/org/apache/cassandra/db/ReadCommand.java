@@ -270,11 +270,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     /**
      * Create a read response and takes care of eventually closing the iterator.
      *
-     * Digest responses calculate the digest in the construstor and close the iterator immediately,
+     * Digest responses calculate the digest in the constructor and close the iterator immediately,
      * whilst data responses may keep it open until the iterator is closed by the final handler, e.g.
      * {@link org.apache.cassandra.cql3.statements.SelectStatement#processPartition(RowIterator, QueryOptions, ResultBuilder, int)}
      *
-     * @param iterator - the iterator containing the results, the response will take ownership
+     * @param partitions - the partitions to be processed in order to create the response
      * @param forLocalDelivery - if the response is to be delivered locally (optimized path)
      * @return An appropriate response, either of type digest or data.
      */

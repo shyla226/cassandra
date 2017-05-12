@@ -509,18 +509,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);
 
-        return queryMemtableAndDiskInternal(cfs);
-    }
-
-    @Override
-    protected int oldestUnrepairedTombstone()
-    {
-        return oldestUnrepairedTombstone;
-    }
-
-    private FlowableUnfilteredPartition queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
-    {
-        /*
+         /*
          * We have 2 main strategies:
          *   1) We query memtables and sstables simultaneously. This is our most generic strategy and the one we use
          *      unless we have a names filter that we know we can optimize further.
@@ -534,6 +523,17 @@ public class SinglePartitionReadCommand extends ReadCommand
         if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
             return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
 
+        return queryMemtableAndDiskInternal(cfs);
+    }
+
+    @Override
+    protected int oldestUnrepairedTombstone()
+    {
+        return oldestUnrepairedTombstone;
+    }
+
+    private FlowableUnfilteredPartition queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
+    {
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
         List<FlowableUnfilteredPartition> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());

@@ -482,14 +482,6 @@ public class Merge<In, Out> extends CsFlow<Out>
         @Override
         public void onError(Throwable error)
         {
-            // TODO: if the exception is thrown in request, then the state is AWAITING_ADVANCE
-            // but if it is thrown in onNext(), before calling request, then the state is
-            // NEEDS_REQUEST - also, on Jenkins we end up here with state set to PROCESSED.
-            // As far as I can see this can be called in any state, use ReadCommandTest
-            // and TombstoneTest to reproduce.
-            if (state.get() != State.AWAITING_ADVANCE)
-                state.set(State.AWAITING_ADVANCE);
-
             this.error = error;
             onAdvance(null);
         }
