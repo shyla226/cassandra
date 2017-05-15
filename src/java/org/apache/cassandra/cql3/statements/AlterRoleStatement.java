@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IRoleManager.Option;
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -95,6 +94,6 @@ public class AlterRoleStatement extends AuthenticationStatement
            if (!opts.isEmpty())
                DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
            return (ResultMessage)(new ResultMessage.Void());
-       }).subscribeOn(Schedulers.io()); // alterRole ultimately calls a blockingGet
+       });
     }
 }

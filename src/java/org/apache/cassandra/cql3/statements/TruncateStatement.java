@@ -19,13 +19,11 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.concurrent.TimeoutException;
 
-import io.reactivex.Completable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -86,5 +84,10 @@ public class TruncateStatement extends CFStatement implements CQLStatement
                                 return Single.just(new ResultMessage.Void());
                             })
                      .subscribeOn(Schedulers.io());
+    }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
     }
 }

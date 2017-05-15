@@ -38,6 +38,6 @@ public class GrantRoleStatement extends RoleManagementStatement
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getRoleManager().grantRole(state.getUser(), role, grantee);
             return (ResultMessage)(new ResultMessage.Void());
-        }).subscribeOn(Schedulers.io()); // grantRole ultimately calls a blockingGet
+        });
     }
 }

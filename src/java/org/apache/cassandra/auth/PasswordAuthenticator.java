@@ -30,6 +30,8 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -83,7 +85,7 @@ public class PasswordAuthenticator implements IAuthenticator
 
     private AuthenticatedUser authenticate(String username, String password) throws AuthenticationException
     {
-        String hash = cache.get(username);
+        String hash = cache.getCredentials(username);
         if (!BCrypt.checkpw(password, hash))
             throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 
@@ -282,6 +284,20 @@ public class PasswordAuthenticator implements IAuthenticator
         public void invalidateCredentials(String roleName)
         {
             invalidate(roleName);
+        }
+
+        public String getCredentials(String roleName)
+        {
+            // we know PasswordAuthenticator.queryHashedPassword() will block, so we might as well
+            // prevent the cache from attempting to load missing entries on the TPC threads,
+            // since attempting to load only to get a WouldBlockException from the authenticator
+            // would result in the cache logging errors and incrementing error statistics and
+            // there also seems to be a problem somewhere in caffeine in that it will not attempt
+            // to reload after an exception
+            String ret = get(roleName, !TPCScheduler.isTPCThread());
+            if (ret == null)
+                throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve credentials for %s, would block TPC thread", roleName));
+            return ret;
         }
     }
 

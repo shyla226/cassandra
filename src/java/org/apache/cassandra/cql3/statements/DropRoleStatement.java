@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.auth.Roles;
@@ -81,6 +80,6 @@ public class DropRoleStatement extends AuthenticationStatement
             DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
             DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
             return (ResultMessage)(new ResultMessage.Void());
-        }).subscribeOn(Schedulers.io()); // isExistingRole and the revoke methods ultimately call blockingGet
+        });
     }
 }

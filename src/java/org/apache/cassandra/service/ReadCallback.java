@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
@@ -71,6 +72,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
 
     private final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
+    private final AtomicBoolean responsesProcesses = new AtomicBoolean(false);
     final Single<PartitionIterator> observable;
 
     /**
@@ -154,7 +156,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         resolver.preprocess(message);
         int n = waitingFor(message.from()) ? received.incrementAndGet() : received.get();
 
-        if (n >= blockfor && resolver.isDataPresent())
+        if (n >= blockfor && resolver.isDataPresent() && responsesProcesses.compareAndSet(false, true))
         {
             PartitionIterator result;
 

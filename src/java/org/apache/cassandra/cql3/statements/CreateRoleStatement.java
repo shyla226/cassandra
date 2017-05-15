@@ -19,7 +19,6 @@ package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
 
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthenticatedUser;
@@ -81,7 +80,7 @@ public class CreateRoleStatement extends AuthenticationStatement
             DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
             grantPermissionsToCreator(state);
             return (ResultMessage)(new ResultMessage.Void());
-        }).subscribeOn(Schedulers.io()); // isExistingRole and createRole ultimately call a blockingGet
+        });
     }
 
     /**

@@ -64,7 +64,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         return name;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasAllKeyspacesAccess(CorePermission.CREATE);
     }

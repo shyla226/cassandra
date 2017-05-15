@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.Observable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -42,8 +42,10 @@ import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.schedulers.Schedulers;
 import org.antlr.runtime.*;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -61,7 +63,6 @@ import org.apache.cassandra.metrics.CQLMetrics;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
@@ -199,12 +200,33 @@ public class QueryProcessor implements QueryHandler
     public Single<? extends ResultMessage> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        logger.trace("Process {} @CL.{}", statement, options.getConsistency());
-        ClientState clientState = queryState.getClientState();
-        statement.checkAccess(clientState);
-        statement.validate(clientState);
+        if (logger.isTraceEnabled())
+            logger.trace("Process {} @CL.{}", statement, options.getConsistency());
 
-        return statement.execute(queryState, options, queryStartNanoTime);
+        final ClientState clientState = queryState.getClientState();
+        final Scheduler scheduler = statement.getScheduler();
+
+        Single<? extends ResultMessage> ret = Single.defer(() -> {
+            try
+            {
+                statement.checkAccess(clientState);
+                statement.validate(clientState);
+                return statement.execute(queryState, options, queryStartNanoTime);
+            }
+            catch (TPCUtils.WouldBlockException ex)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Failed to execute blocking operation, retrying on io schedulers");
+
+                return Single.defer(() -> {
+                    statement.checkAccess(clientState);
+                    statement.validate(clientState);
+                    return statement.execute(queryState, options, queryStartNanoTime);
+                }).subscribeOn(Schedulers.io());
+            }
+        });
+
+        return scheduler == null ? ret : ret.subscribeOn(scheduler);
     }
 
     public static Single<? extends ResultMessage> process(String queryString, ConsistencyLevel cl, QueryState queryState, long queryStartNanoTime)
@@ -279,23 +301,29 @@ public class QueryProcessor implements QueryHandler
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
-    public static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
+    public static Single<ParsedStatement.Prepared> prepareInternal(String query) throws RequestValidationException
     {
-        ParsedStatement.Prepared prepared = internalStatements.get(query);
-        if (prepared != null)
-            return prepared;
+        ParsedStatement.Prepared existing = internalStatements.get(query);
+        if (existing != null)
+            return Single.just(existing);
 
-        // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing
-        prepared = parseStatement(query, internalQueryState());
-        prepared.statement.validate(internalQueryState().getClientState());
-        internalStatements.putIfAbsent(query, prepared);
-        return prepared;
+        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        final Scheduler scheduler = prepared.statement.getScheduler();
+        // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing but make sure
+        // that if validate() may block (scheduler != null) then we switch threads by calling subscribeOn
+        Single<ParsedStatement.Prepared> ret = Single.fromCallable(() -> {
+            prepared.statement.validate(internalQueryState().getClientState());
+            internalStatements.putIfAbsent(query, prepared);
+            return prepared;
+        });
+
+        return scheduler == null ? ret : ret.subscribeOn(scheduler);
     }
 
     public static Single<UntypedResultSet> executeInternalAsync(String query, Object... values)
     {
-        ParsedStatement.Prepared prepared = prepareInternal(query);
-        Single<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+        Single<? extends ResultMessage> observable = prepareInternal(query)
+                                                     .flatMap(prepared -> prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values)));
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)
@@ -321,8 +349,9 @@ public class QueryProcessor implements QueryHandler
     {
         try
         {
-            ParsedStatement.Prepared prepared = prepareInternal(query);
-            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()).blockingGet();
+            ResultMessage result = prepareInternal(query)
+                                   .flatMap(prepared -> prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()))
+                                   .blockingGet();
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else
@@ -336,7 +365,8 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet executeInternalWithPaging(String query, int pageSize, Object... values)
     {
-        ParsedStatement.Prepared prepared = prepareInternal(query);
+        // currently called only by batchlog manager and repair so we should be OK blocking here
+        ParsedStatement.Prepared prepared = TPCUtils.blockingGet(prepareInternal(query));
         if (!(prepared.statement instanceof SelectStatement))
             throw new IllegalArgumentException("Only SELECTs can be paged");
 
@@ -351,9 +381,16 @@ public class QueryProcessor implements QueryHandler
      */
     public static Single<UntypedResultSet> executeOnceInternal(String query, Object... values)
     {
-        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
-        prepared.statement.validate(internalQueryState().getClientState());
-        Single<? extends ResultMessage> observable = prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        final Scheduler scheduler = prepared.statement.getScheduler();
+
+        Single<? extends ResultMessage> observable = Single.defer(() -> {
+            prepared.statement.validate(internalQueryState().getClientState());
+            return prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values));
+        });
+
+        if (scheduler != null)
+            observable = observable.subscribeOn(scheduler);
 
         return observable.map(result -> {
             if (result instanceof ResultMessage.Rows)
@@ -370,10 +407,11 @@ public class QueryProcessor implements QueryHandler
      */
     public static Single<UntypedResultSet> executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
     {
-        ParsedStatement.Prepared prepared = prepareInternal(query);
-        assert prepared.statement instanceof SelectStatement;
-        SelectStatement select = (SelectStatement)prepared.statement;
-        Single<? extends ResultMessage> observable = select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
+        Single<? extends ResultMessage> observable = prepareInternal(query).flatMap(prepared -> {
+            assert prepared.statement instanceof SelectStatement;
+            SelectStatement select = (SelectStatement)prepared.statement;
+            return select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
+        });
 
         return observable.map(result -> {
             assert result instanceof ResultMessage.Rows;
@@ -506,11 +544,25 @@ public class QueryProcessor implements QueryHandler
 
     public Single<? extends ResultMessage> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
-        ClientState clientState = queryState.getClientState();
-        batch.checkAccess(clientState);
-        batch.validate();
-        batch.validate(clientState);
-        return batch.execute(queryState, options, queryStartNanoTime);
+        final ClientState clientState = queryState.getClientState();
+        return Single.defer(() -> {
+            try
+            {
+                batch.checkAccess(clientState);
+                batch.validate();
+                batch.validate(clientState);
+                return batch.execute(queryState, options, queryStartNanoTime);
+            }
+            catch (TPCUtils.WouldBlockException ex)
+            {
+                return Single.defer(() -> {
+                    batch.checkAccess(clientState);
+                    batch.validate();
+                    batch.validate(clientState);
+                    return batch.execute(queryState, options, queryStartNanoTime);
+                }).subscribeOn(Schedulers.io());
+            }
+        });
     }
 
     public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)

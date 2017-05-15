@@ -76,7 +76,6 @@ public class CreateViewStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         if (!baseName.hasKeyspace())

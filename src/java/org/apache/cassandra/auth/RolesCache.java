@@ -19,6 +19,8 @@ package org.apache.cassandra.auth;
 
 import java.util.Set;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> implements RolesCacheMBean
@@ -38,6 +40,15 @@ public class RolesCache extends AuthCache<RoleResource, Set<RoleResource>> imple
 
     public Set<RoleResource> getRoles(RoleResource role)
     {
-        return get(role);
+        // we know CassandraRoleManager.getRoles() will block, so we might as well
+        // prevent the cache from attempting to load missing entries on the TPC threads,
+        // since attempting to load only to get a WouldBlockException from the role manager
+        // would result in the cache logging errors and incrementing error statistics and
+        // there also seems to be a problem somewhere in caffeine in that it will not attempt
+        // to reload after an exception
+        Set<RoleResource> ret = get(role, !TPCScheduler.isTPCThread());
+        if (ret == null)
+            throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve resources for %s, would block TPC thread", role));
+        return ret;
     }
 }

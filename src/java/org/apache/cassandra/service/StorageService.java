@@ -1061,7 +1061,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         else
             migration = Completable.complete();
 
-        return migration.andThen(Completable.fromCallable( () -> {
+        return migration.andThen(Completable.defer( () -> {
             KeyspaceMetadata defined = Schema.instance.getKeyspaceMetadata(expected.name);
 
             // While the keyspace exists, it might miss table or have outdated one

@@ -1477,8 +1477,9 @@ public abstract class CQLTester
             if (exception != null && !exception.isAssignableFrom(e.getClass()))
             {
                 fail("Query should be invalid but wrong error was thrown. " +
-                            "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
-                            "Query is: " + queryInfo(query, values));
+                     "Expected: " + exception.getName() + ", got: " + e.getClass().getName() + ". " +
+                     "Query is: " + queryInfo(query, values) + ". Stack trace of unexpected exception is:\n" +
+                    String.join("\n", Arrays.stream(e.getStackTrace()).map(t -> t.toString()).collect(Collectors.toList())));
             }
             if (errorMessage != null)
             {

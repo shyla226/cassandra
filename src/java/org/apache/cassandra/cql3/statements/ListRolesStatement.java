@@ -26,7 +26,6 @@ import com.google.common.collect.Lists;
 
 import io.reactivex.Single;
 
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.IRoleManager;
@@ -107,7 +106,7 @@ public class ListRolesStatement extends AuthorizationStatement
                 else
                     return Single.error(new UnauthorizedException(String.format("You are not authorized to view roles granted to %s ", grantee.getRoleName())));
             }
-        }).subscribeOn(Schedulers.io()); // role manager.getRoles() ultimately results in a blockingGet() so stay away from core threads
+        });
     }
 
     private Single<ResultMessage> resultMessage(Set<RoleResource> roles)

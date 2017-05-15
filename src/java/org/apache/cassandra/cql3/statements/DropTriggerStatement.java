@@ -18,7 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
-import io.reactivex.Single;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +50,7 @@ public class DropTriggerStatement extends SchemaAlteringStatement
         this.ifExists = ifExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         state.ensureIsSuper("Only superusers are allowed to perfrom DROP TRIGGER queries");
     }

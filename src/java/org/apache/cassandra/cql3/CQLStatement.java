@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.cql3;
 
+import javax.annotation.Nullable;
+
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -70,4 +73,18 @@ public interface CQLStatement
      * @return functions all functions found (may contain duplicates)
      */
     public Iterable<Function> getFunctions();
+
+    /**
+     * Return the scheduler that should be used to execute this statement, this includes {@link CQLStatement#validate(ClientState)},
+     * {@link CQLStatement#checkAccess(ClientState)} and {@link CQLStatement#execute(QueryState, QueryOptions, long)}.
+     *
+     * If no specific scheduler is required, then return null. If returning null then it must be guaranteed that
+     * neither {@link CQLStatement#validate(ClientState)}, nor {@link CQLStatement#execute(QueryState, QueryOptions, long)} block.
+     * {@link CQLStatement#checkAccess(ClientState)} may block only in rare cases, such as security cache misses, but in that
+     * case {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException} must be thrown so that {@link QueryProcessor}
+     * may retry the operation on a different scheduler.
+     *
+     * @return the scheduler for this statement, or null, if no specific scheduler is required because the operations are non blocking.
+     */
+    @Nullable public Scheduler getScheduler();
 }

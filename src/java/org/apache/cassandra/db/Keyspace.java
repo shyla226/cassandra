@@ -483,7 +483,6 @@ public class Keyspace
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Testing write failures"));
 
-        final Scheduler schedulerForPartition = mutation.getScheduler();
         final boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
         final Completable c = maybeAcquireLocksForView(mutation, updateIndexes, isDroppable).flatMapCompletable(locks -> {

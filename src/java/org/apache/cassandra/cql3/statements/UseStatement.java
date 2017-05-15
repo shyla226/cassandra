@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -65,5 +67,10 @@ public class UseStatement extends ParsedStatement implements CQLStatement
         // In production, internal queries are exclusively on the system keyspace and 'use' is thus useless
         // but for some unit tests we need to set the keyspace (e.g. for tests with DROP INDEX)
         return execute(state, options, System.nanoTime());
+    }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
     }
 }

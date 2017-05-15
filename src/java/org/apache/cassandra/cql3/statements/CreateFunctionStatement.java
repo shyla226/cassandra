@@ -22,7 +22,6 @@ import java.util.HashSet;
 import java.util.List;
 
 import io.reactivex.Maybe;
-import io.reactivex.Single;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;

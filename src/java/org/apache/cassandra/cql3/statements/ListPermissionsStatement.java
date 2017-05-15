@@ -22,7 +22,6 @@ import java.util.*;
 
 import io.reactivex.Single;
 
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.PermissionDetails;
@@ -107,7 +106,7 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
             Collections.sort(details);
             return resultMessage(details);
-        }).subscribeOn(Schedulers.io()); // authorizer.grant() ultimately results in a blockingGet() so stay away from core threads
+        });
     }
 
     private Set<PermissionDetails> list(ClientState state, IResource resource)

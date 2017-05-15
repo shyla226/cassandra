@@ -26,15 +26,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 
 import io.reactivex.Completable;
-import io.reactivex.Observable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
@@ -209,6 +207,11 @@ public class BatchStatement implements CQLStatement
                 cfName = stmt.columnFamily();
             }
         }
+    }
+
+    public Scheduler getScheduler()
+    {
+        return null;
     }
 
     private boolean isCounter()

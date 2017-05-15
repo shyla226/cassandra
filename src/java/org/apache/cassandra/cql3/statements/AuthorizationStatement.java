@@ -18,7 +18,9 @@
 package org.apache.cassandra.cql3.statements;
 
 
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -59,5 +61,10 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
     public static IResource maybeCorrectResource(IResource resource, ClientState state) throws InvalidRequestException
     {
         return resource.qualifyWithKeyspace(state::getKeyspace);
+    }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
     }
 }

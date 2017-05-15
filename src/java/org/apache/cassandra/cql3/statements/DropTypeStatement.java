@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
-import io.reactivex.Single;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;

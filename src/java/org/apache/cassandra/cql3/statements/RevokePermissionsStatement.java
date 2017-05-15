@@ -42,6 +42,6 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
         return Single.fromCallable(() -> {
            DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee);
            return (ResultMessage)(new ResultMessage.Void());
-       }).subscribeOn(Schedulers.io()); // authorizer.revoke() ultimately results in a blockingGet() so stay away from core threads
+       });
     }
 }

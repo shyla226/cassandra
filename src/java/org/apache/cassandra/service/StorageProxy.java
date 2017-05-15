@@ -1490,7 +1490,6 @@ public class StorageProxy implements StorageProxyMBean
 
         Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
         {
-
             ReadRepairMetrics.repairedBlocking.mark();
 
             // Do a full data read to resolve the correct response (and repair node that need be)

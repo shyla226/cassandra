@@ -42,6 +42,6 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee);
             return (ResultMessage)(new ResultMessage.Void());
-        }).subscribeOn(Schedulers.io()); // authorizer.grant() ultimately results in a blockingGet() so stay away from core threads
+        });
     }
 }
