@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.serializers.BooleanSerializer;
@@ -36,6 +37,8 @@ public class BooleanType extends AbstractType<Boolean>
     private static final Logger logger = LoggerFactory.getLogger(BooleanType.class);
 
     public static final BooleanType instance = new BooleanType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     BooleanType() {super(ComparisonType.CUSTOM);} // singleton
 
@@ -111,5 +114,11 @@ public class BooleanType extends AbstractType<Boolean>
     public int valueLengthIfFixed()
     {
         return 1;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

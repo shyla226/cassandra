@@ -30,7 +30,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
  * See {@link ScalarFunction#partialApplication(ProtocolVersion, List)} for why this is used.
  * <p>
  * Note (Sylvain): the function is cautious in keeping the protocol version used for the pre-computed value and to
- * fallback to recomputation if the version we get when {@link #execute} is called.  I don't think it's truly necessary
+ * fallback to recomputation if the version we get when {@link #execute} is called. I don't think it's truly necessary
  * though as I don't think we actually depend on the protocol version for values anymore (it's remnant of previous
  * transitions). It's not a lot of code to be on safe side though until this is cleaned (assuming we do clean it).
  */
@@ -40,20 +40,20 @@ class PreComputedFunction extends NativeScalarFunction implements PartialScalarF
     private final ProtocolVersion valueVersion;
 
     private final ScalarFunction function;
-    private final List<ByteBuffer> parameters;
+    private final List<ByteBuffer> arguments;
 
     PreComputedFunction(AbstractType<?> returnType,
                         ByteBuffer value,
                         ProtocolVersion valueVersion,
                         ScalarFunction function,
-                        List<ByteBuffer> parameters)
+                        List<ByteBuffer> arguments)
     {
         // Note that we never register those function, there are just used internally, so the name doesn't matter much
         super("__constant__", returnType);
         this.value = value;
         this.valueVersion = valueVersion;
         this.function = function;
-        this.parameters = parameters;
+        this.arguments = arguments;
     }
 
     @Override
@@ -63,17 +63,23 @@ class PreComputedFunction extends NativeScalarFunction implements PartialScalarF
     }
 
     @Override
-    public List<ByteBuffer> getPartialParameters()
+    public List<ByteBuffer> getPartialArguments()
     {
-        return parameters;
+        return arguments;
     }
 
-    public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> nothing) throws InvalidRequestException
+    public ByteBuffer execute(Arguments nothing) throws InvalidRequestException
     {
-        if (protocolVersion == valueVersion)
+        if (nothing.getProtocolVersion() == valueVersion)
             return value;
 
-        return function.execute(protocolVersion, parameters);
+        Arguments args = function.newArguments(nothing.getProtocolVersion());
+        for (int i = 0, m = arguments.size() ; i < m; i++)
+        {
+            args.set(i, arguments.get(i));;
+        }
+
+        return function.execute(args);
     }
 
     public ScalarFunction partialApplication(ProtocolVersion protocolVersion, List<ByteBuffer> nothing) throws InvalidRequestException

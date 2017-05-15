@@ -35,8 +35,8 @@ public interface PartialScalarFunction extends ScalarFunction
     public Function getFunction();
 
     /**
-     * Returns the list of input parameters for the function where some parameters can be {@link #UNRESOLVED}.
-     * @return the list of input parameters for the function
+     * Returns the list of input arguments for the function where some arguments can be {@link #UNRESOLVED}.
+     * @return the list of input arguments for the function
      */
-    public List<ByteBuffer> getPartialParameters();
+    public List<ByteBuffer> getPartialArguments();
 }

@@ -22,17 +22,14 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-import com.google.common.reflect.TypeToken;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.FunctionName;
-import org.apache.cassandra.cql3.functions.JavaBasedUDFunction;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -46,15 +43,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class UFTest extends CQLTester
 {
-    @Test
-    public void testJavaSourceName()
-    {
-        Assert.assertEquals("String", JavaBasedUDFunction.javaSourceName(TypeToken.of(String.class)));
-        Assert.assertEquals("java.util.Map<Integer, String>", JavaBasedUDFunction.javaSourceName(TypeTokens.mapOf(Integer.class, String.class)));
-        Assert.assertEquals("com.datastax.driver.core.UDTValue", JavaBasedUDFunction.javaSourceName(TypeToken.of(UDTValue.class)));
-        Assert.assertEquals("java.util.Set<com.datastax.driver.core.UDTValue>", JavaBasedUDFunction.javaSourceName(TypeTokens.setOf(UDTValue.class)));
-    }
-
     @Test
     public void testNonExistingOnes() throws Throwable
     {

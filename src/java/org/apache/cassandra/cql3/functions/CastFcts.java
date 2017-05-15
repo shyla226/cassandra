@@ -153,14 +153,11 @@ public final class CastFcts
             functions.add(wrapJavaFunction(inputType, outputType, converter));
     }
 
-    @SuppressWarnings("unchecked")
     private static <O, I> Function wrapJavaFunction(AbstractType<I> inputType,
                                                     AbstractType<O> outputType,
                                                     java.util.function.Function<I, O> converter)
     {
-        return inputType.equals(CounterColumnType.instance)
-                ? JavaCounterFunctionWrapper.create(outputType, (java.util.function.Function<Long, O>) converter)
-                : JavaFunctionWrapper.create(inputType, outputType, converter);
+        return JavaFunctionWrapper.create(inputType, outputType, converter);
     }
 
     private static String toLowerCaseString(CQL3Type type)
@@ -192,12 +189,6 @@ public final class CastFcts
         {
             return (AbstractType<O>) returnType;
         }
-
-        @SuppressWarnings("unchecked")
-        protected AbstractType<I> inputType()
-        {
-            return (AbstractType<I>) argTypes.get(0);
-        }
     }
 
     /**
@@ -228,46 +219,12 @@ public final class CastFcts
             this.converter = converter;
         }
 
-        public final ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        public final ByteBuffer execute(Arguments arguments)
         {
-            ByteBuffer bb = parameters.get(0);
-            if (bb == null)
+            if (arguments.containsNulls())
                 return null;
 
-            return outputType().decompose(converter.apply(compose(bb)));
-        }
-
-        protected I compose(ByteBuffer bb)
-        {
-            return inputType().compose(bb);
-        }
-    }
-
-    /**
-     * <code>JavaFunctionWrapper</code> for counter columns.
-     *
-     * <p>Counter columns need to be handled in a special way because their binary representation is converted into
-     * the one of a BIGINT before functions are applied.</p>
-     *
-     * @param <O> the output parameter
-     */
-    private static class JavaCounterFunctionWrapper<O> extends JavaFunctionWrapper<Long, O>
-    {
-        public static <O> JavaFunctionWrapper<Long, O> create(AbstractType<O> outputType,
-                                                              java.util.function.Function<Long, O> converter)
-        {
-            return new JavaCounterFunctionWrapper<O>(outputType, converter);
-        }
-
-        protected JavaCounterFunctionWrapper(AbstractType<O> outputType,
-                                            java.util.function.Function<Long, O> converter)
-        {
-            super(CounterColumnType.instance, outputType, converter);
-        }
-
-        protected Long compose(ByteBuffer bb)
-        {
-            return LongType.instance.compose(bb);
+            return outputType().decompose(converter.apply(arguments.get(0)));
         }
     }
 
@@ -301,9 +258,9 @@ public final class CastFcts
             this.delegate = delegate;
         }
 
-        public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        public ByteBuffer execute(Arguments arguments)
         {
-            return delegate.execute(protocolVersion, parameters);
+            return delegate.execute(arguments);
         }
     }
 
@@ -327,13 +284,29 @@ public final class CastFcts
             super(inputType, outputType);
         }
 
-        public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        @Override
+        public Arguments newArguments(ProtocolVersion version)
         {
-            ByteBuffer bb = parameters.get(0);
-            if (bb == null)
+            return new FunctionArguments(version, new ArgumentDeserializer()
+            {
+                @Override
+                public Object deserialize(ProtocolVersion protocolVersion, ByteBuffer buffer)
+                {
+                    AbstractType<?> argType = argTypes.get(0);
+                    if (buffer == null || (!buffer.hasRemaining() && argType.isEmptyValueMeaningless()))
+                        return null;
+
+                    return argType.getSerializer().toCQLLiteral(buffer);
+                }
+            });
+        }
+
+        public ByteBuffer execute(Arguments arguments)
+        {
+            if (arguments.containsNulls())
                 return null;
 
-            return outputType().decompose(inputType().getSerializer().toCQLLiteral(bb));
+            return outputType().decompose(arguments.get(0));
         }
     }
 

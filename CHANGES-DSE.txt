@@ -1,4 +1,6 @@
 dse 6.0.0
+ * Avoid unnecessary deserialization of terminal arguments when executing functions(APOLLO-588)
+ * Allow to aggregate by time intervals (APOLLO-75)
  * Port Memory Only Strategy from DSE to Apollo (APOLLO-342)
  * Internode message interceptors for testing (APOLLO-419)
  * Byte-ordered types and trie-based indices (APOLLO-111)

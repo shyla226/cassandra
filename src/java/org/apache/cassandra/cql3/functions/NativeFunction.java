@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.functions;
 import java.util.Arrays;
 
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * Base class for our native/hardcoded functions.
@@ -35,6 +36,12 @@ public abstract class NativeFunction extends AbstractFunction
     {
         // Most of our functions are pure, the other ones should override this
         return true;
+    }
+
+    @Override
+    public Arguments newArguments(ProtocolVersion version)
+    {
+        return FunctionArguments.newInstanceForNativeFunction(version, argTypes);
     }
 
     public boolean isNative()

@@ -108,7 +108,7 @@ public abstract class AggregateFcts
                             return LongType.instance.decompose(count);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
                             count++;
                         }
@@ -145,14 +145,13 @@ public abstract class AggregateFcts
                             return ((DecimalType) returnType()).decompose(sum);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            BigDecimal number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
-                            BigDecimal number = DecimalType.instance.compose(value);
                             sum = sum.add(number);
                         }
                     };
@@ -184,15 +183,14 @@ public abstract class AggregateFcts
                             return DecimalType.instance.decompose(avg);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            BigDecimal number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
                             count++;
-                            BigDecimal number = DecimalType.instance.compose(value);
 
                             // avg = avg + (value - sum) / count.
                             avg = avg.add(number.subtract(avg).divide(BigDecimal.valueOf(count), RoundingMode.HALF_EVEN));
@@ -224,14 +222,13 @@ public abstract class AggregateFcts
                             return ((IntegerType) returnType()).decompose(sum);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            BigInteger number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
-                            BigInteger number = IntegerType.instance.compose(value);
                             sum = sum.add(number);
                         }
                     };
@@ -266,15 +263,14 @@ public abstract class AggregateFcts
                             return IntegerType.instance.decompose(sum.divide(BigInteger.valueOf(count)));
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            BigInteger number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
                             count++;
-                            BigInteger number = ((BigInteger) argTypes().get(0).compose(value));
                             sum = sum.add(number);
                         }
                     };
@@ -303,14 +299,13 @@ public abstract class AggregateFcts
                             return ((ByteType) returnType()).decompose(sum);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            Number number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
-                            Number number = ((Number) argTypes().get(0).compose(value));
                             sum += number.byteValue();
                         }
                     };
@@ -325,7 +320,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new AvgAggregate(ByteType.instance)
+                    return new AvgAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion) throws InvalidRequestException
                         {
@@ -357,14 +352,13 @@ public abstract class AggregateFcts
                             return ((ShortType) returnType()).decompose(sum);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            Number number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
-                            Number number = ((Number) argTypes().get(0).compose(value));
                             sum += number.shortValue();
                         }
                     };
@@ -379,7 +373,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new AvgAggregate(ShortType.instance)
+                    return new AvgAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion)
                         {
@@ -411,14 +405,13 @@ public abstract class AggregateFcts
                             return ((Int32Type) returnType()).decompose(sum);
                         }
 
-                        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                        public void addInput(Arguments arguments)
                         {
-                            ByteBuffer value = values.get(0);
+                            Number number = arguments.get(0);
 
-                            if (value == null)
+                            if (number == null)
                                 return;
 
-                            Number number = ((Number) argTypes().get(0).compose(value));
                             sum += number.intValue();
                         }
                     };
@@ -433,7 +426,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new AvgAggregate(Int32Type.instance)
+                    return new AvgAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion)
                         {
@@ -463,7 +456,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new AvgAggregate(LongType.instance)
+                    return new AvgAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion)
                         {
@@ -481,7 +474,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new FloatSumAggregate(FloatType.instance)
+                    return new FloatSumAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion) throws InvalidRequestException
                         {
@@ -499,7 +492,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new FloatAvgAggregate(FloatType.instance)
+                    return new FloatAvgAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion) throws InvalidRequestException
                         {
@@ -517,7 +510,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new FloatSumAggregate(DoubleType.instance)
+                    return new FloatSumAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion) throws InvalidRequestException
                         {
@@ -537,13 +530,6 @@ public abstract class AggregateFcts
         private double compensation;
         private double simpleSum;
 
-        private final AbstractType numberType;
-
-        public FloatSumAggregate(AbstractType numberType)
-        {
-            this.numberType = numberType;
-        }
-
         public void reset()
         {
             sum = 0;
@@ -551,16 +537,16 @@ public abstract class AggregateFcts
             simpleSum = 0;
         }
 
-        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+        public void addInput(Arguments arguments)
         {
-            ByteBuffer value = values.get(0);
+            Number number = arguments.get(0);
 
-            if (value == null)
+            if (number == null)
                 return;
 
-            double number = ((Number) numberType.compose(value)).doubleValue();
-            simpleSum += number;
-            double tmp = number - compensation;
+            double d = number.doubleValue();
+            simpleSum += d;
+            double tmp = d - compensation;
             double rounded = sum + tmp;
             compensation = (rounded - sum) - tmp;
             sum = rounded;
@@ -574,8 +560,8 @@ public abstract class AggregateFcts
 
             if (Double.isNaN(tmp) && Double.isInfinite(simpleSum))
                 return simpleSum;
-            else
-                return tmp;
+
+            return tmp;
         }
     }
 
@@ -594,13 +580,6 @@ public abstract class AggregateFcts
 
         private BigDecimal bigSum = null;
         private boolean overflow = false;
-
-        private final AbstractType numberType;
-
-        public FloatAvgAggregate(AbstractType numberType)
-        {
-            this.numberType = numberType;
-        }
 
         public void reset()
         {
@@ -622,48 +601,46 @@ public abstract class AggregateFcts
             {
                 return bigSum.divide(BigDecimal.valueOf(count), RoundingMode.HALF_EVEN).doubleValue();
             }
-            else
-            {
-                // correctly compute final sum if it's NaN from consequently
-                // adding same-signed infinite values.
-                double tmp = sum + compensation;
-                if (Double.isNaN(tmp) && Double.isInfinite(simpleSum))
-                    sum = simpleSum;
-                else
-                    sum = tmp;
 
-                return sum / count;
-            }
+            // correctly compute final sum if it's NaN from consequently
+            // adding same-signed infinite values.
+            double tmp = sum + compensation;
+            if (Double.isNaN(tmp) && Double.isInfinite(simpleSum))
+                sum = simpleSum;
+            else
+                sum = tmp;
+
+            return sum / count;
         }
 
-        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+        public void addInput(Arguments arguments)
         {
-            ByteBuffer value = values.get(0);
+            Number number = arguments.get(0);
 
-            if (value == null)
+            if (number == null)
                 return;
 
             count++;
 
-            double number = ((Number) numberType.compose(value)).doubleValue();
+            double d = number.doubleValue();
 
             if (overflow)
             {
-                bigSum = bigSum.add(BigDecimal.valueOf(number));
+                bigSum = bigSum.add(BigDecimal.valueOf(d));
             }
             else
             {
-                simpleSum += number;
+                simpleSum += d;
                 double prev = sum;
-                double tmp = number - compensation;
+                double tmp = d - compensation;
                 double rounded = sum + tmp;
                 compensation = (rounded - sum) - tmp;
                 sum = rounded;
 
-                if (Double.isInfinite(sum) && !Double.isInfinite(number))
+                if (Double.isInfinite(sum) && !Double.isInfinite(d))
                 {
                     overflow = true;
-                    bigSum = BigDecimal.valueOf(prev).add(BigDecimal.valueOf(number));
+                    bigSum = BigDecimal.valueOf(prev).add(BigDecimal.valueOf(d));
                 }
             }
         }
@@ -677,7 +654,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new FloatAvgAggregate(DoubleType.instance)
+                    return new FloatAvgAggregate()
                     {
                         public ByteBuffer compute(ProtocolVersion protocolVersion) throws InvalidRequestException
                         {
@@ -707,7 +684,7 @@ public abstract class AggregateFcts
     {
         public Aggregate newAggregate()
         {
-            return new AvgAggregate(LongType.instance)
+            return new AvgAggregate()
             {
                 public ByteBuffer compute(ProtocolVersion protocolVersion) throws InvalidRequestException
                 {
@@ -739,14 +716,14 @@ public abstract class AggregateFcts
                     return min != null ? LongType.instance.decompose(min) : null;
                 }
 
-                public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                public void addInput(Arguments arguments)
                 {
-                    ByteBuffer value = values.get(0);
+                    Number number = arguments.get(0);
 
-                    if (value == null)
+                    if (number == null)
                         return;
 
-                    long lval = LongType.instance.compose(value);
+                    long lval = number.longValue();
 
                     if (min == null || lval < min)
                         min = lval;
@@ -777,14 +754,14 @@ public abstract class AggregateFcts
                     return max != null ? LongType.instance.decompose(max) : null;
                 }
 
-                public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                public void addInput(Arguments arguments)
                 {
-                    ByteBuffer value = values.get(0);
+                    Number number = arguments.get(0);
 
-                    if (value == null)
+                    if (number == null)
                         return;
 
-                    long lval = LongType.instance.compose(value);
+                    long lval = number.longValue();
 
                     if (max == null || lval > max)
                         max = lval;
@@ -803,6 +780,12 @@ public abstract class AggregateFcts
     {
         return new NativeAggregateFunction("max", inputType, inputType)
         {
+            @Override
+            public Arguments newArguments(ProtocolVersion version)
+            {
+                return FunctionArguments.newNoopInstance(version, 1);
+            }
+
             public Aggregate newAggregate()
             {
                 return new Aggregate()
@@ -819,9 +802,9 @@ public abstract class AggregateFcts
                         return max;
                     }
 
-                    public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                    public void addInput(Arguments arguments)
                     {
-                        ByteBuffer value = values.get(0);
+                        ByteBuffer value = arguments.get(0);
 
                         if (value == null)
                             return;
@@ -844,6 +827,12 @@ public abstract class AggregateFcts
     {
         return new NativeAggregateFunction("min", inputType, inputType)
         {
+            @Override
+            public Arguments newArguments(ProtocolVersion version)
+            {
+                return FunctionArguments.newNoopInstance(version, 1);
+            }
+
             public Aggregate newAggregate()
             {
                 return new Aggregate()
@@ -860,9 +849,9 @@ public abstract class AggregateFcts
                         return min;
                     }
 
-                    public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                    public void addInput(Arguments arguments)
                     {
-                        ByteBuffer value = values.get(0);
+                        ByteBuffer value = arguments.get(0);
 
                         if (value == null)
                             return;
@@ -885,6 +874,12 @@ public abstract class AggregateFcts
     {
         return new NativeAggregateFunction("count", LongType.instance, inputType)
         {
+            @Override
+            public Arguments newArguments(ProtocolVersion version)
+            {
+                return FunctionArguments.newNoopInstance(version, 1);
+            }
+
             public Aggregate newAggregate()
             {
                 return new Aggregate()
@@ -901,11 +896,9 @@ public abstract class AggregateFcts
                         return ((LongType) returnType()).decompose(count);
                     }
 
-                    public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+                    public void addInput(Arguments arguments)
                     {
-                        ByteBuffer value = values.get(0);
-
-                        if (value == null)
+                        if (arguments.get(0) == null)
                             return;
 
                         count++;
@@ -929,14 +922,13 @@ public abstract class AggregateFcts
             return LongType.instance.decompose(sum);
         }
 
-        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+        public void addInput(Arguments arguments)
         {
-            ByteBuffer value = values.get(0);
+            Number number = arguments.get(0);
 
-            if (value == null)
+            if (number == null)
                 return;
 
-            Number number = LongType.instance.compose(value);
             sum += number.longValue();
         }
     }
@@ -953,13 +945,6 @@ public abstract class AggregateFcts
         private BigInteger bigSum = null;
         private boolean overflow = false;
 
-        private final AbstractType numberType;
-
-        public AvgAggregate(AbstractType type)
-        {
-            this.numberType = type;
-        }
-
         public void reset()
         {
             count = 0;
@@ -974,34 +959,32 @@ public abstract class AggregateFcts
             {
                 return bigSum.divide(BigInteger.valueOf(count)).longValue();
             }
-            else
-            {
-                return count == 0 ? 0 : (sum / count);
-            }
+
+            return count == 0 ? 0 : (sum / count);
         }
 
-        public void addInput(ProtocolVersion protocolVersion, List<ByteBuffer> values)
+        public void addInput(Arguments arguments)
         {
-            ByteBuffer value = values.get(0);
+            Number number = arguments.get(0);
 
-            if (value == null)
+            if (number == null)
                 return;
 
             count++;
-            long number = ((Number) numberType.compose(value)).longValue();
+            long l = number.longValue();
             if (overflow)
             {
-                bigSum = bigSum.add(BigInteger.valueOf(number));
+                bigSum = bigSum.add(BigInteger.valueOf(l));
             }
             else
             {
                 long prev = sum;
-                sum += number;
+                sum += l;
 
-                if (((prev ^ sum) & (number ^ sum)) < 0)
+                if (((prev ^ sum) & (l ^ sum)) < 0)
                 {
                     overflow = true;
-                    bigSum = BigInteger.valueOf(prev).add(BigInteger.valueOf(number));
+                    bigSum = BigInteger.valueOf(prev).add(BigInteger.valueOf(l));
                 }
             }
         }

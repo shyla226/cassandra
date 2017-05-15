@@ -29,9 +29,9 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
     protected static final SelectorDeserializer deserializer = new AbstractFunctionSelectorDeserializer()
     {
         @Override
-        protected Selector newFunctionSelector(Function function, List<Selector> argSelectors)
+        protected Selector newFunctionSelector(ProtocolVersion version, Function function, List<Selector> argSelectors)
         {
-            return new AggregateFunctionSelector(function, argSelectors);
+            return new AggregateFunctionSelector(version, function, argSelectors);
         }
     };
 
@@ -52,7 +52,7 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
             setArg(i, s.getOutput(protocolVersion));
             s.reset();
         }
-        this.aggregate.addInput(protocolVersion, args());
+        this.aggregate.addInput(args());
     }
 
     public ByteBuffer getOutput(ProtocolVersion protocolVersion)
@@ -65,9 +65,9 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
         aggregate.reset();
     }
 
-    AggregateFunctionSelector(Function fun, List<Selector> argSelectors)
+    AggregateFunctionSelector(ProtocolVersion version, Function fun, List<Selector> argSelectors)
     {
-        super(Kind.AGGREGATE_FUNCTION_SELECTOR, (AggregateFunction) fun, argSelectors);
+        super(Kind.AGGREGATE_FUNCTION_SELECTOR, version, (AggregateFunction) fun, argSelectors);
         this.aggregate = this.fun.newAggregate();
     }
 }

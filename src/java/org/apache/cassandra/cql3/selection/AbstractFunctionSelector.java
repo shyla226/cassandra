@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.selection;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,12 +27,9 @@ import com.google.common.base.Objects;
 
 import org.apache.commons.lang3.text.StrBuilder;
 
-import org.apache.cassandra.cql3.functions.ScalarFunction;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.cql3.functions.FunctionName;
-import org.apache.cassandra.cql3.functions.PartialScalarFunction;
+import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.RequestValidations;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
@@ -53,11 +49,15 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
     {
         protected Selector deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata) throws IOException
         {
+            // The selector will only be deserialized on the replicas for GROUP BY queries. Due to that we
+            // can safely use the current protocol version.
+            final ProtocolVersion protocolVersion = ProtocolVersion.CURRENT;
+
             FunctionName name = new FunctionName(in.readUTF(), in.readUTF());
 
             KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(metadata.keyspace);
 
-            int numberOfArguments = (int) in.readUnsignedVInt();
+            final int numberOfArguments = (int) in.readUnsignedVInt();
             List<AbstractType<?>> argTypes = new ArrayList<>(numberOfArguments);
             for (int i = 0; i < numberOfArguments; i++)
             {
@@ -76,19 +76,27 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
             Function function = optional.get();
 
             boolean isPartial = in.readBoolean();
+            // if the function is partial we need to retrieve the resolved parameters.
+            // The resolved parameters are encoded as follow: [vint]([vint][bytes])*
+            // The first vint contains the bitset used to determine if which parameters were resolved.
+            // A bit equals to one meaning a resolved parameter.
+            // The parameter values are encoded as [vint][bytes] where the vint contains the size in bytes of the
+            // parameter value.
             if (isPartial)
             {
+                // We use a bitset to track the position of the unresolved arguments
                 int bitset = (int) in.readUnsignedVInt();
                 List<ByteBuffer> partialParameters = new ArrayList<>(numberOfArguments);
                 for (int i = 0; i < numberOfArguments; i++)
                 {
-                    ByteBuffer parameter = ((bitset & 1) == 1) ? ByteBufferUtil.readWithVIntLength(in)
+                    boolean isParameterResolved = getRightMostBit(bitset) == 1;
+                    ByteBuffer parameter = isParameterResolved ? ByteBufferUtil.readWithVIntLength(in)
                                                                : Function.UNRESOLVED;
                     partialParameters.add(parameter);
                     bitset >>= 1;
                 }
 
-                function = ((ScalarFunction) function).partialApplication(ProtocolVersion.CURRENT, partialParameters);
+                function = ((ScalarFunction) function).partialApplication(protocolVersion, partialParameters);
             }
 
             int numberOfRemainingArguments = (int) in.readUnsignedVInt();
@@ -98,10 +106,22 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
                 argSelectors.add(Selector.serializers.get(version).deserialize(in, metadata));
             }
 
-            return newFunctionSelector(function, argSelectors);
+            return newFunctionSelector(protocolVersion, function, argSelectors);
         }
 
-        protected abstract Selector newFunctionSelector(Function function, List<Selector> argSelectors);
+        /**
+         * Returns the value of the right most bit.
+         * @param bitset the bitset
+         * @return the value of the right most bit
+         */
+        private int getRightMostBit(int bitset)
+        {
+            return bitset & 1;
+        }
+
+        protected abstract Selector newFunctionSelector(ProtocolVersion version,
+                                                        Function function,
+                                                        List<Selector> argSelectors);
     };
 
     protected final T fun;
@@ -110,7 +130,7 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
      * The list used to pass the function arguments is recycled to avoid the cost of instantiating a new list
      * with each function call.
      */
-    private final List<ByteBuffer> args;
+    private final Arguments args;
     protected final List<Selector> argSelectors;
 
     public static Factory newFactory(final Function fun, final SelectorFactories factories) throws InvalidRequestException
@@ -156,7 +176,7 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
 
             public Selector newInstance(QueryOptions options) throws InvalidRequestException
             {
-                return fun.isAggregate() ? new AggregateFunctionSelector(fun, factories.newInstances(options))
+                return fun.isAggregate() ? new AggregateFunctionSelector(options.getProtocolVersion(), fun, factories.newInstances(options))
                                          : createScalarSelector(options, (ScalarFunction) fun, factories.newInstances(options));
             }
 
@@ -196,31 +216,35 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
                 }
 
                 if (terminalCount == 0)
-                    return new ScalarFunctionSelector(fun, argSelectors);
+                    return new ScalarFunctionSelector(version, fun, argSelectors);
 
-                // All terminal, reduce to a simple value if the function is pure
-                if (terminalCount == argSelectors.size() && function.isPure())
-                    return new TermSelector(function.execute(version, terminalArgs), function.returnType());
-
-                // We have some terminal arguments but not all, do a partial application
+                // We have some terminal arguments, do a partial application
                 ScalarFunction partialFunction = function.partialApplication(version, terminalArgs);
+
+                // If all the arguments are terminal and the function is pure we can reduce to a simple value.
+                if (terminalCount == argSelectors.size() && fun.isPure())
+                {
+                    Arguments arguments = partialFunction.newArguments(version);
+                    return new TermSelector(partialFunction.execute(arguments), partialFunction.returnType());
+                }
+
                 List<Selector> remainingSelectors = new ArrayList<>(argSelectors.size() - terminalCount);
                 for (Selector selector : argSelectors)
                 {
                     if (!selector.isTerminal())
                         remainingSelectors.add(selector);
                 }
-                return new ScalarFunctionSelector(partialFunction, remainingSelectors);
+                return new ScalarFunctionSelector(version, partialFunction, remainingSelectors);
             }
         };
     }
 
-    protected AbstractFunctionSelector(Kind kind, T fun, List<Selector> argSelectors)
+    protected AbstractFunctionSelector(Kind kind, ProtocolVersion version, T fun, List<Selector> argSelectors)
     {
         super(kind);
         this.fun = fun;
         this.argSelectors = argSelectors;
-        this.args = Arrays.asList(new ByteBuffer[argSelectors.size()]);
+        this.args = fun.newArguments(version);
     }
 
     @Override
@@ -253,7 +277,7 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
         args.set(i, value);
     }
 
-    protected List<ByteBuffer> args()
+    protected Arguments args()
     {
         return args;
     }
@@ -293,7 +317,7 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
 
         if (isPartial)
         {
-            List<ByteBuffer> partialParameters = ((PartialScalarFunction) fun).getPartialParameters();
+            List<ByteBuffer> partialParameters = ((PartialScalarFunction) fun).getPartialArguments();
 
             // We use a bitset to track the position of the unresolved arguments
             size += TypeSizes.sizeofUnsignedVInt(computeBitSet(partialParameters));
@@ -335,7 +359,7 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
 
         if (isPartial)
         {
-            List<ByteBuffer> partialParameters = ((PartialScalarFunction) fun).getPartialParameters();
+            List<ByteBuffer> partialParameters = ((PartialScalarFunction) fun).getPartialArguments();
 
             // We use a bitset to track the position of the unresolved arguments
             out.writeUnsignedVInt(computeBitSet(partialParameters));

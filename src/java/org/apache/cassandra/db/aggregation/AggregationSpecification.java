@@ -71,7 +71,7 @@ public abstract class AggregationSpecification
     /**
      * The <code>AggregationSpecification</code> kinds.
      */
-    public static enum Kind
+    public enum Kind
     {
         AGGREGATE_EVERYTHING, AGGREGATE_BY_PK_PREFIX, AGGREGATE_BY_PK_PREFIX_WITH_SELECTOR
     }

@@ -59,9 +59,8 @@ final class MapSelector extends Selector
             Serializer serializer = serializers.get(version);
             for (int i = 0; i < size; i++)
             {
-                Pair<Selector, Selector> entry = Pair.create(serializer.deserialize(in, metadata),
-                                                             serializer.deserialize(in, metadata));
-                entries.add(entry);
+                entries.add(Pair.create(serializer.deserialize(in, metadata),
+                                        serializer.deserialize(in, metadata)));
             }
             return new MapSelector(type, entries);
         }

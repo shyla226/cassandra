@@ -20,10 +20,7 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.ColumnSpecification;
-import org.apache.cassandra.cql3.Constants;
-import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.UUIDGen;
@@ -161,13 +158,13 @@ public class TimeUUIDType extends TemporalType<UUID>
     }
 
     @Override
-    public ByteBuffer addDuration(ByteBuffer temporal, ByteBuffer duration)
+    public ByteBuffer addDuration(Number temporal, Duration duration)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public ByteBuffer substractDuration(ByteBuffer temporal, ByteBuffer duration)
+    public ByteBuffer substractDuration(Number temporal, Duration duration)
     {
         throw new UnsupportedOperationException();
     }

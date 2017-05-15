@@ -74,4 +74,11 @@ public interface Function extends AssignmentTestable
      * @return the name of the function to use within a ResultSet
      */
     public String columnName(List<String> columnNames);
+
+    /**
+     * Creates some new input arguments for this function.
+     * @param version the protocol version
+     * @return some new input arguments for this function
+     */
+    public Arguments newArguments(ProtocolVersion version);;
 }

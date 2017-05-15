@@ -47,7 +47,7 @@ public final class UDFByteCodeVerifier
 
     public static final String JAVA_UDF_NAME = JavaUDF.class.getName().replace('.', '/');
     public static final String OBJECT_NAME = Object.class.getName().replace('.', '/');
-    public static final String CTOR_SIG = "(Lcom/datastax/driver/core/TypeCodec;[Lcom/datastax/driver/core/TypeCodec;Lorg/apache/cassandra/cql3/functions/UDFContext;)V";
+    public static final String CTOR_SIG = "(Lorg/apache/cassandra/cql3/functions/UDFDataType;Lorg/apache/cassandra/cql3/functions/UDFContext;)V";
 
     private final Set<String> disallowedClasses = new HashSet<>();
     private final Multimap<String, String> disallowedMethodCalls = HashMultimap.create();
@@ -101,14 +101,14 @@ public final class UDFByteCodeVerifier
                     // allowed constructor - JavaUDF(TypeCodec returnCodec, TypeCodec[] argCodecs)
                     return new ConstructorVisitor(errors);
                 }
-                if ("executeImpl".equals(name) && "(Lorg/apache/cassandra/transport/ProtocolVersion;Ljava/util/List;)Ljava/nio/ByteBuffer;".equals(desc))
+                if ("executeImpl".equals(name) && "(Lorg/apache/cassandra/cql3/functions/Arguments;)Ljava/nio/ByteBuffer;".equals(desc))
                 {
                     if (Opcodes.ACC_PROTECTED != access)
                         errors.add("executeImpl not protected");
-                    // the executeImpl method - ByteBuffer executeImpl(ProtocolVersion protocolVersion, List<ByteBuffer> params)
+                    // the executeImpl method - ByteBuffer executeImpl(ProtocolVersion protocolVersion, Arguments arguments)
                     return new ExecuteImplVisitor(errors);
                 }
-                if ("executeAggregateImpl".equals(name) && "(Lorg/apache/cassandra/transport/ProtocolVersion;Ljava/lang/Object;Ljava/util/List;)Ljava/lang/Object;".equals(desc))
+                if ("executeAggregateImpl".equals(name) && "(Ljava/lang/Object;Lorg/apache/cassandra/cql3/functions/Arguments;)Ljava/lang/Object;".equals(desc))
                 {
                     if (Opcodes.ACC_PROTECTED != access)
                         errors.add("executeAggregateImpl not protected");

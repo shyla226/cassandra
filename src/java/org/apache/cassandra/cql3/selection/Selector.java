@@ -73,7 +73,7 @@ public abstract class Selector
     /**
      * The <code>Selector</code> kinds.
      */
-    public static enum Kind
+    public enum Kind
     {
         SIMPLE_SELECTOR(SimpleSelector.deserializer),
         TERM_SELECTOR(TermSelector.deserializer),
