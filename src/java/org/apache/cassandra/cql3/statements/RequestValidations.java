@@ -301,6 +301,24 @@ public final class RequestValidations
     }
 
     /**
+     * Checks that the specified object is <code>null</code>.
+     * If it is not an <code>InvalidRequestException</code> will be throws.
+     *
+     * @param object the object to test
+     * @param messageTemplate the template used to build the error message
+     * @param firstArg the first message argument
+     * @param secondArg the second message argument
+     * @return the object
+     * @throws InvalidRequestException if the specified object is not <code>null</code>.
+     */
+    public static <T> T checkNull(T object, String messageTemplate, Object firstArg, Object secondArg)
+            throws InvalidRequestException
+    {
+        checkTrue(object == null, messageTemplate, firstArg, secondArg);
+        return object;
+    }
+
+    /**
      * Returns an <code>InvalidRequestException</code> with the specified message.
      *
      * @param message the error message

@@ -17,15 +17,27 @@
  */
 package org.apache.cassandra.cql3.functions;
 
+import java.nio.ByteBuffer;
 import java.util.List;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
+import org.apache.cassandra.cql3.selection.Selector;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.github.jamm.Unmetered;
 
 @Unmetered
 public interface Function extends AssignmentTestable
 {
+    /**
+     * A marker buffer used to represent function parameters that cannot be resolved at some stage of CQL processing.
+     * This is used for partial function application in particular.
+     *
+     * @see ScalarFunction#partialApplication(ProtocolVersion, List)
+     * @see Selector.Factory#maybeResolve
+     */
+    public static final ByteBuffer UNRESOLVED = ByteBuffer.allocate(0);
+
     public FunctionName name();
     public List<AbstractType<?>> argTypes();
     public AbstractType<?> returnType();
@@ -36,6 +48,13 @@ public interface Function extends AssignmentTestable
      * @return <code>true</code> if the function is a native/hard coded one, <code>false</code> otherwise.
      */
     public boolean isNative();
+
+    /**
+     * Checks whether the function is a pure function (as in doesn't depend on, nor produce side effects) or not.
+     *
+     * @return <code>true</code> if the function is a pure function, <code>false</code> otherwise.
+     */
+    public boolean isPure();
 
     /**
      * Checks whether the function is an aggregate function or not.

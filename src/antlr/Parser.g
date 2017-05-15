@@ -281,7 +281,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
         Term.Raw limit = null;
         Term.Raw perPartitionLimit = null;
         Map<ColumnMetadata.Raw, Boolean> orderings = new LinkedHashMap<>();
-        List<ColumnMetadata.Raw> groups = new ArrayList<>();
+        List<Selectable.Raw> groups = new ArrayList<>();
         boolean allowFiltering = false;
         boolean isJson = false;
     }
@@ -458,8 +458,8 @@ orderByClause[Map<ColumnMetadata.Raw, Boolean> orderings]
     : c=cident (K_ASC | K_DESC { reversed = true; })? { orderings.put(c, reversed); }
     ;
 
-groupByClause[List<ColumnMetadata.Raw> groups]
-    : c=cident { groups.add(c); }
+groupByClause[List<Selectable.Raw> groups]
+    : s=unaliasedSelector { groups.add(s); }
     ;
 
 /**

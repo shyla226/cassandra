@@ -37,5 +37,11 @@ public abstract class UuidFcts
         {
             return UUIDSerializer.instance.serialize(UUID.randomUUID());
         }
+
+        @Override
+        public boolean isPure()
+        {
+            return false;
+        }
     };
 }

@@ -191,8 +191,10 @@ public class CreateViewStatement extends SchemaAlteringStatement
         }
 
         // build the select statement
+
         Map<ColumnMetadata.Raw, Boolean> orderings = Collections.emptyMap();
-        List<ColumnMetadata.Raw> groups = Collections.emptyList();
+        List<Selectable.Raw> groups = Collections.emptyList();
+
         SelectStatement.Parameters parameters = new SelectStatement.Parameters(orderings, groups, false, true, false);
 
         SelectStatement.RawStatement rawSelect = new SelectStatement.RawStatement(baseName, parameters, selectClause, whereClause, null, null);

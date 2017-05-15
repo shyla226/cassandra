@@ -22,11 +22,19 @@ import java.util.List;
 
 import org.apache.cassandra.cql3.functions.AggregateFunction;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 final class AggregateFunctionSelector extends AbstractFunctionSelector<AggregateFunction>
 {
+    protected static final SelectorDeserializer deserializer = new AbstractFunctionSelectorDeserializer()
+    {
+        @Override
+        protected Selector newFunctionSelector(Function function, List<Selector> argSelectors)
+        {
+            return new AggregateFunctionSelector(function, argSelectors);
+        }
+    };
+
     private final AggregateFunction.Aggregate aggregate;
 
     public boolean isAggregate()
@@ -34,20 +42,20 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
         return true;
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
+    public void addInput(ProtocolVersion protocolVersion, InputRow input)
     {
         // Aggregation of aggregation is not supported
         for (int i = 0, m = argSelectors.size(); i < m; i++)
         {
             Selector s = argSelectors.get(i);
-            s.addInput(protocolVersion, rs);
+            s.addInput(protocolVersion, input);
             setArg(i, s.getOutput(protocolVersion));
             s.reset();
         }
         this.aggregate.addInput(protocolVersion, args());
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException
+    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
         return aggregate.compute(protocolVersion);
     }
@@ -57,10 +65,9 @@ final class AggregateFunctionSelector extends AbstractFunctionSelector<Aggregate
         aggregate.reset();
     }
 
-    AggregateFunctionSelector(Function fun, List<Selector> argSelectors) throws InvalidRequestException
+    AggregateFunctionSelector(Function fun, List<Selector> argSelectors)
     {
-        super((AggregateFunction) fun, argSelectors);
-
+        super(Kind.AGGREGATE_FUNCTION_SELECTOR, (AggregateFunction) fun, argSelectors);
         this.aggregate = this.fun.newAggregate();
     }
 }

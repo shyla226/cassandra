@@ -593,9 +593,11 @@ public abstract class ReadCommand implements ReadQuery
             DigestVersion digestVersion = isDigest ? fromDigestVersionInt((int)in.readUnsignedVInt()) : null;
             TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
             int nowInSec = in.readInt();
+
             ColumnFilter columnFilter = ColumnFilter.serializers.get(version).deserialize(in, metadata);
             RowFilter rowFilter = RowFilter.serializers.get(version).deserialize(in, metadata);
-            DataLimits limits = DataLimits.serializers.get(version).deserialize(in, metadata.comparator);
+            DataLimits limits = DataLimits.serializers.get(version).deserialize(in, metadata);
+
             Optional<IndexMetadata> index = hasIndex
                                           ? deserializeIndexMetadata(in, metadata)
                                           : Optional.empty();
