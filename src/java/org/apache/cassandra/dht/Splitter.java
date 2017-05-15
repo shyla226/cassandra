@@ -73,7 +73,7 @@ public class Splitter
         else
             boundaries.set(boundaries.size() - 1, partitioner.getMaximumToken());
 
-        assert boundaries.size() == parts : boundaries.size() +"!="+parts+" "+boundaries+":"+localRanges;
+        assert boundaries.size() == parts : boundaries.size() + "!=" + parts + " " + boundaries + ":" + localRanges;
         return boundaries;
     }
 
@@ -81,8 +81,10 @@ public class Splitter
     {
         List<Token> boundaries = new ArrayList<>(parts);
         double sum = 0;
+
         int i = 0;
-        while (boundaries.size() < parts - 1)
+        final int rangesCount = localRanges.size();
+        while (boundaries.size() < parts - 1 && i < rangesCount - 1)
         {
             Range<Token> r = localRanges.get(i);
             Range<Token> nextRange = localRanges.get(i + 1);
@@ -90,6 +92,7 @@ public class Splitter
             double currentRangeWidth = r.left.size(r.right);
             double nextRangeWidth = nextRange.left.size(nextRange.right);
             sum += currentRangeWidth;
+
             // does this or next range take us beyond the per part limit?
             if (sum + nextRangeWidth > perPart)
             {

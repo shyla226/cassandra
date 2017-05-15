@@ -285,6 +285,16 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
         return hasIn;
     }
 
+    public boolean hasContains()
+    {
+        for (SingleRestriction restriction : this)
+        {
+            if (restriction.isContains())
+                return true;
+        }
+        return false;
+    }
+
     public final boolean hasSlice()
     {
         for (SingleRestriction restriction : this)

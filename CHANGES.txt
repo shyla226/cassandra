@@ -1,4 +1,9 @@
 4.0
+ * RangeStreamer should be smarter when picking endpoints for streaming (CASSANDRA-4650)
+ * Avoid rewrapping an exception thrown for cache load functions (CASSANDRA-13367)
+ * Log time elapsed for each incremental repair phase (CASSANDRA-13498)
+ * Add multiple table operation support to cassandra-stress (CASSANDRA-8780)
+ * Fix incorrect cqlsh results when selecting same columns multiple times (CASSANDRA-13262)
  * Fix WriteResponseHandlerTest is sensitive to test execution order (CASSANDRA-13421)
  * Improve incremental repair logging (CASSANDRA-13468)
  * Start compaction when incremental repair finishes (CASSANDRA-13454)
@@ -58,9 +63,16 @@
  * Add support for arithmetic operators (CASSANDRA-11935)
  * Add histogram for delay to deliver hints (CASSANDRA-13234)
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
+ * Changing `max_hint_window_in_ms` at runtime (CASSANDRA-11720)
 
 
 3.11.0
+ * Fix the problem with duplicated rows when using paging with SASI (CASSANDRA-13302)
+ * Allow CONTAINS statements filtering on the partition key and it’s parts (CASSANDRA-13275)
+ * Fall back to even ranges calculation in clusters with vnodes when tokens are distributed unevenly (CASSANDRA-13229)
+ * Fix duration type validation to prevent overflow (CASSANDRA-13218)
+ * Forbid unsupported creation of SASI indexes over partition key columns (CASSANDRA-13228)
+ * Reject multiple values for a key in CQL grammar. (CASSANDRA-13369)
  * UDA fails without input rows (CASSANDRA-13399)
  * Fix compaction-stress by using daemonInitialization (CASSANDRA-13188)
  * V5 protocol flags decoding broken (CASSANDRA-13443)
@@ -90,6 +102,10 @@
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
  * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
+ * Add storage port options to sstableloader (CASSANDRA-13518)
+ * Properly handle quoted index names in cqlsh DESCRIBE output (CASSANDRA-12847)
+ * Fix NPE in StorageService.excise() (CASSANDRA-13163)
+ * Expire OutboundTcpConnection messages by a single Thread (CASSANDRA-13265)
  * Fail repair if insufficient responses received (CASSANDRA-13397)
  * Fix SSTableLoader fail when the loaded table contains dropped columns (CASSANDRA-13276)
  * Avoid name clashes in CassandraIndexTest (CASSANDRA-13427)

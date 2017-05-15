@@ -217,6 +217,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static final boolean joinRing = Boolean.parseBoolean(System.getProperty("cassandra.join_ring", "true"));
     private boolean replacing;
 
+    /**
+     * Whether partitioning sstables by token range is enabled when there are multiple disk
+     */
+    private static final boolean SPLIT_SSTABLES_BY_TOKEN_RANGE = Boolean.parseBoolean(System.getProperty("cassandra.split_sstables_by_token_range", "true"));
+
     private final StreamStateStore streamStateStore = new StreamStateStore();
 
     /** This method updates the local token on disk  */
@@ -2426,8 +2431,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         logger.info("Removing tokens {} for {}", tokens, endpoint);
 
-        if (tokenMetadata.isMember(endpoint))
-            HintsService.instance.excise(tokenMetadata.getHostId(endpoint));
+        UUID hostId = tokenMetadata.getHostId(endpoint);
+        if (hostId != null && tokenMetadata.isMember(endpoint))
+            HintsService.instance.excise(hostId);
 
         removeEndpoint(endpoint);
         tokenMetadata.removeEndpoint(endpoint);
@@ -4949,7 +4955,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<Range<Token>> getStartupTokenRanges(Keyspace keyspace)
     {
-        if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())
+        if (!DatabaseDescriptor.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
             return null;
 
         Collection<Range<Token>> lr;
@@ -4995,17 +5001,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * etc.
      *
      * The final entry in the returned list will always be the partitioner maximum tokens upper key bound
-     *
-     * @param localRanges
-     * @param partitioner
-     * @param dataDirectories
-     * @return
      */
     public static List<PartitionPosition> getDiskBoundaries(List<Range<Token>> localRanges, IPartitioner partitioner, Directories.DataDirectory[] dataDirectories)
     {
         assert partitioner.splitter().isPresent();
         Splitter splitter = partitioner.splitter().get();
-        List<Token> boundaries = splitter.splitOwnedRanges(dataDirectories.length, localRanges, DatabaseDescriptor.getNumTokens() > 1);
+        boolean dontSplitRanges = DatabaseDescriptor.getNumTokens() > 1;
+        List<Token> boundaries = splitter.splitOwnedRanges(dataDirectories.length, localRanges, dontSplitRanges);
+        // If we can't split by ranges, split evenly to ensure utilisation of all disks
+        if (dontSplitRanges && boundaries.size() < dataDirectories.length)
+            boundaries = splitter.splitOwnedRanges(dataDirectories.length, localRanges, false);
+
         List<PartitionPosition> diskBoundaries = new ArrayList<>();
         for (int i = 0; i < boundaries.size() - 1; i++)
             diskBoundaries.add(boundaries.get(i).maxKeyBound());

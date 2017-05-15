@@ -30,6 +30,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.Checksum;
@@ -46,6 +47,7 @@ import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
@@ -59,6 +61,7 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 public class OutboundTcpConnection extends FastThreadLocalThread
@@ -114,6 +117,10 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         if (coalescingWindow < 0)
             throw new ExceptionInInitializerError(
                     "Value provided for coalescing window must be greater than 0: " + coalescingWindow);
+
+        int otc_backlog_expiration_interval_in_ms = DatabaseDescriptor.getOtcBacklogExpirationInterval();
+        if (otc_backlog_expiration_interval_in_ms != Config.otc_backlog_expiration_interval_ms_default)
+            logger.info("OutboundTcpConnection backlog expiration interval set to to {}ms", otc_backlog_expiration_interval_in_ms);
     }
 
     private volatile boolean isStopped = false;
@@ -124,6 +131,11 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     static final int LZ4_HASH_SEED = 0x9747b28c;
 
     private final BlockingQueue<QueuedMessage> backlog = new LinkedBlockingQueue<>();
+    private static final String BACKLOG_PURGE_SIZE_PROPERTY = PREFIX + "otc_backlog_purge_size";
+    @VisibleForTesting
+    static final int BACKLOG_PURGE_SIZE = Integer.getInteger(BACKLOG_PURGE_SIZE_PROPERTY, 1024);
+    private final AtomicBoolean backlogExpirationActive = new AtomicBoolean(false);
+    private volatile long backlogNextExpirationTime;
 
     private final OutboundTcpConnectionPool poolReference;
 
@@ -162,8 +174,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
 
     public void enqueue(Message message)
     {
-        if (backlog.size() > 1024)
-            expireMessages();
+        expireMessages(ApproximateTime.currentTimeMillis());
         try
         {
             backlog.put(new QueuedMessage(message));
@@ -172,6 +183,18 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         {
             throw new AssertionError(e);
         }
+    }
+
+    /**
+     * This is a helper method for unit testing. Disclaimer: Do not use this method outside unit tests, as
+     * this method is iterating the queue which can be an expensive operation (CPU time, queue locking).
+     * 
+     * @return true, if the queue contains at least one expired element
+     */
+    @VisibleForTesting // (otherwise = VisibleForTesting.NONE)
+    boolean backlogContainsExpiredMessages(long currentTimeMillis)
+    {
+        return backlog.stream().anyMatch(entry -> entry.message.isTimedOut(currentTimeMillis));
     }
 
     void closeSocket(boolean destroyThread)
@@ -188,11 +211,6 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     void softCloseSocket()
     {
         enqueue(Message.CLOSE_SENTINEL);
-    }
-
-    public MessagingVersion getTargetVersion()
-    {
-        return targetVersion;
     }
 
     public void run()
@@ -213,9 +231,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 throw new AssertionError(e);
             }
 
-            currentMsgBufferCount = drainedMessages.size();
+            int count = currentMsgBufferCount = drainedMessages.size();
 
-            int count = drainedMessages.size();
             //The timestamp of the first message has already been provided to the coalescing strategy
             //so skip logging it.
             inner:
@@ -232,14 +249,16 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                         continue;
                     }
 
-                    if (m.isTimedOut())
+                    if (m.isTimedOut(ApproximateTime.currentTimeMillis()))
                         dropped.incrementAndGet();
                     else if (socket != null || connect())
                         writeConnected(qm, count == 1 && backlog.isEmpty());
                     else
                     {
-                        // clear out the queue, else gossip messages back up.
-                        drainedMessages.clear();
+                        // Not connected! Clear out the queue, else gossip messages back up. Update dropped
+                        // statistics accordingly. Hint: The statistics may be slightly too low, if messages
+                        // are added between the calls of backlog.size() and backlog.clear()
+                        dropped.addAndGet(backlog.size());
                         backlog.clear();
                         break inner;
                     }
@@ -259,6 +278,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 }
                 currentMsgBufferCount = --count;
             }
+            // Update dropped statistics by the number of unprocessed drainedMessages
+            dropped.addAndGet(currentMsgBufferCount);
             drainedMessages.clear();
         }
     }
@@ -539,15 +560,42 @@ public class OutboundTcpConnection extends FastThreadLocalThread
         return version.get();
     }
 
-    private void expireMessages()
+    /**
+     * Expire elements from the queue if the queue is pretty full and expiration is not already in progress.
+     * This method will only remove droppable expired entries. If no such element exists, nothing is removed from the queue.
+     */
+    @VisibleForTesting
+    void expireMessages(long currentTimeMillis)
     {
-        Iterator<QueuedMessage> iter = backlog.iterator();
-        while (iter.hasNext())
+        if (backlog.size() <= BACKLOG_PURGE_SIZE)
+            return; // Plenty of space
+
+        if (backlogNextExpirationTime > currentTimeMillis)
+            return; // Expiration is not due.
+
+        /**
+         * Expiration is an expensive process. Iterating the queue locks the queue for both writes and
+         * reads during iter.next() and iter.remove(). Thus letting only a single Thread do expiration.
+         */
+        if (backlogExpirationActive.compareAndSet(false, true))
         {
-            if (iter.next().message.isTimedOut())
+            try
             {
-                iter.remove();
-                dropped.incrementAndGet();
+                Iterator<QueuedMessage> iter = backlog.iterator();
+                while (iter.hasNext())
+                {
+                    if (iter.next().message.isTimedOut(currentTimeMillis))
+                    {
+                        iter.remove();
+                        dropped.incrementAndGet();
+                    }
+                }
+            }
+            finally
+            {
+                long backlogExpirationInterval = DatabaseDescriptor.getOtcBacklogExpirationInterval();
+                backlogNextExpirationTime = currentTimeMillis + backlogExpirationInterval;
+                backlogExpirationActive.set(false);
             }
         }
     }

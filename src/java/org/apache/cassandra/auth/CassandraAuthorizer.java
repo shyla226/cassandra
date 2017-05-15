@@ -99,6 +99,9 @@ public class CassandraAuthorizer implements IAuthorizer
             throw new RuntimeException(e);
         }
 
+        for (RoleResource role: user.getRoles())
+            addPermissionsForRole(permissions, resource, role);
+
         return permissions;
     }
 

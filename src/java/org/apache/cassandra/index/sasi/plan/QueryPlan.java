@@ -103,6 +103,9 @@ public class QueryPlan
             if (!keyRange.right.isMinimum())
                 keys = keys.takeWhile(key -> keyRange.right.compareTo(key) >= 0);
 
+            if (!keyRange.inclusiveLeft())
+                keys = keys.skippingMap(key -> key.compareTo(keyRange.left) == 0 ? null : key);
+
             return keys.flatMap(this)
                        .doOnClose(this::close);
         }

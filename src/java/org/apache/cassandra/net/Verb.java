@@ -22,6 +22,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.concurrent.ExecutorSupplier;
 import org.apache.cassandra.utils.TimeoutSupplier;
 import org.apache.cassandra.utils.versioning.Version;

@@ -42,10 +42,11 @@ class MessageDeliveryTask implements Runnable
 
     public void run()
     {
+        long currentTimeMillis = ApproximateTime.currentTimeMillis();
         MessagingService.instance().metrics.addQueueWaitTime(message.verb().toString(),
-                                                             ApproximateTime.currentTimeMillis() - enqueueTime);
+                                                             currentTimeMillis - enqueueTime);
 
-        if (message.isTimedOut())
+        if (message.isTimedOut(currentTimeMillis))
         {
             Tracing.trace("Discarding unhandled but timed out message from {}", message.from());
             MessagingService.instance().incrementDroppedMessages(message);
