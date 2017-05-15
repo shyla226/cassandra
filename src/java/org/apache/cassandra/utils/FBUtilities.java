@@ -921,6 +921,11 @@ public class FBUtilities
             return getStackTrace(new ThreadInfo());
         }
 
+        public static String getStackTrace(Thread thread)
+        {
+            return getStackTrace(new ThreadInfo(thread));
+        }
+
         public static String getStackTrace(ThreadInfo threadInfo)
         {
             StringBuilder sb = new StringBuilder();
