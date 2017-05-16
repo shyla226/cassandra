@@ -19,25 +19,21 @@ package org.apache.cassandra.repair;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.AbstractFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.streaming.PreviewKind;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
@@ -60,6 +56,7 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
     private final Map<InetAddress, Set<RangeHash>> receivedRangeCache;
 
     protected volatile SyncStat stat;
+    protected long startTime = Long.MIN_VALUE;
 
     public SyncTask(RepairJobDesc desc, TreeResponse r1, TreeResponse r2, Executor taskExecutor, SyncTask next,
                     Map<InetAddress, Set<RangeHash>> receivedRangeCache, PreviewKind previewKind)
@@ -78,6 +75,9 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
      */
     public void run()
     {
+
+        startTime = System.currentTimeMillis();
+
         try
         {
             // compare trees, and collect differences
@@ -160,4 +160,10 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
     }
 
     protected abstract void startSync(List<Range<Token>> transferToLeft, List<Range<Token>> transferToRight);
+
+    protected void finished()
+    {
+        if (startTime != Long.MIN_VALUE)
+            Keyspace.open(desc.keyspace).getColumnFamilyStore(desc.columnFamily).metric.syncTime.update(System.currentTimeMillis() - startTime, TimeUnit.MILLISECONDS);
+    }
 }
