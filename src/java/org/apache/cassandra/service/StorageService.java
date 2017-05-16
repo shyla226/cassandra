@@ -5016,7 +5016,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
 
-    public static List<PartitionPosition> getCpuBoundries(List<Range<Token>> localRanges, IPartitioner partitioner, int numCpu)
+    public static List<PartitionPosition> getCpuBoundaries(List<Range<Token>> localRanges, IPartitioner partitioner, int numCpu)
     {
         assert partitioner.splitter().isPresent() : partitioner.getClass().getName() + " doesn't support cpu boundary splitting";
         Splitter splitter = partitioner.splitter().get();

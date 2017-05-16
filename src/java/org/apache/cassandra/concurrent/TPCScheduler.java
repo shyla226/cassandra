@@ -53,6 +53,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
@@ -253,7 +254,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
 
     /**
      * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
-     * core is valid via {@link TPCScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
+     * core is valid via {@link TPCScheduler#isValidCoreId(int)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
      */
     public static int getCoreId()
@@ -263,7 +264,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
 
     /**
      * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
-     * core is valid via {@link TPCScheduler#isValidCoreId(Integer)}, or alternatively can allocate an
+     * core is valid via {@link TPCScheduler#isValidCoreId(int)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
      */
     public static int getCoreId(Thread t)
@@ -334,9 +335,9 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
         return perCoreSchedulers[core];
     }
 
-    public static boolean isValidCoreId(Integer coreId)
+    public static boolean isValidCoreId(int coreId)
     {
-        return coreId != null && coreId >= 0 && coreId < getNumCores();
+        return coreId >= 0 && coreId < getNumCores();
     }
 
     /**
@@ -359,34 +360,41 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
         if (!StorageService.instance.isInitialized())
             return 0;
 
-        // Convert OP partitions to top level partitioner for secondary indexes; always route
-        // system table mutations through core 0
-        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
+        Token keyToken;
+
+        if (key.getPartitioner() == DatabaseDescriptor.getPartitioner())
         {
+            keyToken = key.getToken();
+        }
+        else
+        {
+            // Convert OP partitions to top level partitioner for secondary indexes; always route
+            // system table mutations through core 0
             if (SchemaConstants.isSystemKeyspace(keyspaceName))
                 return 0;
 
-            key = DatabaseDescriptor.getPartitioner().decorateKey(key.getKey());
+            keyToken = DatabaseDescriptor.getPartitioner().getToken(key.getKey());
         }
 
         List<Token> keyspaceRanges = getRangeList(keyspaceName, true);
-        Token keyToken = key.getToken();
 
-        Token rangeStart = keyspaceRanges.get(0);
-        for (int i = 1; i < keyspaceRanges.size(); i++)
+
+        // Note that keyspaceRanges starts with the min token and end with the max one (see SS.getCpuBoundaries()) so
+        // we know we'll find the token, and we can skip comparing the first and last token.
+
+        for (int i = 1; i < keyspaceRanges.size() - 1; i++)
         {
-            Token next = keyspaceRanges.get(i);
-            if (keyToken.compareTo(rangeStart) >= 0 && keyToken.compareTo(next) < 0)
+            if (keyToken.compareTo(keyspaceRanges.get(i)) < 0)
             {
                 if (logger.isTraceEnabled())
                     logger.trace("Read moving to {} from {}", i-1, getCoreId());
                 return i - 1;
             }
-
-            rangeStart = next;
         }
 
-        throw new IllegalStateException(String.format("Unable to map %s to cpu for %s", key, keyspaceName));
+        // As mentioned above, we skipped the last token because it's the max token. If we get here, we know the token
+        // belong to the last cpu.
+        return perCoreSchedulers.length - 1;
     }
 
     /**
@@ -420,9 +428,9 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
             return ranges;
 
         List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspace);
-        List<Token> splits = StorageService.getCpuBoundries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS)
+        List<Token> splits = StorageService.getCpuBoundaries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_NETTY_THREADS)
                                           .stream()
-                                          .map(s -> s.getToken())
+                                          .map(RingPosition::getToken)
                                           .collect(Collectors.toList());
 
         if (persist)
@@ -513,7 +521,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
             return scheduleActual(action, delayTime, unit, tasks);
         }
 
-        public Disposable scheduleDirect(final Runnable run, long delayTime, TimeUnit unit)
+        private Disposable scheduleDirect(final Runnable run, long delayTime, TimeUnit unit)
         {
             Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
             try
@@ -536,7 +544,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
             }
         }
 
-        public ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, DisposableContainer parent)
+        private ScheduledRunnable scheduleActual(final Runnable run, long delayTime, TimeUnit unit, DisposableContainer parent)
         {
             Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
 
