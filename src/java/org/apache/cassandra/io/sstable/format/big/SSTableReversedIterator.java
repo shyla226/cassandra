@@ -28,7 +28,10 @@ import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.btree.BTree;
@@ -43,7 +46,19 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
      */
     private int slice;
 
-    public SSTableReversedIterator(BigTableReader sstable,
+    public SSTableReversedIterator(SSTableReader sstable,
+                                   FileDataInput file,
+                                   DecoratedKey key,
+                                   RowIndexEntry indexEntry,
+                                   Slices slices,
+                                   ColumnFilter columnFilter,
+                                   DeletionTime partitionLevelDeletion,
+                                   Row staticRow)
+    {
+        super(sstable, file, indexEntry, key, slices, columnFilter, partitionLevelDeletion, staticRow);
+    }
+
+    public SSTableReversedIterator(SSTableReader sstable,
                                    FileDataInput file,
                                    DecoratedKey key,
                                    BigRowIndexEntry indexEntry,
@@ -53,10 +68,10 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         super(sstable, file, key, indexEntry, slices, columns);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ReverseIndexedReader((BigRowIndexEntry) indexEntry, file, shouldCloseFile)
+             ? new ReverseIndexedReader((BigRowIndexEntry) indexEntry, file, shouldCloseFile, rc)
              : new ReverseReader(file, shouldCloseFile);
     }
 
@@ -70,6 +85,12 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         int next = slice;
         slice++;
         return slices.size() - (next + 1);
+    }
+
+    protected int currentSliceIndex()
+    {
+        assert slice > 0;
+        return slices.size() - slice;
     }
 
     protected boolean hasMoreSlices()
@@ -126,11 +147,19 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             // If we have read the data, just create the iterator for the slice. Otherwise, read the data.
             if (buffer == null)
             {
-                buffer = createBuffer(1);
-                // Note that we can reuse that buffer between slices (we could alternatively re-read from disk
-                // every time, but that feels more wasteful) so we want to include everything from the beginning.
-                // We can stop at the slice end however since any following slice will be before that.
-                loadFromDisk(null, slice.end(), false, false);
+                try
+                {
+                    buffer = createBuffer(1);
+                    // Note that we can reuse that buffer between slices (we could alternatively re-read from disk
+                    // every time, but that feels more wasteful) so we want to include everything from the beginning.
+                    // We can stop at the slice end however since any following slice will be before that.
+                    loadFromDisk(null, slice.end(), false, false);
+                }
+                catch (Rebufferer.NotInCacheException nice)
+                {
+                    buffer = null;
+                    throw nice;
+                }
             }
             setIterator(slice);
         }
@@ -262,10 +291,10 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         // The last index block to consider for the slice
         private int lastBlockIdx;
 
-        private ReverseIndexedReader(BigRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ReverseIndexedReader(BigRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
-            this.indexState = new IndexState(this, metadata.comparator, indexEntry, true, ((BigTableReader) sstable).ifile);
+            this.indexState = new IndexState(this, metadata.comparator, indexEntry, true, ((BigTableReader) sstable).ifile, rc);
         }
 
         @Override
@@ -273,6 +302,13 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
         {
             super.close();
             this.indexState.close();
+        }
+
+        @Override
+        protected void resetState()
+        {
+            super.resetState();
+            this.indexState.reset();
         }
 
         @Override

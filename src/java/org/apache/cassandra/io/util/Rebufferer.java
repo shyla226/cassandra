@@ -19,6 +19,12 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+
+import org.apache.cassandra.cache.ChunkCache;
 
 /**
  * Rebufferer for reading data by a RandomAccessReader.
@@ -37,6 +43,54 @@ public interface Rebufferer extends ReaderFileProxy
      * Called when a reader is closed. Should clean up reader-specific data.
      */
     void closeReader();
+
+    // Extensions for TPC/optimistic read below.
+
+    default BufferHolder rebuffer(long position, ReaderConstraint constraint)
+    {
+        if (constraint == ReaderConstraint.IN_CACHE_ONLY)
+            throw new NotInCacheException(null);
+
+        return rebuffer(position);
+    }
+
+    public enum ReaderConstraint
+    {
+        NONE,
+        IN_CACHE_ONLY
+    }
+
+    public static class NotInCacheException extends RuntimeException
+    {
+        private static final long serialVersionUID = 1L;
+
+        private final ChunkCache.Buffer asyncBuffer;
+
+        public NotInCacheException(ChunkCache.Buffer asyncBuffer)
+        {
+            super("Requested data is not in cache. Retry with ReaderConstraint.NONE.");
+            this.asyncBuffer = asyncBuffer;
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace()
+        {
+            //Avoids generating a stack trace for every instance
+            return this;
+        }
+
+        public void accept(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
+        {
+            //Registers a callback to be issued when the async buffer is ready
+            assert asyncBuffer != null;
+            asyncBuffer.onReadyHandler(onReady, onSchedule, onError, executor);
+        }
+
+        public String toString()
+        {
+            return "NotInCache " + asyncBuffer;
+        }
+    }
 
     interface BufferHolder
     {

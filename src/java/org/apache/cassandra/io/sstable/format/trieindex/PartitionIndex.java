@@ -168,10 +168,10 @@ public class PartitionIndex implements Closeable
         fh.addTo(identities);
     }
 
-    public static PartitionIndex load(FileHandle.Builder fhBuilder, IPartitioner partitioner, boolean preload) throws IOException
+    public static PartitionIndex load(FileHandle.Builder fhBuilder, IPartitioner partitioner, boolean preload, Rebufferer.ReaderConstraint rc) throws IOException
     {
         try (FileHandle fh = fhBuilder.complete();
-             FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8))
+             FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8, rc))
         {
             long firstPos = rdr.readLong();
             long keyCount = rdr.readLong();
@@ -181,6 +181,7 @@ public class PartitionIndex implements Closeable
             DecoratedKey last = partitioner != null ? partitioner.decorateKey(ByteBufferUtil.readWithShortLength(rdr)) : null;
             if (preload)
             {
+                assert rc != Rebufferer.ReaderConstraint.IN_CACHE_ONLY;
                 logger.info("Walking {}", fh.path());
                 int csum = 0;
                 // force a read of all the pages of the index
@@ -207,14 +208,14 @@ public class PartitionIndex implements Closeable
         return s;
     }
 
-    public Reader openReader()
+    public Reader openReader(Rebufferer.ReaderConstraint rc)
     {
-        return new Reader(this);
+        return new Reader(this, rc);
     }
 
-    protected IndexPosIterator allKeysIterator()
+    protected IndexPosIterator allKeysIterator(Rebufferer.ReaderConstraint rc)
     {
-        return new IndexPosIterator(this);
+        return new IndexPosIterator(this, rc);
     }
 
     protected Rebufferer instantiateRebufferer()
@@ -290,9 +291,9 @@ public class PartitionIndex implements Closeable
      */
     public static class Reader extends Walker<Reader>
     {
-        protected Reader(PartitionIndex summary)
+        protected Reader(PartitionIndex summary, Rebufferer.ReaderConstraint rc)
         {
-            super(summary.instantiateRebufferer(), summary.root);
+            super(summary.instantiateRebufferer(), summary.root, rc);
         }
 
         /**
@@ -372,16 +373,16 @@ public class PartitionIndex implements Closeable
      */
     public static class IndexPosIterator extends ValueIterator<IndexPosIterator>
     {
-        protected IndexPosIterator(PartitionIndex summary)
+        protected IndexPosIterator(PartitionIndex summary, Rebufferer.ReaderConstraint rc)
         {
-            super(summary.instantiateRebufferer(), summary.root);
+            super(summary.instantiateRebufferer(), summary.root, rc);
         }
 
-        protected IndexPosIterator(PartitionIndex summary, PartitionPosition start, PartitionPosition end)
+        protected IndexPosIterator(PartitionIndex summary, PartitionPosition start, PartitionPosition end, Rebufferer.ReaderConstraint rc)
         {
             super(summary.instantiateRebufferer(), summary.root,
                   source(start), source(end),
-                  true);
+                  true, rc);
         }
 
         protected long nextIndexPos() throws IOException
@@ -397,7 +398,7 @@ public class PartitionIndex implements Closeable
 
     public void dumpTrie(PrintStream out)
     {
-        try (Reader rdr = openReader())
+        try (Reader rdr = openReader(Rebufferer.ReaderConstraint.NONE))
         {
             rdr.dumpTrie(out, (buf, ppos, pbits) -> Long.toString(getIndexPos(buf, ppos, pbits)));
         }

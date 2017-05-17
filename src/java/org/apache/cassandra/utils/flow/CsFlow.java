@@ -915,7 +915,7 @@ public abstract class CsFlow<T>
             {
                 return inputs;
             }
-        }).ifEmpty(Collections.emptyList());
+        });//.ifEmpty(Collections.emptyList());
     }
 
     /**

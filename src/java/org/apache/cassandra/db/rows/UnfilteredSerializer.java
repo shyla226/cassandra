@@ -22,6 +22,7 @@ import java.io.IOException;
 import com.google.common.collect.Collections2;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.Row.Deletion;
@@ -627,6 +628,10 @@ public class UnfilteredSerializer extends VersionDependent<EncodingVersion>
             }
 
             return builder.build();
+        }
+        catch (Rebufferer.NotInCacheException nice)
+        {
+            throw nice;
         }
         catch (RuntimeException | AssertionError e)
         {

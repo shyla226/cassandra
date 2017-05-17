@@ -23,11 +23,16 @@ import java.nio.ByteOrder;
 
 import com.google.common.primitives.Ints;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
 
 public class RandomAccessReader extends RebufferingInputStream implements FileDataInput
 {
+    private final static Logger logger = LoggerFactory.getLogger(RandomAccessReader.class);
+
     // The default buffer size when the client doesn't specify it
     public static final int DEFAULT_BUFFER_SIZE = 4096;
 
@@ -36,16 +41,18 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     final Rebufferer rebufferer;
     private BufferHolder bufferHolder = Rebufferer.EMPTY;
+    private final Rebufferer.ReaderConstraint constraint;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer)
+    RandomAccessReader(Rebufferer rebufferer, Rebufferer.ReaderConstraint rc)
     {
         super(Rebufferer.EMPTY.buffer());
         this.rebufferer = rebufferer;
+        this.constraint = rc;
     }
 
     /**
@@ -61,8 +68,10 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     private void reBufferAt(long position)
     {
-        bufferHolder.release();
-        bufferHolder = rebufferer.rebuffer(position);
+        BufferHolder prevBufferHolder = bufferHolder;
+        bufferHolder = rebufferer.rebuffer(position, constraint);
+
+        prevBufferHolder.release();
         buffer = bufferHolder.buffer();
         buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
 
@@ -87,7 +96,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         return getChannel().filePath();
     }
 
-    public ChannelProxy getChannel()
+    public AsynchronousChannelProxy getChannel()
     {
         return rebufferer.channel();
     }
@@ -127,7 +136,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         assert mark instanceof BufferedRandomAccessFileMark;
         long bytes = current() - ((BufferedRandomAccessFileMark) mark).pointer;
-        assert bytes >= 0;
+        assert bytes >= 0 : bytes;
         return bytes;
     }
 
@@ -279,7 +288,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer);
+            super(rebufferer, Rebufferer.ReaderConstraint.NONE);
         }
 
         @Override
@@ -312,7 +321,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     @SuppressWarnings("resource")
     public static RandomAccessReader open(File file)
     {
-        ChannelProxy channel = new ChannelProxy(file);
+        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file);
         try
         {
             ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);

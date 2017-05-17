@@ -18,11 +18,16 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +39,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.AIOEpollFileChannel;
+import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.EventExecutorGroup;
@@ -85,7 +92,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
     {
         protected TPCScheduler initialValue()
         {
-            return new TPCScheduler(GlobalEventExecutor.INSTANCE, Integer.MAX_VALUE);
+            return new TPCScheduler(GlobalEventExecutor.INSTANCE.next(), Integer.MAX_VALUE);
         }
     };
 
@@ -297,6 +304,30 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
             ((TPCThread)cpuThread).setCpuId(cpuId);
     }
 
+    public Executor getWrappedExecutor()
+    {
+        return command ->
+        {
+            Executor executor = null;
+
+            if (!isStarted())
+            {
+                executor = GlobalEventExecutor.INSTANCE.next();
+            }
+            else
+            {
+                Integer coreId = getCoreId();
+
+                if (coreId == null || coreId == perCoreSchedulers.length)
+                    coreId = getNextCore();
+
+                executor = perCoreSchedulers[coreId].eventLoop;
+            }
+
+            executor.execute(command);
+        };
+    }
+
     public static int getNumCores()
     {
         return perCoreSchedulers.length;
@@ -333,6 +364,27 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
         return coreId != null && coreId >= 0 && coreId < getNumCores();
     }
 
+    public static boolean isStarted()
+    {
+        // nothing we can do until we have the local ranges
+        return StorageService.instance.isInitialized();
+    }
+
+    public static AsynchronousFileChannel openFileChannel(File file) throws IOException
+    {
+        if (!isStarted())
+            return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+
+        Integer coreId = getCoreId();
+
+        if (coreId == null || coreId == perCoreSchedulers.length)
+            coreId = getNextCore();
+
+        EpollEventLoop loop = (EpollEventLoop)perCoreSchedulers[coreId].eventLoop;
+
+        return new AIOEpollFileChannel(file, loop);
+    }
+
     /**
      * Return the id of the core that is assigned to run operations on the specified keyspace
      * and partition key, see {@link TPCScheduler#perCoreSchedulers}.
@@ -350,7 +402,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
     public static int getCoreForKey(String keyspaceName, DecoratedKey key)
     {
         // nothing we can do until we have the local ranges
-        if (!StorageService.instance.isInitialized())
+        if (!isStarted())
             return 0;
 
         // Convert OP partitions to top level partitioner for secondary indexes; always route
@@ -441,6 +493,10 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
         return splits;
     }
 
+    public Executor getExecutor()
+    {
+        return eventLoop;
+    }
 
     @Override
     public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)

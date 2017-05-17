@@ -21,6 +21,7 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.tries.ReverseValueIterator;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteSource;
 
 /**
@@ -28,14 +29,14 @@ import org.apache.cassandra.utils.ByteSource;
  */
 class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterator>
 {
-    public RowIndexReverseIterator(FileHandle file, long root, ByteSource start, ByteSource end)
+    public RowIndexReverseIterator(FileHandle file, long root, ByteSource start, ByteSource end, Rebufferer.ReaderConstraint rc)
     {
-        super(file.rebuffererFactory().instantiateRebufferer(), root, start, end, true);
+        super(file.rebuffererFactory().instantiateRebufferer(), root, start, end, true, rc);
     }
 
-    public RowIndexReverseIterator(FileHandle file, RowIndexEntry entry, ByteSource end)
+    public RowIndexReverseIterator(FileHandle file, RowIndexEntry entry, ByteSource end, Rebufferer.ReaderConstraint rc)
     {
-        this(file, ((TrieIndexEntry) entry).indexTrieRoot, ByteSource.empty(), end);
+        this(file, ((TrieIndexEntry) entry).indexTrieRoot, ByteSource.empty(), end, rc);
     }
 
     public IndexInfo nextIndexInfo()

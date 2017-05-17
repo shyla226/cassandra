@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.partitions;
 
 import java.util.Iterator;
+import java.util.List;
 
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
@@ -264,6 +265,30 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
     protected static Holder build(UnfilteredRowIterator iterator, int initialRowCapacity)
     {
         return build(iterator, initialRowCapacity, true);
+    }
+
+    protected static Holder build(FlowableUnfilteredPartition fup, List<Unfiltered> materializedRows)
+    {
+        TableMetadata metadata = fup.header.metadata;
+        RegularAndStaticColumns columns = fup.header.columns;
+        boolean reversed = fup.header.isReverseOrder;
+
+        BTree.Builder<Row> builder = BTree.builder(metadata.comparator, materializedRows.size());
+        builder.auto(false);
+        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(fup.header.partitionLevelDeletion, metadata.comparator, reversed);
+
+        for (Unfiltered unfiltered : materializedRows)
+        {
+            if (unfiltered.kind() == Unfiltered.Kind.ROW)
+                builder.add((Row)unfiltered);
+            else
+                deletionBuilder.add((RangeTombstoneMarker)unfiltered);
+        }
+
+        if (reversed)
+            builder.reverse();
+
+        return new Holder(columns, builder.build(), deletionBuilder.build(), fup.staticRow, fup.header.stats);
     }
 
     protected static Holder build(UnfilteredRowIterator iterator, int initialRowCapacity, boolean ordered)

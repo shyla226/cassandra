@@ -34,6 +34,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -52,6 +53,7 @@ public class PartitionIndexTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        TPCScheduler.register();
     }
 
     IPartitioner partitioner = Util.testPartitioner();
@@ -63,7 +65,7 @@ public class PartitionIndexTest
         Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
         List<DecoratedKey> keys = random.left;
         try (PartitionIndex summary = random.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
         {
             for (int i = 0; i < COUNT; i++)
             {
@@ -80,7 +82,7 @@ public class PartitionIndexTest
         Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
         List<DecoratedKey> keys = random.left;
         try (PartitionIndex summary = random.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
         {
             for (int i = 0; i < COUNT; i++)
             {
@@ -97,7 +99,7 @@ public class PartitionIndexTest
         Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
         List<DecoratedKey> keys = random.left;
         try (PartitionIndex summary = random.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
         {
             for (int i = 0; i < COUNT; i++)
             {
@@ -166,8 +168,8 @@ public class PartitionIndexTest
             DecoratedKey key = p.decorateKey(ByteBufferUtil.EMPTY_BYTE_BUFFER);
             builder.addEntry(key, 42);
             builder.complete();
-            try (PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false);
-                 PartitionIndex.Reader reader = summary.openReader())
+            try (PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
+                 PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
             {
                 assertEquals(1, summary.size());
                 assertEquals(42, reader.getLastIndexPosition());
@@ -186,7 +188,7 @@ public class PartitionIndexTest
 
     public void checkIteration(List<DecoratedKey> keys, int keysSize, PartitionIndex index)
     {
-        try (PartitionIndex.IndexPosIterator iter = index.allKeysIterator())
+        try (PartitionIndex.IndexPosIterator iter = index.allKeysIterator(Rebufferer.ReaderConstraint.NONE))
         {
             int i = 0;
             while (true)
@@ -224,7 +226,7 @@ public class PartitionIndexTest
                 boolean b = exactLeft; exactLeft = exactRight; exactRight = b;
             }
 
-            try (PartitionIndex.IndexPosIterator iter = new PartitionIndex.IndexPosIterator(summary, left, right))
+            try (PartitionIndex.IndexPosIterator iter = new PartitionIndex.IndexPosIterator(summary, left, right, Rebufferer.ReaderConstraint.NONE))
             {
                 long p = iter.nextIndexPos();
                 if (p == PartitionIndex.NOT_FOUND)
@@ -261,7 +263,7 @@ public class PartitionIndexTest
             } catch (AssertionError e) {
                 e.printStackTrace();
                 System.out.format("Left %s%s Right %s%s\n", left.asByteComparableSource(), exactLeft ? "#" : "", right.asByteComparableSource(), exactRight ? "#" : "");
-                try (PartitionIndex.IndexPosIterator iter2 = new PartitionIndex.IndexPosIterator(summary, left, right))
+                try (PartitionIndex.IndexPosIterator iter2 = new PartitionIndex.IndexPosIterator(summary, left, right, Rebufferer.ReaderConstraint.NONE))
                 {
                     long pos;
                     while ((pos = iter2.nextIndexPos()) != PartitionIndex.NOT_FOUND) {
@@ -320,7 +322,7 @@ public class PartitionIndexTest
             for (; i < COUNT; ++i)
                 builder.addEntry(list.get(i), i);
             builder.complete();
-            try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false))
+            try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE))
             {
                 checkIteration(list, list.size(), index);
             }
@@ -509,7 +511,7 @@ public class PartitionIndexTest
             for (int i = 0; i < size; i++)
                 builder.addEntry(list.get(i), i);
             builder.complete();
-            PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false);
+            PartitionIndex summary = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
             return Pair.create(list, summary);
         }
         catch (IOException e)

@@ -47,14 +47,17 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
     protected long greaterBranch;
     protected long lesserBranch;
 
+    protected final Rebufferer.ReaderConstraint rc;
+
     /**
      * Creates a walker. Rebufferer must be aligned and with a buffer size that is at least 4k.
      */
-    public Walker(Rebufferer source, long root)
+    public Walker(Rebufferer source, long root, Rebufferer.ReaderConstraint rc)
     {
         this.source = source;
         this.root = root;
-        bh = source.rebuffer(PageAware.pageStart(root));
+        this.rc = rc;
+        bh = source.rebuffer(PageAware.pageStart(root), rc);
         buf = bh.buffer();
     }
 
@@ -69,8 +72,9 @@ public class Walker<Concrete extends Walker<Concrete>> implements AutoCloseable
         long offset = position - bh.offset();
         if (offset < 0 || offset >= buf.limit())
         {
-            bh.release();
-            bh = source.rebuffer(PageAware.pageStart(position));
+            BufferHolder currentBh = bh;
+            bh = source.rebuffer(PageAware.pageStart(position), rc);
+            currentBh.release();
             buf = bh.buffer();
             offset = position - bh.offset();
             assert offset >= 0 && offset < buf.limit();

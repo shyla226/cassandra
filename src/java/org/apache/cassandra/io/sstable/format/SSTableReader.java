@@ -51,17 +51,21 @@ import org.slf4j.LoggerFactory;
 import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
+import io.reactivex.Flowable;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -70,8 +74,13 @@ import org.apache.cassandra.db.mos.MemoryLockedBuffer;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.PartitionHeader;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IPartitioner;
@@ -92,12 +101,13 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
-import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileHandle.Builder;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -109,6 +119,8 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Threads;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 
@@ -747,7 +759,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public static Builder indexFileHandleBuilder(Descriptor descriptor, Component component)
     {
         return new FileHandle.Builder(descriptor.filenameFor(component))
-                   .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+                   .withChunkCache(ChunkCache.instance)
                    .bufferSize(PageAware.PAGE_SIZE)
                    .withChunkCache(ChunkCache.instance);
     }
@@ -756,7 +768,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
                    .compressed(compression)
-                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
                    .withChunkCache(ChunkCache.instance);
     }
 
@@ -830,7 +841,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             // TODO: merge with caller's firstKeyBeyond() work,to save time
             if (newStart.compareTo(first) > 0)
             {
-                long dataStart = getExactPosition(newStart).position;
+                long dataStart = getExactPosition(newStart, Rebufferer.ReaderConstraint.NONE).position;
                 this.tidy.addCloseable(new DropPageCache(dataFile, dataStart, null, 0));
             }
 
@@ -1038,17 +1049,41 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
      * @return The index entry corresponding to the key, or null if the key is not present
      */
-    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op);
-    public abstract RowIndexEntry getExactPosition(DecoratedKey key);
-    public abstract boolean contains(DecoratedKey key);
+    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, Rebufferer.ReaderConstraint rc);
+    public abstract RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc);
+    public abstract boolean contains(DecoratedKey key, Rebufferer.ReaderConstraint rc);
 
     public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
-    public abstract FlowableUnfilteredPartition flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
     public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract AbstractSSTableIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter columnFilter, boolean reversed, DeletionTime partitionLevelDeletion, Row staticRow);
 
     public abstract PartitionIndexIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException;
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
     public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
+
+    public CsFlow<FlowableUnfilteredPartition> flow(OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    {
+        return CsFlow.using(() -> readOrdering.start(),
+                            (opGroup) ->
+                            {
+                                PartitionFlowable pf = new PartitionFlowable(this, readOrdering, key, slices, selectedColumns, reversed, 2);
+
+                                //Convert from PartitionFlowable to FlowableUnfilteredPartition
+                                //First two items are header info. The rest is partition data
+                                return pf.take(2)
+                                         .toList()
+                                         .map(head ->
+                                              {
+                                                  if (head.size() != 2)
+                                                      return new FlowablePartitions.EmptyFlowableUnfilteredPartition(new PartitionHeader(metadata(), key, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS));
+
+                                                  PartitionFlowable u = new PartitionFlowable(pf, readOrdering, 2);
+                                                  return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), u);
+                                              });
+                            },
+                            (opGroup) -> opGroup.close());
+    }
+
 
     public PartitionIndexIterator coveredKeysIterator(AbstractBounds<? extends PartitionPosition> bounds) throws IOException
     {
@@ -1126,7 +1161,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         return !(bf instanceof AlwaysPresentFilter)
                 ? bf.isPresent(dk)
-                : contains(dk);
+                : contains(dk, Rebufferer.ReaderConstraint.NONE);
     }
 
     /**
@@ -1140,7 +1175,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             if (pos == null)
                 return null;
 
-            try (FileDataInput in = dataFile.createReader(pos.position))
+            try (FileDataInput in = dataFile.createReader(pos.position, Rebufferer.ReaderConstraint.NONE))
             {
                 ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
                 DecoratedKey indexDecoratedKey = decorateKey(indexKey);
@@ -1246,9 +1281,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return getScanner(Collections.singletonList(range));
     }
 
-    public FileDataInput getFileDataInput(long position)
+    public FileDataInput getFileDataInput(long position, Rebufferer.ReaderConstraint rc)
     {
-        return dataFile.createReader(position);
+        return dataFile.createReader(position, rc);
     }
 
     /**
@@ -1283,7 +1318,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * Retrieves the key at the given position, as specified by PartitionIndexIterator.keyPosition() as well as
      * SSTableFlushObserver.startPartition().
      */
-    abstract public DecoratedKey keyAt(long position) throws IOException;
+    abstract public DecoratedKey keyAt(long position, Rebufferer.ReaderConstraint rc) throws IOException;
 
     public boolean isPendingRepair()
     {
@@ -1474,9 +1509,16 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dataFile.createReader();
     }
 
-    public ChannelProxy getDataChannel()
+    public AsynchronousChannelProxy getDataChannel()
     {
         return dataFile.channel;
+    }
+
+    protected abstract FileHandle getIndexFile();
+
+    public RowIndexEntry getPosition(PartitionPosition key, Operator op)
+    {
+        return getPosition(key, op, Rebufferer.ReaderConstraint.NONE);
     }
 
     /**
@@ -1575,7 +1617,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         identities.add(tidy.globalRef);
         dataFile.addTo(identities);
         bf.addTo(identities);
-    }
+        }
 
     /**
      * Lock memory mapped segments in RAM, see APOLLO-342.
@@ -1588,7 +1630,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             JVMStabilityInspector.inspectThrowable(ret);
             logger.error("Failed to lock {}", this, ret);
-        }
+}
     }
 
     /**

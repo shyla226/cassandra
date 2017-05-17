@@ -67,7 +67,8 @@ public interface ClusteringPrefix extends IMeasurableMemory, Clusterable
         CLUSTERING                  (2,  0, ByteSource.NEXT_COMPONENT),
         INCL_END_EXCL_START_BOUNDARY(3,  1, ByteSource.GT_NEXT_COMPONENT),
         INCL_END_BOUND              (3,  1, ByteSource.GT_NEXT_COMPONENT),
-        EXCL_START_BOUND            (3,  1, ByteSource.GT_NEXT_COMPONENT);
+        EXCL_START_BOUND            (3,  1, ByteSource.GT_NEXT_COMPONENT),
+        HEADER_CLUSTERING           (-1, 0, ByteSource.NEXT_COMPONENT);  // header compares before everything else, never serialized
 
         private final int comparison;
 

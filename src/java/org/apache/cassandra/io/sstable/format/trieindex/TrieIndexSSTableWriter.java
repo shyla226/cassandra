@@ -547,7 +547,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             complete();
             try
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false);
+                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false, Rebufferer.ReaderConstraint.NONE);
             }
             catch (IOException e)
             {

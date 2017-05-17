@@ -152,7 +152,7 @@ public class RowIndexTest
                 assertEquals("JUNK", rdr.readUTF());
                 assertEquals("JUNK", rdr.readUTF());
             }
-            return new RowIndexReader(fh, root);
+            return new RowIndexReader(fh, root, Rebufferer.ReaderConstraint.NONE);
         }
     }
 
@@ -198,7 +198,7 @@ public class RowIndexTest
                 boolean b = exactLeft; exactLeft = exactRight; exactRight = b;
             }
 
-            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, comparator.asByteComparableSource(left), comparator.asByteComparableSource(right)))
+            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, comparator.asByteComparableSource(left), comparator.asByteComparableSource(right), Rebufferer.ReaderConstraint.NONE))
             {
                 IndexInfo indexInfo = iter.nextIndexInfo();
                 if (indexInfo == null)
@@ -245,7 +245,7 @@ public class RowIndexTest
                                        .map(Object::toString)
                                        .collect(Collectors.joining(", ")));
                 System.out.format("Left %s%s Right %s%s\n", comparator.asByteComparableSource(left), exactLeft ? "#" : "", comparator.asByteComparableSource(right), exactRight ? "#" : "");
-                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparableSource(left), comparator.asByteComparableSource(right)))
+                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparableSource(left), comparator.asByteComparableSource(right), Rebufferer.ReaderConstraint.NONE))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null) {
@@ -270,7 +270,7 @@ public class RowIndexTest
             boolean exactRight = rand.nextBoolean();
             ClusteringPrefix right = exactRight ? keys.get(rand.nextInt(keys.size())) : generateRandomKey();
 
-            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteSource.empty(), comparator.asByteComparableSource(right)))
+            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteSource.empty(), comparator.asByteComparableSource(right), Rebufferer.ReaderConstraint.NONE))
             {
                 IndexInfo indexInfo = iter.nextIndexInfo();
                 if (indexInfo == null)
@@ -309,7 +309,7 @@ public class RowIndexTest
                                        .map(Object::toString)
                                        .collect(Collectors.joining(", ")));
                 System.out.format("Right %s%s\n", comparator.asByteComparableSource(right), exactRight ? "#" : "");
-                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteSource.empty(), comparator.asByteComparableSource(right)))
+                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteSource.empty(), comparator.asByteComparableSource(right), Rebufferer.ReaderConstraint.NONE))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null) {

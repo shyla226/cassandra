@@ -19,14 +19,14 @@ package org.apache.cassandra.io.util;
 
 public class EmptyRebufferer implements Rebufferer, RebuffererFactory
 {
-    ChannelProxy channel;
+    AsynchronousChannelProxy channel;
 
-    public EmptyRebufferer(ChannelProxy channel)
+    public EmptyRebufferer(AsynchronousChannelProxy channel)
     {
         this.channel = channel;
     }
 
-    public ChannelProxy channel()
+    public AsynchronousChannelProxy channel()
     {
         return channel;
     }

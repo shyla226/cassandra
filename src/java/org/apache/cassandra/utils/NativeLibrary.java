@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
@@ -31,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import com.sun.jna.LastErrorException;
 import sun.nio.ch.FileChannelImpl;
+import sun.nio.ch.SimpleAsynchronousFileChannelImpl;
 
 import static org.apache.cassandra.utils.NativeLibrary.OSType.LINUX;
 import static org.apache.cassandra.utils.NativeLibrary.OSType.MAC;
@@ -75,11 +77,13 @@ public final class NativeLibrary
 
     private static final Field FILE_DESCRIPTOR_FD_FIELD;
     private static final Field FILE_CHANNEL_FD_FIELD;
+    private static final Field FILE_ASYNC_CHANNEL_FD_FIELD;
 
     static
     {
         FILE_DESCRIPTOR_FD_FIELD = FBUtilities.getProtectedField(FileDescriptor.class, "fd");
         FILE_CHANNEL_FD_FIELD = FBUtilities.getProtectedField(FileChannelImpl.class, "fd");
+        FILE_ASYNC_CHANNEL_FD_FIELD = FBUtilities.getProtectedField(SimpleAsynchronousFileChannelImpl.class.getSuperclass(), "fdObj");
 
         // detect the OS type the JVM is running on and then set the CLibraryWrapper
         // instance to a compatable implementation of CLibraryWrapper for that OS type
@@ -354,6 +358,19 @@ public final class NativeLibrary
 
             logger.warn("close({}) failed, errno ({}).", fd, errno(e));
         }
+    }
+
+    public static int getfd(AsynchronousFileChannel channel)
+    {
+        try
+        {
+            return getfd((FileDescriptor)FILE_ASYNC_CHANNEL_FD_FIELD.get(channel));
+        }
+        catch (IllegalArgumentException|IllegalAccessException e)
+        {
+            logger.warn("Unable to read fd field from FileChannel");
+        }
+        return -1;
     }
 
     public static int getfd(FileChannel channel)

@@ -110,7 +110,6 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         long time = TimeUnit.MILLISECONDS.toNanos(command.getTimeout()) - (System.nanoTime() - queryStartNanoTime);
 
         return publishSubject
-               .timeout(time, TimeUnit.NANOSECONDS)
                .first(EmptyIterators.partition())
                .onErrorResumeNext(exc ->
                                   {
@@ -128,9 +127,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
                                           logger.debug("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
                                       }
 
-                                      return Single.error(failed
-                                                          ? exc
-                                                          : new ReadTimeoutException(consistencyLevel, received, blockfor, resolver.isDataPresent()));
+                                      return Single.error(exc);
                                   });
     }
 
@@ -183,6 +180,23 @@ public class ReadCallback implements MessageCallback<ReadResponse>
                 StageManager.getStage(Stage.READ_REPAIR).execute(new AsyncRepairRunner(traceState, queryStartNanoTime));
             }
         }
+    }
+
+    @Override
+    public void onTimeout(InetAddress host)
+    {
+        if (Tracing.isTracing())
+        {
+            String gotData = received.get() > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+            Tracing.trace("{}; received {} of {} responses{}", "Timed out", received, blockfor, gotData);
+        }
+        else if (logger.isDebugEnabled())
+        {
+            String gotData = received.get() > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+            logger.debug("{}; received {} of {} responses{}", "Timed out", received, blockfor, gotData);
+        }
+
+        publishSubject.onError(new ReadTimeoutException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent()));
     }
 
     /**

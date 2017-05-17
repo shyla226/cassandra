@@ -1059,7 +1059,7 @@ public abstract class CQLTester
                 if (!Objects.equal(expected.get(j), actual.get(j)))
                     Assert.fail(String.format("Invalid value for row %d column %d (%s of type %s), " +
                                               "expected <%s> (%d bytes) but got <%s> (%d bytes) " +
-                                              "(using protocol version %d)",
+                                              "(using protocol version %s)",
                                               i, j, meta.getName(j), type,
                                               codec.format(codec.deserialize(expected.get(j),driverVersion)),
                                               expected.size(),

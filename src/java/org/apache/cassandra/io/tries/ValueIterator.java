@@ -46,9 +46,9 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
         }
     }
 
-    protected ValueIterator(Rebufferer source, long root)
+    protected ValueIterator(Rebufferer source, long root, Rebufferer.ReaderConstraint rc)
     {
-        super(source, root);
+        super(source, root, rc);
         stack = new IterationPosition(root, -1, 256, null);
         limit = null;
         go(root);
@@ -58,9 +58,9 @@ public class ValueIterator<Concrete extends ValueIterator<Concrete>> extends Wal
             next = advanceNode();
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteSource start, ByteSource end, boolean admitPrefix)
+    protected ValueIterator(Rebufferer source, long root, ByteSource start, ByteSource end, boolean admitPrefix, Rebufferer.ReaderConstraint rc)
     {
-        super(source, root);
+        super(source, root, rc);
         limit = end;
         IterationPosition prev = null;
         boolean atLimit = true;

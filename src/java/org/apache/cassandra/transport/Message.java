@@ -584,10 +584,6 @@ public abstract class Message
             //logger.info("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
             request.execute(qstate, queryStartNanoTime)
-
-                    // TODO evaluate the performance impact of this, we shouldn't need it if the PPC requests are to the correct port
-                   // .observeOn(NettyRxScheduler.instance())
-
                    .subscribe(
                     // onSuccess
                     response -> {

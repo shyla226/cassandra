@@ -49,16 +49,15 @@ import org.openjdk.jmh.infra.Blackhole;
 /**
  * Benchmark for eventloops
  */
-@BenchmarkMode(Mode.AverageTime)
-@Warmup(iterations = 5)
-@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
+@BenchmarkMode(Mode.Throughput)
+@Warmup(iterations = 10)
+@Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.SECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Fork(value = 1)
-//, jvmArgsAppend = {//"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
+@Fork(value = 1, jvmArgsAppend = {"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"
 //                   "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
 //                    "-XX:StartFlightRecording=duration=60s,filename=./profiling-data.jfr,name=profile,settings=profile",
 //                    "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
-//})
+})
 @State(Scope.Thread)
 public class EventLoopBench {
 
@@ -66,7 +65,7 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class NettyExecutorState {
 
-        @Param({"1000000"})
+        @Param({"10000000"})
         public int count;
 
         private MultithreadEventExecutorGroup loops;
@@ -114,7 +113,7 @@ public class EventLoopBench {
     @State(Scope.Thread)
     public static class ExecutorState {
 
-        @Param({"1000000"})
+        @Param({"10000000"})
         public int count;
 
         private MultithreadEventExecutorGroup loops;
@@ -166,13 +165,6 @@ public class EventLoopBench {
         }
     }
 
-    @Benchmark
-    public void rxDefault(ExecutorState state, Blackhole bh) throws Exception {
-        LatchedObserver<Integer> o = new LatchedObserver<>(bh);
-        state.rx1.subscribe(o);
-
-        await(state.count, o.latch);
-    }
 
     @Benchmark
     public void rxNettyNew(ExecutorState state, Blackhole bh) throws Exception {

@@ -238,9 +238,11 @@ public class BatchlogManagerTest extends CQLTester
             BatchlogManager.store(Batch.createLocal(UUIDGen.getTimeUUID(timestamp, i), FBUtilities.timestampMicros(), mutations)).blockingAwait();
         }
 
+        logger.info("FlUSHING");
         // Flush the batchlog to disk (see CASSANDRA-6822).
         Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES).forceBlockingFlush();
 
+        logger.info("BATCHLOG");
         // Force batchlog replay and wait for it to complete.
         BatchlogManager.instance.startBatchlogReplay().get();
 

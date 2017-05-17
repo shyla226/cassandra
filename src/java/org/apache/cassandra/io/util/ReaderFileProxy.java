@@ -25,7 +25,7 @@ public interface ReaderFileProxy extends AutoCloseable
 {
     void close();               // no checked exceptions
 
-    ChannelProxy channel();
+    AsynchronousChannelProxy channel();
 
     long fileLength();
 

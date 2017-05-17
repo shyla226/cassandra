@@ -42,9 +42,9 @@ public class LimitingRebufferer extends WrappingRebufferer
     }
 
     @Override
-    public BufferHolder rebuffer(long position)
+    public BufferHolder rebuffer(long position, ReaderConstraint rc)
     {
-        super.rebuffer(position);
+        super.rebuffer(position, rc);
         int posInBuffer = Ints.checkedCast(position - offset);
         int remaining = buffer.limit() - posInBuffer;
         if (remaining == 0)

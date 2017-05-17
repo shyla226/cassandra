@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.io.util;
 
+import com.google.common.primitives.Ints;
+import io.netty.util.internal.MathUtil;
+
 public interface DiskOptimizationStrategy
 {
     // The maximum buffer size, we will never buffer more than this size. Further,
@@ -26,7 +29,7 @@ public interface DiskOptimizationStrategy
     // see CASSANDRA-8630
     // NOTE: this size is chosen both for historical consistency, as a reasonable upper bound,
     //       and because our BufferPool currently has a maximum allocation size of this.
-    int MAX_BUFFER_SIZE = 1 << 16; // 64k
+    int MAX_BUFFER_SIZE = 1 << 14; // 16k
 
     /**
      * @param recordSize record size
@@ -36,6 +39,7 @@ public interface DiskOptimizationStrategy
 
     /**
      * Round up to the next multiple of 4k but no more than {@link #MAX_BUFFER_SIZE}.
+     * Also, must be a power of 2
      */
     default int roundBufferSize(long size)
     {
@@ -43,6 +47,10 @@ public interface DiskOptimizationStrategy
             return 4096;
 
         size = (size + 4095) & ~4095;
-        return (int)Math.min(size, MAX_BUFFER_SIZE);
+
+        if (size >= MAX_BUFFER_SIZE)
+            return MAX_BUFFER_SIZE;
+        else
+            return Math.min(MathUtil.findNextPositivePowerOfTwo(Ints.saturatedCast(size)), MAX_BUFFER_SIZE);
     }
 }

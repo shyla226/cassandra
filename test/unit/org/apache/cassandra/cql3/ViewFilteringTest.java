@@ -73,10 +73,6 @@ public class ViewFilteringTest extends CQLTester
     private void updateView(String query, Object... params) throws Throwable
     {
         executeNet(protocolVersion, query, params);
-
-        //Fixme check view metrics
-        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
-
     }
 
     private void dropView(String name) throws Throwable

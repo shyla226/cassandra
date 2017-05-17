@@ -41,7 +41,7 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
-    public ChannelProxy channel()
+    public AsynchronousChannelProxy channel()
     {
         return source.channel();
     }

@@ -30,6 +30,7 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  *  A Cell Iterator in reversed clustering order over SSTable
@@ -51,10 +52,10 @@ class SSTableReversedIterator extends AbstractSSTableIterator
         super(sstable, file, key, indexEntry, slices, columns);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile)
+             ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile, rc)
              : new ReverseReader(file, shouldCloseFile);
     }
 
@@ -68,6 +69,12 @@ class SSTableReversedIterator extends AbstractSSTableIterator
         int next = slice;
         slice++;
         return slices.size() - (next + 1);
+    }
+
+    protected int currentSliceIndex()
+    {
+        assert slice > 0;
+        return slices.size() - slice;
     }
 
     protected boolean hasMoreSlices()
@@ -237,12 +244,14 @@ class SSTableReversedIterator extends AbstractSSTableIterator
         long basePosition;
         Slice currentSlice;
         long currentBlockStart;
+        Rebufferer.ReaderConstraint rc;
 
-        public ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        public ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
             basePosition = indexEntry.position;
             this.indexEntry = indexEntry;
+            this.rc = rc;
         }
 
         @Override
@@ -262,7 +271,7 @@ class SSTableReversedIterator extends AbstractSSTableIterator
                 indexReader.close();
             indexReader = new RowIndexReverseIterator(((TrieIndexSSTableReader) sstable).rowIndexFile,
                     indexEntry,
-                    comparator.asByteComparableSource(slice.end()));
+                    comparator.asByteComparableSource(slice.end()), rc);
             blockOpenMarker = null;
             gotoBlock(indexReader.nextIndexInfo(), true, Long.MAX_VALUE);
         }

@@ -881,14 +881,13 @@ public class FBUtilities
      */
     public static long add(long x, long y)
     {
-        try
-        {
-            return Math.addExact(x, y);
-        }
-        catch(ArithmeticException ex)
+        long r = x + y;
+        if (((x ^ r) & (y ^ r)) < 0)
         {
             return Long.MAX_VALUE;
         }
+
+        return r;
     }
 
     /**

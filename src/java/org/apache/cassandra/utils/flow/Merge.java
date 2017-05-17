@@ -232,6 +232,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             for (int i = needingAdvance - 1; i >= 0; --i)
             {
                 Candidate<In> candidate = heap[i];
+
                 /**
                  *  needingAdvance runs to the maximum index (and deepest-right node) that may need advancing;
                  *  since the equal items that were consumed at-once may occur in sub-heap "veins" of equality,
@@ -491,7 +492,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             if (state == State.PROCESSED)
                 return false;
 
-            assert state == State.ADVANCED;
+            assert state == State.ADVANCED : state;
             state = State.PROCESSED;
             return true;
         }

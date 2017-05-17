@@ -32,6 +32,7 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  *  A Cell Iterator over SSTable
@@ -53,10 +54,10 @@ class SSTableIterator extends AbstractSSTableIterator
         super(sstable, file, key, indexEntry, slices, columns);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile)
+             ? new ForwardIndexedReader(indexEntry, file, shouldCloseFile, rc)
              : new ForwardReader(file, shouldCloseFile);
     }
 
@@ -65,6 +66,12 @@ class SSTableIterator extends AbstractSSTableIterator
         int next = slice;
         slice++;
         return next;
+    }
+
+    protected int currentSliceIndex()
+    {
+        assert slice > 0 : slice;
+        return slice - 1;
     }
 
     protected boolean hasMoreSlices()
@@ -214,11 +221,11 @@ class SSTableIterator extends AbstractSSTableIterator
         private final RowIndexReader indexReader;
         long basePosition;
 
-        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
             basePosition = indexEntry.position;
-            indexReader = new RowIndexReader(((TrieIndexSSTableReader) sstable).rowIndexFile, indexEntry);
+            indexReader = new RowIndexReader(((TrieIndexSSTableReader) sstable).rowIndexFile, indexEntry, rc);
         }
 
         @Override

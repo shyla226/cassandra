@@ -440,13 +440,13 @@ concurrent_materialized_view_writes: 2
 # overhead which is roughly 128 bytes per chunk (i.e. 0.2% of the reserved size
 # if the default 64k chunk size is used).
 # Memory is only allocated when needed.
-# file_cache_size_in_mb: 512
+file_cache_size_in_mb: 4096
 
 # Flag indicating whether to allocate on or off heap when the sstable buffer
 # pool is exhausted, that is when it has exceeded the maximum memory
 # file_cache_size_in_mb, beyond which it will not cache buffers but allocate on request.
 
-# buffer_pool_use_heap_if_exhausted: true
+buffer_pool_use_heap_if_exhausted: false
 
 # The strategy for optimizing disk read
 # Possible values are:

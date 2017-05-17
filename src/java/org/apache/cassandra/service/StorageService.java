@@ -4295,6 +4295,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // system tables (for example compactions can obsolete sstables and the tidiers in SSTableReader update
             // system tables, see SSTableReader.GlobalTidy)
 
+            // wait for miscellaneous tasks like sstable and commitlog segment deletion
+            // (used by global tidy)
+            ScheduledExecutors.nonPeriodicTasks.shutdown();
+            if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
+                logger.warn("Failed to wait for non periodic tasks to shutdown");
+
+
             // flush system keyspaces
             List<Single<CommitLogPosition>> systemFlushes =
                 StreamSupport.stream(Keyspace.system().spliterator(), false)
@@ -4318,11 +4325,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             CommitLog.instance.forceRecycleAllSegments();
 
             CommitLog.instance.shutdownBlocking();
-
-            // wait for miscellaneous tasks like sstable and commitlog segment deletion
-            ScheduledExecutors.nonPeriodicTasks.shutdown();
-            if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
-                logger.warn("Failed to wait for non periodic tasks to shutdown");
 
             ColumnFamilyStore.shutdownPostFlushExecutor();
             setMode(Mode.DRAINED, !isFinalShutdown);

@@ -162,16 +162,5 @@ public class Threads
         }
     }
 
-    public static <T> CsFlow<T> evaluateOnCore(Callable<T> callable, int coreId)
-    {
-        return new CsFlow<T>()
-        {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber)
-            {
-                return new EvaluateOn<T>(subscriber, callable, coreId);
-            }
-        };
-    }
-
     // We may also need observeOnCore with the same semantics
 }

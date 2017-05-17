@@ -47,17 +47,17 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         }
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root)
+    protected ReverseValueIterator(Rebufferer source, long root, Rebufferer.ReaderConstraint rc)
     {
-        super(source, root);
+        super(source, root, rc);
         stack = new IterationPosition(root, -1, 256, null);
         limit = null;
         next = advanceNode();
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root, ByteSource start, ByteSource end, boolean admitPrefix)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteSource start, ByteSource end, boolean admitPrefix, Rebufferer.ReaderConstraint rc)
     {
-        super(source, root);
+        super(source, root, rc);
         limit = start;
         IterationPosition prev = null;
         boolean atLimit = true;
