@@ -52,7 +52,7 @@ import sun.misc.Contended;
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 {
     private static String DEBUG_RUNNING_TIME_NAME = "cassandra.debug_tpc_task_running_time_seconds";
-    private static long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "5")),
+    private static long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
                                                                                 TimeUnit.SECONDS);
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(MonitoredEpollEventLoopGroup.class);

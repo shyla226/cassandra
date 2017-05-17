@@ -142,7 +142,6 @@ public class Memtable implements Comparable<Memtable>
     private final List<TreeMap<PartitionPosition, AtomicBTreePartition>> partitions;
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
-    private final List<Token> rangeList;
     private final boolean hasSplits;
 
     // The smallest timestamp for all partitions stored in this memtable
@@ -171,7 +170,6 @@ public class Memtable implements Comparable<Memtable>
         this.cfs.scheduleFlush();
         this.columnsCollector = new ColumnsCollector(cfs.metadata().regularAndStaticColumns());
         this.hasSplits = !cfs.hasSpecialHandlingForTPC;
-        this.rangeList = generateRangeList(cfs);
         this.partitions = generatePartitionMaps();
     }
 
@@ -184,16 +182,7 @@ public class Memtable implements Comparable<Memtable>
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
         this.hasSplits = false;
-        this.rangeList = generateRangeList(null);
         this.partitions = generatePartitionMaps();
-    }
-
-    private List<Token> generateRangeList(ColumnFamilyStore cfs)
-    {
-        if (!hasSplits)
-            return null;
-
-        return TPCScheduler.getRangeList(cfs.keyspace, true);
     }
 
     private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
@@ -201,7 +190,7 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return Collections.singletonList(new TreeMap<>());
 
-        int capacity = rangeList.size();
+        int capacity = TPCScheduler.getNumCores();
         ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
         for (int i = 0; i < capacity; i++)
             partitionMapContainer.add(new TreeMap<>());
@@ -442,7 +431,7 @@ public class Memtable implements Comparable<Memtable>
 
         ArrayList<Pair<Integer, Callable<List<UnfilteredRowIterator>>>> all = new ArrayList<>(partitions.size());
 
-        for (int i = 0; i < TPCScheduler.getNumCores(); i++)
+        for (int i = 0; i < partitions.size(); i++)
         {
             final int coreId = i;
 
