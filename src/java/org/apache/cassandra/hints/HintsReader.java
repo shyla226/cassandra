@@ -35,7 +35,6 @@ import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * A paged non-compressed hints reader that provides two iterators:
@@ -165,6 +164,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
     final class HintsIterator extends AbstractIterator<Hint>
     {
         private final InputPosition offset;
+        private final long now = System.currentTimeMillis();
 
         HintsIterator(InputPosition offset)
         {
@@ -228,7 +228,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
             Hint hint;
             try
             {
-                hint = Hint.serializers.get(descriptor.version).deserialize(input);
+                hint = Hint.serializers.get(descriptor.version).deserializeIfLive(input, now, size);
                 input.checkLimit(0);
             }
             catch (UnknownTableException e)
@@ -262,6 +262,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
     final class BuffersIterator extends AbstractIterator<ByteBuffer>
     {
         private final InputPosition offset;
+        private final long now = System.currentTimeMillis();
 
         BuffersIterator(InputPosition offset)
         {
@@ -322,7 +323,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
                 rateLimiter.acquire(size);
             input.limit(size);
 
-            ByteBuffer buffer = ByteBufferUtil.read(input, size);
+            ByteBuffer buffer = Hint.serializers.get(descriptor.version).readBufferIfLive(input, now, size);
             if (input.checkCrc())
                 return buffer;
 
