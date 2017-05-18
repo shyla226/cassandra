@@ -220,7 +220,7 @@ public class PartitionsPublisher
         private void onInnerSubscriptionClosed()
         {
             innerSubscription = null;
-            super.onNext(null);
+            request();
         }
 
         @Override
@@ -291,7 +291,14 @@ public class PartitionsPublisher
         {
             if (!closed())
             {
-                super.close();
+                try
+                {
+                    super.close();
+                }
+                catch (Exception ex)
+                {
+                    logger.warn("Exception when closing: {}", ex.getMessage());
+                }
 
                 if (innerSubscription != null)
                     innerSubscription.close();
@@ -371,7 +378,7 @@ public class PartitionsPublisher
                     subscriber.onNext(item);
                 }
 
-                super.onNext(item);
+                request();
             }
             catch (Throwable t)
             {
@@ -435,7 +442,15 @@ public class PartitionsPublisher
         {
             if (!closed())
             {
-                super.close();
+                try
+                {
+                    super.close();
+                }
+                catch (Exception ex)
+                {
+                    logger.warn("Exception when closing: {}", ex.getMessage());
+                }
+
                 outerSubscription.onInnerSubscriptionClosed();
             }
         }

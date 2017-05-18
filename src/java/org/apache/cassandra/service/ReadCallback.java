@@ -153,6 +153,9 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
     public void onResponse(Response<ReadResponse> message)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Received response: {}", message);
+
         resolver.preprocess(message);
         int n = waitingFor(message.from()) ? received.incrementAndGet() : received.get();
 
@@ -243,11 +246,14 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     @Override
     public void onFailure(FailureResponse<ReadResponse> failureResponse)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Received failure response: {}", failureResponse);
+
         int n = waitingFor(failureResponse.from()) ? failures.incrementAndGet() : failures.get();
 
         failureReasonByEndpoint.put(failureResponse.from(), failureResponse.reason());
 
-        if (blockfor + n > endpoints.size())
+        if (blockfor + n > endpoints.size() && responsesProcesses.compareAndSet(false, true))
             publishSubject.onError(new ReadFailureException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent(), failureReasonByEndpoint));
     }
 }

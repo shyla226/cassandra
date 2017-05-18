@@ -1824,6 +1824,8 @@ public class StorageProxy implements StorageProxyMBean
 
             handler.assureSufficientLiveNodes();
 
+            if (logger.isTraceEnabled())
+                logger.trace("Sending to {} for CL {}/{} - min {}", toQuery.filteredEndpoints, consistency, blockFor, minimalEndpoints.size());
             MessagingService.instance().send(Verbs.READS.READ.newDispatcher(toQuery.filteredEndpoints, rangeCommand), handler);
             return new SingleRangeResponse(handler);
         }
@@ -1902,7 +1904,6 @@ public class StorageProxy implements StorageProxyMBean
 
         Callable<PartitionIterator> c = () ->
         {
-
             Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
             RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
 

@@ -104,23 +104,21 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation.
      */
-    private static class ApplyOpSubscription<I, O>
-    implements CsSubscription, CsSubscriber<I>
+    private static class ApplyOpSubscription<I, O> extends RequestLoop<I>
     {
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
-        final CsSubscription source;
 
         public ApplyOpSubscription(CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
+            super(source);
             this.subscriber = subscriber;
             this.mapper = mapper;
-            this.source = source.subscribe(this);
         }
 
         public void onNext(I item)
         {
-            mapper.onNext(subscriber, source, item);
+            mapper.onNext(subscriber, this, item);
         }
 
         public void onError(Throwable throwable)
@@ -133,16 +131,11 @@ public abstract class CsFlow<T>
             subscriber.onComplete();
         }
 
-        public void request()
-        {
-            source.request();
-        }
-
         public void close() throws Exception
         {
             try
             {
-                source.close();
+                super.close();
             }
             finally
             {
@@ -159,8 +152,7 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation that checks the subscriptions are used correctly (e.g. without concurrent requests).
      */
-    private static class CheckedApplyOpSubscription<I, O>
-    implements CsSubscription, CsSubscriber<I>
+    private static class CheckedApplyOpSubscription<I, O> implements CsSubscription, CsSubscriber<I>
     {
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
@@ -214,8 +206,12 @@ public abstract class CsFlow<T>
 
         public void onNext(I item)
         {
+            // TODO: if the mapper skips too many items it may cause a stack overflow,
+            // see Flow/OpsTest. The solution is to use the RequestLoop but we need to
+            // integrate the debug states
             if (verifyStateTransition(null, State.REQUESTED, State.READY))
                 mapper.onNext(subscriber, this, item);
+
         }
 
         public void onError(Throwable throwable)
@@ -537,7 +533,7 @@ public abstract class CsFlow<T>
      * it is done since the loop is still in place, if it instead has failed then we must be out of the loop and
      * hence requestLoop() must be called again.
      */
-    public static abstract class RequestLoop<T> implements CsSubscriber<T>
+    public static abstract class RequestLoop<T> implements CsSubscriber<T>, CsSubscription
     {
         private enum State
         {
@@ -570,6 +566,12 @@ public abstract class CsFlow<T>
             // next request within this call. If not, the loop is still going in another thread and we can still signal
             // it to continue (making sure we don't leave while receiving the signal).
 
+            if (closed)
+                return;
+
+            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
+                return;
+
             if (state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
                 requestLoop();
         }
@@ -600,20 +602,7 @@ public abstract class CsFlow<T>
             return false;
         }
 
-        public void onNext(T item)
-        {
-            if (closed)
-                return;
-
-            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
-                return;
-
-            // We must be out of the loop if the above failed; re-start looping.
-            if (verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_READY))
-                requestLoop();
-        }
-
-        public void close()
+        public void close() throws Exception
         {
             if (!closed)
             {
@@ -658,7 +647,7 @@ public abstract class CsFlow<T>
                 return;
             }
 
-           super.onNext(item);
+            request();
         }
 
         public String toString()
