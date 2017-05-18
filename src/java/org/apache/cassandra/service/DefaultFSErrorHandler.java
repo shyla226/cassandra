@@ -76,6 +76,9 @@ public class DefaultFSErrorHandler implements FSErrorHandler
             case ignore:
                 // already logged, so left nothing to do
                 break;
+            case die:
+                JVMStabilityInspector.killCurrentJVM(e, false);
+                break;
             default:
                 throw new IllegalStateException();
         }

@@ -36,7 +36,9 @@ import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CassandraDaemon;
@@ -112,7 +114,6 @@ public class OutOfSpaceTest extends CQLTester
     @Test
     public void testFlushUnwriteableStop() throws Throwable
     {
-
         makeTable();
 
         DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
@@ -168,11 +169,15 @@ public class OutOfSpaceTest extends CQLTester
         {
             // Correct path.
             Throwable t = e.getCause();
-            while (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class)
+            while (t != null && (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class))
                 t = t.getCause();
             Assert.assertTrue(errorClass.isInstance(t));
-        }
 
+            if (t instanceof FSError)
+                FileUtils.handleFSError((FSError) t);
+            else if (t instanceof CorruptSSTableException)
+                FileUtils.handleCorruptSSTable((CorruptSSTableException) t);
+        }
 
         // Make sure commit log wasn't discarded.
         TableId tableId = currentTableMetadata().id;

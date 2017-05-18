@@ -40,6 +40,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.profile.LinuxPerfAsmProfiler;
 import org.openjdk.jmh.results.Result;
@@ -109,7 +110,7 @@ public class ReadWriteTest extends CQLTester
     @TearDown(Level.Trial)
     public void teardown() throws IOException, ExecutionException, InterruptedException
     {
-        StorageService.instance.removeShutdownHook();
+        JVMStabilityInspector.removeShutdownHooks();
         CQLTester.tearDownClass();
         CQLTester.cleanup();
     }
