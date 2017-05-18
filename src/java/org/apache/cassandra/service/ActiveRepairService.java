@@ -606,6 +606,25 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                     shadowingUnrepairedSet = getShadowingUnrepaired(unrepairedSet, repairedSet);
                 }
 
+                long antiCompactedBytes = repairedSet.stream().mapToLong(s -> s.onDiskLength()).sum();
+                long nonAntiCompactedBytes = unrepairedSet.stream().mapToLong(s -> s.onDiskLength).sum();
+
+                cfs.metric.antiCompactedBytes.inc(antiCompactedBytes);
+                cfs.metric.nonAntiCompactedBytes.inc(nonAntiCompactedBytes);
+
+                if (nonAntiCompactedBytes > antiCompactedBytes)
+                {
+                    long totalRepaired = antiCompactedBytes + nonAntiCompactedBytes;
+                    logger.warn("[repair {}] Out of {} bytes repaired for table {}.{}, {} bytes from {} SSTables ({}%) could not be marked as " +
+                                "repaired because they were either compacted or shadow compacted data during repair. Please check the metrics " +
+                                "org.apache.cassandra.metrics.Table.{AntiCompactedBytes|NonAntiCompactedBytes} for more details on how " +
+                                "anti-compaction is performing. Ideally NonAntiCompactedBytes should be zero or much lower than AntiCompactedBytes, " +
+                                "otherwise incremental repair may be causing non-negligible over-streaming. If this is the case, consider " +
+                                "running incremental repairs on this table with compactions disabled or switch to full repairs.",
+                                parentSessionId, totalRepaired, cfs.keyspace.getName(), cfs.getTableName(), nonAntiCompactedBytes,
+                                unrepairedSet.size(), String.format("%.2f", (double)nonAntiCompactedBytes*100/totalRepaired));
+                }
+
                 return new LocalAntiCompactionTask(cfs, successfulRanges, parentSessionId, repairedAt, localToAntiCompact, remoteCompactingSSTables.getOrDefault(cfId, Collections.emptySet()),
                                                    unrepairedSet.stream().filter(i -> i.sstableRef.isPresent()).map(i -> i.sstableRef.get()).collect(Collectors.toSet()));
             }
