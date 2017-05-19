@@ -1,11 +1,15 @@
-DSE 5.1.1
+DSE 5.1.2
  * Show correct protocol version in cqlsh (APOLLO-616)
+
+
+DSE 5.1.1
  * Update to logback-1.2.3 and redefine default rotation policy (APOLLO-643)
  * Guard mapped memory accesses with an assertion instead of segfaulting JVM (APOLLO-586)
  * Backport follow-up commit to CASSANDRA-12929
  * Fix version check to enable streaming keep-alive (backport CASSANDRA-12929)
 Merged from dse5.0:
  * Handle missing metadata when opening a keyspace (APOLLO-395)
+
 
 DSE 5.1.0
  * Only perform drop below RF check on decommission for non-partitioned keyspaces (APOLLO-589)
