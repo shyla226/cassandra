@@ -617,7 +617,9 @@ class Shell(cmd.Cmd):
         # system.Versions['cql'] apparently does not reflect changes with
         # set_cql_version.
         vers['cql'] = self.cql_version
-        print "[cqlsh %(shver)s | Cassandra %(build)s | CQL spec %(cql)s | Native protocol v%(protocol)s]" % vers
+        vers['dist'] = "DSE" if (int(vers['protocol']) & 0x40) == 0x40 else "Native"
+        vers['protocolVersion'] = int(vers['protocol']) & 0x3f
+        print "[cqlsh %(shver)s | Cassandra %(build)s | CQL spec %(cql)s | %(dist)s protocol v%(protocolVersion)s]" % vers
 
     def show_session(self, sessionid, partial_session=False):
         print_trace_session(self, self.session, sessionid, partial_session)

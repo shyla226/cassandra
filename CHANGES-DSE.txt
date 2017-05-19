@@ -1,4 +1,5 @@
 DSE 5.1.1
+ * Show correct protocol version in cqlsh (APOLLO-616)
  * Update to logback-1.2.3 and redefine default rotation policy (APOLLO-643)
  * Guard mapped memory accesses with an assertion instead of segfaulting JVM (APOLLO-586)
  * Backport follow-up commit to CASSANDRA-12929
