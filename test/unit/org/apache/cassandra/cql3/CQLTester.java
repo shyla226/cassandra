@@ -98,7 +98,7 @@ public abstract class CQLTester
 
     private static boolean isServerPrepared = false;
 
-    public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
+    public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>();
 
     /** Return the current server version if supported by the driver, else
      * the latest that is supported.
@@ -369,7 +369,8 @@ public abstract class CQLTester
         server = new Server.Builder()
                  .withHost(nativeAddr)
                  .withPort(nativePort)
-                 .withEventExecutor(new RequestThreadPoolExecutor()).build();
+                 .withEventExecutor(new RequestThreadPoolExecutor())
+                 .build();
 
         server.start();
 
@@ -400,6 +401,7 @@ public abstract class CQLTester
                        .withPort(nativePort)
                        .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()))
                        .withNettyOptions(nettyOptions)
+                       .withoutMetrics()
                        .build();
     }
 
