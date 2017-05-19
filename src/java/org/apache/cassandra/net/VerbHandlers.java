@@ -19,6 +19,7 @@ package org.apache.cassandra.net;
 
 import java.net.InetAddress;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
@@ -50,6 +51,11 @@ public abstract class VerbHandlers
 
     private static <P, Q> FailureResponse<Q> handleFailure(Request<P, Q> request, Throwable t)
     {
+        // Calling completeExceptionally() wraps the original exception into a CompletionException even
+        // though the documentation says otherwise
+        if (t instanceof CompletionException && t.getCause() != null)
+            t = t.getCause();
+
         // These are the exceptions that we don't want silenced and that should (and are) dealt
         // with by callers of the definition handle() method.
         // AbortedOperation means the operation timed out and Monitoring aborted it.

@@ -276,7 +276,7 @@ public class PartitionsPublisher
         public void onError(Throwable error)
         {
             JVMStabilityInspector.inspectThrowable(error);
-            //logger.debug("{}/{}", error.getClass().getName(), error.getMessage());
+            logger.debug("Got exception: {}/{}", error.getClass().getName(), error.getMessage());
 
             if (this.error == null)
             {
