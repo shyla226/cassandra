@@ -217,7 +217,7 @@ public class MigrationManager
         else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
             return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
 
-        logger.info("Create new table: {}", cfm);
+        logger.info("Create new table: {}/{}", cfm, cfm.id);
         return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
     }
 

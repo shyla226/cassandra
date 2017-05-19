@@ -4284,7 +4284,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Single.concat(nonSystemFlushes)
                   .timeout(1, TimeUnit.MINUTES)
                   .doOnError(t -> {
-                      //JVMStabilityInspector.inspectThrowable(t);
+                      JVMStabilityInspector.inspectThrowable(t);
                       logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
             }).blockingLast(CommitLogPosition.NONE);
 
@@ -4308,7 +4308,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Single.merge(systemFlushes)
                   .timeout(1, TimeUnit.MINUTES)
                   .doOnError(t -> {
-                      //JVMStabilityInspector.inspectThrowable(t);
+                      JVMStabilityInspector.inspectThrowable(t);
                       logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
             }).blockingLast(CommitLogPosition.NONE);
 

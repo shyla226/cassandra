@@ -89,6 +89,6 @@ public class FailureResponse<Q> extends Response<Q>
     @Override
     public String toString()
     {
-        return String.format("[error]@%d: %s %s %s", id(), from(), isRequest() ? "->" : "<-", to());
+        return String.format("[error]@%d %s: %s %s %s", id(), reason, from(), isRequest() ? "->" : "<-", to());
     }
 }

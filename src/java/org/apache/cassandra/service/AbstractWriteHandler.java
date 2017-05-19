@@ -114,6 +114,8 @@ abstract class AbstractWriteHandler extends WriteHandler
     public Completable toObservable()
     {
         return Completable.create(subscriber -> whenComplete((result, error) -> {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - Completed with {}/{}", AbstractWriteHandler.this.hashCode(), result, error == null ? null : error.getClass().getName());
             if (error != null)
                 subscriber.onError(error);
             else
@@ -130,7 +132,8 @@ abstract class AbstractWriteHandler extends WriteHandler
                        acks = blockFor - 1;
                    return Completable.error(new WriteTimeoutException(writeType, consistency, acks, blockFor));
                }
-
+               if (logger.isTraceEnabled())
+                   logger.trace("{} - Returning error {}", AbstractWriteHandler.this.hashCode(), exc.getClass().getName());
                return Completable.error(exc);
           });
     }
@@ -158,7 +161,8 @@ abstract class AbstractWriteHandler extends WriteHandler
     public void onFailure(FailureResponse<EmptyPayload> response)
     {
         InetAddress from = response.from();
-        logger.trace("Got failure from {}", from);
+        if (logger.isTraceEnabled())
+            logger.trace("{} - Got failure from {}: {}", hashCode(), from, response);
 
         int n = waitingFor(from) ? failures.incrementAndGet() : failures.get();
 

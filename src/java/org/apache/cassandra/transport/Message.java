@@ -581,13 +581,10 @@ public abstract class Message
                 ClientWarn.instance.captureWarnings();
 
             QueryState qstate = connection.validateNewMessage(request, connection.getVersion());
-            //logger.info("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
+            if (logger.isTraceEnabled())
+                logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
             request.execute(qstate, queryStartNanoTime)
-
-                    // TODO evaluate the performance impact of this, we shouldn't need it if the PPC requests are to the correct port
-                   // .observeOn(NettyRxScheduler.instance())
-
                    .subscribe(
                     // onSuccess
                     response -> {
@@ -602,14 +599,17 @@ public abstract class Message
                         response.attach(connection);
                         connection.applyStateTransition(request.type, response.type);
 
-                        //logger.info("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
+                        if (logger.isTraceEnabled())
+                            logger.trace("Responding: {}, v={} ON {}", response, connection.getVersion(), Thread.currentThread().getName());
+
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
                         ClientWarn.instance.resetWarnings();
                     },
 
                     // onError
                     t -> {
-                        //logger.info("Responding with error: {}, v={} ON {}", t.getMessage(), connection.getVersion(), Thread.currentThread().getName());
+                        if (logger.isTraceEnabled())
+                            logger.trace("Responding with error: {}, v={} ON {}", t.getMessage(), connection.getVersion(), Thread.currentThread().getName());
 
                         JVMStabilityInspector.inspectThrowable(t);
                         UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);

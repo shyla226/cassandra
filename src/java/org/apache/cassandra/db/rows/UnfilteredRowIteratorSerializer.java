@@ -101,6 +101,9 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
 
         serializeBeginningOfPartition(iterator, header, selection, out, rowEstimate);
 
+        if (iterator.isEmpty())
+            return;
+
         while (iterator.hasNext())
             serialize(iterator.next(), header, out);
 

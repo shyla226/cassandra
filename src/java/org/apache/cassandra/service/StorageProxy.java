@@ -514,15 +514,15 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         Completable ret = Completable.merge(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
-        return ret.doOnEvent(ex -> {
-
-            if (ex != null)
+        return ret.onErrorResumeNext(ex -> {
+            try
             {
                 if (ex instanceof WriteTimeoutException || ex instanceof WriteFailureException)
                 {
                     if (consistencyLevel == ConsistencyLevel.ANY)
                     {
                         hintMutations(mutations);
+                        return Completable.complete(); // do not propagate the exception
                     }
                     else
                     {
@@ -555,11 +555,15 @@ public class StorageProxy implements StorageProxyMBean
                     writeMetricsMap.get(consistencyLevel).unavailables.mark();
                     Tracing.trace("Overloaded");
                 }
-            }
 
-            long latency = System.nanoTime() - startTime;
-            writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistencyLevel).addNano(latency);
+                return Completable.error(ex);
+            }
+            finally
+            {
+                long latency = System.nanoTime() - startTime;
+                writeMetrics.addNano(latency);
+                writeMetricsMap.get(consistencyLevel).addNano(latency);
+            }
         }).toSingleDefault(new ResultMessage.Void());
     }
 
