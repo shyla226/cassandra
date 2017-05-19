@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -38,6 +39,9 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.LineNumberInference;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -46,6 +50,21 @@ import org.apache.cassandra.utils.Throwables;
  */
 public abstract class CsFlow<T>
 {
+    private final static LineNumberInference LINE_NUMBERS = new LineNumberInference((klass) -> FlowableOp.class.isAssignableFrom(klass));
+    public static final FlowableOp[] EMPTY_OPERATION_STACK = {};
+
+    protected final FlowableOp[] operationStack;
+
+    protected CsFlow()
+    {
+        this(EMPTY_OPERATION_STACK);
+    }
+
+    protected CsFlow(FlowableOp[] operationStack)
+    {
+        this.operationStack = operationStack;
+    }
+
     /**
      * Create a subscription linking the content of the flow with the given subscriber.
      * The subscriber is expected to call request() on the returned subscription; in response, it will receive an
@@ -89,6 +108,11 @@ public abstract class CsFlow<T>
     {
         class ApplyFlow extends CsFlow<O>
         {
+            protected ApplyFlow(FlowableOp[] operationStack)
+            {
+                super(operationStack);
+            }
+
             public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
             {
                 return !DEBUG_ENABLED
@@ -96,7 +120,7 @@ public abstract class CsFlow<T>
                        : new CheckedApplyOpSubscription<>(subscriber, op, source);
             }
         }
-        return new ApplyFlow();
+        return new ApplyFlow(append(source.operationStack, op));
     }
 
     /**
@@ -701,7 +725,17 @@ public abstract class CsFlow<T>
 
             public void onError(Throwable t)
             {
-                error = t;
+                StringBuilder errorBuilder = new StringBuilder("Flowable operation stack: \n");
+                LINE_NUMBERS.preloadLambdas();
+
+                for (FlowableOp flowableOp : operationStack)
+                {
+                    LINE_NUMBERS.maybeProcessClass(flowableOp.getClass());
+                    Pair<String, Integer> lineNumber = LINE_NUMBERS.getLine(flowableOp.getClass());
+                    errorBuilder.append("\t\t").append(flowableOp).append("(").append(lineNumber.left).append(":").append(lineNumber.right).append(")").append("\n");
+                }
+
+                error = new RuntimeException(errorBuilder.toString(), t);
                 latch.countDown();
             }
         };
@@ -793,7 +827,7 @@ public abstract class CsFlow<T>
     public <O> CsFlow<O> reduceWith(Supplier<O> seedSupplier, BiFunction<O, T, O> reducer)
     {
         CsFlow<T> self = this;
-        return new CsFlow<O>()
+        return new CsFlow<O>(operationStack)
         {
             public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
             {
@@ -836,12 +870,17 @@ public abstract class CsFlow<T>
     {
         class IfEmptyFlow extends CsFlow<T>
         {
+            protected IfEmptyFlow(FlowableOp[] operationStack)
+            {
+                super(operationStack);
+            }
+
             public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
             {
                 return new IfEmptySubscription<>(subscriber, value, source);
             }
         }
-        return new IfEmptyFlow();
+        return new IfEmptyFlow(source.operationStack);
     }
 
     static class IfEmptySubscription<T> implements CsSubscription, CsSubscriber<T>
@@ -1124,4 +1163,11 @@ public abstract class CsFlow<T>
 
     }
 
+    private static final FlowableOp[] append(FlowableOp[] ops, FlowableOp op)
+    {
+        int length = ops.length;
+        FlowableOp[] newOps = Arrays.copyOf(ops, length + 1);
+        newOps[length] = op;
+        return newOps;
+    }
 }
