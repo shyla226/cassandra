@@ -103,7 +103,7 @@ public abstract class CQLTester
 
     private static boolean isServerPrepared = false;
 
-    public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
+    public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>();
 
     private static final String CREATE_INDEX_NAME_REGEX = "(\\s*(\\w*|\"\\w*\")\\s*)";
     private static final String CREATE_INDEX_REGEX = String.format("\\A\\s*CREATE(?:\\s+CUSTOM)?\\s+INDEX" +
@@ -391,7 +391,8 @@ public abstract class CQLTester
         server = new Server.Builder()
                  .withHost(nativeAddr)
                  .withPort(nativePort)
-                 .withEventExecutor(new RequestThreadPoolExecutor()).build();
+                 .withEventExecutor(new RequestThreadPoolExecutor())
+                 .build();
 
         server.start();
 
@@ -422,6 +423,7 @@ public abstract class CQLTester
                        .withPort(nativePort)
                        .withProtocolVersion(com.datastax.driver.core.ProtocolVersion.fromInt(version.asInt()))
                        .withNettyOptions(nettyOptions)
+                       .withoutMetrics()
                        .build();
     }
 
