@@ -128,7 +128,6 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
                                    .withBackPressure()
                                    .handler(COUNTER_FORWARDING_HANDLER);
         READ_REPAIR = helper.ackedRequest("READ_REPAIR", Mutation.class)
-                            .stage(Stage.MUTATION)
                             .timeout(DatabaseDescriptor::getWriteRpcTimeout)
                             .handler(WRITE_HANDLER);
         BATCH_STORE = helper.ackedRequest("BATCH_STORE", Batch.class)

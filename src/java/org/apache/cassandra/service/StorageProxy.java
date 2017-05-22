@@ -696,7 +696,9 @@ public class StorageProxy implements StorageProxyMBean
             viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
         };
 
-        List<WriteHandler> handlers = Lists.transform(mutationsAndEndpoints, mae ->
+        // The copy into an immutable list is not just an optimization, it is essential for correctness
+        // since it would be very wrong if we subscribed to the observable of a different handler
+        List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
             viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
             WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime)
@@ -706,7 +708,7 @@ public class StorageProxy implements StorageProxyMBean
 
             handler.thenRun(cleanupLatch::countDown);
             return handler;
-        });
+        }));
 
         completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
 
@@ -805,6 +807,8 @@ public class StorageProxy implements StorageProxyMBean
 
         // Creates write handlers: each mutation must be acknowledged to clean the batchlog, and each mutation is
         // acknowledged once we head back from 'batchConsistencyLevel' nodes.
+        // The copy into an immutable list is not just an optimization, it is essential for correctness
+        // since it would be very wrong if we subscribed to the observable of a different handler
         List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
             Keyspace keyspace = mae.endpoints.keyspace();
@@ -1486,14 +1490,16 @@ public class StorageProxy implements StorageProxyMBean
                             .onErrorResumeNext(e ->
                                                {
                                                    if (e instanceof DigestMismatchException)
-                                                       return retryOnDigestMismatch();
+                                                       return retryOnDigestMismatch((DigestMismatchException)e);
 
                                                    return Single.error(e);
                                                }));
         }
 
-        Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
+        Single<PartitionIterator> retryOnDigestMismatch(DigestMismatchException ex) throws ReadFailureException, ReadTimeoutException
         {
+            Tracing.trace("Digest mismatch: {}", ex);
+
             ReadRepairMetrics.repairedBlocking.mark();
 
             // Do a full data read to resolve the correct response (and repair node that need be)
@@ -1512,10 +1518,22 @@ public class StorageProxy implements StorageProxyMBean
             Tracing.trace("Enqueuing full data read to {}", endpoints);
             MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
 
-
             return repairHandler.get().onErrorResumeNext(e -> {
                 if (e instanceof DigestMismatchException)
-                    return Single.error(new RuntimeException("Digest mismatch hit on readRepair", e));
+                    return Single.error(new AssertionError(e)); // full data requested from each node here, no digests should be sent
+
+                else if(e instanceof ReadTimeoutException)
+                {
+                    if (Tracing.isTracing())
+                        Tracing.trace("Timed out waiting on digest mismatch repair requests");
+                    else
+                        logger.trace("Timed out waiting on digest mismatch repair requests");
+
+                    // the caught exception here will have CL.ALL from the repair command,
+                    // not whatever CL the initial command was at (CASSANDRA-7947)
+                    int blockFor = consistency.blockFor(Keyspace.open(command.metadata().keyspace));
+                    return Single.error(new ReadTimeoutException(consistency, blockFor-1, blockFor, true));
+                }
 
                 return Single.error(e);
             });
