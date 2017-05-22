@@ -40,6 +40,9 @@ public abstract class WrappingWriteHandler extends WriteHandler
         // we install a callback that will be executed when
         // wrapped completes, either with a result or exceptionally
         wrapped.whenComplete((x, t) -> {
+            if (logger.isTraceEnabled())
+                logger.trace("{}/{} - Completed", WrappingWriteHandler.this.hashCode(), wrapped.hashCode());
+
             if (t == null)
                 complete(null);
             else

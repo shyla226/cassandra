@@ -89,7 +89,7 @@ public class DigestResolver extends ResponseResolver
                 digest = newDigest;
             else if (!digest.equals(newDigest))
                 // rely on the fact that only single partition queries use digests
-                throw new DigestMismatchException(((SinglePartitionReadCommand)command).partitionKey(), digest, newDigest);
+                throw new DigestMismatchException(((SinglePartitionReadCommand) command).partitionKey(), digest, newDigest);
         }
 
         if (logger.isTraceEnabled())

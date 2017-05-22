@@ -114,14 +114,15 @@ public abstract class ReadResponse
     protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator, ReadCommand command)
     {
         MessageDigest digest = FBUtilities.threadLocalMD5Digest();
-        UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
+        UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion()).blockingAwait();
         return ByteBuffer.wrap(digest.digest());
     }
 
     protected static Single<ByteBuffer> makeDigest(PartitionsPublisher publisher, ReadCommand command)
     {
         return UnfilteredPartitionIterators.digest(publisher,
-                                                   FBUtilities.threadLocalMD5Digest(),
+                                                   // TODO perf. - do we need a cache to replace threadLocalMD5Digest()?
+                                                   FBUtilities.newMessageDigest("MD5"),
                                                    command.digestVersion())
                                            .map(digest -> ByteBuffer.wrap(digest.digest()));
     }

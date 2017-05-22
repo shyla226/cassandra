@@ -23,7 +23,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import io.reactivex.Scheduler;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.schema.ColumnMetadata;
