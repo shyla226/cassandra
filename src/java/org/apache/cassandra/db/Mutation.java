@@ -231,7 +231,7 @@ public class Mutation implements IMutation, Scheduleable
 
     public TPCScheduler getScheduler()
     {
-        return TPC.getForKey(getKeyspaceName(), key());
+        return TPC.getForKey(Keyspace.open(getKeyspaceName()), key());
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

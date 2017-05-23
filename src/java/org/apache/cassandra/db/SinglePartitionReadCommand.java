@@ -359,7 +359,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-                                      TPC.getCoreForKey(metadata().keyspace, partitionKey()));
+                                      TPC.getCoreForKey(cfs.keyspace, partitionKey()));
     }
 
     /**
@@ -966,7 +966,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public TPCScheduler getScheduler()
     {
-        return TPC.getForKey(metadata().keyspace, partitionKey());
+        return TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey());
     }
 
     /**

@@ -169,7 +169,6 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
-              + "token_boundaries list<varchar>,"
               + "truncated_at map<uuid, blob>,"
               + "PRIMARY KEY ((key)))")
               .recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
@@ -188,7 +187,6 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
-              + "token_boundaries list<varchar>,"
               + "PRIMARY KEY ((peer)))")
               .build();
 
@@ -720,16 +718,6 @@ public final class SystemKeyspace
 
         String req = "INSERT INTO system.%s (key, tokens) VALUES ('%s', ?)";
         executeInternal(format(req, LOCAL, LOCAL), tokensAsSet(tokens));
-        forceBlockingFlush(LOCAL);
-    }
-
-    public static synchronized void updateTokenBoundaries()
-    {
-        // TODO technically this needs to be per-keyspace; just use a distributed KS for now
-        List<Token> ranges = TPC.getRangeList(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, false);
-        String req = "INSERT INTO system.%s (key, token_boundaries) VALUES ('%s', ?)";
-        logger.info("LIST = " + tokensAsList(ranges));
-        executeInternal(String.format(req, LOCAL, LOCAL), tokensAsList(ranges));
         forceBlockingFlush(LOCAL);
     }
 

@@ -38,6 +38,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
@@ -270,7 +271,7 @@ public class TPC
         return t instanceof TPCThread ? ((TPCThread)t).coreId() : NUM_CORES;
     }
 
-    public static boolean isTPCThread(Thread thread)
+    private static boolean isTPCThread(Thread thread)
     {
         return thread instanceof TPCThread;
     }
@@ -317,60 +318,32 @@ public class TPC
     }
 
     /**
-     * Return the id of the core that is assigned to run operations on the specified keyspace
-     * and partition key, see {@link TPC#perCoreSchedulers}.
+     * Return the id of the core that is assigned to run operations on the specified keyspace and partition key.
      * <p>
-     * Core zero is returned if {@link StorageService} is not yet initialized,
-     * since in this case we cannot assign any partition key to any core.
+     * Core zero is returned if {@link StorageService} is not yet initialized, since in this case we cannot assign an
+     * partition key to any core.
      *
-     * @param keyspaceName - the keyspace name
+     * @param keyspace - the keyspace
      * @param key - the partition key
      *
      * @return the core id for this partition
      */
-
     @Inline
-    public static int getCoreForKey(String keyspaceName, DecoratedKey key)
+    public static int getCoreForKey(Keyspace keyspace, DecoratedKey key)
     {
-        // nothing we can do until we have the local ranges
-        if (!StorageService.instance.isInitialized())
+        TPCBoundaries boundaries = keyspace.getTPCBoundaries();
+
+        // Handles both the system keyspace (but cheaper that comparing strings) and if the node is not sufficiently
+        // initialized yet than we can compute it's boundaries
+        if (boundaries == TPCBoundaries.NONE)
             return 0;
 
-        Token keyToken;
-
-        if (key.getPartitioner() == DatabaseDescriptor.getPartitioner())
-        {
-            keyToken = key.getToken();
-        }
-        else
-        {
-            // Convert OP partitions to top level partitioner for secondary indexes; always route
-            // system table mutations through core 0
-            if (SchemaConstants.isSystemKeyspace(keyspaceName))
-                return 0;
-
+        Token keyToken = key.getToken();
+        // Convert to top level partitioner for secondary indexes
+        if (key.getPartitioner() != DatabaseDescriptor.getPartitioner())
             keyToken = DatabaseDescriptor.getPartitioner().getToken(key.getKey());
-        }
 
-        List<Token> keyspaceRanges = getRangeList(keyspaceName, true);
-
-
-        // Note that keyspaceRanges starts with the min token and end with the max one (see SS.getCpuBoundaries()) so
-        // we know we'll find the token, and we can skip comparing the first and last token.
-
-        for (int i = 1; i < keyspaceRanges.size() - 1; i++)
-        {
-            if (keyToken.compareTo(keyspaceRanges.get(i)) < 0)
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace("Read moving to {} from {}", i-1, getCoreId());
-                return i - 1;
-            }
-        }
-
-        // As mentioned above, we skipped the last token because it's the max token. If we get here, we know the token
-        // belong to the last cpu.
-        return perCoreSchedulers.length - 1;
+        return boundaries.getCoreFor(keyToken);
     }
 
     /**
@@ -380,55 +353,15 @@ public class TPC
      * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
      * since in this case we cannot assign any partition key to any core.
      *
-     * @param keyspaceName - the keyspace name
+     * @param keyspace - the keyspace
      * @param key - the partition key
      *
      * @return the Netty RX scheduler
      */
     @Inline
-    public static TPCScheduler getForKey(String keyspaceName, DecoratedKey key)
+    public static TPCScheduler getForKey(Keyspace keyspace, DecoratedKey key)
     {
-        return getForCore(getCoreForKey(keyspaceName, key));
-    }
-
-    public static List<Token> getRangeList(String keyspaceName, boolean persist)
-    {
-        return getRangeList(Keyspace.open(keyspaceName), persist);
-    }
-
-    public static List<Token> getRangeList(Keyspace keyspace, boolean persist)
-    {
-        List<Token> ranges = keyspaceToRangeMapping.get(keyspace.getName());
-
-        if (ranges != null)
-            return ranges;
-
-        List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(keyspace);
-        List<Token> splits = StorageService.getCpuBoundaries(localRanges, DatabaseDescriptor.getPartitioner(), NUM_CORES)
-                                           .stream()
-                                           .map(RingPosition::getToken)
-                                           .collect(Collectors.toList());
-
-        if (persist)
-        {
-            if (isTPCThread() && currentThreadTPCScheduler().thread().coreId() == 0)
-            {
-                keyspaceToRangeMapping.put(keyspace.getName(), splits);
-            }
-            else
-            {
-                CountDownLatch ready = new CountDownLatch(1);
-
-                getForCore(0).scheduleDirect(() -> {
-                    keyspaceToRangeMapping.put(keyspace.getName(), splits);
-                    ready.countDown();
-                });
-
-                Uninterruptibles.awaitUninterruptibly(ready);
-            }
-        }
-
-        return splits;
+        return getForCore(getCoreForKey(keyspace, key));
     }
 
     /**

@@ -202,7 +202,7 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return partitions.get(0);
 
-        int coreId = TPC.getCoreForKey(cfs.metadata.keyspace, key);
+        int coreId = TPC.getCoreForKey(cfs.keyspace, key);
         assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id: " + Integer.toString(coreId);
 
         return partitions.get(coreId);
@@ -349,7 +349,7 @@ public class Memtable implements Comparable<Memtable>
                        currentOperations.addAndGet(update.operationCount());
 
                        return p.left[1];
-                   }).subscribeOn(TPC.getForKey(cfs.metadata.keyspace, key));
+                   }).subscribeOn(TPC.getForKey(cfs.keyspace, key));
     }
 
     private void updateIfMin(AtomicLong val, long newVal)
@@ -466,7 +466,7 @@ public class Memtable implements Comparable<Memtable>
         return CsFlow.fromIterable(all)
                      .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
                      .flatMap(list -> CsFlow.fromIterable(list))
-                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForKey(cfs.keyspace.getName(), iterator.partitionKey())));
+                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForKey(cfs.keyspace, iterator.partitionKey())));
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
