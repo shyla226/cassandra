@@ -321,7 +321,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     @SuppressWarnings("resource")
     public static RandomAccessReader open(File file)
     {
-        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file);
+        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, true);
         try
         {
             ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);

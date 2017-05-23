@@ -109,27 +109,28 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
     private Single<PartitionIterator> makeObservable()
     {
-        long time = TimeUnit.MILLISECONDS.toNanos(command.getTimeout()) - (System.nanoTime() - queryStartNanoTime);
-
         return publishSubject
                .first(EmptyIterators.partition())
-               .onErrorResumeNext(exc -> {
-                  int received = this.received.get();
-                  boolean failed = !(exc instanceof TimeoutException);
+               .onErrorResumeNext(exc ->
+                                  {
+                                      int received = this.received.get();
+                                      boolean failed = !(exc instanceof ReadTimeoutException);
 
-                  if (Tracing.isTracing())
-                  {
-                      String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                      Tracing.trace("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
-                  }
-                  else if (logger.isDebugEnabled())
-                  {
-                      String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                      logger.debug("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
-                  }
+                                      if (failed)
+                                      {
+                                          if (Tracing.isTracing())
+                                          {
+                                              String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                                              Tracing.trace("Failed; received {} of {} responses{}", received, blockfor, gotData);
+                                          }
+                                          else if (logger.isDebugEnabled())
+                                          {
+                                              String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                                              logger.debug("Failed; received {} of {} responses{}", received, blockfor, gotData);
+                                          }
+                                      }
 
-                                      return Single.error( exc);
-
+                                      return Single.error(exc);
                                   });
     }
 
@@ -195,12 +196,12 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         if (Tracing.isTracing())
         {
             String gotData = received.get() > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            Tracing.trace("{}; received {} of {} responses{}", "Timed out", received, blockfor, gotData);
+            Tracing.trace("Timed out; received {} of {} responses{}", received, blockfor, gotData);
         }
         else if (logger.isDebugEnabled())
         {
             String gotData = received.get() > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            logger.debug("{}; received {} of {} responses{}", "Timed out", received, blockfor, gotData);
+            logger.debug("Timed out; received {} of {} responses{}", received, blockfor, gotData);
         }
 
         publishSubject.onError(new ReadTimeoutException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent()));

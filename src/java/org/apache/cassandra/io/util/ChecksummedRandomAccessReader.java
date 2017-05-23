@@ -27,7 +27,7 @@ public final class ChecksummedRandomAccessReader
     @SuppressWarnings("resource") // The Rebufferer owns both the channel and the validator and handles closing both.
     public static RandomAccessReader open(File file, File crcFile) throws IOException
     {
-        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file);
+        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, false);
         try
         {
             DataIntegrityMetadata.ChecksumValidator validator = new DataIntegrityMetadata.ChecksumValidator(ChecksumType.CRC32,

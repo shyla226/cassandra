@@ -203,8 +203,8 @@ class TrieIndexSSTableReader extends SSTableReader
     {
         assert indexEntry != null;
         return reversed
-               ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns)
-               : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns);
+               ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow)
+               : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow);
     }
 
     /**

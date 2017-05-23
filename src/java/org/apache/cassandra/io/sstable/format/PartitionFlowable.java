@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -71,6 +72,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
     final boolean reverse;
     final int offset;
     final long limit;
+    final boolean mmapped;
 
     Slices slices;
 
@@ -85,6 +87,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         this.subscr = null;
         this.offset = 0;
         this.limit = limit;
+        this.mmapped = table.dataFile.mmapped();
     }
 
 
@@ -99,6 +102,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         this.subscr = new PartitionSubscription(o.subscr, offset);
         this.offset = offset;
         this.limit = Long.MAX_VALUE;
+        this.mmapped = o.mmapped;
     }
 
 
@@ -249,7 +253,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         {
             try
             {
-                action.accept(ReaderConstraint.IN_CACHE_ONLY);
+                action.accept(mmapped ? ReaderConstraint.NONE : ReaderConstraint.IN_CACHE_ONLY);
 
                 switch (state)
                 {
@@ -294,6 +298,12 @@ class PartitionFlowable extends CsFlow<Unfiltered>
                              }
                          },
                          (t) -> {
+
+                             // Calling completeExceptionally() wraps the original exception into a CompletionException even
+                             // though the documentation says otherwise
+                             if (t instanceof CompletionException && t.getCause() != null)
+                                 t = t.getCause();
+
                              s.onError(t);
                          },
                          onReadyExecutor);
@@ -514,8 +524,8 @@ class PartitionFlowable extends CsFlow<Unfiltered>
                     boolean hasNext = iter.hasNext();
                     if (!hasNext)
                     {
-                        s.onComplete();
                         cancel();
+                        s.onComplete();
                         return;
                     }
 

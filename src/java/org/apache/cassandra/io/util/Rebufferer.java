@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.io.util;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;

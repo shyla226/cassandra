@@ -50,12 +50,11 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
     private final String filePath;
     private final AsynchronousFileChannel channel;
 
-    public static AsynchronousFileChannel openChannel(File file)
+    public static AsynchronousFileChannel openChannel(File file, boolean mmapped)
     {
         try
         {
-            //return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
-            return TPCScheduler.openFileChannel(file);
+            return TPCScheduler.openFileChannel(file, mmapped);
         }
         catch (IOException e)
         {
@@ -63,14 +62,14 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public AsynchronousChannelProxy(String path)
+    public AsynchronousChannelProxy(String path, boolean mmapped)
     {
-        this (new File(path));
+        this (new File(path), mmapped);
     }
 
-    public AsynchronousChannelProxy(File file)
+    public AsynchronousChannelProxy(File file, boolean mmapped)
     {
-        this(file.getPath(), openChannel(file));
+        this(file.getPath(), openChannel(file, mmapped));
     }
 
     public AsynchronousChannelProxy(String filePath, AsynchronousFileChannel channel)
@@ -164,16 +163,16 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
         }
     }
 
+    public ChannelProxy getBlockingChannel()
+    {
+        return new ChannelProxy(new File(filePath));
+    }
+
     public long transferTo(long position, long count, WritableByteChannel target)
     {
-        ChannelProxy cp = new ChannelProxy(new File(filePath));
-        try
+        try(ChannelProxy cp = new ChannelProxy(new File(filePath)))
         {
             return cp.transferTo(position, count, target);
-        }
-        finally
-        {
-            cp.close();
         }
     }
 

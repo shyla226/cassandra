@@ -32,6 +32,7 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -49,6 +50,7 @@ public class RowIndexTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        TPCScheduler.register();
     }
 
     static final ClusteringComparator comparator = new ClusteringComparator(UUIDType.instance);
@@ -186,7 +188,7 @@ public class RowIndexTest
         List<ClusteringPrefix> keys = random.left;
         Random rand = new Random();
         
-        for (int i = 0; i < 1000; ++i)
+        for (int i = 0; i < 500; ++i)
         {
             boolean exactLeft = rand.nextBoolean();
             boolean exactRight = rand.nextBoolean();

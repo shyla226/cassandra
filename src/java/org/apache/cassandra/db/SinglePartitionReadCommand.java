@@ -903,9 +903,10 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                                   sstable.incrementReadCount();
                                                                                   sstablesIterated.increment();
                                                                                   if (!fup.header.partitionLevelDeletion.isLive())
+                                                                                  {
                                                                                       result.set(add(UnfilteredRowIterators.noRowsIterator(fup.header.metadata, fup.header.partitionKey, fup.staticRow, fup.header.partitionLevelDeletion, filter.get().isReversed()), result.get(), filter.get(), sstable.isRepaired()));
-
-                                                                                  return CsFlow.empty();
+                                                                                      return CsFlow.empty();
+                                                                                  }
                                                                               }
 
                                                                               Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
@@ -922,7 +923,9 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                               return fup.content.toList()
                                                                                                 .map(u ->
                                                                                                      {
-                                                                                                         result.set(add(ImmutableBTreePartition.create(fup, u).unfilteredIterator(), result.get(), filter.get(), sstable.isRepaired()));
+                                                                                                         result.set(add(ImmutableBTreePartition.create(fup, u)
+                                                                                                                                               .unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()),
+                                                                                                                        result.get(), filter.get(), sstable.isRepaired()));
                                                                                                          return result.get();
                                                                                                      });
                                                                           });

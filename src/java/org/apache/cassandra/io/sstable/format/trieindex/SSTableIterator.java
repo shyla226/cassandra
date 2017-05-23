@@ -22,11 +22,13 @@ import java.util.NoSuchElementException;
 
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
@@ -43,6 +45,18 @@ class SSTableIterator extends AbstractSSTableIterator
      * The index of the slice being processed.
      */
     private int slice;
+
+    public SSTableIterator(TrieIndexSSTableReader sstable,
+                           FileDataInput file,
+                           DecoratedKey key,
+                           RowIndexEntry indexEntry,
+                           Slices slices,
+                           ColumnFilter columns,
+                           DeletionTime partitionLevelDeletion,
+                           Row staticRow)
+    {
+        super(sstable, file, indexEntry, key, slices, columns, partitionLevelDeletion, staticRow);
+    }
 
     public SSTableIterator(TrieIndexSSTableReader sstable,
                            FileDataInput file,

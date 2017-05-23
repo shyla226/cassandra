@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 
 class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
@@ -56,7 +57,9 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 
             public void failed(Throwable exc, ByteBuffer attachment)
             {
-                futureBuffer.completeExceptionally(exc);
+                // Make sure reader does not see stale data.
+                buffer.position(0).limit(0);
+                futureBuffer.completeExceptionally(new CorruptSSTableException(exc, channel.filePath()));
             }
         });
 

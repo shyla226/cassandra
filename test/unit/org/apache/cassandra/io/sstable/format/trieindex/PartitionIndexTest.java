@@ -382,6 +382,12 @@ public class PartitionIndexTest
         @Override
         public BufferHolder rebuffer(long position)
         {
+            return rebuffer(position, ReaderConstraint.NONE);
+        }
+
+        @Override
+        public BufferHolder rebuffer(long position, ReaderConstraint rc)
+        {
             long pos;
 
             int idx = Arrays.binarySearch(offsets, position);
@@ -391,7 +397,7 @@ public class PartitionIndexTest
             if (idx >= 0)
                 pos = pos - offsets[idx] + cutoffs[idx];
 
-            super.rebuffer(pos);
+            super.rebuffer(pos, rc);
             if (idx < cutoffs.length - 1 && buffer.limit() + offset > cutoffs[idx + 1])
                 buffer.limit((int) (cutoffs[idx + 1] - offset));
             if (idx >= 0)

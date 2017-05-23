@@ -130,9 +130,12 @@ public abstract class AbstractReadExecutor
      */
     public Single<PartitionIterator> get()
     {
-            return handler.get().doOnError(e -> {
+            return handler.get().onErrorResumeNext(e -> {
+
                 if (e instanceof ReadTimeoutException)
                     Throwables.perform((Throwable)null, this::onReadTimeout);
+
+                return Single.error(e);
             });
 
     }
@@ -264,14 +267,13 @@ public abstract class AbstractReadExecutor
             return Completable.defer(() -> {
 
                 if (!shouldSpeculate() || !logFailedSpeculation)
-                    return Completable.complete();
+                    return CompletableObserver::onComplete;
 
                 TPCScheduler.instance().scheduleDirect(() ->
                                                            {
                                                                if (!handler.hasValue())
-                                                               {
                                                                    cfs.metric.speculativeInsufficientReplicas.inc();
-                                                               }
+
                                                            }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
@@ -332,7 +334,7 @@ public abstract class AbstractReadExecutor
             () -> {
 
                 if (!shouldSpeculate())
-                    return Completable.complete();
+                    return CompletableObserver::onComplete;
 
                 TPCScheduler.instance().scheduleDirect(() -> {
                        if (!handler.hasValue())

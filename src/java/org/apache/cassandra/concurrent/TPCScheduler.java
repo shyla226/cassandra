@@ -92,6 +92,8 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
     private static boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("cassandra.log_caller_stack_on_tpc_exception", "false")
                                                                  .equalsIgnoreCase("true");
 
+    private static boolean FORCE_DISABLE_AIO = System.getProperty("cassandra.force_disable_aio", "false").equalsIgnoreCase("true");
+
     private static final Logger logger = LoggerFactory.getLogger(TPCScheduler.class);
 
     public final static FastThreadLocal<TPCScheduler> localNettyEventLoop = new FastThreadLocal<TPCScheduler>()
@@ -382,9 +384,9 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
         return StorageService.instance.isInitialized();
     }
 
-    public static AsynchronousFileChannel openFileChannel(File file) throws IOException
+    public static AsynchronousFileChannel openFileChannel(File file, boolean mmapped) throws IOException
     {
-        if (!isStarted())
+        if (FORCE_DISABLE_AIO || mmapped || !isStarted())
             return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
 
         Integer coreId = getCoreId();

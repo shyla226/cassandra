@@ -23,7 +23,7 @@ public class CorruptFileException extends RuntimeException
 {
     public final String filePath;
 
-    public CorruptFileException(Exception cause, String filePath)
+    public CorruptFileException(Throwable cause, String filePath)
     {
         super(cause);
         this.filePath = filePath;

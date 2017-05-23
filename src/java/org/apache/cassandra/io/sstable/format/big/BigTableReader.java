@@ -38,6 +38,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -103,7 +104,7 @@ public class BigTableReader extends SSTableReader
         }
 
         try(FileHandle.Builder ibuilder = new FileHandle.Builder(descriptor.filenameFor(Component.PRIMARY_INDEX))
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+                .mmapped(DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard && metadata().params.compaction.klass().equals(MemoryOnlyStrategy.class))
                 .withChunkCache(ChunkCache.instance))
         {
             loadSummary();
@@ -281,8 +282,8 @@ public class BigTableReader extends SSTableReader
     {
         assert indexEntry != null;
         return reversed
-               ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow)
-               : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow);
+               ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow)
+               : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow);
     }
 
     /**

@@ -57,6 +57,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     protected final Slices slices;
 
 
+    /**
+     * This constructor is used by Async readers
+     */
     protected AbstractSSTableIterator(SSTableReader sstable,
                                       FileDataInput file,
                                       RowIndexEntry indexEntry,

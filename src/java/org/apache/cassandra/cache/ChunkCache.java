@@ -22,6 +22,7 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.*;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
@@ -66,17 +68,12 @@ public class ChunkCache
         final String path;
         final long position;
 
-        //Decides if the cache loading should be blocking or non-blocking.
-        //Not included in hashcode or equals
-        final boolean blocking;
-
-        public Key(ChunkReader file, long position, boolean blocking)
+        public Key(ChunkReader file, long position)
         {
             super();
             this.file = file;
             this.position = position;
             this.path = file.channel().filePath();
-            this.blocking = blocking;
         }
 
         public int hashCode()
@@ -112,53 +109,68 @@ public class ChunkCache
     {
         private final Key key;
         private final CompletableFuture<ByteBuffer> futureBuffer;
-        private volatile ByteBuffer finalBuffer;
         private final long offset;
         private final int capacity;
         private final AtomicInteger references;
 
-        public Buffer(Key key ,CompletableFuture<ByteBuffer> futureBuffer, long offset, int capacity, boolean blocking)
+        public Buffer(Key key ,CompletableFuture<ByteBuffer> futureBuffer, long offset, int capacity) throws Exception
         {
             this.key = key;
             this.offset = offset;
             this.capacity = capacity;
-            this.finalBuffer = null;
 
-            // start un-referenced if non-blocking.
+            // start un-referenced.
             // Once the async disk read is done we will reference.
-            //
-            // Otherwise start referenced
-            if (blocking)
-            {
-                references = new AtomicInteger(1);
-                this.futureBuffer = futureBuffer;
-                finalBuffer = this.futureBuffer.join();
-            }
-            else
-            {
-                // We need to avoid anyone trying to reference the buffer before
-                // its been initialized.
-                references = new AtomicInteger(UNINITIALISED);
-                this.futureBuffer = futureBuffer.thenApply((buf) ->
+            // We need to avoid anyone trying to reference the buffer before
+            // its been initialized.
+            references = new AtomicInteger(UNINITIALISED);
+            this.futureBuffer = futureBuffer.handle((buf, t) ->
+                                                       {
+                                                           boolean success = references.compareAndSet(UNINITIALISED, 1);
+                                                           assert success : "Buffer was referenced before it was initialized: " + key;
+
+                                                           if (t != null)
                                                            {
-                                                               finalBuffer = buf;
-                                                               boolean success = references.compareAndSet(UNINITIALISED, 1);
-                                                               assert success : "Buffer was referenced before it was initialized: " + key;
-                                                               return buf;
-                                                           });
-            }
+                                                               if (t instanceof CompletionException)
+                                                                   throw (CompletionException) t;
+
+                                                               throw new CompletionException(t);
+                                                           }
+
+                                                           return buf;
+                                                       });
         }
 
-        Buffer reference()
+        Buffer reference(Rebufferer.ReaderConstraint rc)
         {
             int refCount;
             do
             {
                 refCount = references.get();
+
+                // Might need to block on the buffer depending on the constraing
+                if (rc == Rebufferer.ReaderConstraint.NONE && refCount == UNINITIALISED)
+                {
+                    try
+                    {
+                        assert !TPCScheduler.isTPCThread(); //better not be blocking the tpc threads
+                        futureBuffer.join();
+                    }
+                    catch (CompletionException t)
+                    {
+                        if (t.getCause() != null && t.getCause() instanceof RuntimeException)
+                            throw (RuntimeException) t.getCause();
+
+                        throw t;
+                    }
+                }
+
                 if (refCount == 0 || refCount == UNINITIALISED)
+                {
                     // Buffer was released before we managed to reference it.
                     // Or it's an async request and not ready yet
                     return null;
+                }
             } while (!references.compareAndSet(refCount, refCount + 1));
 
             return this;
@@ -168,7 +180,7 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert references.get() > 0;
-            return finalBuffer.duplicate();
+            return futureBuffer.join().duplicate();
         }
 
         /**
@@ -181,14 +193,18 @@ public class ChunkCache
          */
         public void onReadyHandler(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
         {
-            //if (futureBuffer.isDone() && !futureBuffer.isCompletedExceptionally())
-            //{
-            //    onReady.run();
-            //}
-            //else
+            if (futureBuffer.isDone() && !futureBuffer.isCompletedExceptionally())
+            {
+                onReady.run();
+            }
+            else
             {
                 onSchedule.run();
-                futureBuffer.thenRunAsync(() -> onReady.run(), executor)
+
+                //Track the ThreadLocals
+                Runnable wrappedOnReady = new ExecutorLocals.WrappedRunnable(onReady);
+
+                futureBuffer.thenRunAsync(() -> wrappedOnReady.run(), executor)
                             .exceptionally(t ->
                                            {
                                                onError.accept(t);
@@ -214,9 +230,7 @@ public class ChunkCache
             //The read from disk read may be in flight
             //We need to keep this buffer till the async callback has fire
             if (references.get() != UNINITIALISED && references.decrementAndGet() == 0)
-            {
-                BufferPool.put(finalBuffer);
-            }
+                BufferPool.put(futureBuffer.join());
         }
 
         public String toString()
@@ -239,26 +253,31 @@ public class ChunkCache
     @Override
     public Buffer load(Key key) throws Exception
     {
-        ChunkReader rebufferer = key.file;
-        metrics.misses.mark();
-        try (Timer.Context ctx = metrics.missLatency.time())
+        CompletableFuture<ByteBuffer> future = null;
+        ByteBuffer buffer = null;
+        try
         {
-            ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
-            assert buffer != null;
-            assert MemoryUtil.getAddress(buffer) % 512 == 0 : "Buffer from pool is not properly aligned!";
-
-            //Once the buffer has been filled we can give it an initial reference
-            try
+            ChunkReader rebufferer = key.file;
+            metrics.misses.mark();
+            try (Timer.Context ctx = metrics.missLatency.time())
             {
-                CompletableFuture<ByteBuffer> future = rebufferer.readChunk(key.position, buffer);
+                buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
+                assert buffer != null;
+                assert MemoryUtil.getAddress(buffer) % 512 == 0 : "Buffer from pool is not properly aligned!";
 
-                return new Buffer(key, future, key.position, buffer.capacity(), key.blocking);
+                //Once the buffer has been filled we can give it an initial reference
+                future = rebufferer.readChunk(key.position, buffer);
+                return new Buffer(key, future, key.position, buffer.capacity());
             }
-            catch (Throwable t)
-            {
-                logger.error("Error loading buffer for {}: ", key, t);
-                throw t;
-            }
+        }
+        catch (Throwable t)
+        {
+            logger.error("Error loading buffer for {}: ", key, t);
+            if (future == null)
+                future = new CompletableFuture<>();
+
+            future.completeExceptionally(t);
+            return new Buffer(key, future, key.position, buffer.capacity());
         }
     }
 
@@ -322,7 +341,7 @@ public class ChunkCache
         {
             source = file;
             int chunkSize = file.chunkSize();
-            assert Integer.bitCount(chunkSize) == 1 : chunkSize;    // Must be power of two
+            assert Integer.bitCount(chunkSize) == 1 : chunkSize; // Must be power of two
             alignmentMask = -chunkSize;
         }
 
@@ -333,16 +352,22 @@ public class ChunkCache
             {
                 metrics.requests.mark();
                 long pageAlignedPos = position & alignmentMask;
-                Buffer buf;
-                Key pageKey = new Key(source, pageAlignedPos, true);
+                Buffer buf = null;
+                Key pageKey = new Key(source, pageAlignedPos);
 
                 Buffer page = null;
 
+                int spin = 0;
                 //There is a small window when a released buffer/invalidated chunk
                 //is still in the cache. In this case it will return null
                 //so we spin loop while waiting for the cache to re-populate
-                while(page == null || ((buf = page.reference()) == null))
+                while(page == null || ((buf = page.reference(ReaderConstraint.NONE)) == null))
+                {
                     page = cache.get(pageKey);
+
+                    if (page != null && buf == null && ++spin == 1024)
+                        logger.error("Spinning for {}", pageKey);
+                }
 
                 return buf;
             }
@@ -361,10 +386,10 @@ public class ChunkCache
 
             metrics.requests.mark();
             long pageAlignedPos = position & alignmentMask;
-            Key key = new Key(source, pageAlignedPos, false);
+            Key key = new Key(source, pageAlignedPos);
 
             Buffer buf = cache.getIfPresent(key);
-            if (buf != null && (buf = buf.reference()) != null)
+            if (buf != null && (buf = buf.reference(rc)) != null)
                 return buf;
 
             metrics.misses.mark();
@@ -379,7 +404,7 @@ public class ChunkCache
         public void invalidate(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, pageAlignedPos, true));
+            cache.invalidate(new Key(source, pageAlignedPos));
         }
 
         @Override

@@ -23,7 +23,9 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
 import org.apache.cassandra.schema.TableMetadata;
@@ -496,6 +498,7 @@ public class CreateTest extends CQLTester
         execute("DROP KEYSPACE testXYZ");
         assertInvalidThrow(ConfigurationException.class, "DROP KEYSPACE non_existing");
 
+        Uninterruptibles.sleepUninterruptibly(10, TimeUnit.SECONDS);
         execute("CREATE KEYSPACE testXYZ WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
 
         // clean-up

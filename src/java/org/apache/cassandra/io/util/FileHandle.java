@@ -82,6 +82,8 @@ public class FileHandle extends SharedCloseableImpl
     @Nullable
     private MmappedRegions regions;
 
+    private final boolean mmapped;
+
     private FileHandle(Cleanup cleanup,
                        AsynchronousChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
@@ -95,6 +97,7 @@ public class FileHandle extends SharedCloseableImpl
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
         this.onDiskLength = onDiskLength;
         this.regions = regions;
+        this.mmapped = regions != null;
     }
 
     private FileHandle(FileHandle copy)
@@ -105,6 +108,7 @@ public class FileHandle extends SharedCloseableImpl
         compressionMetadata = copy.compressionMetadata;
         onDiskLength = copy.onDiskLength;
         regions = copy.regions;
+        mmapped = copy.mmapped;
     }
 
     /**
@@ -113,6 +117,11 @@ public class FileHandle extends SharedCloseableImpl
     public String path()
     {
         return channel.filePath();
+    }
+
+    public boolean mmapped()
+    {
+        return mmapped;
     }
 
     public long dataLength()
@@ -389,7 +398,7 @@ public class FileHandle extends SharedCloseableImpl
         {
             if (channel == null)
             {
-                channel = new AsynchronousChannelProxy(path);
+                channel = new AsynchronousChannelProxy(path, mmapped);
             }
 
             AsynchronousChannelProxy channelCopy = channel.sharedCopy();
@@ -404,6 +413,24 @@ public class FileHandle extends SharedCloseableImpl
                 if (length == 0)
                 {
                     rebuffererFactory = new EmptyRebufferer(channelCopy);
+                }
+                else if (mmapped)
+                {
+                    try (ChannelProxy blockingChannel = channelCopy.getBlockingChannel())
+                    {
+                        if (compressed)
+                        {
+
+                            regions = MmappedRegions.map(blockingChannel, compressionMetadata);
+                            rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata,
+                                                                                           regions));
+                        }
+                        else
+                        {
+                            updateRegions(blockingChannel, length);
+                            rebuffererFactory = new MmapRebufferer(channelCopy, length, regions.sharedCopy());
+                        }
+                    }
                 }
                 else
                 {

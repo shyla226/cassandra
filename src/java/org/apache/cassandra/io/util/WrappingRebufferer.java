@@ -34,9 +34,10 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     @Override
     public BufferHolder rebuffer(long position)
     {
-        bufferHolder = source.rebuffer(position);
+        bufferHolder = rebuffer(position, ReaderConstraint.NONE);
         buffer = bufferHolder.buffer();
         offset = bufferHolder.offset();
+
         return this;
     }
 

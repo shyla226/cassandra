@@ -69,6 +69,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.mos.MemoryLockedBuffer;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
@@ -753,28 +754,30 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected Builder indexFileHandleBuilder(Component component)
     {
-        return indexFileHandleBuilder(descriptor, component);
+        return indexFileHandleBuilder(descriptor, metadata(), component);
     }
 
-    public static Builder indexFileHandleBuilder(Descriptor descriptor, Component component)
+    public static Builder indexFileHandleBuilder(Descriptor descriptor, TableMetadata metadata, Component component)
     {
         return new FileHandle.Builder(descriptor.filenameFor(component))
                    .withChunkCache(ChunkCache.instance)
+                   .mmapped(DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard && metadata.params.compaction.klass().equals(MemoryOnlyStrategy.class))
                    .bufferSize(PageAware.PAGE_SIZE)
                    .withChunkCache(ChunkCache.instance);
     }
 
-    public static Builder dataFileHandleBuilder(Descriptor descriptor, boolean compression)
+    public static Builder dataFileHandleBuilder(Descriptor descriptor, TableMetadata metadata, boolean compression)
     {
         return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
                    .compressed(compression)
+                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap && metadata.params.compaction.klass().equals(MemoryOnlyStrategy.class))
                    .withChunkCache(ChunkCache.instance);
     }
 
     Builder dataFileHandleBuilder()
     {
         int dataBufferSize = optimizationStrategy.bufferSize(sstableMetadata.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-        return dataFileHandleBuilder(descriptor, compression)
+        return dataFileHandleBuilder(descriptor, metadata(), compression)
                    .bufferSize(dataBufferSize);
     }
 

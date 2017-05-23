@@ -25,6 +25,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
@@ -41,6 +42,18 @@ class SSTableReversedIterator extends AbstractSSTableIterator
      * The index of the slice being processed.
      */
     private int slice;
+
+    public SSTableReversedIterator(TrieIndexSSTableReader sstable,
+                                   FileDataInput file,
+                                   DecoratedKey key,
+                                   RowIndexEntry indexEntry,
+                                   Slices slices,
+                                   ColumnFilter columns,
+                                   DeletionTime partitionLevelDeletionTime,
+                                   Row staticRow)
+    {
+        super(sstable, file, indexEntry, key, slices, columns, partitionLevelDeletionTime, staticRow);
+    }
 
     public SSTableReversedIterator(TrieIndexSSTableReader sstable,
                                    FileDataInput file,
