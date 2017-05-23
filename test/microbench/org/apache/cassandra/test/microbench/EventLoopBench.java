@@ -31,7 +31,10 @@ import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
 import org.apache.cassandra.concurrent.EpollTPCEventLoopGroup;
+import org.apache.cassandra.concurrent.EventLoopBasedScheduler;
+import org.apache.cassandra.concurrent.TPCEventLoopGroup;
 import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -78,6 +81,8 @@ public class EventLoopBench {
         @Setup
         public void setup() throws InterruptedException
         {
+            DatabaseDescriptor.daemonInitialization();
+
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
@@ -88,8 +93,8 @@ public class EventLoopBench {
 
             ((EpollEventLoopGroup)loops).setIoRatio(100);
 
-            TPCScheduler scheduler1 = TPCScheduler.create((EventLoop)loops.next());
-            TPCScheduler scheduler2 = TPCScheduler.create((EventLoop)loops.next());
+            EventLoopBasedScheduler<?> scheduler1 = new EventLoopBasedScheduler<>((EventLoop)loops.next());
+            EventLoopBasedScheduler<?> scheduler2 = new EventLoopBasedScheduler<>((EventLoop)loops.next());
 
             //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
             rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
@@ -107,7 +112,7 @@ public class EventLoopBench {
         @Param({"1000000"})
         public int count;
 
-        private MultithreadEventExecutorGroup loops;
+        private TPCEventLoopGroup loops;
 
         Observable<Integer> rx1;
         Observable<Integer> rx2;
@@ -116,17 +121,19 @@ public class EventLoopBench {
         @Setup
         public void setup() throws InterruptedException
         {
+            DatabaseDescriptor.daemonInitialization();
+            
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
             if (!Epoll.isAvailable())
                 throw new RuntimeException("Epoll Not available");
 
-            loops = new EpollTPCEventLoopGroup(2, new DefaultThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
+            loops = new EpollTPCEventLoopGroup(2);
 
 
-            TPCScheduler scheduler1 = TPCScheduler.create((EventLoop)loops.next());
-            TPCScheduler scheduler2 = TPCScheduler.create((EventLoop)loops.next());
+            TPCScheduler scheduler1 = new TPCScheduler(loops.eventLoops().get(0));
+            TPCScheduler scheduler2 = new TPCScheduler(loops.eventLoops().get(1));
 
             //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
             rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
