@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 
@@ -230,7 +231,7 @@ public class Mutation implements IMutation, Scheduleable
 
     public TPCScheduler getScheduler()
     {
-        return TPCScheduler.getForKey(getKeyspaceName(), key());
+        return TPC.getForKey(getKeyspaceName(), key());
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)

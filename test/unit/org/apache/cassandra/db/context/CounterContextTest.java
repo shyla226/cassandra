@@ -55,7 +55,6 @@ public class CounterContextTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Test

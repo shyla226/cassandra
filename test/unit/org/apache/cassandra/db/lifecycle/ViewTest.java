@@ -53,7 +53,6 @@ public class ViewTest
     public static void setUp()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
         MockSchema.cleanup();
     }
 

@@ -22,14 +22,15 @@ import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import io.netty.channel.EventLoop;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.MultithreadEventExecutorGroup;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.disposables.Disposable;
-import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
+import org.apache.cassandra.concurrent.EpollTPCEventLoopGroup;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -80,29 +81,18 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loops = new EpollEventLoopGroup(2, new TPCScheduler.NettyRxThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
             if (!Epoll.isAvailable())
                 throw new RuntimeException("Epoll Not available");
 
+            loops = new EpollEventLoopGroup(2, new DefaultThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
+
             ((EpollEventLoopGroup)loops).setIoRatio(100);
 
-            EventExecutor loop1 = loops.next();
-            CountDownLatch latch = new CountDownLatch(2);
-            loop1.submit(() -> {
-                TPCScheduler.register(loop1, 0);
-                latch.countDown();
-            });
-
-            EventExecutor loop2 = loops.next();
-            loop2.submit(() -> {
-                TPCScheduler.register(loop2, 1);
-                latch.countDown();
-            });
-
-            latch.await();
+            TPCScheduler scheduler1 = TPCScheduler.create((EventLoop)loops.next());
+            TPCScheduler scheduler2 = TPCScheduler.create((EventLoop)loops.next());
 
             //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(TPCScheduler.getForCore(0)).observeOn(TPCScheduler.getForCore(1));
+            rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
         }
 
         @TearDown
@@ -129,27 +119,17 @@ public class EventLoopBench {
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
-            loops = new MonitoredEpollEventLoopGroup(2);
             if (!Epoll.isAvailable())
                 throw new RuntimeException("Epoll Not available");
 
-            EventExecutor loop1 = loops.next();
-            CountDownLatch latch = new CountDownLatch(2);
-            loop1.submit(() -> {
-                TPCScheduler.register(loop1, 0);
-                latch.countDown();
-            });
+            loops = new EpollTPCEventLoopGroup(2, new DefaultThreadFactory("eventLoopBench", Thread.MAX_PRIORITY));
 
-            EventExecutor loop2 = loops.next();
-            loop2.submit(() -> {
-                TPCScheduler.register(loop2, 1);
-                latch.countDown();
-            });
 
-            latch.await();
+            TPCScheduler scheduler1 = TPCScheduler.create((EventLoop)loops.next());
+            TPCScheduler scheduler2 = TPCScheduler.create((EventLoop)loops.next());
 
             //rx1 = Observable.fromArray(arr).subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation());
-            rx2 = Observable.fromArray(arr).subscribeOn(TPCScheduler.getForCore(0)).observeOn(TPCScheduler.getForCore(1));
+            rx2 = Observable.fromArray(arr).subscribeOn(scheduler1).observeOn(scheduler2);
         }
 
         @TearDown

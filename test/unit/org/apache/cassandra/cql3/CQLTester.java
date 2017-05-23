@@ -43,6 +43,7 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
@@ -227,8 +228,8 @@ public abstract class CQLTester
 
         try
         {
-            //Required early for TPC
-            TPCScheduler.register();
+            // Not really required, but doesn't hurt either
+            TPC.ensureInitialized();
 
             // Cleanup first
             try

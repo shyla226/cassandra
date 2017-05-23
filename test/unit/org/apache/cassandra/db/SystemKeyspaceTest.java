@@ -44,7 +44,6 @@ public class SystemKeyspaceTest
     public static void prepSnapshotTracker()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
 
         if (FBUtilities.isWindows)
             WindowsFailedSnapshotTracker.deleteOldSnapshots();

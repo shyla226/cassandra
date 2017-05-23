@@ -18,7 +18,7 @@
  */
 package org.apache.cassandra.tools;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -50,7 +50,7 @@ public class StandaloneSSTableUtil
         {
             // load keyspace descriptions.
             Util.initDatabaseDescriptor();
-            TPCScheduler.register();
+            TPC.ensureInitialized();
 
             Schema.instance.loadFromDisk(false);
 

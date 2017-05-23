@@ -24,6 +24,12 @@ cluster_name: 'Test Cluster'
 # multiple tokens per node, see http://wiki.apache.org/cassandra/Operations
 num_tokens: 1
 
+# Number of cores used by the internal Thread-Per-Core architecture (TPC). This corresponds to the
+# number of event loops that will be created internally.
+# If unset or commented (the default), this will default to the number of available processors on the machine. That
+# generally yield the best performance and most users should rely on it.
+#tpc_cores:
+
 # Triggers automatic allocation of num_tokens tokens for this node. The allocation
 # algorithm attempts to choose tokens in a way that optimizes replicated load over
 # the nodes in the datacenter for the specified DC-level replication factor.

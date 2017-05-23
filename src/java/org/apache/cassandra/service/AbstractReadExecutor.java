@@ -31,6 +31,7 @@ import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -266,13 +267,13 @@ public abstract class AbstractReadExecutor
                 if (!shouldSpeculate() || !logFailedSpeculation)
                     return Completable.complete();
 
-                TPCScheduler.instance().scheduleDirect(() ->
-                                                           {
-                                                               if (!handler.hasValue())
-                                                               {
-                                                                   cfs.metric.speculativeInsufficientReplicas.inc();
-                                                               }
-                                                           }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
+                command.getScheduler().scheduleDirect(() ->
+                                                      {
+                                                          if (!handler.hasValue())
+                                                          {
+                                                              cfs.metric.speculativeInsufficientReplicas.inc();
+                                                          }
+                                                      }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
 
                 return CompletableObserver::onComplete;
             });
@@ -334,7 +335,7 @@ public abstract class AbstractReadExecutor
                 if (!shouldSpeculate())
                     return Completable.complete();
 
-                TPCScheduler.instance().scheduleDirect(() -> {
+                command.getScheduler().scheduleDirect(() -> {
                        if (!handler.hasValue())
                        {
                            //Handle speculation stats first in case the callback fires immediately

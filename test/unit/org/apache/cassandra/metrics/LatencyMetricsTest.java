@@ -32,7 +32,6 @@ public class LatencyMetricsTest
     public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     /**

@@ -32,6 +32,7 @@ import com.google.common.util.concurrent.Striped;
 import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -140,8 +141,9 @@ public class CounterMutation implements IMutation, Scheduleable
                                     if (!success)
                                     {
                                         Tracing.trace("Failed to acquire counter locks, scheduling retry");
+                                        // TODO (Sylvain): shouldn't we use 'scheduler' below?
                                         return Single.defer(() -> this.applyCounterMutation(startTime))
-                                                     .subscribeOn(TPCScheduler.instance());
+                                                     .subscribeOn(TPC.bestTPCScheduler());
                                     }
 
                                     // TODO this will need to become async to handle disk reads

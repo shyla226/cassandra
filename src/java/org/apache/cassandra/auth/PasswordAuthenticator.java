@@ -30,7 +30,7 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -292,7 +292,7 @@ public class PasswordAuthenticator implements IAuthenticator
             // would result in the cache logging errors and incrementing error statistics and
             // there also seems to be a problem somewhere in caffeine in that it will not attempt
             // to reload after an exception
-            String ret = get(roleName, !TPCScheduler.isTPCThread());
+            String ret = get(roleName, !TPC.isTPCThread());
             if (ret == null)
                 throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve credentials for %s, would block TPC thread", roleName));
             return ret;

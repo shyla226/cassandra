@@ -48,7 +48,6 @@ public class FailureDetectorTest
         System.setProperty("cassandra.max_local_pause_in_ms", "20000");
 
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Test

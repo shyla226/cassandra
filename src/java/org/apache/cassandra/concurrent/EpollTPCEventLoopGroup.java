@@ -20,15 +20,17 @@ package org.apache.cassandra.concurrent;
 
 
 import java.util.ArrayDeque;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
-import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
@@ -37,11 +39,8 @@ import io.netty.channel.SelectStrategy;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.epoll.Native;
 import io.netty.util.concurrent.AbstractScheduledEventExecutor;
-import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.RejectedExecutionHandlers;
 
-import io.netty.util.internal.logging.InternalLogger;
-import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
@@ -51,105 +50,48 @@ import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
 
 /**
- * Groups our TPC event loops.
- * <p>
- * This is mainly a container for our per-core event loop threads, implemented by {@link SingleCoreEventLoop}, that are
- * in charge of executing all-the-things[1]. In particular, the event loops execute both our internal Apollo tasks as
- * well as Netty's tasks, which is why it extends Netty's {@link MultithreadEventLoopGroup}.
- * <p>
- * When an event loop has no work to do for some time, it will eventually park itself (see {@link SingleCoreEventLoop}
- * for details) and so the group uses a monitoring thread that continuously check if a parked event loop needs to be
- * un-parked.
- *
- * [1]: not exactly everything yet, but they should  eventually.
+ * A TPC event loop group that uses EPoll for I/O tasks.
  */
-public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
+public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements TPCEventLoopGroup
 {
     private static final String DEBUG_RUNNING_TIME_NAME = "cassandra.debug_tpc_task_running_time_seconds";
     private static final long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
                                                                                       TimeUnit.SECONDS);
 
-    private static final InternalLogger logger = InternalLoggerFactory.getInstance(MonitoredEpollEventLoopGroup.class);
+    private static final Logger logger = LoggerFactory.getLogger(EpollTPCEventLoopGroup.class);
 
     @Contended
-    private final SingleCoreEventLoop[] eventLoops;
+    private final ImmutableList<SingleCoreEventLoop> eventLoops;
 
     private final Thread monitorThread;
 
     private volatile boolean shutdown;
 
     /**
-     * Creates new a {@code MonitoredEpollEventLoopGroup} using the provided number of event loops.
+     * Creates new a {@code EpollTPCEventLoopGroup} using the provided number of event loops.
      *
      * @param nThreads the number of event loops to use (not that every loop is exactly one thread, but the group also
      *                 use an additional thread for monitoring).
      */
-    public MonitoredEpollEventLoopGroup(int nThreads)
+    public EpollTPCEventLoopGroup(int nThreads)
     {
-        this(nThreads, new TPCScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
-    }
+        super(nThreads, TPCThread.threadFactory());
 
-    /**
-     * This constructor is called by jmh benchmarks, when using a custom executor.
-     * It should only be called for testing, not production code, since it wires the NettyRxScheduler
-     * as well, but unlike {@link org.apache.cassandra.service.CassandraDaemon#initializeTPC()},
-     * it will not set any CPU affinity or epoll IO ratio.
-     *
-     * @param nThreads - the number of threads
-     * @param name - the thread name (unused)
-     */
-    @VisibleForTesting
-    public MonitoredEpollEventLoopGroup(int nThreads, String name)
-    {
-        this(nThreads, new TPCScheduler.NettyRxThreadFactory(MonitoredEpollEventLoopGroup.class, Thread.MAX_PRIORITY));
-
-        CountDownLatch ready = new CountDownLatch(eventLoops.length);
-
-        for (int i = 0; i < eventLoops.length; i++)
-        {
-            final int cpuId = i;
-            EventLoop loop = eventLoops[i];
-            loop.schedule(() -> {
-                try
-                {
-                    TPCScheduler.register(loop, cpuId);
-                }
-                catch (Exception ex)
-                {
-                    logger.error("Failed to initialize monitored epoll event loop group due to exception", ex);
-                }
-                finally
-                {
-                    ready.countDown();
-                }
-            }, 0, TimeUnit.SECONDS);
-        }
-
-        Uninterruptibles.awaitUninterruptibly(ready);
-    }
-
-    private MonitoredEpollEventLoopGroup(int nThreads, ThreadFactory threadFactory)
-    {
-        // The 1st threadFactory is for the super class ctor, the 2nd one is so it gets passed to newChild()
-        super(nThreads, threadFactory, threadFactory);
-
-        this.eventLoops = extractEventLoopArray();
+        this.eventLoops = ImmutableList.copyOf(Iterables.transform(this, e -> (SingleCoreEventLoop) e));
 
         monitorThread = new Thread(() -> {
-            int length = eventLoops.length;
-
             while (!shutdown)
             {
                 long nanoTime = SingleCoreEventLoop.nanoTime();
-                for (int i = 0; i < length; i++)
-                    eventLoops[i].checkQueues(nanoTime);
+                for (SingleCoreEventLoop loop : eventLoops)
+                    loop.checkQueues(nanoTime);
 
                 LockSupport.parkNanos(1);
                 ApproximateTime.tick();
             }
 
-            for (int i = 0; i < length; i++)
-                eventLoops[i].unpark();
+            for (SingleCoreEventLoop loop : eventLoops)
+                loop.unpark();
         });
 
         monitorThread.setName("CoreThreadMonitor");
@@ -158,13 +100,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         monitorThread.start();
     }
 
-    private SingleCoreEventLoop[] extractEventLoopArray()
+    public ImmutableList<? extends TPCEventLoop> eventLoops()
     {
-        SingleCoreEventLoop[] loops = new SingleCoreEventLoop[executorCount()];
-        int i = 0;
-        for (EventExecutor eventExecutor : this)
-            loops[i++] = (SingleCoreEventLoop)eventExecutor;
-        return loops;
+        return eventLoops;
     }
 
     @Override
@@ -190,29 +128,11 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
     protected EventLoop newChild(Executor executor, Object... args) throws Exception
     {
-        assert args.length >= 1 : args.length;
-        return new SingleCoreEventLoop(this, new MonitorableExecutor((ThreadFactory) args[0]));
+        assert executor instanceof TPCThread.TPCThreadsCreator;
+        return new SingleCoreEventLoop(this, (TPCThread.TPCThreadsCreator)executor);
     }
 
-    private static class MonitorableExecutor implements Executor
-    {
-        private final ThreadFactory threadFactory;
-        Thread thread;
-
-        private MonitorableExecutor(ThreadFactory threadFactory)
-        {
-            this.threadFactory = threadFactory;
-        }
-
-        public void execute(Runnable command)
-        {
-            thread = threadFactory.newThread(command);
-            thread.setDaemon(true);
-            thread.start();
-        }
-    }
-
-    private static class SingleCoreEventLoop extends EpollEventLoop
+    private static class SingleCoreEventLoop extends EpollEventLoop implements TPCEventLoop
     {
         private enum CoreState
         {
@@ -220,8 +140,8 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             WORKING
         }
 
-        private final MonitoredEpollEventLoopGroup parent;
-        private final Thread thread;
+        private final EpollTPCEventLoopGroup parent;
+        private final TPCThread thread;
 
         private static final int busyExtraSpins =  1024 * 128;
         private static final int yieldExtraSpins = 1024 * 8;
@@ -241,7 +161,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         private volatile long lastDrainTime;
 
-        private SingleCoreEventLoop(MonitoredEpollEventLoopGroup parent, MonitorableExecutor executor)
+        private SingleCoreEventLoop(EpollTPCEventLoopGroup parent, TPCThread.TPCThreadsCreator executor)
         {
             super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject());
 
@@ -252,11 +172,23 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             this.state = CoreState.WORKING;
             this.lastDrainTime = -1;
 
-            // Start the loop which sets the Thread
+            // Start the loop, which forces the creation of the Thread using 'executor' so we can get a reference to it
+            // easily.
             Futures.getUnchecked(submit(() -> {}));
 
-            this.thread = executor.thread;
+            this.thread = executor.lastCreatedThread();
             assert this.thread != null;
+        }
+
+        public TPCThread thread()
+        {
+            return thread;
+        }
+
+        @Override
+        public TPCEventLoopGroup parent()
+        {
+            return parent;
         }
 
         /**
@@ -346,6 +278,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Override
         protected void addTask(Runnable task)
         {
+
             Thread currentThread = Thread.currentThread();
 
             // Side-note: 'thread' will be null the very first time this is called for the empty task submitted in the
@@ -392,9 +325,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
                         case SelectStrategy.SELECT:
                             t = this.epollWait(WAKEN_UP_UPDATER.getAndSet(this, 0) == 1);
                             if (this.wakenUp == 1)
-                            {
                                 Native.eventFdWrite(this.eventFd.intValue(), 1L);
-                            }
                         default:
                     }
                 }

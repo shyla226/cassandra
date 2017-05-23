@@ -47,7 +47,6 @@ public class OutboundTcpConnectionTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
     
     /**

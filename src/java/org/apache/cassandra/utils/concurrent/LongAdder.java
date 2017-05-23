@@ -20,7 +20,7 @@ package org.apache.cassandra.utils.concurrent;
 
 import java.util.Arrays;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import sun.misc.Contended;
 
@@ -90,7 +90,7 @@ public class LongAdder
 
     public LongAdder()
     {
-        this.numCores = TPCScheduler.getNumCores();
+        this.numCores = TPC.getNumCores();
         this.values = new Cell[numCores + 1];
 
         // The last value is shared by multiple threads and so it is
@@ -100,7 +100,7 @@ public class LongAdder
 
     public void add(long x)
     {
-       int coreId = TPCScheduler.getCoreId();
+       int coreId = TPC.getCoreId();
 
         // allocate lazily to conserve space and to make sure they
         // are not on the same cache line, even with the @contended
@@ -108,7 +108,7 @@ public class LongAdder
         // when the array is created
         if (values[coreId] == null)
         {
-            assert TPCScheduler.isValidCoreId(coreId);
+            assert TPC.isValidCoreId(coreId);
             values[coreId] = new Cell(0L);
         }
 

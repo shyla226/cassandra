@@ -2353,4 +2353,9 @@ public class DatabaseDescriptor
     {
         conf.metrics_histogram_update_interval_millis = interval;
     }
+
+    public static int getTPCCores()
+    {
+        return conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
+    }
 }

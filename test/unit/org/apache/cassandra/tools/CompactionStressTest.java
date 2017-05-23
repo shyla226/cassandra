@@ -35,7 +35,6 @@ public class CompactionStressTest extends ToolsTester
     public static void setUp()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Test

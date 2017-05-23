@@ -54,7 +54,6 @@ public class LongStreamingTest
     {
         DatabaseDescriptor.daemonInitialization();
         StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-        TPCScheduler.register();
 
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
 

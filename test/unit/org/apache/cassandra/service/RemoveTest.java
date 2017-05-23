@@ -62,7 +62,6 @@ public class RemoveTest
     public static void setupClass() throws ConfigurationException
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Before

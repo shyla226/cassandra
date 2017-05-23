@@ -36,7 +36,7 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -726,7 +726,7 @@ public final class SystemKeyspace
     public static synchronized void updateTokenBoundaries()
     {
         // TODO technically this needs to be per-keyspace; just use a distributed KS for now
-        List<Token> ranges = TPCScheduler.getRangeList(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, false);
+        List<Token> ranges = TPC.getRangeList(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, false);
         String req = "INSERT INTO system.%s (key, token_boundaries) VALUES ('%s', ?)";
         logger.info("LIST = " + tokensAsList(ranges));
         executeInternal(String.format(req, LOCAL, LOCAL), tokensAsList(ranges));
