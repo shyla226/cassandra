@@ -181,11 +181,11 @@ public class ChunkCache
          */
         public void onReadyHandler(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
         {
-            if (futureBuffer.isDone() && !futureBuffer.isCompletedExceptionally())
-            {
-                onReady.run();
-            }
-            else
+            //if (futureBuffer.isDone() && !futureBuffer.isCompletedExceptionally())
+            //{
+            //    onReady.run();
+            //}
+            //else
             {
                 onSchedule.run();
                 futureBuffer.thenRunAsync(() -> onReady.run(), executor)
@@ -229,7 +229,7 @@ public class ChunkCache
     {
         cache = Caffeine.newBuilder()
                 .maximumWeight(cacheSize)
-                .executor(TPCScheduler.instance().getWrappedExecutor())
+                .executor(TPCScheduler.getWrappedExecutor())
                 .weigher((key, buffer) -> ((Buffer) buffer).capacity())
                 .removalListener(this)
                 .build(this);

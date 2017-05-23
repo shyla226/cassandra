@@ -447,6 +447,7 @@ public class FileHandle extends SharedCloseableImpl
         {
             if (chunkCache != null)
                 return chunkCache.maybeWrap(reader);
+
             return reader;
         }
 

@@ -267,7 +267,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return build(iterator, initialRowCapacity, true);
     }
 
-    protected static Holder build(FlowableUnfilteredPartition fup, List<Unfiltered> materializedRows)
+    public static Holder build(FlowableUnfilteredPartition fup, List<Unfiltered> materializedRows)
     {
         TableMetadata metadata = fup.header.metadata;
         RegularAndStaticColumns columns = fup.header.columns;

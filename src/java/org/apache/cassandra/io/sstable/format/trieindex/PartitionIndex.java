@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
@@ -182,7 +183,6 @@ public class PartitionIndex implements Closeable
             if (preload)
             {
                 assert rc != Rebufferer.ReaderConstraint.IN_CACHE_ONLY;
-                logger.info("Walking {}", fh.path());
                 int csum = 0;
                 // force a read of all the pages of the index
                 for (long pos = 0; pos < fh.dataLength(); pos += PageAware.PAGE_SIZE)

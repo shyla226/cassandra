@@ -786,6 +786,11 @@ public abstract class CsFlow<T>
         return result;
     }
 
+    public CsFlow<T> last()
+    {
+        return reduceWith(() -> null, (prev, next) -> next);
+    }
+
     /**
      * Reduce the flow, blocking until the operation completes.
      *

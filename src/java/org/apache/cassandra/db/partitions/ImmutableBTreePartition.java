@@ -123,6 +123,11 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
         return new ImmutableBTreePartition(iterator.metadata(), iterator.partitionKey(), build(iterator, initialRowCapacity, ordered));
     }
 
+    public static ImmutableBTreePartition create(FlowableUnfilteredPartition fup, List<Unfiltered> materializedRows)
+    {
+        return new ImmutableBTreePartition(fup.header.metadata, fup.header.partitionKey, build(fup, materializedRows));
+    }
+
     /**
      * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
      *

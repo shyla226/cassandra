@@ -304,7 +304,13 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
             ((TPCThread)cpuThread).setCpuId(cpuId);
     }
 
-    public Executor getWrappedExecutor()
+    /**
+     * Creates an executor that tries to stay on the local thread.
+     * Used by ChunkCache
+     *
+     * @return
+     */
+    public static Executor getWrappedExecutor()
     {
         return command ->
         {

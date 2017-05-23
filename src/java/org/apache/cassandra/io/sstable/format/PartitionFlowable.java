@@ -47,6 +47,7 @@ import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
 
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSED;
+import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSING;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.DONE_WAITING;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WORKING;
 
@@ -208,7 +209,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
 
         public void close()
         {
-
             //FIXME PartitionFlowableBase.unused calls subscribe
             //assert state != CLOSED : "Already closed";
             if (state == CLOSED)

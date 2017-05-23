@@ -49,7 +49,7 @@ public interface Rebufferer extends ReaderFileProxy
     default BufferHolder rebuffer(long position, ReaderConstraint constraint)
     {
         if (constraint == ReaderConstraint.IN_CACHE_ONLY)
-            throw new NotInCacheException(null);
+            throw new IllegalStateException("In cache only constraint requires the cache rebufferer");
 
         return rebuffer(position);
     }

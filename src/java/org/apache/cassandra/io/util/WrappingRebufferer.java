@@ -41,6 +41,16 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
+    public BufferHolder rebuffer(long position, ReaderConstraint constraint)
+    {
+        bufferHolder = source.rebuffer(position, constraint);
+        buffer = bufferHolder.buffer();
+        offset = bufferHolder.offset();
+
+        return this;
+    }
+
+    @Override
     public AsynchronousChannelProxy channel()
     {
         return source.channel();
