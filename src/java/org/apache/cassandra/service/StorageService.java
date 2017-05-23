@@ -27,6 +27,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
@@ -3226,7 +3227,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             parallelism = RepairParallelism.PARALLEL;
         }
 
-        RepairOption options = new RepairOption(parallelism, primaryRange, !fullRepair, false, 1, Collections.<Range<Token>>emptyList(), false);
+        RepairOption options = new RepairOption(parallelism, primaryRange, !fullRepair, false,1, Collections.<Range<Token>>emptyList(),
+                                                false, false);
         if (dataCenters != null)
         {
             options.getDataCenters().addAll(dataCenters);
@@ -3318,7 +3320,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         "The repair will occur but without anti-compaction.");
         Collection<Range<Token>> repairingRange = createRepairRangeFrom(beginToken, endToken);
 
-        RepairOption options = new RepairOption(parallelism, false, !fullRepair, false, 1, repairingRange, true);
+        RepairOption options = new RepairOption(parallelism, false, !fullRepair, false, 1,
+                                                repairingRange, true, false);
         if (dataCenters != null)
         {
             options.getDataCenters().addAll(dataCenters);
@@ -3405,9 +3408,41 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (options.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
 
+        if (options.isIncremental() && shouldFallBackToFullRepair(keyspace, options.getColumnFamilies().toArray(new String[options.getColumnFamilies().size()])))
+        {
+            logger.info("Incremental repair is not supported on tables{} from keyspace {} with materialized views. " +
+                        "Running full repairs instead.", options.getColumnFamilies().isEmpty()? "" : " " + options.getColumnFamilies(), keyspace);
+            options.setIncremental(false);
+        }
+
         int cmd = nextRepairCommand.incrementAndGet();
         new Thread(NamedThreadFactory.threadLocalDeallocator(createRepairTask(cmd, keyspace, options, legacy))).start();
         return cmd;
+    }
+
+    protected boolean shouldFallBackToFullRepair(String keyspace, String[] tables)
+    {
+        try
+        {
+            Set<ColumnFamilyStore> tablesToRepair = Sets.newHashSet(getValidColumnFamilies(false, false, keyspace, tables));
+            Set<String> baseOrViewsToRepair = tablesToRepair.stream().filter(c -> c.hasViews() || c.metadata.isView()).map(c -> c.name).collect(Collectors.toSet());
+
+            if (baseOrViewsToRepair.isEmpty())
+                return false;
+
+            if (tablesToRepair.size() == baseOrViewsToRepair.size())
+                return true;
+
+
+            throw new IllegalArgumentException(String.format("Cannot run a single repair command on both MV and non-MV tables (%s) from keyspace %s " +
+                                                             "simultaneously because incremental repair is not supported on tables with materialized views: %s. " +
+                                                             "Please execute a separate command for repairing tables with and without MVs.", tablesToRepair,
+                                                             keyspace, baseOrViewsToRepair));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Could not fetch tables for repair.", e);
+        }
     }
 
     private FutureTask<Object> createRepairTask(final int cmd, final String keyspace, final RepairOption options, boolean legacy)
@@ -4589,6 +4624,22 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public List<String> getNonLocalStrategyKeyspaces()
     {
         return Collections.unmodifiableList(Schema.instance.getNonLocalStrategyKeyspaces());
+    }
+
+    public Map<String, Map<String, String>> getTableInfos(String keyspace, String... tables)
+    {
+        Map<String, Map<String, String>> tableInfos = new HashMap<>();
+
+        try
+        {
+            getValidColumnFamilies(false, false, keyspace, tables).forEach(cfs -> tableInfos.put(cfs.name, cfs.getTableInfo().asMap()));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(String.format("Could not retrieve info for keyspace %s and table(s) %s.", keyspace, tables), e);
+        }
+
+        return tableInfos;
     }
 
     public void updateSnitch(String epSnitchClassName, Boolean dynamic, Integer dynamicUpdateInterval, Integer dynamicResetInterval, Double dynamicBadnessThreshold) throws ClassNotFoundException

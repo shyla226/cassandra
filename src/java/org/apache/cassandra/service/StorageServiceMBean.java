@@ -449,6 +449,15 @@ public interface StorageServiceMBean extends NotificationEmitter
     public List<String> getNonLocalStrategyKeyspaces();
 
     /**
+     * Retrieves information about a subset or all tables of a keyspace
+     * @param keyspace the keyspace to retrieve table info from
+     * @param tables an optional list of tables to retrieve info from. if these parameter is not passed, information
+     *               of all tables from the keyspace will be retrieved
+     * @return a map from the table name to its {@link TableInfo} object represented as a {@link Map<String, String>}
+     */
+    public Map<String, Map<String, String>> getTableInfos(String keyspace, String... tables);
+
+    /**
      * Change endpointsnitch class and dynamic-ness (and dynamic attributes) at runtime
      * @param epSnitchClassName        the canonical path name for a class implementing IEndpointSnitch
      * @param dynamic                  boolean that decides whether dynamicsnitch is used or not
