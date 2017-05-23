@@ -868,12 +868,15 @@ public class DatabaseDescriptor
     // definitely not safe for tools + clients - implicitly instantiates StorageService
     public static void applySnitch()
     {
+        if (snitch == null)
+        { // if set by tests, don't change it
         /* end point snitch */
-        if (conf.endpoint_snitch == null)
-        {
-            throw new ConfigurationException("Missing endpoint_snitch directive", false);
+            if (conf.endpoint_snitch == null)
+            {
+                throw new ConfigurationException("Missing endpoint_snitch directive", false);
+            }
+            snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
         }
-        snitch = createEndpointSnitch(conf.dynamic_snitch, conf.endpoint_snitch);
         EndpointSnitchInfo.create();
 
         localDC = snitch.getDatacenter(FBUtilities.getBroadcastAddress());
@@ -895,18 +898,21 @@ public class DatabaseDescriptor
     // definitely not safe for tools + clients - implicitly instantiates schema
     public static void applyPartitioner()
     {
-        /* Hashing strategy */
-        if (conf.partitioner == null)
-        {
-            throw new ConfigurationException("Missing directive: partitioner", false);
-        }
-        try
-        {
-            partitioner = FBUtilities.newPartitioner(System.getProperty(Config.PROPERTY_PREFIX + "partitioner", conf.partitioner));
-        }
-        catch (Exception e)
-        {
-            throw new ConfigurationException("Invalid partitioner class " + conf.partitioner, false);
+        if (partitioner == null)
+        { // only set partitioner if tests haven't already changed
+            /* Hashing strategy */
+            if (conf.partitioner == null)
+            {
+                throw new ConfigurationException("Missing directive: partitioner", false);
+            }
+            try
+            {
+                partitioner = FBUtilities.newPartitioner(System.getProperty(Config.PROPERTY_PREFIX + "partitioner", conf.partitioner));
+            }
+            catch (Exception e)
+            {
+                throw new ConfigurationException("Invalid partitioner class " + conf.partitioner, false);
+            }
         }
 
         paritionerName = partitioner.getClass().getCanonicalName();
@@ -2171,6 +2177,16 @@ public class DatabaseDescriptor
         conf.otc_coalescing_enough_coalesced_messages = otc_coalescing_enough_coalesced_messages;
     }
 
+    public static int getOtcBacklogExpirationInterval()
+    {
+        return conf.otc_backlog_expiration_interval_ms;
+    }
+
+    public static void setOtcBacklogExpirationInterval(int intervalInMillis)
+    {
+        conf.otc_backlog_expiration_interval_ms = intervalInMillis;
+    }
+ 
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;

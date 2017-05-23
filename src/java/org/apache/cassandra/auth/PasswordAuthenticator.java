@@ -22,7 +22,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -31,6 +30,8 @@ import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -40,7 +41,6 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -85,48 +85,34 @@ public class PasswordAuthenticator implements IAuthenticator
 
     private AuthenticatedUser authenticate(String username, String password) throws AuthenticationException
     {
-        try
-        {
-            String hash = cache.get(username);
-            if (!BCrypt.checkpw(password, hash))
-                throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
+        String hash = cache.getCredentials(username);
+        if (!BCrypt.checkpw(password, hash))
+            throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 
-            return new AuthenticatedUser(username);
-        }
-        catch (ExecutionException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return new AuthenticatedUser(username);
     }
 
     private String queryHashedPassword(String username)
     {
-        try
-        {
-            SelectStatement authenticationStatement = authenticationStatement();
+        SelectStatement authenticationStatement = authenticationStatement();
 
-            ResultMessage.Rows rows = (ResultMessage.Rows)
-                authenticationStatement.execute(QueryState.forInternalCalls(),
-                                                QueryOptions.forInternalCalls(consistencyForRole(username),
-                                                                              Lists.newArrayList(ByteBufferUtil.bytes(username))),
-                                                System.nanoTime()).blockingGet();
+        ResultMessage.Rows rows = (ResultMessage.Rows)
+        authenticationStatement.execute(QueryState.forInternalCalls(),
+                                        QueryOptions.forInternalCalls(consistencyForRole(username),
+                                                                      Lists.newArrayList(ByteBufferUtil.bytes(username))),
+                                        System.nanoTime()).blockingGet();
 
-            // If either a non-existent role name was supplied, or no credentials
-            // were found for that role we don't want to cache the result so we throw
-            // a specific, but unchecked, exception to keep LoadingCache happy.
-            if (rows.result.isEmpty())
-                throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
+        // If either a non-existent role name was supplied, or no credentials
+        // were found for that role we don't want to cache the result so we throw
+        // a specific, but unchecked, exception to keep LoadingCache happy.
+        if (rows.result.isEmpty())
+            throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 
-            UntypedResultSet result = UntypedResultSet.create(rows.result);
-            if (!result.one().has(SALTED_HASH))
-                throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
+        UntypedResultSet result = UntypedResultSet.create(rows.result);
+        if (!result.one().has(SALTED_HASH))
+            throw new AuthenticationException(String.format("Provided username %s and/or password are incorrect", username));
 
-            return result.one().getString(SALTED_HASH);
-        }
-        catch (RequestExecutionException e)
-        {
-            throw new AuthenticationException(String.format("Error performing internal authentication of user %s : %s", username, e.getMessage()));
-        }
+        return result.one().getString(SALTED_HASH);
     }
 
     /**
@@ -298,6 +284,20 @@ public class PasswordAuthenticator implements IAuthenticator
         public void invalidateCredentials(String roleName)
         {
             invalidate(roleName);
+        }
+
+        public String getCredentials(String roleName)
+        {
+            // we know PasswordAuthenticator.queryHashedPassword() will block, so we might as well
+            // prevent the cache from attempting to load missing entries on the TPC threads,
+            // since attempting to load only to get a WouldBlockException from the authenticator
+            // would result in the cache logging errors and incrementing error statistics and
+            // there also seems to be a problem somewhere in caffeine in that it will not attempt
+            // to reload after an exception
+            String ret = get(roleName, !TPCScheduler.isTPCThread());
+            if (ret == null)
+                throw new TPCUtils.WouldBlockException(String.format("Cannot retrieve credentials for %s, would block TPC thread", roleName));
+            return ret;
         }
     }
 

@@ -90,8 +90,10 @@ public class AlterRoleStatement extends AuthenticationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        if (!opts.isEmpty())
-            DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
-        return Single.just(new ResultMessage.Void());
+        return Single.fromCallable(() -> {
+           if (!opts.isEmpty())
+               DatabaseDescriptor.getRoleManager().alterRole(state.getUser(), role, opts);
+           return (ResultMessage)(new ResultMessage.Void());
+       });
     }
 }

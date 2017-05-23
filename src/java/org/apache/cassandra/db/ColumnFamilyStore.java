@@ -1371,9 +1371,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public Completable apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
-        Completable ret = applyInternal(update, indexer, opGroup, commitLogPosition);
-        TPCScheduler scheduler = TPCScheduler.getForKey(this.keyspace.getName(), update.partitionKey());
-        return scheduler.cpuId == TPCScheduler.getCoreId() ? ret : ret.subscribeOn(scheduler);
+        return applyInternal(update, indexer, opGroup, commitLogPosition);
     }
 
     Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)

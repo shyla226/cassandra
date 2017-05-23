@@ -217,7 +217,7 @@ public class MigrationManager
         else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
             return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
 
-        logger.info("Create new table: {}", cfm);
+        logger.info("Create new table: {}/{}", cfm, cfm.id);
         return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
     }
 
@@ -401,24 +401,22 @@ public class MigrationManager
     // Returns a future on the local application of the schema
     private static Completable announce(final SchemaMigration schema)
     {
-        return Completable.defer(() ->
-                                 {
+        return Completable.defer(() -> {
+             Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
+                                                 .subscribeOn(TPCScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                                              ImmediateThinScheduler.INSTANCE);
 
-                                     Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
-                                                                         .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+             for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
+             {
+                 // only push schema to nodes with known and equal versions
+                 if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
+                     MessagingService.instance().knowsVersion(endpoint) &&
+                     MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
+                     pushSchemaMutation(endpoint, schema);
+             }
 
-                                     for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
-                                     {
-                                         // only push schema to nodes with known and equal versions
-                                         if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
-                                             MessagingService.instance().knowsVersion(endpoint) &&
-                                             MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
-                                             pushSchemaMutation(endpoint, schema);
-                                     }
-
-                                     return observable;
-                                 });
-
+             return observable;
+         });
     }
 
     /**

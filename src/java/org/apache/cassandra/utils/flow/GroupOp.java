@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>
  * Stream is broken up in selections of consecutive elements where {@link #inSameGroup} returns true, passing each
  * collection through {@link #map(List)}.
- *
+ * <p>
  * Warning: not safe to use if the items in the stream rely on holding on to resources, since it keeps a list of active
  * items.
  */

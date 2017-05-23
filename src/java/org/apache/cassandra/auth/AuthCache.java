@@ -19,11 +19,11 @@
 package org.apache.cassandra.auth;
 
 import java.lang.management.ManagementFactory;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
@@ -32,6 +32,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,8 +95,31 @@ public class AuthCache<K, V> implements AuthCacheMBean
         return new ObjectName(MBEAN_NAME_BASE + name);
     }
 
-    public V get(K k) throws ExecutionException
+    /**
+     * Retrieve an entry from the cache. If the entry is not present, or the
+     * cache is disabled, then invoke the load function to compute and store
+     * the entry but only if retrieveIfMissing is true.
+     * <p>
+     * This parameter can be used by callers (sub-classes) to control if the
+     * load function should be invoked, given that in some cases the load
+     * function might block and in this case we do not want to invoke it
+     * on TPC threads.
+     *
+     * @param k - the key of the entry to retrieve
+     * @param retrieveIfMissing - if true retrieve missing entries by invoking the load function
+     *
+     * @return the entry or null if retrieveIfMissing is false and the entry is missing
+     */
+    @Nullable
+    protected V get(K k, boolean retrieveIfMissing)
     {
+        V ret = cache == null ? null : cache.getIfPresent(k);
+        if (ret != null)
+            return ret;
+
+        if (!retrieveIfMissing)
+            return null;
+
         if (cache == null)
             return loadFunction.apply(k);
 
@@ -175,7 +199,7 @@ public class AuthCache<K, V> implements AuthCacheMBean
               .build(loadFunction::apply);
         }
 
-        // Always set as manditory
+        // Always set as mandatory
         cache.policy().refreshAfterWrite().ifPresent(policy ->
             policy.setExpiresAfter(getUpdateInterval(), TimeUnit.MILLISECONDS));
         cache.policy().expireAfterWrite().ifPresent(policy ->

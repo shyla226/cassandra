@@ -32,6 +32,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.UpdateFunction;
@@ -82,9 +83,9 @@ public class AtomicBTreePartition extends AbstractBTreePartition
      * Adds a given update to this in-memtable partition.
      *
      * @return an array containing first the difference in size seen after merging the updates, and second the minimum
-     * time detla between updates.
+     * time detla between updates and the update itself.
      */
-    public Single<long[]> addAllWithSizeDelta(final PartitionUpdate update, OpOrder.Group writeOp, UpdateTransaction indexer)
+    public Single<Pair<long[], PartitionUpdate>> addAllWithSizeDelta(final PartitionUpdate update, OpOrder.Group writeOp, UpdateTransaction indexer)
     {
         RowUpdater updater = new RowUpdater(this, allocator, writeOp, indexer);
         try
@@ -120,7 +121,8 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         }
         finally
         {
-            return indexer.commit().toSingleDefault(new long[]{updater.dataSize, updater.colUpdateTimeDelta});
+            return indexer.commit().toSingleDefault(new long[]{updater.dataSize, updater.colUpdateTimeDelta})
+                          .map(p -> Pair.create(p, update));
         }
     }
 

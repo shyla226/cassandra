@@ -514,15 +514,15 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         Completable ret = Completable.merge(responseHandlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
-        return ret.doOnEvent(ex -> {
-
-            if (ex != null)
+        return ret.onErrorResumeNext(ex -> {
+            try
             {
                 if (ex instanceof WriteTimeoutException || ex instanceof WriteFailureException)
                 {
                     if (consistencyLevel == ConsistencyLevel.ANY)
                     {
                         hintMutations(mutations);
+                        return Completable.complete(); // do not propagate the exception
                     }
                     else
                     {
@@ -555,11 +555,15 @@ public class StorageProxy implements StorageProxyMBean
                     writeMetricsMap.get(consistencyLevel).unavailables.mark();
                     Tracing.trace("Overloaded");
                 }
-            }
 
-            long latency = System.nanoTime() - startTime;
-            writeMetrics.addNano(latency);
-            writeMetricsMap.get(consistencyLevel).addNano(latency);
+                return Completable.error(ex);
+            }
+            finally
+            {
+                long latency = System.nanoTime() - startTime;
+                writeMetrics.addNano(latency);
+                writeMetricsMap.get(consistencyLevel).addNano(latency);
+            }
         }).toSingleDefault(new ResultMessage.Void());
     }
 
@@ -692,7 +696,7 @@ public class StorageProxy implements StorageProxyMBean
             viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
         };
 
-        List<WriteHandler> handlers = Lists.transform(mutationsAndEndpoints, mae ->
+        List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
             viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
             WriteHandler handler = WriteHandler.builder(mae.endpoints, ConsistencyLevel.ONE, WriteType.BATCH, queryStartNanoTime)
@@ -702,7 +706,7 @@ public class StorageProxy implements StorageProxyMBean
 
             handler.thenRun(cleanupLatch::countDown);
             return handler;
-        });
+        }));
 
         completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
 
@@ -1482,14 +1486,15 @@ public class StorageProxy implements StorageProxyMBean
                             .onErrorResumeNext(e ->
                                                {
                                                    if (e instanceof DigestMismatchException)
-                                                       return retryOnDigestMismatch();
+                                                       return retryOnDigestMismatch((DigestMismatchException)e);
 
                                                    return Single.error(e);
                                                }));
         }
 
-        Single<PartitionIterator> retryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
+        Single<PartitionIterator> retryOnDigestMismatch(DigestMismatchException ex) throws ReadFailureException, ReadTimeoutException
         {
+            Tracing.trace("Digest mismatch: {}", ex);
 
             ReadRepairMetrics.repairedBlocking.mark();
 
@@ -1509,10 +1514,22 @@ public class StorageProxy implements StorageProxyMBean
             Tracing.trace("Enqueuing full data read to {}", endpoints);
             MessagingService.instance().send(Verbs.READS.READ.newDispatcher(endpoints, command), repairHandler);
 
-
             return repairHandler.get().onErrorResumeNext(e -> {
                 if (e instanceof DigestMismatchException)
-                    return Single.error(new RuntimeException("Digest mismatch hit on readRepair", e));
+                    return Single.error(new AssertionError(e)); // full data requested from each node here, no digests should be sent
+
+                else if(e instanceof ReadTimeoutException)
+                {
+                    if (Tracing.isTracing())
+                        Tracing.trace("Timed out waiting on digest mismatch repair requests");
+                    else
+                        logger.trace("Timed out waiting on digest mismatch repair requests");
+
+                    // the caught exception here will have CL.ALL from the repair command,
+                    // not whatever CL the initial command was at (CASSANDRA-7947)
+                    int blockFor = consistency.blockFor(Keyspace.open(command.metadata().keyspace));
+                    return Single.error(new ReadTimeoutException(consistency, blockFor-1, blockFor, true));
+                }
 
                 return Single.error(e);
             });
@@ -1825,6 +1842,8 @@ public class StorageProxy implements StorageProxyMBean
 
             handler.assureSufficientLiveNodes();
 
+            if (logger.isTraceEnabled())
+                logger.trace("Sending to {} for CL {}/{} - min {}", toQuery.filteredEndpoints, consistency, blockFor, minimalEndpoints.size());
             MessagingService.instance().send(Verbs.READS.READ.newDispatcher(toQuery.filteredEndpoints, rangeCommand), handler);
             return new SingleRangeResponse(handler);
         }
@@ -1903,7 +1922,6 @@ public class StorageProxy implements StorageProxyMBean
 
         Callable<PartitionIterator> c = () ->
         {
-
             Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
             RangeIterator ranges = new RangeIterator(command, keyspace, consistencyLevel);
 
@@ -2411,5 +2429,13 @@ public class StorageProxy implements StorageProxyMBean
         ConsistencyLevel newCL = ConsistencyLevel.valueOf(cl.trim().toUpperCase());
         DatabaseDescriptor.setIdealConsistencyLevel(newCL);
         return String.format("Updating ideal consistency level new value: %s old value %s", newCL, original.toString());
+    }
+
+    public int getOtcBacklogExpirationInterval() {
+        return DatabaseDescriptor.getOtcBacklogExpirationInterval();
+    }
+
+    public void setOtcBacklogExpirationInterval(int intervalInMillis) {
+        DatabaseDescriptor.setOtcBacklogExpirationInterval(intervalInMillis);
     }
 }

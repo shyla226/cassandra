@@ -23,26 +23,14 @@ import javax.swing.text.html.CSS;
 import io.reactivex.functions.Function;
 import org.apache.cassandra.utils.Throwables;
 
+/**
+ * Implementation of {@link CsFlow#flatMap(Function)}, which applies a method to a flow and concatenates the results.
+ * <p>
+ * This is done in depth-first fashion, i.e. one item is requested from the flow, and the result of the conversion
+ * is issued to the downstream subscriber completely before requesting the next item.
+ */
 class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
 {
-    /**
-     * The downstream subscriber, also known as observer, it will receive the output items by calling
-     * the onXXXX() methods.
-     */
-    private final CsSubscriber<O> subscriber;
-
-    /**
-     * The mapper converts each input (upstream) item into a CsFlow of output (downstream) items
-     */
-    private final Function<I, CsFlow<O>> mapper;
-
-    private final CsSubscription source;
-
-    /**
-     * The subscriber to the current source, wrapped in utility class.
-     */
-    volatile FlatMapChild current;
-
     public static <I, O> CsFlow<O> flatMap(CsFlow<I> source, Function<I, CsFlow<O>> op)
     {
         class FlatMapFlow extends CsFlow<O>
@@ -54,6 +42,26 @@ class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
         }
         return new FlatMapFlow();
     }
+
+    /**
+     * The downstream subscriber which will receive the flow using the onXXXX() methods.
+     */
+    private final CsSubscriber<O> subscriber;
+
+    /**
+     * The mapper converts each input (upstream) item into a CsFlow of output (downstream) items
+     */
+    private final Function<I, CsFlow<O>> mapper;
+
+    /**
+     * Upstream subscription which will be requested to supply source items.
+     */
+    private final CsSubscription source;
+
+    /**
+     * If an item is active, this holds our subscription to the resulting flow.
+     */
+    volatile FlatMapChild current;
 
     FlatMap(CsSubscriber<O> subscriber, Function<I, CsFlow<O>> mapper, CsFlow<I> source) throws Exception
     {
@@ -88,10 +96,10 @@ class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
         if (!verify(current == null, null))
             return;
 
-        CsFlow<O> child;
         try
         {
-            child = mapper.apply(next);
+            CsFlow<O> child = mapper.apply(next);
+            current = new FlatMapChild(child);
         }
         catch (Throwable t)
         {
@@ -99,15 +107,7 @@ class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
             return;
         }
 
-        try
-        {
-            current = new FlatMapChild(child);
-            current.source.request();
-        }
-        catch (Throwable t)
-        {
-            subscriber.onError(t);
-        }
+        current.source.request();
     }
 
     public void onError(Throwable throwable)
@@ -172,13 +172,16 @@ class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
             {
                 current = null;
                 source.close();
-                FlatMap.this.request();     // Recursion here could cause stack overflow on a long sequence of empty results.
-                                            // Not really expected to happen.
             }
             catch (Exception e)
             {
                 subscriber.onError(e);
             }
+
+            FlatMap.this.request();
+            // Recursion by the above call could cause stack overflow on a long sequence of empty mappings.
+            // This is not really expected to happen, but if it ends up being a concern a loop such as the one in
+            // GroupOp.request() will have to be implemented.
         }
 
         public String toString()

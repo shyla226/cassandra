@@ -91,20 +91,22 @@ public class ListPermissionsStatement extends AuthorizationStatement
     // TODO: Create a new ResultMessage type (?). Rows will do for now.
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        List<PermissionDetails> details = new ArrayList<PermissionDetails>();
+        return Single.fromCallable(() -> {
+            List<PermissionDetails> details = new ArrayList<PermissionDetails>();
 
-        if (resource != null && recursive)
-        {
-            for (IResource r : Resources.chain(resource))
-                details.addAll(list(state, r));
-        }
-        else
-        {
-            details.addAll(list(state, resource));
-        }
+            if (resource != null && recursive)
+            {
+                for (IResource r : Resources.chain(resource))
+                    details.addAll(list(state, r));
+            }
+            else
+            {
+                details.addAll(list(state, resource));
+            }
 
-        Collections.sort(details);
-        return Single.just(resultMessage(details));
+            Collections.sort(details);
+            return resultMessage(details);
+        });
     }
 
     private Set<PermissionDetails> list(ClientState state, IResource resource)

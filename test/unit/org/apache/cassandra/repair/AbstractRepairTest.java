@@ -62,8 +62,8 @@ public abstract class AbstractRepairTest
             throw new AssertionError(e);
         }
 
-        DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        DatabaseDescriptor.daemonInitialization();
     }
 
     protected static final Set<InetAddress> PARTICIPANTS = ImmutableSet.of(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3);

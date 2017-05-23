@@ -39,6 +39,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -103,23 +104,21 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation.
      */
-    private static class ApplyOpSubscription<I, O>
-    implements CsSubscription, CsSubscriber<I>
+    private static class ApplyOpSubscription<I, O> extends RequestLoop<I>
     {
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
-        final CsSubscription source;
 
         public ApplyOpSubscription(CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
+            super(source);
             this.subscriber = subscriber;
             this.mapper = mapper;
-            this.source = source.subscribe(this);
         }
 
         public void onNext(I item)
         {
-            mapper.onNext(subscriber, source, item);
+            mapper.onNext(subscriber, this, item);
         }
 
         public void onError(Throwable throwable)
@@ -132,16 +131,11 @@ public abstract class CsFlow<T>
             subscriber.onComplete();
         }
 
-        public void request()
-        {
-            source.request();
-        }
-
         public void close() throws Exception
         {
             try
             {
-                source.close();
+                super.close();
             }
             finally
             {
@@ -158,8 +152,7 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation that checks the subscriptions are used correctly (e.g. without concurrent requests).
      */
-    private static class CheckedApplyOpSubscription<I, O>
-    implements CsSubscription, CsSubscriber<I>
+    private static class CheckedApplyOpSubscription<I, O> implements CsSubscription, CsSubscriber<I>
     {
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
@@ -213,8 +206,12 @@ public abstract class CsFlow<T>
 
         public void onNext(I item)
         {
+            // TODO: if the mapper skips too many items it may cause a stack overflow,
+            // see Flow/OpsTest. The solution is to use the RequestLoop but we need to
+            // integrate the debug states
             if (verifyStateTransition(null, State.REQUESTED, State.READY))
                 mapper.onNext(subscriber, this, item);
+
         }
 
         public void onError(Throwable throwable)
@@ -530,13 +527,13 @@ public abstract class CsFlow<T>
      * <p>
      * This is handled with a small state machine that controls whether we are in the loop and whether an
      * item has been received. The call to request is a no-op if we are already in the loop. Once in the loop,
-     * after calling request we try to exit the loop, but if {@link RequestLoop#onNext()} has been called
+     * after calling request we try to exit the loop, but if {@link RequestLoop#onNext(Object)} has been called
      * recursively or has raced with the request loop, then we fail to exit the loop and continue with the next
      * request. onNext will try to transition from in_loop_requested to in_loop_ready and if it succeeds then
      * it is done since the loop is still in place, if it instead has failed then we must be out of the loop and
      * hence requestLoop() must be called again.
      */
-    public final static class RequestLoop
+    public static abstract class RequestLoop<T> implements CsSubscriber<T>, CsSubscription
     {
         private enum State
         {
@@ -546,15 +543,13 @@ public abstract class CsFlow<T>
         }
 
         private final AtomicReference<State> state;
-        private final CsSubscriber subscriber;
         private final CsSubscription subscription;
-        private volatile boolean released;
+        private volatile boolean closed;
 
-        public RequestLoop(CsSubscriber subscriber, CsSubscription subscription)
+        public RequestLoop(CsFlow<T> source) throws Exception
         {
             this.state = new AtomicReference<>(State.OUT_OF_LOOP);
-            this.subscriber = subscriber;
-            this.subscription = subscription;
+            this.subscription = source.subscribe(this);
         }
 
         public void request()
@@ -571,14 +566,19 @@ public abstract class CsFlow<T>
             // next request within this call. If not, the loop is still going in another thread and we can still signal
             // it to continue (making sure we don't leave while receiving the signal).
 
+            if (closed)
+                return;
+
+            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
+                return;
+
             if (state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
                 requestLoop();
-
         }
 
         private void requestLoop()
         {
-            while (!released)
+            while (!closed)
             {
                 // The loop can only be entered in IN_LOOP_READY
                 if (!verifyStateChange(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
@@ -598,28 +598,22 @@ public abstract class CsFlow<T>
             if (prev == from)
                 return true;
 
-            subscriber.onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
+            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
             return false;
         }
 
-        public void onNext()
+        public void close() throws Exception
         {
-            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
-                return;
-
-            // We must be out of the loop if the above failed; re-start looping.
-            if (verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_READY))
-                requestLoop();
+            if (!closed)
+            {
+                closed = true;
+                FileUtils.closeQuietly(subscription);
+            }
         }
 
-        public void release()
+        public boolean closed()
         {
-            released = true;
-        }
-
-        public boolean isReleased()
-        {
-            return released;
+            return closed;
         }
     }
 
@@ -627,26 +621,18 @@ public abstract class CsFlow<T>
      * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, BiFunction)},
      * {@link #reduceWith(Supplier, BiFunction)} and {@link #reduceToFuture(Object, BiFunction)}.
      */
-    abstract static private class ReduceSubscriber<T, O> implements CsSubscriber<T>, CsSubscription
+    abstract static private class ReduceSubscriber<T, O> extends RequestLoop<T> implements CsSubscription
     {
-        final CsSubscription sub;
-        final RequestLoop requestLoop;
         final BiFunction<O, T, O> reducer;
         O current;
         private StackTraceElement[] stackTrace;
 
         ReduceSubscriber(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
         {
+            super(source);
             this.reducer = reducer;
-            sub = source.subscribe(this);
-            requestLoop = new RequestLoop(this, sub);
             current = seed;
             stackTrace = maybeGetStackTrace();
-        }
-
-        public void request()
-        {
-            requestLoop.request();
         }
 
         public void onNext(T item)
@@ -661,12 +647,7 @@ public abstract class CsFlow<T>
                 return;
             }
 
-           requestLoop.onNext();
-        }
-
-        public void close() throws Exception
-        {
-            sub.close();
+            request();
         }
 
         public String toString()
@@ -728,7 +709,6 @@ public abstract class CsFlow<T>
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
-     * @throws Exception
      */
     public <O> CompletableFuture<O> reduceToFuture(O seed, BiFunction<O, T, O> reducer)
     {
@@ -800,7 +780,6 @@ public abstract class CsFlow<T>
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
-     * @throws Exception
      */
     public <O> CsFlow<O> reduceWith(Supplier<O> seedSupplier, BiFunction<O, T, O> reducer)
     {
@@ -1107,6 +1086,7 @@ public abstract class CsFlow<T>
      */
     public long countBlocking() throws Exception
     {
+        // Note: using AtomicLong to avoid boxing a long at every iteration.
         return reduceBlocking(new AtomicLong(0),
                               (count, value) ->
                               {

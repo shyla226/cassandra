@@ -52,7 +52,7 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
     }
 
-    public void checkAccess(ClientState state) throws UnauthorizedException
+    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         state.ensureIsSuper("Only superusers are allowed to perform CREATE TRIGGER queries");
     }

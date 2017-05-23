@@ -24,6 +24,7 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
@@ -314,6 +315,11 @@ public class SelectStatement implements CQLStatement
         {
             return execute(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
         }
+    }
+
+    public Scheduler getScheduler()
+    {
+        return null;
     }
 
     /**

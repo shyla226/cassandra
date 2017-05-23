@@ -44,12 +44,16 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.jctools.queues.MpscArrayQueue;
 import sun.misc.Contended;
 
 public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 {
+    private static String DEBUG_RUNNING_TIME_NAME = "cassandra.debug_tpc_task_running_time_seconds";
+    private static long DEBUG_RUNNING_TIME_NANOS = TimeUnit.NANOSECONDS.convert(Integer.parseInt(System.getProperty(DEBUG_RUNNING_TIME_NAME, "0")),
+                                                                                TimeUnit.SECONDS);
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(MonitoredEpollEventLoopGroup.class);
 
@@ -261,6 +265,8 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
         @Contended
         private final ArrayDeque<Runnable> internalQueue;
 
+        private volatile long lastDrainTime;
+
         private SingleCoreEventLoop(MonitoredEpollEventLoopGroup parent, Executor executor, int threadOffset, int totalCores)
         {
             super(parent, executor, 0,  DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy(), RejectedExecutionHandlers.reject());
@@ -271,6 +277,7 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             this.internalQueue = new ArrayDeque<>(1 << 16);
 
             this.state = CoreState.WORKING;
+            this.lastDrainTime = -1;
         }
 
         public void run()
@@ -335,9 +342,24 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
             LockSupport.unpark(parent.runningThreads[threadOffset]);
         }
 
+        private void checkLongRunningTasks(long nanoTime)
+        {
+            if (lastDrainTime > 0 && Math.abs(nanoTime - lastDrainTime) > DEBUG_RUNNING_TIME_NANOS)
+            {
+                logger.debug("Detected task running for {} seconds for thread with stack:\n{}",
+                             TimeUnit.SECONDS.convert(Math.abs(nanoTime - lastDrainTime), TimeUnit.NANOSECONDS),
+                             FBUtilities.Debug.getStackTrace(parent.runningThreads[threadOffset]));
+
+                lastDrainTime = -1;
+            }
+        }
+
         private void checkQueues(long nanoTime)
         {
             delayedNanosDeadline = nanoTime;
+
+            if (DEBUG_RUNNING_TIME_NANOS > 0 && state == CoreState.WORKING)
+                checkLongRunningTasks(nanoTime);
 
             if (state == CoreState.PARKED && !isEmpty())
                 unpark();
@@ -368,6 +390,9 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
         int drain()
         {
+            if (DEBUG_RUNNING_TIME_NANOS > 0)
+                lastDrainTime = nanoTime();
+
             int processed = drainEpoll();
             return drainTasks() + processed;
         }
@@ -479,8 +504,6 @@ public class MonitoredEpollEventLoopGroup extends MultithreadEventLoopGroup
 
             return hasTasks;
         }
-
-
 
         @Inline
         boolean isEmpty()

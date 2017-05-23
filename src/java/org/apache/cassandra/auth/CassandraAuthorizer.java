@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -98,6 +99,9 @@ public class CassandraAuthorizer implements IAuthorizer
             logger.warn("CassandraAuthorizer failed to authorize {} for {}", user, resource);
             throw new RuntimeException(e);
         }
+
+        for (RoleResource role: user.getRoles())
+            addPermissionsForRole(permissions, resource, role);
 
         return permissions;
     }
@@ -202,10 +206,10 @@ public class CassandraAuthorizer implements IAuthorizer
                                                   BatchStatement.Type.LOGGED,
                                                   Lists.newArrayList(Iterables.filter(statements, ModificationStatement.class)),
                                                   Attributes.none());
-        QueryProcessor.instance.processBatch(batch,
-                                             QueryState.forInternalCalls(),
-                                             BatchQueryOptions.withoutPerStatementVariables(QueryOptions.DEFAULT),
-                                             System.nanoTime());
+        TPCUtils.blockingGet(QueryProcessor.instance.processBatch(batch,
+                                                                  QueryState.forInternalCalls(),
+                                                                  BatchQueryOptions.withoutPerStatementVariables(QueryOptions.DEFAULT),
+                                                                  System.nanoTime()));
 
     }
 
@@ -229,7 +233,7 @@ public class CassandraAuthorizer implements IAuthorizer
                 legacyAuthorizeRoleStatement = prepare(USERNAME, USER_PERMISSIONS);
             statement = legacyAuthorizeRoleStatement;
         }
-        ResultMessage.Rows rows = (ResultMessage.Rows) statement.execute(QueryState.forInternalCalls(), options, System.nanoTime()).blockingGet();
+        ResultMessage.Rows rows = (ResultMessage.Rows) TPCUtils.blockingGet(statement.execute(QueryState.forInternalCalls(), options, System.nanoTime()));
         UntypedResultSet result = UntypedResultSet.create(rows.result);
 
         if (!result.isEmpty() && result.one().has(PERMISSIONS))
@@ -468,6 +472,6 @@ public class CassandraAuthorizer implements IAuthorizer
 
     private UntypedResultSet process(String query) throws RequestExecutionException
     {
-        return QueryProcessor.process(query, ConsistencyLevel.LOCAL_ONE).blockingGet();
+        return TPCUtils.blockingGet(QueryProcessor.process(query, ConsistencyLevel.LOCAL_ONE));
     }
 }

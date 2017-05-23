@@ -51,6 +51,7 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -307,7 +308,7 @@ public final class MessagingService implements MessagingServiceMBean
         };
         Consumer<Request<P, Q>> consumer = rq ->
         {
-            if (rq.isTimedOut())
+            if (rq.isTimedOut(ApproximateTime.currentTimeMillis()))
             {
                 onAborted.run();
                 return;

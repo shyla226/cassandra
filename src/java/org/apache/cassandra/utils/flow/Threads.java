@@ -64,6 +64,11 @@ public class Threads
         return (source, subscriber) -> new RequestOnCore(subscriber, coreId, source);
     }
 
+    /**
+     * Returns an operator to perform each request() on the given flow on the specified core thread.
+     * If execution is already on this thread, the request is called directly, otherwise it is given to the scheduler
+     * for async execution.
+     */
     public static <T> CsFlow.Operator<T, T> requestOnCore(int coreId)
     {
         return (CsFlow.Operator<T, T>) REQUEST_ON_CORE[coreId];
@@ -92,6 +97,11 @@ public class Threads
         }
     }
 
+    /**
+     * Returns an operator to perform each request() on the given flow on the specified scheduler.
+     * If we are already on that scheduler, whether the request is called directly or scheduled depends on the specific
+     * scheduler.
+     */
     public static <T> CsFlow.Operator<T, T> requestOn(Scheduler scheduler)
     {
         if (scheduler instanceof TPCScheduler)
@@ -109,6 +119,10 @@ public class Threads
 
     static final CsFlow.Operator<?, ?> REQUEST_ON_IO = createRequestOn(Schedulers.io());
 
+    /**
+     * Returns an operator to perform each request() on the given flow on the IO scheduler.
+     * Used for operations that can block (e.g. sync reads off disk).
+     */
     public static <T> CsFlow.Operator<T, T> requestOnIo()
     {
         return (CsFlow.Operator<T, T>) REQUEST_ON_IO;
@@ -162,5 +176,19 @@ public class Threads
         }
     }
 
-    // We may also need observeOnCore with the same semantics
+    /**
+     * Returns a flow which represents the evaluation of the given callable on the specified core thread.
+     * If execution is already on this thread, the evaluation is called directly, otherwise it is given to the scheduler
+     * for async execution.
+     */
+    public static <T> CsFlow<T> evaluateOnCore(Callable<T> callable, int coreId)
+    {
+        return new CsFlow<T>()
+        {
+            public CsSubscription subscribe(CsSubscriber<T> subscriber)
+            {
+                return new EvaluateOn<T>(subscriber, callable, coreId);
+            }
+        };
+    }
 }

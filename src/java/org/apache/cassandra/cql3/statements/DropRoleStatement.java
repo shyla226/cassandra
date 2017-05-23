@@ -69,14 +69,17 @@ public class DropRoleStatement extends AuthenticationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
-        // not rejected in validate()
-        if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return Single.just(new ResultMessage.Void());
+        return Single.fromCallable(() -> {
 
-        // clean up grants and permissions of/on the dropped role.
-        DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
-        DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
-        DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
-        return Single.just(new ResultMessage.Void());
+            // not rejected in validate()
+            if (ifExists && !DatabaseDescriptor.getRoleManager().isExistingRole(role))
+                return new ResultMessage.Void();
+
+            // clean up grants and permissions of/on the dropped role.
+            DatabaseDescriptor.getRoleManager().dropRole(state.getUser(), role);
+            DatabaseDescriptor.getAuthorizer().revokeAllFrom(role);
+            DatabaseDescriptor.getAuthorizer().revokeAllOn(role);
+            return (ResultMessage)(new ResultMessage.Void());
+        });
     }
 }

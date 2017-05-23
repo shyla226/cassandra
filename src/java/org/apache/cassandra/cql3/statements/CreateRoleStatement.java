@@ -72,13 +72,15 @@ public class CreateRoleStatement extends AuthenticationStatement
 
     public Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException
     {
-        // not rejected in validate()
-        if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return Single.just(new ResultMessage.Void());
+        return Single.fromCallable(() -> {
+            // not rejected in validate()
+            if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
+                return new ResultMessage.Void();
 
-        DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
-        grantPermissionsToCreator(state);
-        return Single.just(new ResultMessage.Void());
+            DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
+            grantPermissionsToCreator(state);
+            return (ResultMessage)(new ResultMessage.Void());
+        });
     }
 
     /**

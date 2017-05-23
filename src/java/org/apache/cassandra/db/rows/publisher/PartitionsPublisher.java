@@ -23,6 +23,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,11 +38,8 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.transform.BaseIterator;
 import org.apache.cassandra.db.transform.Stack;
 import org.apache.cassandra.db.transform.Transformation;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
 
 /**
  * A publisher will notify the subscriber when partitions or rows
@@ -142,7 +141,7 @@ public class PartitionsPublisher
         {
             OuterSubscription subscription = new OuterSubscription(this, subscriber);
             subscriber.onSubscribe(subscription);
-            subscription.subscribe();
+            subscription.request();
         }
         catch(Throwable t)
         {
@@ -155,7 +154,7 @@ public class PartitionsPublisher
     /**
      * The subscription to the outer flowable of partitions.
      */
-    private static final class OuterSubscription implements PartitionsSubscription, CsSubscriber<FlowableUnfilteredPartition>
+    private static final class OuterSubscription extends CsFlow.RequestLoop<FlowableUnfilteredPartition> implements PartitionsSubscription
     {
         /**
          * A stack of transformations to apply to the source before sending downstream
@@ -176,19 +175,9 @@ public class PartitionsPublisher
         private final PartitionsSubscriber<Unfiltered> subscriber;
 
         /**
-         * A subscription to the partitions source, created on subscription, null until then.
-         */
-        private CsSubscription subscription;
-
-        /**
          * A subscription to the current partition source, null when no subscription exists
          */
         private volatile InnerSubscription innerSubscription = null;
-
-        /**
-         * The request loop keeps track of when we should request the next item;
-         */
-        private CsFlow.RequestLoop requestLoop;
 
         /**
          * Set to true when the downstream has closed the subscription
@@ -203,13 +192,13 @@ public class PartitionsPublisher
         /** Any error that might have been received */
         private volatile  Throwable error;
 
-        private OuterSubscription(PartitionsPublisher publisher, PartitionsSubscriber<Unfiltered> subscriber)
+        private OuterSubscription(PartitionsPublisher publisher, PartitionsSubscriber<Unfiltered> subscriber) throws Exception
         {
+            super(publisher.source.get());
             this.transformations = publisher.transformations;
             this.stop = publisher.stop;
             this.source = publisher.source;
             this.subscriber = subscriber;
-
         }
 
         public void closePartition(DecoratedKey partitionKey)
@@ -228,18 +217,10 @@ public class PartitionsPublisher
                 subscription.closed = true;
         }
 
-        private void subscribe() throws Exception
-        {
-            subscription = source.get().subscribe(this);
-            requestLoop = new CsFlow.RequestLoop(this, subscription);
-
-            requestLoop.request();
-        }
-
         private void onInnerSubscriptionClosed()
         {
             innerSubscription = null;
-            requestLoop.onNext();
+            request();
         }
 
         @Override
@@ -252,9 +233,16 @@ public class PartitionsPublisher
                 return;
             }
 
-            assert innerSubscription == null : "Receive partition before the previous one was completed";
-            innerSubscription = new InnerSubscription(this, subscriber, partition);
-            innerSubscription.subscribe();
+            try
+            {
+                assert innerSubscription == null : "Receive partition before the previous one was completed";
+                innerSubscription = new InnerSubscription(this, subscriber, partition);
+                innerSubscription.request();
+            }
+            catch (Throwable t)
+            {
+                onError(t);
+            }
         }
 
         @Override
@@ -273,6 +261,10 @@ public class PartitionsPublisher
                     if (error == null)
                         subscriber.onComplete();
                 }
+                catch(Throwable t)
+                {
+                    onError(t);
+                }
                 finally
                 {
                     release();
@@ -284,7 +276,7 @@ public class PartitionsPublisher
         public void onError(Throwable error)
         {
             JVMStabilityInspector.inspectThrowable(error);
-            //logger.debug("{}/{}", error.getClass().getName(), error.getMessage());
+            logger.debug("Got exception: {}/{}", error.getClass().getName(), error.getMessage());
 
             if (this.error == null)
             {
@@ -297,16 +289,19 @@ public class PartitionsPublisher
 
         private void release()
         {
-            if (!requestLoop.isReleased())
+            if (!closed())
             {
-                //logger.debug("{} - releasing", hashCode());
-                requestLoop.release();
+                try
+                {
+                    super.close();
+                }
+                catch (Exception ex)
+                {
+                    logger.warn("Exception when closing: {}", ex.getMessage());
+                }
 
                 if (innerSubscription != null)
                     innerSubscription.close();
-
-                if (subscription != null)
-                    FileUtils.closeQuietly(subscription);
 
                 source.close();
             }
@@ -317,20 +312,23 @@ public class PartitionsPublisher
      * The subscription to the inner flowable of partition items, e.g. unfiltered items.
      * TODO - support rows as well.
     */
-    private final static class InnerSubscription implements CsSubscriber<Unfiltered>
+    private final static class InnerSubscription extends CsFlow.RequestLoop<Unfiltered>
     {
         private final OuterSubscription outerSubscription;
         private final PartitionsSubscriber subscriber;
+        private final DecoratedKey partitionKey;
+        @Nullable // will be null if transformations suppress it
         private FlowableUnfilteredPartition partition;
-        private CsSubscription subscription;
         private boolean partitionPublished;
-        private CsFlow.RequestLoop requestLoop;
         private volatile boolean closed;
 
-        InnerSubscription(OuterSubscription outerSubscription, PartitionsSubscriber subscriber, FlowableUnfilteredPartition partition)
+        InnerSubscription(OuterSubscription outerSubscription, PartitionsSubscriber subscriber, FlowableUnfilteredPartition partition) throws Exception
         {
+            super(partition.content);
+
             this.outerSubscription = outerSubscription;
             this.subscriber = subscriber;
+            this.partitionKey = partition.header.partitionKey;
             this.partition = partition;
             this.partitionPublished = false;
 
@@ -340,76 +338,74 @@ public class PartitionsPublisher
 
         DecoratedKey partitionKey()
         {
-            return partition.header.partitionKey;
-        }
-
-        // we cannot subscribe in the constructor because the atomic reference is not set yet
-        public void subscribe()
-        {
-            assert this.subscription == null : "onSubscribe should have been called only once";
-
-            try
-            {
-                subscription = this.partition.content.subscribe(this);
-                requestLoop = new CsFlow.RequestLoop(this, subscription);
-            }
-            catch (Throwable t)
-            {
-                outerSubscription.onError(t);
-            }
-
-            requestLoop.request();
+            return partitionKey;
         }
 
         @Override
         public void onNext(Unfiltered item)
         {
-            //logger.debug("{} - onNext item", outerSubscription.hashCode());
-
-            if (!partition.hasData)
-                partition.hasData = true;
-
-            if (!maybePublishPartition())
-            { // partition was suppressed, close silently without calling onComplete
-                //logger.debug("{} - partition suppressed", outerSubscription.hashCode());
-                close();
-                return;
-            }
-
-            if (closed || partition.stop.isSignalled)
+            try
             {
-                //logger.debug("{} - closed or stop signalled {}, {}", outerSubscription.hashCode(), closed, partition.stop.isSignalled);
-                onComplete();
-                return;
-            }
+                //logger.debug("{} - onNext item", outerSubscription.hashCode());
 
-            for (Transformation transformation : outerSubscription.transformations)
+                if (partition != null && !partition.hasData)
+                    partition.hasData = true;
+
+                if (!maybePublishPartition())
+                { // partition was suppressed, close silently without calling onComplete
+                    //logger.debug("{} - partition suppressed", outerSubscription.hashCode());
+                    close();
+                    return;
+                }
+
+                if (closed || (partition != null && partition.stop.isSignalled))
+                {
+                    //logger.debug("{} - closed or stop signalled {}, {}", outerSubscription.hashCode(), closed, partition.stop.isSignalled);
+                    onComplete();
+                    return;
+                }
+
+                for (Transformation transformation : outerSubscription.transformations)
+                {
+                    item = transformation.applyToUnfiltered(item);
+                    if (item == null)
+                        break;
+                }
+
+                if (item != null)
+                {
+                    //logger.debug("{} - Publishing {}", outerSubscription.hashCode(), item.toString(partition.header.metadata));
+                    subscriber.onNext(item);
+                }
+
+                request();
+            }
+            catch (Throwable t)
             {
-                item = transformation.applyToUnfiltered(item);
-                if (item == null)
-                    break;
+                onError(t);
             }
-
-            if (item != null)
-            {
-                //logger.debug("{} - Publishing {}", outerSubscription.hashCode(), item.toString(partition.header.metadata));
-                subscriber.onNext(item);
-            }
-
-            requestLoop.onNext();
         }
 
         @Override
         public void onComplete()
         {
             //logger.debug("{} - onComplete item", outerSubscription.hashCode());
-            if (maybePublishPartition())
+            try
             {
-                for (Transformation transformation : outerSubscription.transformations)
-                    transformation.onPartitionClose();
+                if (maybePublishPartition())
+                {
+                    for (Transformation transformation : outerSubscription.transformations)
+                        transformation.onPartitionClose();
+                }
             }
-
-            close();
+            catch (Throwable t)
+            {
+                onError(t);
+            }
+            finally
+            {
+                close();
+            }
         }
 
         @Override
@@ -438,17 +434,23 @@ public class PartitionsPublisher
                 subscriber.onNextPartition(new PartitionData(partition.header, partition.staticRow, partition.hasData));
             }
 
-            // the partition was published, either now or earlier
-            return true;
+            // the partition was published earlier if it isn't null, otherwise it was suppressed and we return false
+            return partition != null;
         }
 
-        private void close()
+        public void close()
         {
-            //logger.debug("{} - closing {}", outerSubscription.hashCode(), requestLoop.isReleased());
-            if (!requestLoop.isReleased())
+            if (!closed())
             {
-                requestLoop.release();
-                FileUtils.closeQuietly(subscription);
+                try
+                {
+                    super.close();
+                }
+                catch (Exception ex)
+                {
+                    logger.warn("Exception when closing: {}", ex.getMessage());
+                }
+
                 outerSubscription.onInnerSubscriptionClosed();
             }
         }

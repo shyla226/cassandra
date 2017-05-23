@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
@@ -71,6 +72,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
 
     private final BehaviorSubject<PartitionIterator> publishSubject = BehaviorSubject.create();
+    private final AtomicBoolean responsesProcessed = new AtomicBoolean(false);
     final Single<PartitionIterator> observable;
 
     /**
@@ -111,23 +113,23 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
         return publishSubject
                .first(EmptyIterators.partition())
-               .onErrorResumeNext(exc ->
-                                  {
-                                      int received = this.received.get();
-                                      boolean failed = !(exc instanceof TimeoutException);
+               .onErrorResumeNext(exc -> {
+                  int received = this.received.get();
+                  boolean failed = !(exc instanceof TimeoutException);
 
-                                      if (Tracing.isTracing())
-                                      {
-                                          String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                                          Tracing.trace("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
-                                      }
-                                      else if (logger.isDebugEnabled())
-                                      {
-                                          String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-                                          logger.debug("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
-                                      }
+                  if (Tracing.isTracing())
+                  {
+                      String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                      Tracing.trace("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
+                  }
+                  else if (logger.isDebugEnabled())
+                  {
+                      String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+                      logger.debug("{}; received {} of {} responses{}", (failed ? "Failed" : "Timed out"), received, blockfor, gotData);
+                  }
 
-                                      return Single.error(exc);
+                                      return Single.error( exc);
+
                                   });
     }
 
@@ -148,10 +150,13 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
     public void onResponse(Response<ReadResponse> message)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Received response: {}", message);
+
         resolver.preprocess(message);
         int n = waitingFor(message.from()) ? received.incrementAndGet() : received.get();
 
-        if (n >= blockfor && resolver.isDataPresent())
+        if (n >= blockfor && resolver.isDataPresent() && responsesProcessed.compareAndSet(false, true))
         {
             PartitionIterator result;
 
@@ -159,8 +164,9 @@ public class ReadCallback implements MessageCallback<ReadResponse>
             {
                 result = blockfor == 1 ? resolver.getData() : resolver.resolve();
             }
-            catch (DigestMismatchException e)
-            {
+            catch (Throwable e)
+            { // typically DigestMismatchException, but safer to report all errors to the subscriber
+                logger.trace("Got error: {}/{}", e.getClass().getName(), e.getMessage());
                 publishSubject.onError(e);
                 return;
             }
@@ -177,6 +183,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
                 TraceState traceState = Tracing.instance.get();
                 if (traceState != null)
                     traceState.trace("Initiating read-repair");
+                logger.trace("Initiating read-repair");
                 StageManager.getStage(Stage.READ_REPAIR).execute(new AsyncRepairRunner(traceState, queryStartNanoTime));
             }
         }
@@ -255,11 +262,14 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     @Override
     public void onFailure(FailureResponse<ReadResponse> failureResponse)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Received failure response: {}", failureResponse);
+
         int n = waitingFor(failureResponse.from()) ? failures.incrementAndGet() : failures.get();
 
         failureReasonByEndpoint.put(failureResponse.from(), failureResponse.reason());
 
-        if (blockfor + n > endpoints.size())
+        if (blockfor + n > endpoints.size() && responsesProcessed.compareAndSet(false, true))
             publishSubject.onError(new ReadFailureException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent(), failureReasonByEndpoint));
     }
 }

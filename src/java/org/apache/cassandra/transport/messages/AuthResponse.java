@@ -20,18 +20,14 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
-import io.reactivex.Observable;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.CBUtil;
-import org.apache.cassandra.transport.Message;
-import org.apache.cassandra.transport.ProtocolException;
-import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.transport.ServerConnection;
+import org.apache.cassandra.transport.*;
 
 /**
  * A SASL token message sent from client to server. Some SASL
@@ -76,27 +72,31 @@ public class AuthResponse extends Message.Request
     @Override
     public Single<? extends Response> execute(QueryState queryState, long queryStartNanoTime)
     {
-        try
-        {
-            IAuthenticator.SaslNegotiator negotiator = ((ServerConnection) connection).getSaslNegotiator(queryState);
-            byte[] challenge = negotiator.evaluateResponse(token);
-            if (negotiator.isComplete())
+        return Single.fromCallable(() -> {
+            try
             {
-                AuthenticatedUser user = negotiator.getAuthenticatedUser();
-                queryState.getClientState().login(user);
-                AuthMetrics.instance.markSuccess();
-                // authentication is complete, send a ready message to the client
-                return Single.just(new AuthSuccess(challenge));
+                IAuthenticator.SaslNegotiator negotiator = ((ServerConnection) connection).getSaslNegotiator(queryState);
+                byte[] challenge = negotiator.evaluateResponse(token);
+                if (negotiator.isComplete())
+                {
+                    AuthenticatedUser user = negotiator.getAuthenticatedUser();
+                    queryState.getClientState().login(user);
+                    AuthMetrics.instance.markSuccess();
+                    // authentication is complete, send a ready message to the client
+                    return new AuthSuccess(challenge);
+                }
+                else
+                {
+                    return new AuthChallenge(challenge);
+                }
             }
-            else
+            catch (AuthenticationException e)
             {
-                return Single.just(new AuthChallenge(challenge));
+                AuthMetrics.instance.markFailure();
+                return ErrorMessage.fromException(e);
             }
         }
-        catch (AuthenticationException e)
-        {
-            AuthMetrics.instance.markFailure();
-            return Single.just(ErrorMessage.fromException(e));
-        }
+        ).subscribeOn(Schedulers.io()); // both password authenticator and role manager call blockingGet()
+                                        // in several places, so we need to move away from core threads or it will deadlock
     }
 }

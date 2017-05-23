@@ -24,6 +24,8 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
@@ -41,6 +43,9 @@ import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.UUIDGen;
+
+import static junit.framework.TestCase.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class MergeTest
 {
@@ -737,6 +742,145 @@ public class MergeTest
         public int compareTo(CandidatePQ<In> that)
         {
             return comp.compare(this.item, that.item);
+        }
+    }
+
+    @Test
+    public void testNulls()
+    {
+        boolean failed = false;
+        try
+        {
+            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("one"), CsFlow.just(null)), Ordering.natural(), new Counter<>()).countBlocking());
+            failed = true;
+        }
+        catch (Throwable t)
+        {
+            t.printStackTrace();
+            assertTrue(t instanceof AssertionError);
+        }
+        assertFalse(failed);
+    }
+
+    @Test
+    public void testDoubleNext()
+    {
+        boolean failed = false;
+        try
+        {
+            CsFlow<String> bad = new BadCsFlow("a", new Object[]{"b", "c"}, null);
+
+            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            failed = true;
+        }
+        catch (Throwable t)
+        {
+            t.printStackTrace();
+            assertTrue(t instanceof AssertionError);
+        }
+        assertFalse(failed);
+    }
+
+    @Test
+    public void testNextComplete()
+    {
+        boolean failed = false;
+        try
+        {
+            CsFlow<String> bad = new BadCsFlow("a", new Object[]{"b", null});
+
+            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            failed = true;
+        }
+        catch (Throwable t)
+        {
+            t.printStackTrace();
+            assertTrue(t instanceof AssertionError);
+        }
+        assertFalse(failed);
+    }
+
+    @Test
+    public void testErrorNext()
+    {
+        boolean failed = false;
+        try
+        {
+            CsFlow<String> bad = new BadCsFlow("a", new Object[]{new AssertionError(), "b"}, null);
+
+            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            failed = true;
+        }
+        catch (Throwable t)
+        {
+            t.printStackTrace();
+            assertTrue(t instanceof AssertionError);
+        }
+        assertFalse(failed);
+    }
+
+    static class MyException extends Exception
+    {
+    }
+
+    @Test
+    public void testError()
+    {
+        boolean failed = false;
+        try
+        {
+            CsFlow<String> bad = new BadCsFlow("a", new MyException(), null);
+
+            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            failed = true;
+        }
+        catch (Throwable t)
+        {
+            t.printStackTrace();
+            assertTrue(t instanceof RuntimeException);
+            assertTrue(Throwables.getRootCause(t) instanceof MyException);
+        }
+        assertFalse(failed);
+    }
+
+    class BadCsFlow extends CsFlow<String>
+    {
+        Object[] inputs;
+
+        public BadCsFlow(Object... inputs)
+        {
+            this.inputs = inputs;
+        }
+
+
+        public CsSubscription subscribe(CsSubscriber<String> subscriber) throws Exception
+        {
+            return new CsSubscription()
+            {
+                int pos = 0;
+                public void request()
+                {
+                    Object o = inputs[pos++];
+                    process(o);
+                }
+
+                public void close() throws Exception
+                {
+                }
+
+                private void process(Object o)
+                {
+                    if (o instanceof String)
+                        subscriber.onNext((String) o);
+                    else if (o instanceof Throwable)
+                        subscriber.onError((Throwable) o);
+                    else if (o == null)
+                        subscriber.onComplete();
+                    else
+                        for (Object oo : (Object[]) o)
+                            process(oo);
+                }
+            };
         }
     }
 }

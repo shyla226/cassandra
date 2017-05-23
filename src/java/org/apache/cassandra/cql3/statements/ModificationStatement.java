@@ -34,6 +34,7 @@ import java.util.UUID;
 import com.google.common.collect.Iterables;
 
 import io.reactivex.Completable;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.*;
@@ -275,6 +276,11 @@ public abstract class ModificationStatement implements CQLStatement
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");
         checkFalse(isCounter() && attrs.isTimeToLiveSet(), "Cannot provide custom TTL for counter updates");
         checkFalse(isView(), "Cannot directly modify a materialized view");
+    }
+
+    public Scheduler getScheduler()
+    {
+        return null;
     }
 
     public RegularAndStaticColumns updatedColumns()

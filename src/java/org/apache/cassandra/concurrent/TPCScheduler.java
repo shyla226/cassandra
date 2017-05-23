@@ -86,6 +86,12 @@ import org.slf4j.LoggerFactory;
  */
 public class TPCScheduler extends Scheduler implements TracingAwareExecutor
 {
+    /**
+     * Set this to true in order to log the caller's thread stack trace in case of exception when running a task on an Rx scheduler.
+     */
+    private static boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("cassandra.log_caller_stack_on_tpc_exception", "false")
+                                                                 .equalsIgnoreCase("true");
+
     private static final Logger logger = LoggerFactory.getLogger(TPCScheduler.class);
 
     public final static FastThreadLocal<TPCScheduler> localNettyEventLoop = new FastThreadLocal<TPCScheduler>()
@@ -628,14 +634,15 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
         }
     }
 
-    private static boolean DEBUG_SCHEDULERS = false;
-
-    private static final class RunnableWithSchedInfo implements Runnable
+    /**
+     * Log the caller thread stack trace in case of exception when running a task.
+     */
+    private static final class RunnableWithCallerThreadInfo implements Runnable
     {
         private final Runnable runnable;
         private final FBUtilities.Debug.ThreadInfo threadInfo;
 
-        RunnableWithSchedInfo(Runnable runnable)
+        RunnableWithCallerThreadInfo(Runnable runnable)
         {
             this.runnable = runnable;
             this.threadInfo = new FBUtilities.Debug.ThreadInfo();
@@ -649,7 +656,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
             }
             catch (Throwable t)
             {
-                logger.error("Scheduler's thread info for exception {}/{} below:\n{}",
+                logger.error("Got exception {} with message <{}> when running Rx task. Caller's thread stack:\n{}",
                              t.getClass().getName(), t.getMessage(),
                              FBUtilities.Debug.getStackTrace(threadInfo));
                 throw t;
@@ -675,7 +682,7 @@ public class TPCScheduler extends Scheduler implements TracingAwareExecutor
                            ? runnable
                            : new ExecutorLocals.WrappedRunnable(runnable);
 
-          return DEBUG_SCHEDULERS ? new RunnableWithSchedInfo(ret) : ret;
+          return LOG_CALLER_STACK_ON_EXCEPTION ? new RunnableWithCallerThreadInfo(ret) : ret;
         });
 
         //RxSubscriptionDebugger.enable();

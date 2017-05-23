@@ -118,7 +118,7 @@ public class AuthorizationProxy implements InvocationHandler
      the permissions from the local cache, which in turn loads them from the configured IAuthorizer
      but can be overridden for testing.
      */
-    protected Function<RoleResource, Set<PermissionDetails>> getPermissions = permissionsCache::get;
+    protected Function<RoleResource, Set<PermissionDetails>> getPermissions = permissionsCache::getPermissions;
 
     /*
      Used to decide whether authorization is enabled or not, usually this depends on the configured
@@ -495,19 +495,11 @@ public class AuthorizationProxy implements InvocationHandler
                   () -> true);
         }
 
-        public Set<PermissionDetails> get(RoleResource roleResource)
+        public Set<PermissionDetails> getPermissions(RoleResource roleResource)
         {
-            try
-            {
-                return super.get(roleResource);
-            }
-            catch (Exception e)
-            {
-                // because the outer class uses this method as Function<RoleResource, Set<PermissionDetails>>,
-                // which can be overridden for testing, it cannot throw checked exceptions. So here we simply
-                // use guava's propagation helper.
-                throw Throwables.propagate(e);
-            }
+            // as far as I can see AuthorizationProxy::loadPermissions should not block and so
+            // we can retrieve missing entries regardless of thread type
+            return get(roleResource, true);
         }
     }
 }

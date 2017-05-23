@@ -18,7 +18,9 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Maybe;
+import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -122,6 +124,11 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
     {
         return announceMigration(state, true).map(s -> (ResultMessage) new ResultMessage.SchemaChange(s))
                                              .toSingle(new ResultMessage.Void());
+    }
+
+    public Scheduler getScheduler()
+    {
+        return Schedulers.io();
     }
 
     protected Maybe<Event.SchemaChange> error(String msg)
