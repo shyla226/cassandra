@@ -33,8 +33,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
  */
 public class TPCThread extends FastThreadLocalThread
 {
-    private static final TPCThreadsCreator factory = new TPCThreadsCreator();
-
     private final int coreId;
 
     private TPCThread(ThreadGroup group, Runnable target, int coreId)
@@ -49,14 +47,18 @@ public class TPCThread extends FastThreadLocalThread
     }
 
     /**
-     * The thread factory to create TPC threads.
+     * Creates a new factory to create TPC threads.
      * <p>
      * This factory makes the assumptions that it is only used to create true TPC threads, and thus that exactly
-     * {@link DatabaseDescriptor#getTPCCores()} of them will be created.
+     * {@link DatabaseDescriptor#getTPCCores()} of them will be created. Also note that each call creates a new
+     * factory so in practice this should only be called once per-runtime and the factory used to create all the
+     * TPC threads. However, some jmh benchmarks reuse our TPC event loop (typically {@link EpollTPCEventLoopGroup})
+     * and that will use a new factory every time, which is fine for those tests but means we don't want to make
+     * that factory a static singleton.
      */
-    static Executor threadFactory()
+    static Executor newTPCThreadFactory()
     {
-        return factory;
+        return new TPCThreadsCreator();
     }
 
     /**

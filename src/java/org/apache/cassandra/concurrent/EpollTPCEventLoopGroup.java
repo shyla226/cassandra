@@ -87,7 +87,7 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
      */
     public EpollTPCEventLoopGroup(int nThreads)
     {
-        super(nThreads, TPCThread.threadFactory());
+        super(nThreads, TPCThread.newTPCThreadFactory());
 
         this.eventLoops = ImmutableList.copyOf(Iterables.transform(this, e -> (SingleCoreEventLoop) e));
 

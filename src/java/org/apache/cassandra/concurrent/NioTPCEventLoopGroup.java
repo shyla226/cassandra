@@ -48,7 +48,7 @@ public class NioTPCEventLoopGroup extends NioEventLoopGroup implements TPCEventL
      */
     NioTPCEventLoopGroup(int nThreads)
     {
-        super(nThreads, TPCThread.threadFactory());
+        super(nThreads, TPCThread.newTPCThreadFactory());
         this.eventLoops = ImmutableList.copyOf(Iterables.transform(this, e -> (SingleCoreEventLoop) e));
     }
 
