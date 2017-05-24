@@ -107,7 +107,6 @@ public class TPC
     // Initialization
     static
     {
-        logger.debug("Initializing TPC");
         // Creates the event loops
         if (USE_EPOLL)
         {
@@ -126,12 +125,9 @@ public class TPC
         // Then create and set the scheduler corresponding to each event loop. Note that the initialization of each
         // scheduler must be done on the thread corresponding to that scheduler/event loop because 1) we need to be able
         // to access said thread easily and 2) we set thread locals as part of the initialization.
-        logger.debug(">> Starting creating schedulers");
         eventLoopGroup.eventLoops().forEach(TPC::register);
 
         initRx();
-
-        logger.debug("TPC fully initialized");
     }
 
     private static void register(TPCEventLoop loop)

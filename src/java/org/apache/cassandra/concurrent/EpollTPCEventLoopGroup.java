@@ -24,6 +24,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
@@ -66,6 +67,17 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
     private final Thread monitorThread;
 
     private volatile boolean shutdown;
+
+    /**
+     * Constructor used by jmh through reflection (so it must have this exact signature, even though the name is
+     * ignored) in some benchmarks (grep for "-Djmh.executor.class=org.apache.cassandra.concurrent.EpollTPCEventLoopGroup"
+     * to see where it's used).
+     */
+    @VisibleForTesting
+    public EpollTPCEventLoopGroup(int nThreads, String name)
+    {
+        this(nThreads);
+    }
 
     /**
      * Creates new a {@code EpollTPCEventLoopGroup} using the provided number of event loops.
