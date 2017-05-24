@@ -17,14 +17,8 @@
  */
 package org.apache.cassandra.concurrent;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,9 +32,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
@@ -57,9 +48,9 @@ import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
  * This is initialized on startup:
  * @see CassandraDaemon#initializeTPC()
  *
- * Each loop run managed on a single thread ({@link TPCThread}) which may be pinned to a particular CPU. Apollo can
+ * Each loop runs managed on a single thread ({@link TPCThread}) which may be pinned to a particular CPU. Apollo can
  * route tasks relative to a particular partition to a single loop thereby avoiding any multi-threaded access, removing
- * the need to concurrent datastructures and locks.
+ * the need for concurrent datastructures and locks.
  */
 public class TPC
 {
@@ -68,8 +59,8 @@ public class TPC
     /**
      * Set this to true in order to log the caller's thread stack trace in case of exception when running a task on an Rx scheduler.
      */
-    private static boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("cassandra.log_caller_stack_on_tpc_exception", "false")
-                                                                 .equalsIgnoreCase("true");
+    private static final boolean LOG_CALLER_STACK_ON_EXCEPTION = System.getProperty("cassandra.log_caller_stack_on_tpc_exception", "false")
+                                                                       .equalsIgnoreCase("true");
 
     private static final int NUM_CORES = DatabaseDescriptor.getTPCCores();
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
@@ -77,8 +68,6 @@ public class TPC
                                             && Epoll.isAvailable();
 
     private final static FastThreadLocal<TPCScheduler> threadLocalEventLoopReferences = new FastThreadLocal<>();
-
-    final static Map<String, List<Token>> keyspaceToRangeMapping = new HashMap<>();
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
@@ -146,7 +135,7 @@ public class TPC
         RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
         RxJavaPlugins.setErrorHandler(e -> CassandraDaemon.defaultExceptionHandler.accept(Thread.currentThread(), e));
 
-        /**
+        /*
          * This handler wraps every scheduled task with a runnable that sets the thread local state to
          * the same state as the thread requesting the task to be scheduled, that means every time
          * a scheduler subscribe is called, and therefore indirectly every time observeOn or subscribeOn
@@ -211,24 +200,24 @@ public class TPC
     }
 
     /**
-     * Creates a new {@link OpOrder} suitable for synchronizing operations that mostly executes on TPC threads.
+     * Creates a new {@link OpOrder} suitable for synchronizing operations that mostly execute on TPC threads.
      * <p>
      * More precisely, the returned {@link OpOrder} reduces contentions between operations calling
      * {@link OpOrder#start()} if those operations are on a TPC thread by internally using per-TPC-thread "groups". It
      * is still valid to call {@link OpOrder#start()} from a non TPC thread, but all such calls will contend with one
-     * another (in other words, if all calls to {@link OpOrder#start()} are done from non-TPC thread, the returned
+     * another (in other words, if all calls to {@link OpOrder#start()} are done from non-TPC threads, the returned
      * {@code OpOrder} won't provide any benefit over a simple {@link OpOrderSimple}, but it will help if most are from
      * TPC threads).
      * <p>
      * Note however that the {@link OpOrder#newBarrier()} method on the returned object <b>must</b> only be called from
      * a <b>non</b>-TPC thread (an assertion error will be thrown if that's not the case) as it is blocking by nature.
      *
-     * @param creator the object for which the {@code OpOrder} is created. Mainly use for debugging purposes.
+     * @param creator the object for which the {@code OpOrder} is created. Mainly used for debugging purposes.
      * @return the newly created {@code OpOrder}.
      */
     public static OpOrder newOpOrder(Object creator)
     {
-        // As mention above, we avoid contention for operations on TPC thread by using a separate "id" (in the
+        // As mentioned above, we avoid contention for operations on TPC thread by using a separate "id" (in the
         // OpOrderThreaded parlance) for each such thread (we simply use the core ID). Any other thread ends up using
         // a shared "id", which is why 1) we use NUM_CORES+1 as "idLimit" and why 2) operations on non-TPC thread do
         // still contend. Also see the definition of threadIdentifier for how we identify the "id" to any thread.
@@ -236,7 +225,7 @@ public class TPC
     }
 
     /**
-     * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
+     * @return the core id for TPC threads, otherwise the number of cores. Callers can verify if the returned
      * core is valid via {@link TPC#isValidCoreId(int)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
      */
@@ -258,7 +247,7 @@ public class TPC
     }
 
     /**
-     * @return the core id for netty threads, otherwise the number of cores. Callers can verify if the returned
+     * @return the core id for TPC threads, otherwise the number of cores. Callers can verify if the returned
      * core is valid via {@link TPC#isValidCoreId(int)}, or alternatively can allocate an
      * array with length num_cores + 1, and use thread safe operations only on the last element.
      */
@@ -287,7 +276,7 @@ public class TPC
      * To balance the execution of tasks, we select the next available core in a round-robin fashion.
      *
      * This method should normally be called during initialization, it should not be called
-     * by methods in the critical execution patch, since the modulo operator is not optimized.
+     * by methods in the critical execution path, since the modulo operator is not optimized.
      *
      * @return a valid core id, distributed in a round-robin way
      */
@@ -301,13 +290,22 @@ public class TPC
      *
      * @param core - the core number for which we want a scheduler of
      *
-     * @return - the scheduler of the core specified, or the scheduler of core zero if not yet assigned
+     * @return - the scheduler of the core specified, or null if not yet assigned
+     *
+     * @throws ArrayIndexOutOfBoundsException if the core is invalid, see {@link TPC#isValidCoreId(int)}.
      */
     public static TPCScheduler getForCore(int core)
     {
         return perCoreSchedulers[core];
     }
 
+    /**
+     * Check if this is a valid core id.
+     *
+     * @param coreId the core id to check.
+     *
+     * @return true if the core id is valid, that is it is >= 0 and < {@link TPC#NUM_CORES}.
+     */
     public static boolean isValidCoreId(int coreId)
     {
         return coreId >= 0 && coreId < getNumCores();
@@ -317,7 +315,7 @@ public class TPC
      * Return the id of the core that is assigned to run operations on the specified keyspace and partition key.
      * <p>
      * Core zero is returned if {@link StorageService} is not yet initialized, since in this case we cannot assign an
-     * partition key to any core.
+     * partition key to any core, or for system keyspaces ({@link SchemaConstants#SYSTEM_KEYSPACE_NAMES}).
      *
      * @param keyspace - the keyspace
      * @param key - the partition key
@@ -330,7 +328,7 @@ public class TPC
         TPCBoundaries boundaries = keyspace.getTPCBoundaries();
 
         // Handles both the system keyspace (but cheaper that comparing strings) and if the node is not sufficiently
-        // initialized yet than we can compute it's boundaries
+        // initialized yet than we can compute its boundaries
         if (boundaries == TPCBoundaries.NONE)
             return 0;
 
@@ -343,16 +341,17 @@ public class TPC
     }
 
     /**
-     * Return the Netty rx scheduler of the core that is assigned to run operations on the specified keyspace
+     * Return the TPC scheduler of the core that is assigned to run operations on the specified keyspace
      * and partition key, see {@link TPC#perCoreSchedulers}.
      * <p>
      * The scheduler for core zero is returned if {@link StorageService} is not yet initialized,
-     * since in this case we cannot assign any partition key to any core.
+     * since in this case we cannot assign any partition key to any core, or for system keyspaces
+     * ({@link SchemaConstants#SYSTEM_KEYSPACE_NAMES}).
      *
      * @param keyspace - the keyspace
      * @param key - the partition key
      *
-     * @return the Netty RX scheduler
+     * @return the TPC scheduler
      */
     @Inline
     public static TPCScheduler getForKey(Keyspace keyspace, DecoratedKey key)

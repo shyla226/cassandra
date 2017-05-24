@@ -36,7 +36,6 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

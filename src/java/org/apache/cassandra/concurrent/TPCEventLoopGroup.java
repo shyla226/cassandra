@@ -25,9 +25,9 @@ import org.apache.cassandra.transport.Server;
 /**
  * A group of TPC event loops.
  * <p>
- * This can be mostly though of as a list of our per-core {@link TPCEventLoop}. This extend netty {@link EventLoopGroup}
- * because 1) there is no point re-inventing the wheel and 2) we use out internal group and events loops to handle
- * I/O tasks as well, which means we pass this to Netty (see the boostrap group in {@link Server#start} in particular).
+ * This can be mostly thought of as a list of our per-core {@link TPCEventLoop}. This extends netty {@link EventLoopGroup}
+ * because 1) there is no point re-inventing the wheel and 2) we use our internal group and event loops to handle
+ * I/O tasks as well, which means we pass this to Netty (see the bootstrap group in {@link Server#start} in particular).
  * <p>
  * The exact event loop group (and so the per-core loops it contains) used is initialized and kept in the {@link TPC}
  * class.

@@ -27,11 +27,11 @@ import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 
 /**
- * Holds boundaries (token) used to map a particular token (so partition key) to a TPC core ID.
+ * Holds boundaries (tokens) used to map a particular token (so partition key) to a TPC core ID.
  * In practice, each keyspace has its associated boundaries, see {@link Keyspace}.
  * <p>
  * Technically, if we use {@code n} cores, this is a list of {@code n-1} tokens and each token {@code tk} gets assigned
- * to the core ID corresponding to the slot of the smallest token in the list that greater to {@code tk}, or {@code n}
+ * to the core ID corresponding to the slot of the smallest token in the list that is greater to {@code tk}, or {@code n}
  * if {@code tk} is bigger than any token in the list.
  */
 public class TPCBoundaries

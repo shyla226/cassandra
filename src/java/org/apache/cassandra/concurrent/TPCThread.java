@@ -25,11 +25,10 @@ import io.netty.util.concurrent.FastThreadLocalThread;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 /**
- * A TPC thread, that is one of core thread running our internal event loops.
+ * A TPC thread, that is one of the core threads running our internal event loops.
  * <p>
  * We create exactly as many TPC threads as the number of configured cores (see {@link DatabaseDescriptor#getTPCCores()})
- * and each of those thread has an associated core ID ({@link #coreId}).
- *
+ * and each of those threads has an associated core ID ({@link #coreId}).
  */
 public class TPCThread extends FastThreadLocalThread
 {

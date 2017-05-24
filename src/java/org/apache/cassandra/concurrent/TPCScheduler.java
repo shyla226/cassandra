@@ -18,25 +18,10 @@
 
 package org.apache.cassandra.concurrent;
 
-import java.util.concurrent.Callable;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
-
 import com.google.common.annotations.VisibleForTesting;
 
-import io.netty.util.concurrent.EventExecutorGroup;
-import io.reactivex.Scheduler;
-import io.reactivex.disposables.Disposable;
-import io.reactivex.disposables.Disposables;
-import io.reactivex.internal.disposables.DisposableContainer;
-import io.reactivex.internal.disposables.EmptyDisposable;
-import io.reactivex.internal.disposables.ListCompositeDisposable;
-import io.reactivex.internal.schedulers.ScheduledRunnable;
-import io.reactivex.plugins.RxJavaPlugins;
-
 /**
- * RxJava Scheduler which wraps a TPC event loops.
+ * RxJava Scheduler which wraps a TPC event loop.
  */
 public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
 {

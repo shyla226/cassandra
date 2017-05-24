@@ -38,7 +38,7 @@ public class CompositeHistogramTest
 {
     private static final DecayingEstimatedHistogramTest.TestClock CLOCK = new DecayingEstimatedHistogramTest.TestClock();
     private static final int TEST_UPDATE_INTERVAL_MILLIS = 0; // zero ensures updates are performed on read
-    private static DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR; // Set in setup as this needs prio initialization
+    private static DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR; // Set in setup as this needs prior initialization
 
     private static final double DELTA = 1e-15; // precision for double comparisons
 

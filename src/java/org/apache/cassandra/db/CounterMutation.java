@@ -142,6 +142,15 @@ public class CounterMutation implements IMutation, Scheduleable
                                     {
                                         Tracing.trace("Failed to acquire counter locks, scheduling retry");
                                         // TODO (Sylvain): shouldn't we use 'scheduler' below?
+                                        // (Stefania) We had similar code for the materialized views and it
+                                        // caused a stack overflow if the locks didn't become available
+                                        // quickly enough. We need to change this and introduce a method that
+                                        // reschedules itself directly if the locks are not available, similar to
+                                        // Keyspace.acquireLocksForView() so that no stack overflow occurs, then
+                                        // we can use directly the same scheduler. Also, the locks should
+                                        // be semaphores just in case the same thread receives multiple counter
+                                        // mutations and it interleaves them, locks are re-entrant and would not
+                                        // protect us against this case.
                                         return Single.defer(() -> this.applyCounterMutation(startTime))
                                                      .subscribeOn(TPC.bestTPCScheduler());
                                     }

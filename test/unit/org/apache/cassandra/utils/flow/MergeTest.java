@@ -77,7 +77,7 @@ public class MergeTest
     @BeforeClass
     public static void setup()
     {
-        // This initialize metrics depends on the number of cores, which depends on the Yaml.
+        // This initializes metrics, which depend on the number of cores, which depends on the Yaml.
         DatabaseDescriptor.daemonInitialization();
     }
 

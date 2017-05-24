@@ -37,7 +37,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 /**
  * Creates a RxJava scheduler that uses an event loop for execution.
  * <p>
- * Note: the real class used in the code is {@link TPCScheduler} which extends this and offer a few additional
+ * Note: the real class used in the code is {@link TPCScheduler} which extends this and offers additional
  * TPC-related convenience, but the reason we have this is testing: it allows us to warp the raw Netty event loops
  * easily so we can bench them against our own loops easily.
  */

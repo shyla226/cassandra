@@ -290,7 +290,6 @@ public class EpollTPCEventLoopGroup extends MultithreadEventLoopGroup implements
         @Override
         protected void addTask(Runnable task)
         {
-
             Thread currentThread = Thread.currentThread();
 
             // Side-note: 'thread' will be null the very first time this is called for the empty task submitted in the
