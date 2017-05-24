@@ -38,8 +38,7 @@ public class CompositeHistogramTest
 {
     private static final DecayingEstimatedHistogramTest.TestClock CLOCK = new DecayingEstimatedHistogramTest.TestClock();
     private static final int TEST_UPDATE_INTERVAL_MILLIS = 0; // zero ensures updates are performed on read
-    private static final DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR =
-        DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
+    private static DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR; // Set in setup as this needs prio initialization
 
     private static final double DELTA = 1e-15; // precision for double comparisons
 
@@ -48,6 +47,7 @@ public class CompositeHistogramTest
     {
         // Metrics depends on the number of cores, which depends on the Yaml.
         DatabaseDescriptor.daemonInitialization();
+        DEFAULT_RESERVOIR = DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
     }
 
     @Test
