@@ -18,13 +18,22 @@
 
 package org.apache.cassandra.cql3;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import junit.framework.Assert;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.SyntaxException;
 
 public class ReservedKeywordsTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        // This initialize metrics depends on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testReservedWordsForColumns() throws Exception
     {

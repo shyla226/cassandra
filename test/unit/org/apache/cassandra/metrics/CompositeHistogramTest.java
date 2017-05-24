@@ -22,9 +22,11 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sasi.utils.AbstractIterator;
 
 import static org.apache.cassandra.metrics.Histogram.DEFAULT_MAX_TRACKABLE_VALUE;
@@ -40,6 +42,13 @@ public class CompositeHistogramTest
         DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
 
     private static final double DELTA = 1e-15; // precision for double comparisons
+
+    @BeforeClass
+    public static void setup()
+    {
+        // Metrics depends on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+    }
 
     @Test
     public void testSingleAggregation()

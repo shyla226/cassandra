@@ -18,10 +18,12 @@
 
 package org.apache.cassandra.metrics;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -33,6 +35,14 @@ public class DecayingEstimatedHistogramTest
     private static final double DOUBLE_ASSERT_DELTA = 0;
     private static final Clock CLOCK = new TestClock();
     private static final int TEST_UPDATE_INTERVAL_MILLIS = 0; // zero ensures updates are performed on read
+
+
+    @BeforeClass
+    public static void setup()
+    {
+        // Metrics depends on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+    }
 
     @Test
     public void testSimple()

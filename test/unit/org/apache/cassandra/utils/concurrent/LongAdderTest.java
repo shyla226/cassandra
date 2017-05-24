@@ -23,16 +23,25 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterators;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.util.concurrent.EventExecutor;
 import junit.framework.Assert;
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class LongAdderTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        // This initialize metrics depends on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testSingleThread()
     {

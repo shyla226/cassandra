@@ -32,9 +32,11 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Sets;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -71,6 +73,13 @@ public class MergeTest
     static int DELAY_CHANCE = 9;            // 1/this of the inputs will be async delayed randomly, 0 for all
     static int SCHEDULE_CHANCE = 4;
     Random rand = new Random();
+
+    @BeforeClass
+    public static void setup()
+    {
+        // This initialize metrics depends on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+    }
 
     @Test
     public void testRandomInts()
