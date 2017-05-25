@@ -20,17 +20,14 @@ package org.apache.cassandra.test.microbench;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.concurrent.LongAdder;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
-import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
@@ -53,12 +50,6 @@ public class LongAdderBench
 {
     private final java.util.concurrent.atomic.LongAdder atomicLongAdder = new java.util.concurrent.atomic.LongAdder();
     private final LongAdder longAdder = new LongAdder();
-
-    @Setup(Level.Trial)
-    public void init() throws InterruptedException
-    {
-        DatabaseDescriptor.daemonInitialization();
-    }
 
     @Benchmark
     public void javaLongAdder_add()

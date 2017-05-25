@@ -2356,6 +2356,9 @@ public class DatabaseDescriptor
 
     public static int getTPCCores()
     {
-        return conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
+        // Checking conf == null allows running micro benchmarks without calling DatabaseDescriptor.daemonInitialization(),
+        // which in turns causes initialization problems when running the micro benchmarks directly from the jar, e.g.
+        // java -jar build/test/benchmarks.jar MyBench
+        return conf == null || conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
     }
 }

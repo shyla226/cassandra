@@ -81,8 +81,6 @@ public class EventLoopBench {
         @Setup
         public void setup() throws InterruptedException
         {
-            DatabaseDescriptor.daemonInitialization();
-
             Integer[] arr = new Integer[count];
             Arrays.fill(arr, 777);
 
