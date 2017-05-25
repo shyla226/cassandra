@@ -472,7 +472,7 @@ concurrent_materialized_view_writes: 2
 # under heavy write load.
 #
 # memtable_cleanup_threshold defaults to 1 / (memtable_flush_writers + 1)
-memtable_cleanup_threshold: 0.34
+# memtable_cleanup_threshold: 0.34
 
 # Specify the way Cassandra allocates and manages memtable memory.
 # Options are:
@@ -525,7 +525,12 @@ memtable_allocation_type: heap_buffers
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-memtable_flush_writers: 12
+# TODO for Jake: I lowered the flush writers back from 12 to 2 because otherwise the calculation for
+# memtable_cleanup_threshold makes no sense and CASSANDRA-12228 deprecated MCT, which means
+# the warning breaks tests if we specify MCT in the yaml. You seemed OK with removing MCT in 12228,
+# so I am not quite sure what we want to do, and also why do we need as many flush writers as 12
+# (given that it is 12 per disk)
+memtable_flush_writers: 2
 
 # Total space to use for change-data-capture logs on disk.
 #

@@ -22,6 +22,7 @@ import java.io.File;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.commons.cli.*;
@@ -52,6 +53,7 @@ public class StandaloneSplitter
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
+        TPCScheduler.register();
 
         try
         {

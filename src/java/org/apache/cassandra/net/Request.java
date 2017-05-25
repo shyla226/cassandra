@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -210,6 +211,11 @@ public class Request<P, Q> extends Message<P>
                 future.thenAccept(responseHandler)
                       .exceptionally(e ->
                                      {
+                                         // Calling completeExceptionally() wraps the original exception into a CompletionException even
+                                         // though the documentation says otherwise
+                                         if (e instanceof CompletionException && e.getCause() != null)
+                                             e = e.getCause();
+
                                          if (e instanceof AbortedOperationException)
                                              onAborted.run();
                                          else if (e instanceof DroppingResponseException)

@@ -30,6 +30,7 @@ import com.google.common.collect.Multimap;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 
+import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.io.sstable.SSTableLoader;
@@ -44,6 +45,7 @@ public class BulkLoader
 {
     public static void main(String args[]) throws BulkLoadException
     {
+        TPCScheduler.register();
         LoaderOptions options = LoaderOptions.builder().parseArgs(args).build();
         load(options);
     }
