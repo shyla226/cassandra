@@ -51,33 +51,34 @@ public class CommitLogSegmentManagerStandard extends AbstractCommitLogSegmentMan
      */
     public Single<CommitLogSegment.Allocation> allocate(Mutation mutation, int size)
     {
+        return Single.defer(() -> {
+            CommitLogSegment segment = allocatingFrom();
+            if (logger.isTraceEnabled())
+                logger.trace("Allocating mutation of size {} on segment {} with space {}", size, segment.id, segment.availableSize());
 
-        CommitLogSegment segment = allocatingFrom();
-        CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
-
-        if (alloc == null)
-        {
-            Scheduler scheduler = mutation.getScheduler();
+            CommitLogSegment.Allocation alloc = segment.allocate(mutation, size);
+            if (alloc != null)
+                return Single.just(alloc);
 
             // failed to allocate, so move to a new segment with enough room
-            return Single.fromCallable(() ->
-                                       {
-                                           CommitLogSegment.Allocation nalloc;
-                                           CommitLogSegment nsegment = segment;
-                                           do
-                                           {
-                                               advanceAllocatingFrom(nsegment);
-                                               nsegment = allocatingFrom();
-                                           }
-                                           while ((nalloc = nsegment.allocate(mutation, size)) == null);
+            return Single.fromCallable(() -> {
+               if (logger.isTraceEnabled())
+                logger.trace("Waiting for segment allocation...");
+               CommitLogSegment.Allocation nalloc;
+               CommitLogSegment nsegment = segment;
+               do
+               {
+                   advanceAllocatingFrom(nsegment);
+                   nsegment = allocatingFrom();
+               }
+               while ((nalloc = nsegment.allocate(mutation, size)) == null);
 
-                                           return nalloc;
-                                       })
-                         .subscribeOn(Schedulers.io()) //Do blocking on IO Sched, continue on TPC thread
-                         .observeOn(scheduler);
-        }
-
-        return Single.just(alloc);
+               if (logger.isTraceEnabled())
+                   logger.trace("Returning segment allocated {}", nalloc);
+               return nalloc;
+           }).subscribeOn(Schedulers.io()) // Do blocking on IO Sched, continue on TPC thread
+             .observeOn(mutation.getScheduler());
+        });
     }
 
     /**

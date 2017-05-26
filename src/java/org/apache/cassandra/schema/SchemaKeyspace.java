@@ -1027,7 +1027,7 @@ public final class SchemaKeyspace
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, COLUMNS);
         // TODO make async?
-		UntypedResultSet columnRows = query(query, keyspace, table).blockingGet();
+        UntypedResultSet columnRows = query(query, keyspace, table).blockingGet();
         if (columnRows.isEmpty())
             throw new MissingColumns("Columns not found in schema table for " + keyspace + "." + table);
 

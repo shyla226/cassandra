@@ -596,6 +596,11 @@ public abstract class CommitLogSegment
         return lastSyncedOffset;
     }
 
+    public long availableSize()
+    {
+        return endOfBuffer - allocatePosition.get();
+    }
+
     @Override
     public String toString()
     {
@@ -677,6 +682,12 @@ public abstract class CommitLogSegment
         void awaitDiskSync(org.apache.cassandra.metrics.Timer waitingOnCommit)
         {
             segment.waitForSync(position, waitingOnCommit);
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("Segment id %d, position %d, limit: %d", segment.id, buffer.position(), buffer.limit());
         }
 
         public CommitLogPosition getCommitLogPosition()

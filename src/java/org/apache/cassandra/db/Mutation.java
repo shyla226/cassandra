@@ -28,6 +28,7 @@ import org.apache.cassandra.concurrent.Scheduleable;
 
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -254,12 +255,12 @@ public class Mutation implements IMutation, Scheduleable
 
     public void apply(boolean durableWrites, boolean isDroppable)
     {
-        Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable).blockingAwait();
+        TPCUtils.blockingAwait(Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable));
     }
 
     public void apply(boolean durableWrites)
     {
-        applyAsync(durableWrites, true).blockingAwait();
+        TPCUtils.blockingAwait(applyAsync(durableWrites, true));
     }
 
     /*

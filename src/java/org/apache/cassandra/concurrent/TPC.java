@@ -24,7 +24,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Epoll;
-import io.netty.util.concurrent.FastThreadLocal;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -66,8 +65,6 @@ public class TPC
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
-
-    private final static FastThreadLocal<TPCScheduler> threadLocalEventLoopReferences = new FastThreadLocal<>();
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
@@ -127,7 +124,6 @@ public class TPC
 
         TPCScheduler scheduler = new TPCScheduler(loop);
         perCoreSchedulers[coreId] = scheduler;
-        threadLocalEventLoopReferences.set(loop.thread().threadLocalMap(), scheduler);
     }
 
     private static void initRx()
@@ -176,27 +172,28 @@ public class TPC
      * you know you are supposed to be on a TPC thread and this is important for performance so you want the code to
      * complain loudly if that assertion is violated.
      * <p>
-     * If you are not sure to be on a TPC scheduler and don't particular care which scheduler/core to use, then you
+     * If you are not sure to be on a TPC scheduler and don't particularly care which scheduler/core to use, then you
      * should prefer the {@link #bestTPCScheduler()} method.
      */
     public static TPCScheduler currentThreadTPCScheduler()
     {
-        assert isTPCThread() : "This method should not be called from a non-TPC thread.";
-        return threadLocalEventLoopReferences.get();
+        int coreId = getCoreId();
+        assert isValidCoreId(coreId) : "This method should not be called from a non-TPC thread.";
+        return getForCore(coreId);
     }
 
     /**
      * Returns the "best" TPC scheduler if no particular core is preferred (typically because the task is not based on
-     * a particular token). In practice, this return the current thread if we are already on a TPC thread, or this
-     * return a "random" TPC scheduler (random as far as the caller is concerned, but in practice we round-robin the
+     * a particular token). In practice, this returns the current thread if we are already on a TPC thread, or it
+     * returns a "random" TPC scheduler (random as far as the caller is concerned, but in practice we round-robin the
      * returned scheduler through {@link #getNextCore()}).
      * <p>
      * If you don't want to favour the current thread if it's a TPC thread, simply use {@code getForCore(getNextCore())}.
      */
     public static TPCScheduler bestTPCScheduler()
     {
-        TPCScheduler scheduler = threadLocalEventLoopReferences.get();
-        return scheduler == null ? getForCore(getNextCore()) : scheduler;
+        int coreId = getCoreId();
+        return isValidCoreId(coreId) ? getForCore(coreId) : getForCore(getNextCore());
     }
 
     /**

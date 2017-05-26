@@ -43,7 +43,7 @@ from select import select
 from uuid import UUID
 from util import profile_on, profile_off
 
-from dse import OperationTimedOut
+from dse import OperationTimedOut, WriteTimeout
 from dse.cluster import Cluster, DefaultConnection, ExecutionProfile, EXEC_PROFILE_DEFAULT
 from dse.cqltypes import ReversedType, UserType
 from dse.metadata import protect_name, protect_names, protect_value
@@ -2257,7 +2257,7 @@ class FastTokenAwarePolicy(DCAwareRoundRobinPolicy):
                 # the back-off starts at 10 ms (0.01) and it can go up to to 2^max_backoff_attempts,
                 # which is currently 12, so 2^12 = 4096 = ~40 seconds when dividing by 0.01
                 delay = randint(1, pow(2, i + 1)) * 0.01
-                printdebugmsg("All replicas busy, sleeping for %d second(s)..." % (delay,))
+                printdebugmsg("All replicas busy, sleeping for %f second(s)..." % (delay,))
                 time.sleep(delay)
 
             printdebugmsg("Replicas too busy, given up")
@@ -2599,11 +2599,23 @@ class ImportProcess(ChildProcess):
         err_is_final = batch['attempts'] >= self.max_attempts
         self.report_error(response, chunk, batch['rows'], batch['attempts'], err_is_final)
         if not err_is_final:
-            batch['attempts'] += 1
+            self.retry(response, batch, chunk, replicas)
+
+    def retry(self, response, batch, chunk, replicas):
+        batch['attempts'] += 1
+
+        def _send():
             statement = self.make_statement(self.query, self.conv, chunk, batch, replicas)
             future = self.session.execute_async(statement)
             future.add_callbacks(callback=self.result_callback, callback_args=(batch, chunk),
                                  errback=self.err_callback, errback_args=(batch, chunk, replicas))
+
+        if isinstance(response, WriteTimeout):
+            delay = randint(1, batch['attempts'] + 1)
+            printdebugmsg("Write timeout received, retrying after %f seconds" % (delay,))
+            threading.Timer(delay, _send).start()
+        else:
+            _send()
 
     def report_error(self, err, chunk=None, rows=None, attempts=1, final=True):
         if self.debug and sys.exc_info()[1] == err:

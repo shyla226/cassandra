@@ -323,6 +323,9 @@ public class Memtable implements Comparable<Memtable>
                         Map<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
                         AtomicBTreePartition previous = partitionMap.get(key);
 
+                        if (logger.isTraceEnabled())
+                            logger.trace("Adding key {} to memtable", key);
+
                         assert writeBarrier == null || writeBarrier.isAfter(opGroup)
                             : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
 

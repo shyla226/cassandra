@@ -216,6 +216,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
                             if (newMutation == null)
                                 newMutation = new Mutation(mutation.getKeyspaceName(), mutation.key());
                             newMutation.add(update);
+
+                            if (logger.isTraceEnabled())
+                                logger.trace("Replaying {}", update);
                             commitLogReplayer.replayedCount.incrementAndGet();
                         }
                     }

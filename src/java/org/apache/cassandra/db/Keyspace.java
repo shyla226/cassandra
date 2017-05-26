@@ -504,7 +504,6 @@ public class Keyspace
         return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable);
     }
 
-
     /**
      * This method appends a row to the global CommitLog, then updates memtables and indexes.
      *
@@ -521,27 +520,17 @@ public class Keyspace
 
         final boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
-        final Completable c = maybeAcquireLocksForView(mutation, updateIndexes, isDroppable).flatMapCompletable(locks -> {
-              int nowInSec = FBUtilities.nowInSeconds();
+        return maybeAcquireLocksForView(mutation, isDroppable, requiresViewUpdate).flatMapCompletable(locks ->
 
-              // write the mutation to the commitlog
-              Single<CommitLogPosition> commitLogPositionObservable;
-              if (writeCommitLog)
-              {
-                  Tracing.trace("Appending to commitlog");
-                  commitLogPositionObservable = CommitLog.instance.add(mutation);
-              }
-              else
-              {
-                  commitLogPositionObservable = Single.just(CommitLogPosition.NONE);
-              }
-
-              return Completable.using(
+              Completable.using(
                   () -> writeOrder.start(),
 
-                  // completable provider
-                  (opGroup) -> commitLogPositionObservable
+                  (opGroup) -> (writeCommitLog ? CommitLog.instance.add(mutation) : Single.just(CommitLogPosition.NONE))
                                .flatMapCompletable(commitLogPosition -> {
+
+                                   if (logger.isTraceEnabled())
+                                       logger.trace("Got CL position {} for mutation {} (view updates: {})",
+                                                    commitLogPosition, mutation, requiresViewUpdate);
 
                                    List<Completable> memtablePutCompletables = new ArrayList<>(mutation.getPartitionUpdates().size());
 
@@ -574,7 +563,7 @@ public class Keyspace
 
                                        Tracing.trace("Adding to {} memtable", upd.metadata().name);
                                        UpdateTransaction indexTransaction = updateIndexes
-                                                                            ? cfs.indexManager.newUpdateTransaction(upd, opGroup, nowInSec)
+                                                                            ? cfs.indexManager.newUpdateTransaction(upd, opGroup, FBUtilities.nowInSeconds())
                                                                             : UpdateTransaction.NO_OP;
 
                                        CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
@@ -594,7 +583,6 @@ public class Keyspace
                                        return Completable.merge(memtablePutCompletables);
                                }),
 
-                  // disposer
                   (opGroup) -> {
                       opGroup.close();
 
@@ -608,10 +596,8 @@ public class Keyspace
                           JVMStabilityInspector.inspectThrowable(t);
                           logger.error("Fail to release view locks", t);
                       }
-              });
-          });
-
-        return c;
+                  }
+              ));
     }
 
     /**
@@ -619,16 +605,14 @@ public class Keyspace
      * Otherwise keep on trying to acquire locks until we succeed or the timeout expires.
      *
      * @param mutation - the mutation to be applied
-     * @param updateIndexes - whether indexes should be updated
      * @param isDroppable - true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout_in_ms
+     * @param requiresViewUpdate - true if the mutation involves one or more views
      *
      * @return a Single of an empty array if no locks are required, or an array containing the locks if a view update is required.
      */
-    private Single<Semaphore[]> maybeAcquireLocksForView(final Mutation mutation, final boolean updateIndexes, final boolean isDroppable)
+    private Single<Semaphore[]> maybeAcquireLocksForView(final Mutation mutation, final boolean isDroppable, final boolean requiresViewUpdate)
     {
         final Semaphore[] locks = new Semaphore[mutation.getTableIds().size()];
-        final boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
-
         if (!requiresViewUpdate)
             return Single.just(locks);
 
@@ -680,7 +664,7 @@ public class Keyspace
                         logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
 
                     // This view update can't happen right now, so schedule another attempt later.
-                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable));
+                    mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable), 1, TimeUnit.MICROSECONDS);
                     return;
                 }
             }
