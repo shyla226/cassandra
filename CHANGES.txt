@@ -74,7 +74,13 @@
  * Add histogram for delay to deliver hints (CASSANDRA-13234)
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
  * Changing `max_hint_window_in_ms` at runtime (CASSANDRA-11720)
+ * Nodetool repair can hang forever if we lose the notification for the repair completing/failing (CASSANDRA-13480)
 
+3.11.1
+ * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
+Merged from 3.0:
+  * Fix secondary index queries on COMPACT tables (CASSANDRA-13627) 
+  * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
 
 3.11.0
  * Allow native function calls in CQLSSTableWriter (CASSANDRA-12606)
@@ -115,8 +121,6 @@
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
  * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
- * Fix secondary index queries on COMPACT tables (CASSANDRA-13627)
- * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
  * Ensure int overflow doesn't occur when calculating large partition warning size (CASSANDRA-13172)
  * Ensure consistent view of partition columns between coordinator and replica in ColumnFilter (CASSANDRA-13004)
  * Failed unregistering mbean during drop keyspace (CASSANDRA-13346)
