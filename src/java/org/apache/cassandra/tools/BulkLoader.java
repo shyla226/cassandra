@@ -45,7 +45,6 @@ public class BulkLoader
 {
     public static void main(String args[]) throws BulkLoadException
     {
-        TPCScheduler.register();
         LoaderOptions options = LoaderOptions.builder().parseArgs(args).build();
         load(options);
     }
