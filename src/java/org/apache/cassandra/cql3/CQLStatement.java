@@ -21,6 +21,8 @@ import javax.annotation.Nullable;
 
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import org.apache.cassandra.concurrent.TPCUtils;
+import org.apache.cassandra.concurrent.TPCUtils.WouldBlockException;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -39,6 +41,14 @@ public interface CQLStatement
 
     /**
      * Perform any access verification necessary for the statement.
+     * <p>
+     * <b>Important:</b> implementation of this method may have to block under some circumstances (typically, some
+     * permissions are not in cache and must be queried). If implementations of this method need to block, they should
+     * first check if they are running on a TPC thread, and if that's the case, they must throw {@link WouldBlockException},
+     * in which case the access we be checked again on a non-TPC thread (on which it is ok to block). This behavior
+     * can be simplified by using the methods in {@link TPCUtils}.
+     * <p>
+     * TODO: we should probably change this to be explicitly (potentially) asynchronous so it's less error-prone.
      *
      * @param state the current client state
      */
@@ -47,6 +57,9 @@ public interface CQLStatement
     /**
      * Perform additional validation required by the statment.
      * To be overriden by subclasses if needed.
+     * <p>
+     * <b>Important:</b> this method is meant for simple validation but that method should never block (it is usually
+     * executed on a TPC thread).
      *
      * @param state the current client state
      */
@@ -79,9 +92,9 @@ public interface CQLStatement
      * {@link CQLStatement#checkAccess(ClientState)} and {@link CQLStatement#execute(QueryState, QueryOptions, long)}.
      *
      * If no specific scheduler is required, then return null. If returning null then it must be guaranteed that
-     * neither {@link CQLStatement#validate(ClientState)}, nor {@link CQLStatement#execute(QueryState, QueryOptions, long)} block.
+     * {@link CQLStatement#execute(QueryState, QueryOptions, long)} doesn't block.
      * {@link CQLStatement#checkAccess(ClientState)} may block only in rare cases, such as security cache misses, but in that
-     * case {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException} must be thrown so that {@link QueryProcessor}
+     * case {@link WouldBlockException} must be thrown so that {@link QueryProcessor}
      * may retry the operation on a different scheduler.
      *
      * @return the scheduler for this statement, or null, if no specific scheduler is required because the operations are non blocking.
