@@ -505,9 +505,7 @@ public class Keyspace
 
     // TODO can probably combine this with applyInternal with the same signature
     /**
-     * If apply is blocking, apply must not be deferred
-     * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
-     * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
+     * Applies the provided mutation.
      *
      * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
      *                       may happen concurrently, depending on the CL Executor type.
@@ -517,20 +515,6 @@ public class Keyspace
      * @throws ExecutionException
      */
     public Completable apply(final Mutation mutation, final boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
-    {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable);
-    }
-
-    /**
-     * This method appends a row to the global CommitLog, then updates memtables and indexes.
-     *
-     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
-     *                       may happen concurrently, depending on the CL Executor type.
-     * @param writeCommitLog false to disable commitlog append entirely
-     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isDroppable    true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout_in_ms
-     */
-    private Completable applyInternal(final Mutation mutation, final boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Testing write failures"));
@@ -589,7 +573,7 @@ public class Keyspace
                                                                             : UpdateTransaction.NO_OP;
 
                                        CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
-                                       Completable memtableCompletable = cfs.applyInternal(upd, indexTransaction, opGroup, pos);
+                                       Completable memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
                                        if (requiresViewUpdate)
                                        {
                                            memtableCompletable = memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));

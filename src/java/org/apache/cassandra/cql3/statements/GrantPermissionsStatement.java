@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.statements;
 import java.util.Set;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -41,7 +40,7 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
     {
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee);
-            return (ResultMessage)(new ResultMessage.Void());
+            return new ResultMessage.Void();
         });
     }
 }
