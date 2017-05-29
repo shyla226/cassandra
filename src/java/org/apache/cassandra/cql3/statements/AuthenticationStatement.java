@@ -55,7 +55,7 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
     public Single<? extends ResultMessage> executeInternal(QueryState state, QueryOptions options)
     {
         // executeInternal is for local query only, thus altering users doesn't make sense and is not supported
-        return Single.error(new UnsupportedOperationException());
+        throw new UnsupportedOperationException();
     }
 
     public Scheduler getScheduler()

@@ -323,7 +323,7 @@ class ContinuousPageWriter
         {
             long pauseMicros = 1;
             boolean aborted = aborted();
-            while(aborted || channel.isWritable())
+            while (aborted || channel.isWritable())
             {
                 if (!aborted && !limiter.tryAcquire())
                 {
