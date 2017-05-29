@@ -44,7 +44,6 @@ public class GossiperTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
     static final IPartitioner partitioner = new Murmur3Partitioner();
     StorageService ss = StorageService.instance;

@@ -28,7 +28,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.commons.cli.*;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -56,7 +56,7 @@ public class StandaloneScrubber
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
-        TPCScheduler.register();
+        TPC.ensureInitialized();
 
         try
         {

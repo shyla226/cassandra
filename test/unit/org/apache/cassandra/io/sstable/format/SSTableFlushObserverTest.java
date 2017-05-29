@@ -61,7 +61,6 @@ public class SSTableFlushObserverTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     private static final String KS_NAME = "test";

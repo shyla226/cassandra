@@ -2353,4 +2353,12 @@ public class DatabaseDescriptor
     {
         conf.metrics_histogram_update_interval_millis = interval;
     }
+
+    public static int getTPCCores()
+    {
+        // Checking conf == null allows running micro benchmarks without calling DatabaseDescriptor.daemonInitialization(),
+        // which in turns causes initialization problems when running the micro benchmarks directly from the jar, e.g.
+        // java -jar build/test/benchmarks.jar MyBench
+        return conf == null || conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
+    }
 }

@@ -48,7 +48,6 @@ public abstract class PartitionerTestCase
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Before

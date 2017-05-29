@@ -196,7 +196,7 @@ public class OpOrderThreaded implements OpOrder
          */
         public void await()
         {
-            assert mapper.barrierPermitted();
+            assert mapper.barrierPermitted() : "Shouldn't have created a barrier for " + mapper + " on thread " + Thread.currentThread();
 
             OpOrderSimple.Group[] current = orderOnOrBefore;
             if (current == null)

@@ -39,7 +39,7 @@ import sun.misc.Contended;
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 3, jvmArgsAppend = {
-      "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup",
+      "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.EpollTPCEventLoopGroup",
       "-Dagrona.disable.bounds.checks=TRUE"
 //      ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+PrintAssembly"
 //       ,"-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
@@ -50,14 +50,14 @@ import sun.misc.Contended;
 @State(Scope.Benchmark)
 public class HistogramUpdateBench
 {
-    static final int UPDATE_TIME_MILLIS = 1000;
+    static final int UPDATE_TIME_MILLIS = 0; // do not aggregate the histogram because that would be on a different thread pool
     static final long testValueLevel = 12340;
     Histogram histogram;
 
     @Setup
     public void setup()
     {
-       histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
+        histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
     }
 
     @State(Scope.Thread)

@@ -22,6 +22,7 @@ import java.util.concurrent.Callable;
 
 import io.reactivex.Scheduler;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 
 public class Threads
@@ -39,10 +40,10 @@ public class Threads
 
         public void request()
         {
-            if (TPCScheduler.getCoreId() == coreId)
+            if (TPC.isOnCore(coreId))
                 source.request();
             else
-                TPCScheduler.getForCore(coreId).scheduleDirect(source::request);
+                TPC.getForCore(coreId).scheduleDirect(source::request);
         }
 
         public void close() throws Exception
@@ -52,7 +53,7 @@ public class Threads
         }
     }
 
-    final static CsFlow.Operator<?, ?> REQUEST_ON_CORE[] = new CsFlow.Operator[TPCScheduler.NUM_NETTY_THREADS];
+    final static CsFlow.Operator<?, ?> REQUEST_ON_CORE[] = new CsFlow.Operator[TPC.getNumCores()];
     static
     {
         for (int i = 0; i < REQUEST_ON_CORE.length; ++i)
@@ -105,7 +106,7 @@ public class Threads
     public static <T> CsFlow.Operator<T, T> requestOn(Scheduler scheduler)
     {
         if (scheduler instanceof TPCScheduler)
-            return requestOnCore(((TPCScheduler) scheduler).cpuId);
+            return requestOnCore(((TPCScheduler) scheduler).coreId());
         else if (scheduler == Schedulers.io())
             return requestOnIo();
         else
@@ -147,10 +148,10 @@ public class Threads
             switch (requested++)
             {
             case 0:
-                if (TPCScheduler.getCoreId() == coreId)
+                if (TPC.isOnCore(coreId))
                     evaluate();
                 else
-                    TPCScheduler.getForCore(coreId).scheduleDirect(this::evaluate);
+                    TPC.getForCore(coreId).scheduleDirect(this::evaluate);
                 break;
             default:
                 // Assuming no need to switch threads for no work.

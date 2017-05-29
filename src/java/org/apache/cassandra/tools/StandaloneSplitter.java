@@ -53,7 +53,6 @@ public class StandaloneSplitter
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
-        TPCScheduler.register();
 
         try
         {

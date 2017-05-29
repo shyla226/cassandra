@@ -42,7 +42,6 @@ public class StreamStateStoreTest
     {
         DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-        TPCScheduler.register();
     }
 
     @Test

@@ -571,7 +571,7 @@ public class SelectionColumnMappingTest extends CQLTester
     private void checkExecution(SelectStatement statement, List<ColumnSpecification> expectedResultColumns)
     throws RequestExecutionException, RequestValidationException
     {
-        ResultMessage.Rows result = (ResultMessage.Rows) statement.executeInternal(QueryState.forInternalCalls(), QueryOptions.DEFAULT).blockingGet();
+        ResultMessage.Rows result = statement.executeInternal(QueryState.forInternalCalls(), QueryOptions.DEFAULT).blockingGet();
         UntypedResultSet rs = UntypedResultSet.create(result.result);
 
         assertEquals(expectedResultColumns, rs.one().getColumns());

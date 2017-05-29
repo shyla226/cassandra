@@ -58,7 +58,6 @@ public class CQLSSTableWriterTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @BeforeClass

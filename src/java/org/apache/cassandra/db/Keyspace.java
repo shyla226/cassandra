@@ -30,7 +30,8 @@ import io.reactivex.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCBoundaries;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -38,6 +39,8 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
@@ -84,12 +87,14 @@ public class Keyspace
 
     //OpOrder is defined globally since we need to order writes across
     //Keyspaces in the case of Views (batchlog of view mutations)
-    public static final OpOrder writeOrder = TPCScheduler.newOpOrderThreaded(Keyspace.class);
+    public static final OpOrder writeOrder = TPC.newOpOrder(Keyspace.class);
 
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
     private volatile AbstractReplicationStrategy replicationStrategy;
     public final ViewManager viewManager;
+
+    private volatile TPCBoundaries tpcBoundaries;
 
     private static volatile boolean initialized = false;
 
@@ -349,6 +354,7 @@ public class Keyspace
         this.viewManager.reload();
     }
 
+    // Only used for mocking Keyspace
     private Keyspace(KeyspaceMetadata metadata)
     {
         this.metadata = metadata;
@@ -360,6 +366,36 @@ public class Keyspace
     public static Keyspace mockKS(KeyspaceMetadata metadata)
     {
         return new Keyspace(metadata);
+    }
+
+    public TPCBoundaries getTPCBoundaries()
+    {
+        TPCBoundaries boundaries = tpcBoundaries;
+        if (boundaries == null)
+        {
+            if (!StorageService.instance.isInitialized())
+                return TPCBoundaries.NONE;
+
+            synchronized (this)
+            {
+                boundaries = tpcBoundaries;
+                if (boundaries == null)
+                {
+                    tpcBoundaries = boundaries = computeTPCBoundaries();
+                    logger.debug("Computed TPC core assignments for {}: {}", getName(), boundaries);
+                }
+            }
+        }
+        return boundaries;
+    }
+
+    private TPCBoundaries computeTPCBoundaries()
+    {
+        if (SchemaConstants.isSystemKeyspace(metadata.name))
+            return TPCBoundaries.NONE;
+
+        List<Range<Token>> localRanges = StorageService.getStartupTokenRanges(this);
+        return localRanges == null ? TPCBoundaries.NONE : TPCBoundaries.compute(localRanges, TPC.getNumCores());
     }
 
     private void createReplicationStrategy(KeyspaceMetadata ksm)

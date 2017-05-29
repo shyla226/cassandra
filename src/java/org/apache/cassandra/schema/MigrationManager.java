@@ -28,7 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.internal.schedulers.ImmediateThinScheduler;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -387,7 +387,7 @@ public class MigrationManager
 
         if (announceLocally)
             return Completable.fromRunnable(() -> Schema.instance.merge(migration))
-                              .subscribeOn(TPCScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                              .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
                                            ImmediateThinScheduler.INSTANCE);
         else
             return announce(migration);
@@ -403,7 +403,7 @@ public class MigrationManager
     {
         return Completable.defer(() -> {
              Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
-                                                 .subscribeOn(TPCScheduler.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                                 .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
                                                               ImmediateThinScheduler.INSTANCE);
 
              for (InetAddress endpoint : Gossiper.instance.getLiveMembers())

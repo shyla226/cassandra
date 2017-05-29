@@ -24,29 +24,17 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.epoll.Epoll;
-import io.netty.channel.nio.NioEventLoopGroup;
-
-import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.metrics.AuthMetrics;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.transport.Server;
-
-import static org.apache.cassandra.concurrent.TPCScheduler.NUM_NETTY_THREADS;
 
 /**
  * Handles native transport server lifecycle and associated resources. Lazily initialized.
  */
 public class NativeTransportService
 {
-    private static final int pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
-
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
-    public static final EventLoopGroup eventLoopGroup = makeWorkerGroup();
 
     private List<Server> servers = Collections.emptyList();
 
@@ -68,26 +56,6 @@ public class NativeTransportService
         this.nativePort = DatabaseDescriptor.getNativeTransportPort();
     }
 
-    private static EventLoopGroup makeWorkerGroup()
-    {
-        if (useEpoll())
-        {
-            MonitoredEpollEventLoopGroup ret = new MonitoredEpollEventLoopGroup(NUM_NETTY_THREADS);
-            logger.info("Using native Epoll event loops");
-            return ret;
-        }
-        else
-        {
-            NioEventLoopGroup ret = new NioEventLoopGroup(NUM_NETTY_THREADS, new TPCScheduler.NettyRxThreadFactory(NioEventLoopGroup.class, Thread.MAX_PRIORITY));
-            ret.setIoRatio(pIO);
-            ApproximateTime.schedule(ret.next());
-
-            logger.info("Using Java NIO event loops");
-            logger.info("Netting ioWork ratio to {}", pIO);
-            return ret;
-        }
-    }
-
     /**
      * Creates netty thread pools and event loops.
      */
@@ -104,7 +72,6 @@ public class NativeTransportService
             servers = new ArrayList<>(1);
 
             org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                                                                    .withEventLoopGroup(eventLoopGroup)
                                                                     .withHost(nativeAddr)
                                                                     .withPort(nativePort)
                                                                     .withSSL(false);
@@ -115,7 +82,6 @@ public class NativeTransportService
         {
 
             org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                    .withEventLoopGroup(eventLoopGroup)
                     .withHost(nativeAddr);
 
             if (nativePort != nativePortSSL)
@@ -174,15 +140,6 @@ public class NativeTransportService
     {
         stop();
         servers = Collections.emptyList();
-    }
-
-    /**
-     * @return intend to use epoll bassed event looping
-     */
-    public static boolean useEpoll()
-    {
-        final boolean enableEpoll = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"));
-        return enableEpoll && Epoll.isAvailable();
     }
 
     /**

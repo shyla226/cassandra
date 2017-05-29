@@ -62,6 +62,7 @@
     <property name="test.long.src" value="${test.dir}/long"/>
     <property name="test.burn.src" value="${test.dir}/burn"/>
     <property name="test.microbench.src" value="${test.dir}/microbench"/>
+    <property name="test.microbench.classes" value="${build.test.dir}/classes/org/apache/cassandra/test/microbench"/>
     <property name="test.dse.src" value="${test.dir}/dse"/>
     <property name="dist.dir" value="${build.dir}/dist"/>
     <property name="tmp.dir" value="${java.io.tmpdir}"/>
@@ -1218,7 +1219,14 @@
       </rat:report>
     </target>
 
-  <target name="build-jmh" depends="build-test" description="Create JMH uber jar">
+    <target name="clean-benches">
+        <delete dir="${test.microbench.classes}" />
+    </target>
+
+    <!--Note, if we do not clean all the benchmark classes, when compiling only the modified
+     benchmarks, build/test/classes/META-INF/BenchmarkList will be overwritten with only the
+     modified benchmakrs and the other ones will not be available for running-->
+    <target name="build-jmh" depends="clean-benches, build-test" description="Create JMH uber jar">
       <jar jarfile="${build.test.dir}/deps.jar">
           <zipgroupfileset dir="${build.dir.lib}/jars">
               <include name="*jmh*.jar"/>
@@ -1235,7 +1243,7 @@
           <fileset dir="${build.classes.main}"/>
           <fileset dir="${test.classes}"/>
       </jar>
-  </target>
+    </target>
 
     <!-- use https://github.com/krummas/jstackjunit to get thread dumps when unit tests time out -->
   <taskdef name="junit" classname="org.krummas.junit.JStackJUnitTask" classpath="lib/jstackjunit-0.0.1.jar"/>

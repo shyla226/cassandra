@@ -22,7 +22,8 @@ import java.util.concurrent.TimeUnit;
 
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.Histogram;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -42,7 +43,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 3, jvmArgsAppend = {
-                                 //"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup",
+                                 //"-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.EpollTPCEventLoopGroup",
                                  "-Dagrona.disable.bounds.checks=TRUE"
 //      ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+PrintAssembly"
 //       ,"-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
@@ -64,7 +65,7 @@ public class HistogramAggregationBench
     {
         histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
 
-        int numCores = TPCScheduler.getNumCores();
+        int numCores = TPC.getNumCores();
         Thread[] threads = new Thread[numCores];
         for (int c = 0; c < numCores; c++)
         {

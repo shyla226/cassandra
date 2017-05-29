@@ -15,35 +15,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.concurrent;
 
-import io.reactivex.Completable;
-import io.reactivex.Single;
+import io.netty.channel.EventLoop;
 
-public class TPCUtils
+/**
+ * An event loop for our Thread-Per-Core architecture. Each loop runs on a specific {@link TPCThread} and as a core
+ * ID associated to it.
+ * <p>
+ * This extends Netty {@link EventLoop} for reasons similar to the one mentioned in {@link TPCEventLoopGroup}.
+ */
+public interface TPCEventLoop extends EventLoop
 {
-    public final static class WouldBlockException extends RuntimeException
+    /**
+     * The TPC thread on which the event loop runs.
+     */
+    public TPCThread thread();
+
+    /**
+     * The core ID identifying the event loop.
+     */
+    default public int coreId()
     {
-        public WouldBlockException(String message)
-        {
-            super(message);
-        }
+        return thread().coreId();
     }
 
-    public static <T> T blockingGet(Single<T> single)
-    {
-        if (TPC.isTPCThread())
-            throw new WouldBlockException("Calling blockingGet would block a TPC thread");
-
-        return single.blockingGet();
-    }
-
-    public static void blockingAwait(Completable completable)
-    {
-        if (TPC.isTPCThread())
-            throw new WouldBlockException("Calling blockingAwait would block a TPC thread");
-
-        completable.blockingAwait();
-    }
+    @Override
+    public TPCEventLoopGroup parent();
 }

@@ -38,7 +38,6 @@ public class NativeAllocatorTest
     public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Test

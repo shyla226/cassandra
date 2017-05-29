@@ -32,12 +32,11 @@ import com.datastax.driver.core.Row;
 import io.reactivex.Scheduler;
 import io.reactivex.plugins.RxJavaPlugins;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -83,7 +82,7 @@ public class ReadWriteTest extends CQLTester
     public void setup() throws Throwable
     {
         Scheduler ioScheduler = Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters()));
-        RxJavaPlugins.setComputationSchedulerHandler((s) -> TPCScheduler.instance());
+        RxJavaPlugins.setComputationSchedulerHandler((s) -> TPC.bestTPCScheduler());
         RxJavaPlugins.initIoScheduler(() -> ioScheduler);
         RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 

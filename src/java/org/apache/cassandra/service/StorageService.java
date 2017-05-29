@@ -233,7 +233,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Collection<Token> localTokens = getLocalTokens();
         setGossipTokens(localTokens);
         tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
-        SystemKeyspace.updateTokenBoundaries();
         setMode(Mode.NORMAL, false);
     }
 
@@ -4951,7 +4950,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<Range<Token>> getStartupTokenRanges(Keyspace keyspace)
     {
-        if (!DatabaseDescriptor.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)
+        if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())
             return null;
 
         Collection<Range<Token>> lr;
@@ -4977,6 +4976,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
     {
+        if (!SPLIT_SSTABLES_BY_TOKEN_RANGE)
+            return null;
+
         List<Range<Token>> localRanges = getStartupTokenRanges(cfs.keyspace);
         if (localRanges == null)
             return null;
@@ -5013,19 +5015,5 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             diskBoundaries.add(boundaries.get(i).maxKeyBound());
         diskBoundaries.add(partitioner.getMaximumToken().maxKeyBound());
         return diskBoundaries;
-    }
-
-
-    public static List<PartitionPosition> getCpuBoundries(List<Range<Token>> localRanges, IPartitioner partitioner, int numCpu)
-    {
-        assert partitioner.splitter().isPresent() : partitioner.getClass().getName() + " doesn't support cpu boundary splitting";
-        Splitter splitter = partitioner.splitter().get();
-        List<Token> boundaries = splitter.splitOwnedRanges(numCpu, localRanges, DatabaseDescriptor.getNumTokens() > 1);
-        List<PartitionPosition> cpuBoundries = new ArrayList<>();
-        cpuBoundries.add(partitioner.getMinimumToken().minKeyBound());
-        for (int i = 0; i < boundaries.size() - 1; i++)
-            cpuBoundries.add(boundaries.get(i).maxKeyBound());
-        cpuBoundries.add(partitioner.getMaximumToken().maxKeyBound());
-        return cpuBoundries;
     }
 }

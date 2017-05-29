@@ -53,7 +53,6 @@ public class ShadowRoundTest
     {
         System.setProperty("cassandra.config", "cassandra-seeds.yaml");
 
-        TPCScheduler.register();
         DatabaseDescriptor.daemonInitialization();
         IEndpointSnitch snitch = new PropertyFileSnitch();
         DatabaseDescriptor.setEndpointSnitch(snitch);

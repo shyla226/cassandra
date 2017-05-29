@@ -78,7 +78,6 @@ public class MessagingServiceTest
     public static void beforeClass() throws UnknownHostException
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
 
         DatabaseDescriptor.setBackPressureStrategy(new MockBackPressureStrategy(Collections.emptyMap()));
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.0.0.1"));

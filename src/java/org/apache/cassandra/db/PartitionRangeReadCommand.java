@@ -26,6 +26,7 @@ import com.google.common.collect.Iterables;
 
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
@@ -344,7 +345,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public TPCScheduler getScheduler()
     {
-        return TPCScheduler.instance();
+        return TPC.bestTPCScheduler();
     }
 
     private static class Deserializer extends SelectionDeserializer
