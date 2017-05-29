@@ -264,7 +264,12 @@ public class QueryProcessor implements QueryHandler
         return getStatement(queryStr, queryState.getClientState());
     }
 
-    public static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
+    public static UntypedResultSet processBlocking(String query, ConsistencyLevel cl) throws RequestExecutionException
+    {
+        return TPCUtils.blockingGet(process(query, cl));
+    }
+
+    private static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
         return process(query, cl, Collections.<ByteBuffer>emptyList());
     }
