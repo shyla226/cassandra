@@ -14,6 +14,8 @@ DSE 5.0.8
  * Issue CQL native protocol warning that DTCS is deprecated (APOLLO-327)
  * Log message when rebuild has finished (APOLLO-465)
  * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
+Merged from DSE 4.8.13:
+* Integrate top threads command in nodetool (APOLLO-652)
 
 
 DSE 5.0.7
