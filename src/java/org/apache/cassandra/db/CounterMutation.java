@@ -35,6 +35,7 @@ import io.reactivex.Single;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.rows.*;
@@ -181,7 +182,7 @@ public class CounterMutation implements IMutation, Scheduleable
 
     public void apply()
     {
-        applyCounterMutation().blockingGet();
+        TPCUtils.blockingGet(applyCounterMutation());
     }
 
     public Completable applyAsync()
