@@ -61,7 +61,6 @@ public class RandomAccessReaderTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     private static final class Parameters

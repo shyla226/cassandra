@@ -33,11 +33,9 @@ import org.slf4j.LoggerFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
-import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.ssl.SslHandler;
@@ -45,6 +43,7 @@ import io.netty.util.Version;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -63,7 +62,6 @@ public class Server implements CassandraDaemon.Server
     }
 
     private static final Logger logger = LoggerFactory.getLogger(Server.class);
-    private static final boolean useEpoll = NativeTransportService.useEpoll();
 
     private final ConnectionTracker connectionTracker = new ConnectionTracker();
 
@@ -79,24 +77,10 @@ public class Server implements CassandraDaemon.Server
     public boolean useSSL = false;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    private EventLoopGroup workerGroup;
-
-    private Server (Builder builder)
+    private Server(Builder builder)
     {
         this.socket = builder.getSocket();
         this.useSSL = builder.useSSL;
-        if (builder.workerGroup != null)
-        {
-            workerGroup = builder.workerGroup;
-        }
-        else
-        {
-            logger.warn("!!!!!!!!!!!!!!!!!! creating new worker group");
-            if (useEpoll)
-                workerGroup = new EpollEventLoopGroup();
-            else
-                workerGroup = new NioEventLoopGroup();
-        }
 
         EventNotifier notifier = new EventNotifier(this);
         StorageService.instance.register(notifier);
@@ -121,15 +105,14 @@ public class Server implements CassandraDaemon.Server
 
         // Configure the server.
         ServerBootstrap bootstrap = new ServerBootstrap()
-                                    .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
+                                    .group(TPC.eventLoopGroup())
+                                    .channel(TPC.USE_EPOLL ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
                                     .childOption(ChannelOption.TCP_NODELAY, true)
                                     .childOption(ChannelOption.SO_LINGER, 0)
                                     .childOption(ChannelOption.SO_KEEPALIVE, DatabaseDescriptor.getRpcKeepAlive())
                                     .childOption(ChannelOption.ALLOCATOR, CBUtil.allocator)
                                     .childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024)
                                     .childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
-        if (workerGroup != null)
-            bootstrap = bootstrap.group(workerGroup);
 
         if (this.useSSL)
         {
@@ -178,7 +161,6 @@ public class Server implements CassandraDaemon.Server
 
     public static class Builder
     {
-        private EventLoopGroup workerGroup;
         private boolean useSSL = false;
         private InetAddress hostAddr;
         private int port = -1;
@@ -187,12 +169,6 @@ public class Server implements CassandraDaemon.Server
         public Builder withSSL(boolean useSSL)
         {
             this.useSSL = useSSL;
-            return this;
-        }
-
-        public Builder withEventLoopGroup(EventLoopGroup eventLoopGroup)
-        {
-            this.workerGroup = eventLoopGroup;
             return this;
         }
 

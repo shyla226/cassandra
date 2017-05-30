@@ -233,7 +233,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private final Tracker data;
 
     /* The read order, used to track accesses to off-heap memtable storage */
-    public final OpOrder readOrdering = TPCScheduler.newOpOrderThreaded(this);
+    public final OpOrder readOrdering = TPC.newOpOrder(this);
 
     /* This is used to generate the next index for a SSTable */
     private final AtomicInteger fileIndexGenerator = new AtomicInteger(0);

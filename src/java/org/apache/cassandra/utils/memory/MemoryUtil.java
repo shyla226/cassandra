@@ -109,7 +109,7 @@ public abstract class MemoryUtil
 
     public static long getAddress(ByteBuffer buffer)
     {
-        assert buffer.getClass() == DIRECT_BYTE_BUFFER_CLASS || buffer.getClass() == RO_DIRECT_BYTE_BUFFER_CLASS;
+        assert buffer.getClass() == DIRECT_BYTE_BUFFER_CLASS || buffer.getClass() == RO_DIRECT_BYTE_BUFFER_CLASS : buffer.getClass();
         return unsafe.getLong(buffer, DIRECT_BYTE_BUFFER_ADDRESS_OFFSET);
     }
 

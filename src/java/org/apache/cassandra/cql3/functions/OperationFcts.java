@@ -23,9 +23,9 @@ import java.util.Collection;
 import java.util.List;
 
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.OperationExecutionException;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * Operation functions (Mathematics).
@@ -37,73 +37,49 @@ public final class OperationFcts
     {
         ADDITION('+', "_add")
         {
-            protected ByteBuffer executeOnNumerics(NumberType<?> resultType,
-                                                   NumberType<?> leftType,
-                                                   ByteBuffer left,
-                                                   NumberType<?> rightType,
-                                                   ByteBuffer right)
+            protected ByteBuffer executeOnNumerics(NumberType<?> resultType, Number left, Number right)
             {
-                return resultType.add(leftType, left, rightType, right);
+                return resultType.add(left, right);
             }
 
             @Override
-            protected ByteBuffer executeOnTemporals(TemporalType<?> type,
-                                                    ByteBuffer temporal,
-                                                    ByteBuffer duration)
+            protected ByteBuffer executeOnTemporals(TemporalType<?> type, Number temporal, Duration duration)
             {
                 return type.addDuration(temporal, duration);
             }
         },
         SUBSTRACTION('-', "_substract")
         {
-            protected ByteBuffer executeOnNumerics(NumberType<?> resultType,
-                                         NumberType<?> leftType,
-                                         ByteBuffer left,
-                                         NumberType<?> rightType,
-                                         ByteBuffer right)
+            protected ByteBuffer executeOnNumerics(NumberType<?> resultType, Number left, Number right)
             {
-                return resultType.substract(leftType, left, rightType, right);
+                return resultType.substract(left, right);
             }
 
             @Override
-            protected ByteBuffer executeOnTemporals(TemporalType<?> type,
-                                                    ByteBuffer temporal,
-                                                    ByteBuffer duration)
+            protected ByteBuffer executeOnTemporals(TemporalType<?> type, Number temporal, Duration duration)
             {
                 return type.substractDuration(temporal, duration);
             }
         },
         MULTIPLICATION('*', "_multiply")
         {
-            protected ByteBuffer executeOnNumerics(NumberType<?> resultType,
-                                         NumberType<?> leftType,
-                                         ByteBuffer left,
-                                         NumberType<?> rightType,
-                                         ByteBuffer right)
+            protected ByteBuffer executeOnNumerics(NumberType<?> resultType, Number left, Number right)
             {
-                return resultType.multiply(leftType, left, rightType, right);
+                return resultType.multiply(left, right);
             }
         },
         DIVISION('/', "_divide")
         {
-            protected ByteBuffer executeOnNumerics(NumberType<?> resultType,
-                                         NumberType<?> leftType,
-                                         ByteBuffer left,
-                                         NumberType<?> rightType,
-                                         ByteBuffer right)
+            protected ByteBuffer executeOnNumerics(NumberType<?> resultType, Number left, Number right)
             {
-                return resultType.divide(leftType, left, rightType, right);
+                return resultType.divide(left, right);
             }
         },
         MODULO('%', "_modulo")
         {
-            protected ByteBuffer executeOnNumerics(NumberType<?> resultType,
-                                         NumberType<?> leftType,
-                                         ByteBuffer left,
-                                         NumberType<?> rightType,
-                                         ByteBuffer right)
+            protected ByteBuffer executeOnNumerics(NumberType<?> resultType, Number left, Number right)
             {
-                return resultType.mod(leftType, left, rightType, right);
+                return resultType.mod(left, right);
             }
         };
 
@@ -127,17 +103,13 @@ public final class OperationFcts
          * Executes the operation between the specified numeric operand.
          *
          * @param resultType the result ype of the operation
-         * @param leftType the type of the left operand
          * @param left the left operand
-         * @param rightType the type of the right operand
          * @param right the right operand
          * @return the operation result
          */
         protected abstract ByteBuffer executeOnNumerics(NumberType<?> resultType,
-                                                        NumberType<?> leftType,
-                                                        ByteBuffer left,
-                                                        NumberType<?> rightType,
-                                                        ByteBuffer right);
+                                                        Number left,
+                                                        Number right);
 
         /**
          * Executes the operation on the specified temporal operand.
@@ -148,8 +120,8 @@ public final class OperationFcts
          * @return the operation result
          */
         protected ByteBuffer executeOnTemporals(TemporalType<?> type,
-                                                ByteBuffer temporal,
-                                                ByteBuffer duration)
+                                                Number temporal,
+                                                Duration duration)
         {
             throw new UnsupportedOperationException();
         }
@@ -362,16 +334,14 @@ public final class OperationFcts
             return String.format("%s %s %s", columnNames.get(0), getOperator(), columnNames.get(1));
         }
 
-        public final ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        public final ByteBuffer execute(Arguments arguments)
         {
-            ByteBuffer left = parameters.get(0);
-            ByteBuffer right = parameters.get(1);
-            if (left == null || !left.hasRemaining() || right == null || !right.hasRemaining())
+            if (arguments.containsNulls())
                 return null;
 
             try
             {
-                return doExecute(left, operation, right);
+                return doExecute(arguments.get(0), operation, arguments.get(1));
             }
             catch (Exception e)
             {
@@ -379,7 +349,7 @@ public final class OperationFcts
             }
         }
 
-        protected abstract ByteBuffer doExecute(ByteBuffer left, OPERATION operation, ByteBuffer right);
+        protected abstract ByteBuffer doExecute(Object left, OPERATION operation, Object right);
 
         /**
          * Returns the operator symbol.
@@ -405,13 +375,11 @@ public final class OperationFcts
         }
 
         @Override
-        protected ByteBuffer doExecute(ByteBuffer left, OPERATION operation, ByteBuffer right)
+        protected ByteBuffer doExecute(Object left, OPERATION operation, Object right)
         {
-            NumberType<?> leftType = (NumberType<?>) argTypes().get(0);
-            NumberType<?> rightType = (NumberType<?>) argTypes().get(1);
             NumberType<?> resultType = (NumberType<?>) returnType();
 
-            return operation.executeOnNumerics(resultType, leftType, left, rightType, right);
+            return operation.executeOnNumerics(resultType, (Number) left, (Number) right);
         }
     }
 
@@ -427,10 +395,10 @@ public final class OperationFcts
         }
 
         @Override
-        protected ByteBuffer doExecute(ByteBuffer left, OPERATION operation, ByteBuffer right)
+        protected ByteBuffer doExecute(Object left, OPERATION operation, Object right)
         {
             TemporalType<?> resultType = (TemporalType<?>) returnType();
-            return operation.executeOnTemporals(resultType, left, right);
+            return operation.executeOnTemporals(resultType, (Number) left, (Duration) right);
         }
     }
 
@@ -450,15 +418,14 @@ public final class OperationFcts
             return String.format("-%s", columnNames.get(0));
         }
 
-        public final ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        public final ByteBuffer execute(Arguments arguments)
         {
-            ByteBuffer input = parameters.get(0);
-            if (input == null)
+            if (arguments.containsNulls())
                 return null;
 
             NumberType<?> inputType = (NumberType<?>) argTypes().get(0);
 
-            return inputType.negate(input);
+            return inputType.negate(arguments.get(0));
         }
     }
 }

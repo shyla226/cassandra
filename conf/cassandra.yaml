@@ -24,6 +24,12 @@ cluster_name: 'Test Cluster'
 # multiple tokens per node, see http://wiki.apache.org/cassandra/Operations
 num_tokens: 1
 
+# Number of cores used by the internal Thread-Per-Core architecture (TPC). This corresponds to the
+# number of event loops that will be created internally.
+# If unset or commented (the default), this will default to the number of available processors on the machine. That
+# generally yield the best performance and most users should rely on it.
+#tpc_cores:
+
 # Triggers automatic allocation of num_tokens tokens for this node. The allocation
 # algorithm attempts to choose tokens in a way that optimizes replicated load over
 # the nodes in the datacenter for the specified DC-level replication factor.
@@ -472,7 +478,7 @@ buffer_pool_use_heap_if_exhausted: false
 # under heavy write load.
 #
 # memtable_cleanup_threshold defaults to 1 / (memtable_flush_writers + 1)
-memtable_cleanup_threshold: 0.34
+# memtable_cleanup_threshold: 0.34
 
 # Specify the way Cassandra allocates and manages memtable memory.
 # Options are:
@@ -525,7 +531,12 @@ memtable_allocation_type: heap_buffers
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-memtable_flush_writers: 12
+# TODO for Jake: I lowered the flush writers back from 12 to 2 because otherwise the calculation for
+# memtable_cleanup_threshold makes no sense and CASSANDRA-12228 deprecated MCT, which means
+# the warning breaks tests if we specify MCT in the yaml. You seemed OK with removing MCT in 12228,
+# so I am not quite sure what we want to do, and also why do we need as many flush writers as 12
+# (given that it is 12 per disk)
+memtable_flush_writers: 2
 
 # Total space to use for change-data-capture logs on disk.
 #
@@ -742,6 +753,10 @@ column_index_cache_size_in_kb: 2
 # If your data directories are backed by SSD, you should increase this
 # to the number of cores.
 #concurrent_compactors: 1
+
+# Number of simultaneous repair validations to allow. Default is unbounded
+# Values less than one are interpreted as unbounded (the default)
+# concurrent_validations: 0
 
 # Throttles compaction to the given total throughput across the entire
 # system. The faster you insert data, the faster you need to compact in

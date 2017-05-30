@@ -32,6 +32,7 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
@@ -60,7 +61,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Wrapped;
 import org.apache.cassandra.utils.WrappedInt;
-import org.apache.cassandra.utils.flow.Threads;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedBoolean;
@@ -363,8 +363,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         //return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-        //                              TPCScheduler.getCoreForKey(metadata().keyspace, partitionKey()));
-
+        //                              TPC.getCoreForKey(cfs.keyspace, partitionKey()));
         return queryMemtableAndDisk(cfs, executionController);
     }
 
@@ -1101,7 +1100,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public TPCScheduler getScheduler()
     {
-        return TPCScheduler.getForKey(metadata().keyspace, partitionKey());
+        return TPC.getForKey(Keyspace.open(metadata().keyspace), partitionKey());
     }
 
     /**

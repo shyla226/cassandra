@@ -26,6 +26,7 @@ import org.apache.cassandra.cql3.Json;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
@@ -35,6 +36,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 public class UTF8Type extends AbstractType<String>
 {
     public static final UTF8Type instance = new UTF8Type();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     UTF8Type() {super(ComparisonType.BYTE_ORDER);} // singleton
 
@@ -87,5 +90,11 @@ public class UTF8Type extends AbstractType<String>
     public TypeSerializer<String> getSerializer()
     {
         return UTF8Serializer.instance;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

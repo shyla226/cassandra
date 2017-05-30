@@ -22,9 +22,11 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sasi.utils.AbstractIterator;
 
 import static org.apache.cassandra.metrics.Histogram.DEFAULT_MAX_TRACKABLE_VALUE;
@@ -36,10 +38,17 @@ public class CompositeHistogramTest
 {
     private static final DecayingEstimatedHistogramTest.TestClock CLOCK = new DecayingEstimatedHistogramTest.TestClock();
     private static final int TEST_UPDATE_INTERVAL_MILLIS = 0; // zero ensures updates are performed on read
-    private static final DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR =
-        DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
+    private static DecayingEstimatedHistogram.Reservoir DEFAULT_RESERVOIR; // Set in setup as this needs prior initialization
 
     private static final double DELTA = 1e-15; // precision for double comparisons
+
+    @BeforeClass
+    public static void setup()
+    {
+        // Metrics depends on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+        DEFAULT_RESERVOIR = DecayingEstimatedHistogram.makeCompositeReservoir(DEFAULT_ZERO_CONSIDERATION, DEFAULT_MAX_TRACKABLE_VALUE, TEST_UPDATE_INTERVAL_MILLIS, CLOCK);
+    }
 
     @Test
     public void testSingleAggregation()

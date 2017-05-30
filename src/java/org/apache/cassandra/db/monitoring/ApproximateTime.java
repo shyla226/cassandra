@@ -21,18 +21,18 @@ package org.apache.cassandra.db.monitoring;
 import java.util.concurrent.TimeUnit;
 
 import io.netty.channel.EventLoop;
-import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
+import org.apache.cassandra.concurrent.EpollTPCEventLoopGroup;
 
 /**
  * This is an approximation of System.currentTimeInMillis() and System.nanoTime(),
  * to be used as a faster alternative when we can sacrifice precision.
  *
- * The current nanoTime is updated by the monitoring thread of {@link MonitoredEpollEventLoopGroup},
+ * The current nanoTime is updated by the monitoring thread of {@link EpollTPCEventLoopGroup},
  * which calls {@link java.util.concurrent.locks.LockSupport#parkNanos(long)} with a parameter of 1
  * nanoSecond, and then checks the queues of the single-threaded executors, so the precision should be
  * of approximately 50 to 100 microseconds. To be on the safe side, we set the precision to 200 microseconds.
  *
- * For platforms without epoll support, then {@link MonitoredEpollEventLoopGroup} is not available and
+ * For platforms without epoll support, then {@link EpollTPCEventLoopGroup} is not available and
  * {@link ApproximateTime#schedule(EventLoop)} must be called when the alternative event loop group is initialized.
  */
 public class ApproximateTime
@@ -45,7 +45,7 @@ public class ApproximateTime
     private static final long precisionWithSchedulingMicros = 1000;
 
     /** The precision when epoll is available and hence {@link ApproximateTime#tick} gets called automatically
-     * by {@link MonitoredEpollEventLoopGroup}.
+     * by {@link EpollTPCEventLoopGroup}.
      */
     private static final long precisionWithEpollMicros = 200; // see comment in class description
 
@@ -55,7 +55,7 @@ public class ApproximateTime
     private static long precisionMicros = precisionWithEpollMicros;
 
     /**
-     * For platforms without epoll support, then {@link MonitoredEpollEventLoopGroup} is not available and
+     * For platforms without epoll support, then {@link EpollTPCEventLoopGroup} is not available and
      * hence we need to schedule time updates manually.
      *
      * @param eventLoop - the event loop that will periodically set the current time.
@@ -68,7 +68,7 @@ public class ApproximateTime
 
     /**
      * Update the current time. This must be called by the same thread,
-     * see {@link MonitoredEpollEventLoopGroup#MonitoredEpollEventLoopGroup(int)}
+     * see {@link EpollTPCEventLoopGroup#EpollTPCEventLoopGroup(int)}
      */
     public static void tick()
     {

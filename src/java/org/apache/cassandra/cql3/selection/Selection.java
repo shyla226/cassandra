@@ -27,6 +27,7 @@ import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.selection.Selector.InputRow;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -259,18 +260,19 @@ public abstract class Selection
 
     static interface Selectors
     {
+        public boolean hasProcessing();
+
         public boolean isAggregate();
 
         /**
-         * Adds the current row of the specified <code>ResultSetBuilder</code>.
+         * Adds the specified input row.
          *
-         * @param protocolVersion
-         * @param rs the <code>ResultSetBuilder</code>
-         * @throws InvalidRequestException
+         * @param protocolVersion the protocol version
+         * @param input the input row
          */
-        public void addInputRow(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException;
+        public void addInputRow(ProtocolVersion protocolVersion, InputRow input);
 
-        public List<ByteBuffer> getOutputRow(ProtocolVersion protocolVersion) throws InvalidRequestException;
+        public List<ByteBuffer> getOutputRow(ProtocolVersion protocolVersion);
 
         public void reset();
     }
@@ -326,9 +328,14 @@ public abstract class Selection
                     return current;
                 }
 
-                public void addInputRow(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
+                public void addInputRow(ProtocolVersion protocolVersion, InputRow input)
                 {
-                    current = rs.current;
+                    current = input.getValues();
+                }
+
+                public boolean hasProcessing()
+                {
+                    return false;
                 }
 
                 public boolean isAggregate()
@@ -408,7 +415,12 @@ public abstract class Selection
                     return factories.doesAggregation();
                 }
 
-                public List<ByteBuffer> getOutputRow(ProtocolVersion protocolVersion) throws InvalidRequestException
+                public boolean hasProcessing()
+                {
+                    return true;
+                }
+
+                public List<ByteBuffer> getOutputRow(ProtocolVersion protocolVersion)
                 {
                     List<ByteBuffer> outputRow = new ArrayList<>(selectors.size());
 
@@ -418,10 +430,10 @@ public abstract class Selection
                     return outputRow;
                 }
 
-                public void addInputRow(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
+                public void addInputRow(ProtocolVersion protocolVersion, InputRow input)
                 {
                     for (Selector selector : selectors)
-                        selector.addInput(protocolVersion, rs);
+                        selector.addInput(protocolVersion, input);
                 }
             };
         }

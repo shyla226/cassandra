@@ -132,8 +132,8 @@ public class BufferPool
 
         if (size > CHUNK_SIZE)
         {
-            //if (logger.isTraceEnabled())
-                logger.info("Requested buffer size {} is bigger than {}, allocating directly",
+            if (logger.isTraceEnabled())
+                logger.trace("Requested buffer size {} is bigger than {}, allocating directly",
                              FBUtilities.prettyPrintMemory(size),
                              FBUtilities.prettyPrintMemory(CHUNK_SIZE));
 

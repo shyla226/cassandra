@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sasi.plan;
 import java.util.Iterator;
 
 import io.reactivex.functions.Function;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -34,6 +35,7 @@ import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Threads;
 
 public class QueryPlan
 {
@@ -98,6 +100,7 @@ public class QueryPlan
             operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
 
             CsFlow<DecoratedKey> keys = CsFlow.fromIterable(() -> operationTree)
+                                              .lift(Threads.requestOnIo())
                                               .flatMap(CsFlow::fromIterable);
 
             if (!keyRange.right.isMinimum())

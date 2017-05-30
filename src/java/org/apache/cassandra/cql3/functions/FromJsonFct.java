@@ -28,7 +28,6 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 public class FromJsonFct extends NativeScalarFunction
 {
@@ -52,20 +51,19 @@ public class FromJsonFct extends NativeScalarFunction
         super("fromjson", returnType, UTF8Type.instance);
     }
 
-    public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+    public ByteBuffer execute(Arguments arguments)
     {
-        assert parameters.size() == 1 : "Unexpectedly got " + parameters.size() + " arguments for fromJson()";
-        ByteBuffer argument = parameters.get(0);
-        if (argument == null)
+        assert arguments.size() == 1 : "Unexpectedly got " + arguments.size() + " arguments for fromJson()";
+        if (arguments.containsNulls())
             return null;
 
-        String jsonArg = UTF8Type.instance.getSerializer().deserialize(argument);
+        String jsonArg = arguments.get(0);
         try
         {
             Object object = Json.JSON_OBJECT_MAPPER.readValue(jsonArg, Object.class);
             if (object == null)
                 return null;
-            return returnType.fromJSONObject(object).bindAndGet(QueryOptions.forProtocolVersion(protocolVersion));
+            return returnType.fromJSONObject(object).bindAndGet(QueryOptions.forProtocolVersion(arguments.getProtocolVersion()));
         }
         catch (IOException exc)
         {

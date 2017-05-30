@@ -46,7 +46,6 @@ public class HintedHandOffMetricsTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Test

@@ -18,8 +18,6 @@
 package org.apache.cassandra.cql3.functions;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.List;
 
 import org.junit.Test;
 
@@ -43,7 +41,7 @@ public class TimeFctsTest
     @Test
     public void testMinTimeUuid()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -56,7 +54,7 @@ public class TimeFctsTest
     @Test
     public void testMaxTimeUuid()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -69,7 +67,7 @@ public class TimeFctsTest
     @Test
     public void testDateOf()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -82,7 +80,7 @@ public class TimeFctsTest
     @Test
     public void testTimeUuidToTimestamp()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -95,7 +93,7 @@ public class TimeFctsTest
     @Test
     public void testUnixTimestampOfFct()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -108,7 +106,7 @@ public class TimeFctsTest
     @Test
     public void testTimeUuidToUnixTimestamp()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -121,7 +119,7 @@ public class TimeFctsTest
     @Test
     public void testTimeUuidToDate()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(DateTimeZone.UTC)
                 .parseDateTime("2015-05-21 11:03:02");
 
@@ -183,7 +181,7 @@ public class TimeFctsTest
     @Test
     public void testTimestampToUnixTimestamp()
     {
-        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd hh:mm:ss")
+        DateTime dateTime = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
                                           .withZone(DateTimeZone.UTC)
                                           .parseDateTime("2015-05-21 11:03:02");
 
@@ -201,7 +199,8 @@ public class TimeFctsTest
 
     private static ByteBuffer executeFunction(Function function, ByteBuffer input)
     {
-        List<ByteBuffer> params = Arrays.asList(input);
-        return ((ScalarFunction) function).execute(ProtocolVersion.CURRENT, params);
+        Arguments arguments = function.newArguments(ProtocolVersion.CURRENT);
+        arguments.set(0, input);
+        return ((ScalarFunction) function).execute(arguments);
     }
 }

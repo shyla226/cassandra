@@ -36,7 +36,6 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -169,7 +168,6 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
-              + "token_boundaries list<varchar>,"
               + "truncated_at map<uuid, blob>,"
               + "PRIMARY KEY ((key)))")
               .recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
@@ -188,7 +186,6 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
-              + "token_boundaries list<varchar>,"
               + "PRIMARY KEY ((peer)))")
               .build();
 
@@ -720,16 +717,6 @@ public final class SystemKeyspace
 
         String req = "INSERT INTO system.%s (key, tokens) VALUES ('%s', ?)";
         executeInternal(format(req, LOCAL, LOCAL), tokensAsSet(tokens));
-        forceBlockingFlush(LOCAL);
-    }
-
-    public static synchronized void updateTokenBoundaries()
-    {
-        // TODO technically this needs to be per-keyspace; just use a distributed KS for now
-        List<Token> ranges = TPCScheduler.getRangeList(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME, false);
-        String req = "INSERT INTO system.%s (key, token_boundaries) VALUES ('%s', ?)";
-        logger.info("LIST = " + tokensAsList(ranges));
-        executeInternal(String.format(req, LOCAL, LOCAL), tokensAsList(ranges));
         forceBlockingFlush(LOCAL);
     }
 

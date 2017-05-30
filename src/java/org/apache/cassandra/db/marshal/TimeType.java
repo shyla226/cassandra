@@ -19,11 +19,11 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TimeSerializer;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -37,6 +37,9 @@ import org.apache.cassandra.utils.ByteSource;
 public class TimeType extends TemporalType<Long>
 {
     public static final TimeType instance = new TimeType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
+
     private TimeType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
     public ByteSource asByteComparableSource(ByteBuffer buf)
@@ -90,5 +93,11 @@ public class TimeType extends TemporalType<Long>
     public ByteBuffer now()
     {
         return decompose(LocalTime.now(ZoneOffset.UTC).toNanoOfDay());
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

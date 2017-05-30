@@ -20,19 +20,11 @@
 package org.apache.cassandra.test.microbench;
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 import io.netty.channel.epoll.EpollEventLoopGroup;
-import io.netty.util.concurrent.DefaultEventExecutorGroup;
-import io.reactivex.Observable;
-import io.reactivex.Observer;
-import io.reactivex.Scheduler;
-import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup;
+import org.apache.cassandra.concurrent.EpollTPCEventLoopGroup;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -63,11 +55,11 @@ public class ExecutorMicroBench {
         public int count;
         public int value = 0;
 
-        public MonitoredEpollEventLoopGroup executor;
+        public EpollTPCEventLoopGroup executor;
 
         @Setup
         public void setup() {
-            executor = new MonitoredEpollEventLoopGroup(1);
+            executor = new EpollTPCEventLoopGroup(1);
         }
 
         @TearDown

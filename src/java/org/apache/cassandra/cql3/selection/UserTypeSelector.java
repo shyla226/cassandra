@@ -17,23 +17,31 @@
  */
 package org.apache.cassandra.cql3.selection;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.apache.cassandra.schema.ColumnMetadata;
+import com.google.common.base.Objects;
+
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.UserTypes;
 import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.db.ReadVerbs.ReadVersion;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UserType;
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * <code>Selector</code> for literal map (e.g. {'min' : min(value), 'max' : max(value), 'count' : count(value)}).
@@ -41,6 +49,24 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 final class UserTypeSelector extends Selector
 {
+    protected static final SelectorDeserializer deserializer = new SelectorDeserializer()
+    {
+        protected Selector deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata) throws IOException
+        {
+            UserType type = (UserType) readType(metadata, in);
+            int size = (int) in.readUnsignedVInt();
+            Map<FieldIdentifier, Selector> fields = new HashMap<>(size);
+            Serializer serializer = serializers.get(version);
+            for (int i = 0; i < size; i++)
+            {
+                FieldIdentifier identifier = new FieldIdentifier(ByteBufferUtil.readWithVIntLength(in));
+                Selector selector = serializer.deserialize(in, metadata);
+                fields.put(identifier, selector);
+            }
+            return new UserTypeSelector(type, fields);
+        }
+    };
+
     /**
      * The map type.
      */
@@ -132,13 +158,13 @@ final class UserTypeSelector extends Selector
         };
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
+    public void addInput(ProtocolVersion protocolVersion, InputRow input)
     {
         for (Selector field : fields.values())
-            field.addInput(protocolVersion, rs);
+            field.addInput(protocolVersion, input);
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException
+    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
         UserType userType = (UserType) type;
         ByteBuffer[] buffers = new ByteBuffer[userType.size()];
@@ -157,6 +183,17 @@ final class UserTypeSelector extends Selector
             field.reset();
     }
 
+    @Override
+    public boolean isTerminal()
+    {
+        for (Selector field : fields.values())
+        {
+            if(!field.isTerminal())
+                return false;
+        }
+        return true;
+    }
+
     public AbstractType<?> getType()
     {
         return type;
@@ -170,7 +207,55 @@ final class UserTypeSelector extends Selector
 
     private UserTypeSelector(AbstractType<?> type, Map<FieldIdentifier, Selector> fields)
     {
+        super(Kind.USER_TYPE_SELECTOR);
         this.type = type;
         this.fields = fields;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o)
+            return true;
+
+        if (!(o instanceof UserTypeSelector))
+            return false;
+
+        UserTypeSelector s = (UserTypeSelector) o;
+
+        return Objects.equal(type, s.type)
+            && Objects.equal(fields, s.fields);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hashCode(type, fields);
+    }
+
+    @Override
+    protected int serializedSize(ReadVersion version)
+    {
+        int size = sizeOf(type) + TypeSizes.sizeofUnsignedVInt(fields.size());
+
+        Serializer serializer = serializers.get(version);
+        for (Map.Entry<FieldIdentifier, Selector> field : fields.entrySet())
+            size += ByteBufferUtil.serializedSizeWithVIntLength(field.getKey().bytes) + serializer.serializedSize(field.getValue());
+
+        return size;
+    }
+
+    @Override
+    protected void serialize(DataOutputPlus out, ReadVersion version) throws IOException
+    {
+        writeType(out, type);
+        out.writeUnsignedVInt(fields.size());
+
+        Serializer serializer = serializers.get(version);
+        for (Map.Entry<FieldIdentifier, Selector> field : fields.entrySet())
+        {
+            ByteBufferUtil.writeWithVIntLength(field.getKey().bytes, out);
+            serializer.serialize(field.getValue(), out);
+        }
     }
 }

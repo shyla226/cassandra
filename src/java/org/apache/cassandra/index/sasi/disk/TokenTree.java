@@ -456,11 +456,6 @@ public class TokenTree
             return new KeyIterator(keyFetcher, fetchOffsets());
         }
 
-        public Iterator<Single<DecoratedKey>> rxiterator()
-        {
-            return Iterators.transform(iterator(), k -> Single.just(k));
-        }
-
         public int hashCode()
         {
             return new HashCodeBuilder().append(keyFetcher).append(position).append(leafSize).build();

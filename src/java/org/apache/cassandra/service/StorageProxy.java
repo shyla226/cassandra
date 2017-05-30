@@ -696,6 +696,8 @@ public class StorageProxy implements StorageProxyMBean
             viewWriteMetrics.viewWriteLatency.update(delay, TimeUnit.MILLISECONDS);
         };
 
+        // The copy into an immutable list is not just an optimization, it is essential for correctness
+        // since it would be very wrong if we subscribed to the observable of a different handler
         List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
             viewWriteMetrics.viewReplicasAttempted.inc(mae.endpoints.liveCount());
@@ -805,6 +807,8 @@ public class StorageProxy implements StorageProxyMBean
 
         // Creates write handlers: each mutation must be acknowledged to clean the batchlog, and each mutation is
         // acknowledged once we head back from 'batchConsistencyLevel' nodes.
+        // The copy into an immutable list is not just an optimization, it is essential for correctness
+        // since it would be very wrong if we subscribed to the observable of a different handler
         List<WriteHandler> handlers = ImmutableList.copyOf(Lists.transform(mutationsAndEndpoints, mae ->
         {
             Keyspace keyspace = mae.endpoints.keyspace();
@@ -1280,73 +1284,75 @@ public class StorageProxy implements StorageProxyMBean
     private static Single<PartitionIterator> readWithPaxos(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state, long queryStartNanoTime)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
-        assert state != null;
-        if (group.commands.size() > 1)
-            throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
+        return Single.fromCallable(() -> {
+           assert state != null;
+           if (group.commands.size() > 1)
+               throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
 
-        long start = System.nanoTime();
-        SinglePartitionReadCommand command = group.commands.get(0);
-        TableMetadata metadata = command.metadata();
-        DecoratedKey key = command.partitionKey();
+           long start = System.nanoTime();
+           SinglePartitionReadCommand command = group.commands.get(0);
+           TableMetadata metadata = command.metadata();
+           DecoratedKey key = command.partitionKey();
 
-        PartitionIterator result = null;
-        try
-        {
-            // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
-            Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
-            List<InetAddress> liveEndpoints = p.left.live();
-            int requiredParticipants = p.right;
+           PartitionIterator result;
+           try
+           {
+               // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
+               Pair<WriteEndpoints, Integer> p = getPaxosParticipants(metadata, key, consistencyLevel);
+               List<InetAddress> liveEndpoints = p.left.live();
+               int requiredParticipants = p.right;
 
-            // does the work of applying in-progress writes; throws UAE or timeout if it can't
-            final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
-                                                                                   ? ConsistencyLevel.LOCAL_QUORUM
-                                                                                   : ConsistencyLevel.QUORUM;
+               // does the work of applying in-progress writes; throws UAE or timeout if it can't
+               final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
+                                                                    ? ConsistencyLevel.LOCAL_QUORUM
+                                                                    : ConsistencyLevel.QUORUM;
 
-            try
-            {
-                final Pair<UUID, Integer> pair = beginAndRepairPaxos(start, key, metadata, liveEndpoints, requiredParticipants, consistencyLevel, consistencyForCommitOrFetch, false, state);
-                if (pair.right > 0)
-                    casReadMetrics.contention.update(pair.right);
-            }
-            catch (WriteTimeoutException e)
-            {
-                throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false);
-            }
-            catch (WriteFailureException e)
-            {
-                throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
-            }
+               try
+               {
+                   final Pair<UUID, Integer> pair = beginAndRepairPaxos(start, key, metadata, liveEndpoints, requiredParticipants, consistencyLevel, consistencyForCommitOrFetch, false, state);
+                   if (pair.right > 0)
+                       casReadMetrics.contention.update(pair.right);
+               }
+               catch (WriteTimeoutException e)
+               {
+                   throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(metadata.keyspace)), false);
+               }
+               catch (WriteFailureException e)
+               {
+                   throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
+               }
 
-            result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime).blockingGet();
-        }
-        catch (UnavailableException e)
-        {
-            readMetrics.unavailables.mark();
-            casReadMetrics.unavailables.mark();
-            readMetricsMap.get(consistencyLevel).unavailables.mark();
-            throw e;
-        }
-        catch (ReadTimeoutException e)
-        {
-            readMetrics.timeouts.mark();
-            casReadMetrics.timeouts.mark();
-            readMetricsMap.get(consistencyLevel).timeouts.mark();
-            throw e;
-        }
-        catch (ReadFailureException e)
-        {
-            readMetrics.failures.mark();
-            casReadMetrics.failures.mark();
-            readMetricsMap.get(consistencyLevel).failures.mark();
-            throw e;
-        }
-        finally
-        {
-            long latency =  recordLatency(group, consistencyLevel, start);
-            casReadMetrics.addNano(latency);
-        }
+               result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime).blockingGet();
+           }
+           catch (UnavailableException e)
+           {
+               readMetrics.unavailables.mark();
+               casReadMetrics.unavailables.mark();
+               readMetricsMap.get(consistencyLevel).unavailables.mark();
+               throw e;
+           }
+           catch (ReadTimeoutException e)
+           {
+               readMetrics.timeouts.mark();
+               casReadMetrics.timeouts.mark();
+               readMetricsMap.get(consistencyLevel).timeouts.mark();
+               throw e;
+           }
+           catch (ReadFailureException e)
+           {
+               readMetrics.failures.mark();
+               casReadMetrics.failures.mark();
+               readMetricsMap.get(consistencyLevel).failures.mark();
+               throw e;
+           }
+           finally
+           {
+               long latency = recordLatency(group, consistencyLevel, start);
+               casReadMetrics.addNano(latency);
+           }
 
-        return Single.just(result);
+           return result;
+        }).subscribeOn(Schedulers.io());
     }
 
     @SuppressWarnings("resource")

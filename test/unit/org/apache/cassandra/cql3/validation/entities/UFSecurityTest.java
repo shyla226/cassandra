@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.service.ClientWarn;
 
@@ -59,7 +58,6 @@ public class UFSecurityTest extends CQLTester
 
         String[][] typesAndSources =
         {
-        {"", "try { Class.forName(\"" + UDHelper.class.getName() + "\"); } catch (Exception e) { throw new RuntimeException(e); } return 0d;"},
         {"sun.misc.Unsafe",         "sun.misc.Unsafe.getUnsafe(); return 0d;"},
         {"",                        "try { Class.forName(\"sun.misc.Unsafe\"); } catch (Exception e) { throw new RuntimeException(e); } return 0d;"},
         {"java.nio.file.FileSystems", "try {" +

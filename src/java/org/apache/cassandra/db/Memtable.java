@@ -29,9 +29,9 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
-import org.apache.cassandra.concurrent.TPCScheduler;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -190,7 +190,7 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return Collections.singletonList(new TreeMap<>());
 
-        int capacity = TPCScheduler.getNumCores();
+        int capacity = TPC.getNumCores();
         ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
         for (int i = 0; i < capacity; i++)
             partitionMapContainer.add(new TreeMap<>());
@@ -202,7 +202,7 @@ public class Memtable implements Comparable<Memtable>
         if (!hasSplits)
             return partitions.get(0);
 
-        int coreId = TPCScheduler.getCoreForKey(cfs.metadata.keyspace, key);
+        int coreId = TPC.getCoreForKey(cfs.keyspace, key);
         assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id: " + Integer.toString(coreId);
 
         return partitions.get(coreId);
@@ -323,6 +323,9 @@ public class Memtable implements Comparable<Memtable>
                         Map<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
                         AtomicBTreePartition previous = partitionMap.get(key);
 
+                        if (logger.isTraceEnabled())
+                            logger.trace("Adding key {} to memtable", key);
+
                         assert writeBarrier == null || writeBarrier.isAfter(opGroup)
                             : String.format("Put called after write barrier\n%s", FBUtilities.Debug.getStackTrace());
 
@@ -349,7 +352,7 @@ public class Memtable implements Comparable<Memtable>
                        currentOperations.addAndGet(update.operationCount());
 
                        return p.left[1];
-                   }).subscribeOn(TPCScheduler.getForKey(cfs.metadata.keyspace, key));
+                   }).subscribeOn(TPC.getForKey(cfs.keyspace, key));
     }
 
     private void updateIfMin(AtomicLong val, long newVal)
@@ -466,7 +469,7 @@ public class Memtable implements Comparable<Memtable>
         return CsFlow.fromIterable(all)
                      .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
                      .flatMap(list -> CsFlow.fromIterable(list))
-                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPCScheduler.getForKey(cfs.keyspace.getName(), iterator.partitionKey())));
+                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForKey(cfs.keyspace, iterator.partitionKey())));
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has

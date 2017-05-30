@@ -33,7 +33,6 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.*;
@@ -58,7 +57,6 @@ public class CQLSSTableWriterTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @BeforeClass
@@ -357,8 +355,8 @@ public class CQLSSTableWriterTest
         loadSSTables(dataDir, KS);
 
         UntypedResultSet resultSet = QueryProcessor.executeInternal("SELECT * FROM " + KS + "." + TABLE);
-        TypeCodec collectionCodec = UDHelper.codecFor(DataType.CollectionType.frozenList(tuple2Type));
-        TypeCodec tuple3Codec = UDHelper.codecFor(tuple3Type);
+        TypeCodec collectionCodec = JavaDriverUtils.codecFor(DataType.CollectionType.frozenList(tuple2Type));
+        TypeCodec tuple3Codec = JavaDriverUtils.codecFor(tuple3Type);
 
         assertEquals(resultSet.size(), 100);
 
@@ -409,8 +407,8 @@ public class CQLSSTableWriterTest
 
         UserType tuple2Type = writer.getUDType("tuple2");
         UserType nestedTuple = writer.getUDType("nested_tuple");
-        TypeCodec tuple2Codec = UDHelper.codecFor(tuple2Type);
-        TypeCodec nestedTupleCodec = UDHelper.codecFor(nestedTuple);
+        TypeCodec tuple2Codec = JavaDriverUtils.codecFor(tuple2Type);
+        TypeCodec nestedTupleCodec = JavaDriverUtils.codecFor(nestedTuple);
 
         SortedSet<Integer> sortedTokens = com.google.common.collect.Sets.newTreeSet(Comparator.comparing(a -> DatabaseDescriptor.getPartitioner().decorateKey(Int32Type.instance.decompose(a))));
 

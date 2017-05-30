@@ -47,7 +47,6 @@ public class CloudstackSnitchTest
     public static void setup() throws Exception
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
         SchemaLoader.mkdirs();
         SchemaLoader.cleanup();
         Keyspace.setInitialized();

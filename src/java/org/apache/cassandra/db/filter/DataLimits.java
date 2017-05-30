@@ -38,6 +38,7 @@ import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
@@ -1189,7 +1190,7 @@ public abstract class DataLimits
             }
         }
 
-        public DataLimits deserialize(DataInputPlus in, ClusteringComparator comparator) throws IOException
+        public DataLimits deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
             Kind kind = Kind.values()[in.readUnsignedByte()];
             switch (kind)
@@ -1213,9 +1214,9 @@ public abstract class DataLimits
                     int groupPerPartitionLimit = (int) in.readUnsignedVInt();
                     int rowLimit = (int) in.readUnsignedVInt();
 
-                    AggregationSpecification groupBySpec = AggregationSpecification.serializers.get(version).deserialize(in, comparator);
+                    AggregationSpecification groupBySpec = AggregationSpecification.serializers.get(version).deserialize(in, metadata);
 
-                    GroupingState state = GroupingState.serializers.get(version).deserialize(in, comparator);
+                    GroupingState state = GroupingState.serializers.get(version).deserialize(in, metadata.comparator);
 
                     if (kind == Kind.CQL_GROUP_BY_LIMIT)
                         return new CQLGroupByLimits(groupLimit,

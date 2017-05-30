@@ -64,19 +64,20 @@ public class FunctionCall extends Term.NonTerminal
 
     public ByteBuffer bindAndGet(QueryOptions options) throws InvalidRequestException
     {
-        List<ByteBuffer> buffers = new ArrayList<>(terms.size());
-        for (Term t : terms)
+        Arguments arguments = fun.newArguments(options.getProtocolVersion());
+        for (int i = 0, m = terms.size(); i < m; i++)
         {
-            ByteBuffer functionArg = t.bindAndGet(options);
-            RequestValidations.checkBindValueSet(functionArg, "Invalid unset value for argument in call to function %s", fun.name().name);
-            buffers.add(functionArg);
+            Term t = terms.get(i);
+            ByteBuffer argument = t.bindAndGet(options);
+            RequestValidations.checkBindValueSet(argument, "Invalid unset value for argument in call to function %s", fun.name().name);
+            arguments.set(i, argument);
         }
-        return executeInternal(options.getProtocolVersion(), fun, buffers);
+        return executeInternal(fun, arguments);
     }
 
-    private static ByteBuffer executeInternal(ProtocolVersion protocolVersion, ScalarFunction fun, List<ByteBuffer> params) throws InvalidRequestException
+    private static ByteBuffer executeInternal(ScalarFunction fun, Arguments arguments) throws InvalidRequestException
     {
-        ByteBuffer result = fun.execute(protocolVersion, params);
+        ByteBuffer result = fun.execute(arguments);
         try
         {
             // Check the method didn't lied on it's declared return type

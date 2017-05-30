@@ -33,7 +33,7 @@ public class TPCUtils
 
     public static <T> T blockingGet(Single<T> single)
     {
-        if (TPCScheduler.isTPCThread())
+        if (TPC.isTPCThread())
             throw new WouldBlockException("Calling blockingGet would block a TPC thread");
 
         return single.blockingGet();
@@ -41,7 +41,7 @@ public class TPCUtils
 
     public static void blockingAwait(Completable completable)
     {
-        if (TPCScheduler.isTPCThread())
+        if (TPC.isTPCThread())
             throw new WouldBlockException("Calling blockingAwait would block a TPC thread");
 
         completable.blockingAwait();

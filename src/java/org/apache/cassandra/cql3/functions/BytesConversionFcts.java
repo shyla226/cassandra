@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.functions;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -54,16 +53,30 @@ public abstract class BytesConversionFcts
         return functions;
     }
 
+    private static abstract class BytesConversionFct extends NativeScalarFunction
+    {
+        public BytesConversionFct(String name, AbstractType<?> returnType, AbstractType<?>... argsType)
+        {
+            super(name, returnType, argsType);
+        }
+
+        @Override
+        public Arguments newArguments(ProtocolVersion version)
+        {
+            return FunctionArguments.newNoopInstance(version, 1);
+        }
+    }
+
     // Most of the XAsBlob and blobAsX functions are basically no-op since everything is
     // bytes internally. They only "trick" the type system.
     public static Function makeToBlobFunction(AbstractType<?> fromType)
     {
         String name = fromType.asCQL3Type() + "asblob";
-        return new NativeScalarFunction(name, BytesType.instance, fromType)
+        return new BytesConversionFct(name, BytesType.instance, fromType)
         {
-            public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+            public ByteBuffer execute(Arguments arguments)
             {
-                return parameters.get(0);
+                return arguments.get(0);
             }
         };
     }
@@ -71,11 +84,11 @@ public abstract class BytesConversionFcts
     public static Function makeFromBlobFunction(final AbstractType<?> toType)
     {
         final String name = "blobas" + toType.asCQL3Type();
-        return new NativeScalarFunction(name, toType, BytesType.instance)
+        return new BytesConversionFct(name, toType, BytesType.instance)
         {
-            public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException
+            public ByteBuffer execute(Arguments arguments)
             {
-                ByteBuffer val = parameters.get(0);
+                ByteBuffer val = arguments.get(0);
                 try
                 {
                     if (val != null)
@@ -91,19 +104,19 @@ public abstract class BytesConversionFcts
         };
     }
 
-    public static final Function VarcharAsBlobFct = new NativeScalarFunction("varcharasblob", BytesType.instance, UTF8Type.instance)
+    public static final Function VarcharAsBlobFct = new BytesConversionFct("varcharasblob", BytesType.instance, UTF8Type.instance)
     {
-        public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        public ByteBuffer execute(Arguments arguments)
         {
-            return parameters.get(0);
+            return arguments.get(0);
         }
     };
 
-    public static final Function BlobAsVarcharFct = new NativeScalarFunction("blobasvarchar", UTF8Type.instance, BytesType.instance)
+    public static final Function BlobAsVarcharFct = new BytesConversionFct("blobasvarchar", UTF8Type.instance, BytesType.instance)
     {
-        public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+        public ByteBuffer execute(Arguments arguments)
         {
-            return parameters.get(0);
+            return arguments.get(0);
         }
     };
 }

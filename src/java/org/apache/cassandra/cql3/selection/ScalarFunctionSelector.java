@@ -22,17 +22,27 @@ import java.util.List;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.ScalarFunction;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
+
+import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
 
 final class ScalarFunctionSelector extends AbstractFunctionSelector<ScalarFunction>
 {
-    public void addInput(ProtocolVersion protocolVersion, ResultBuilder rs) throws InvalidRequestException
+    protected static final SelectorDeserializer deserializer = new AbstractFunctionSelectorDeserializer()
+    {
+        @Override
+        protected Selector newFunctionSelector(ProtocolVersion version, Function function, List<Selector> argSelectors)
+        {
+            return new ScalarFunctionSelector(version, function, argSelectors);
+        }
+    };
+
+    public void addInput(ProtocolVersion protocolVersion, InputRow input)
     {
         for (int i = 0, m = argSelectors.size(); i < m; i++)
         {
             Selector s = argSelectors.get(i);
-            s.addInput(protocolVersion, rs);
+            s.addInput(protocolVersion, input);
         }
     }
 
@@ -40,7 +50,7 @@ final class ScalarFunctionSelector extends AbstractFunctionSelector<ScalarFuncti
     {
     }
 
-    public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException
+    public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
         for (int i = 0, m = argSelectors.size(); i < m; i++)
         {
@@ -48,11 +58,19 @@ final class ScalarFunctionSelector extends AbstractFunctionSelector<ScalarFuncti
             setArg(i, s.getOutput(protocolVersion));
             s.reset();
         }
-        return fun.execute(protocolVersion, args());
+        return fun.execute(args());
     }
 
-    ScalarFunctionSelector(Function fun, List<Selector> argSelectors)
+    @Override
+    public void validateForGroupBy()
     {
-        super((ScalarFunction) fun, argSelectors);
+        checkTrue(fun.isMonotonic(), "Only monotonic functions are supported in the GROUP BY clause. Got: %s ", fun);
+        for (int i = 0, m = argSelectors.size(); i < m; i++)
+            argSelectors.get(i).validateForGroupBy();
+    }
+
+    ScalarFunctionSelector(ProtocolVersion version, Function fun, List<Selector> argSelectors)
+    {
+        super(Kind.SCALAR_FUNCTION_SELECTOR, version, (ScalarFunction) fun, argSelectors);
     }
 }

@@ -233,7 +233,7 @@ public class CassandraAuthorizer implements IAuthorizer
                 legacyAuthorizeRoleStatement = prepare(USERNAME, USER_PERMISSIONS);
             statement = legacyAuthorizeRoleStatement;
         }
-        ResultMessage.Rows rows = (ResultMessage.Rows) TPCUtils.blockingGet(statement.execute(QueryState.forInternalCalls(), options, System.nanoTime()));
+        ResultMessage.Rows rows = TPCUtils.blockingGet(statement.execute(QueryState.forInternalCalls(), options, System.nanoTime()));
         UntypedResultSet result = UntypedResultSet.create(rows.result);
 
         if (!result.isEmpty() && result.one().has(PERMISSIONS))

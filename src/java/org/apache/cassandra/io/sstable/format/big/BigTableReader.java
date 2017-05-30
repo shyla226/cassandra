@@ -63,10 +63,8 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.concurrent.Ref;
-import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * SSTableReaders are open()ed by Keyspace.onStart; after that they are created by SSTableWriter.renameAndOpen.

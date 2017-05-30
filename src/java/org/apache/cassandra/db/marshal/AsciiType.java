@@ -29,6 +29,7 @@ import org.apache.cassandra.cql3.Json;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.AsciiSerializer;
@@ -38,6 +39,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 public class AsciiType extends AbstractType<String>
 {
     public static final AsciiType instance = new AsciiType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     AsciiType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
@@ -101,5 +104,11 @@ public class AsciiType extends AbstractType<String>
     public TypeSerializer<String> getSerializer()
     {
         return AsciiSerializer.instance;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

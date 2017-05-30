@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.UUIDSerializer;
@@ -32,6 +33,8 @@ import org.apache.cassandra.utils.UUIDGen;
 public class LexicalUUIDType extends AbstractType<UUID>
 {
     public static final LexicalUUIDType instance = new LexicalUUIDType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     LexicalUUIDType()
     {
@@ -119,5 +122,11 @@ public class LexicalUUIDType extends AbstractType<UUID>
     public int valueLengthIfFixed()
     {
         return 16;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

@@ -27,6 +27,7 @@ import com.google.common.primitives.Ints;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.DecimalSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -37,6 +38,8 @@ import org.apache.cassandra.utils.ByteSource;
 public class DecimalType extends NumberType<BigDecimal>
 {
     public static final DecimalType instance = new DecimalType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     DecimalType() {super(ComparisonType.CUSTOM);} // singleton
 
@@ -207,69 +210,70 @@ public class DecimalType extends NumberType<BigDecimal>
         return DecimalSerializer.instance;
     }
 
-    @Override
-    protected int toInt(ByteBuffer value)
+    /**
+     * Converts the specified number into a <code>BigDecimal</code>.
+     *
+     * @param value the value to convert
+     * @return the converted value
+     */
+    protected BigDecimal toBigDecimal(Number number)
     {
-        throw new UnsupportedOperationException();
+        if (number instanceof BigDecimal)
+            return (BigDecimal) number;
+
+        if (number instanceof BigInteger)
+            return new BigDecimal((BigInteger) number);
+
+        double d = number.doubleValue();
+
+        if (Double.isNaN(d))
+            throw new NumberFormatException("A NaN cannot be converted into a decimal");
+
+        if (Double.isInfinite(d))
+            throw new NumberFormatException("An infinite number cannot be converted into a decimal");
+
+        return BigDecimal.valueOf(d);
     }
 
     @Override
-    protected float toFloat(ByteBuffer value)
+    public ByteBuffer add(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigDecimal(left).add(toBigDecimal(right), MathContext.DECIMAL128));
     }
 
     @Override
-    protected long toLong(ByteBuffer value)
+    public ByteBuffer substract(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigDecimal(left).subtract(toBigDecimal(right), MathContext.DECIMAL128));
     }
 
     @Override
-    protected double toDouble(ByteBuffer value)
+    public ByteBuffer multiply(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigDecimal(left).multiply(toBigDecimal(right), MathContext.DECIMAL128));
     }
 
     @Override
-    protected BigInteger toBigInteger(ByteBuffer value)
+    public ByteBuffer divide(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigDecimal(left).divide(toBigDecimal(right), MathContext.DECIMAL128));
     }
 
     @Override
-    protected BigDecimal toBigDecimal(ByteBuffer value)
+    public ByteBuffer mod(Number left, Number right)
     {
-        return compose(value);
+        return decompose(toBigDecimal(left).remainder(toBigDecimal(right), MathContext.DECIMAL128));
     }
 
-    public ByteBuffer add(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigDecimal(left).add(rightType.toBigDecimal(right), MathContext.DECIMAL128));
-    }
-
-    public ByteBuffer substract(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigDecimal(left).subtract(rightType.toBigDecimal(right), MathContext.DECIMAL128));
-    }
-
-    public ByteBuffer multiply(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigDecimal(left).multiply(rightType.toBigDecimal(right), MathContext.DECIMAL128));
-    }
-
-    public ByteBuffer divide(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigDecimal(left).divide(rightType.toBigDecimal(right), MathContext.DECIMAL128));
-    }
-
-    public ByteBuffer mod(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigDecimal(left).remainder(rightType.toBigDecimal(right), MathContext.DECIMAL128));
-    }
-
-    public ByteBuffer negate(ByteBuffer input)
+    @Override
+    public ByteBuffer negate(Number input)
     {
         return decompose(toBigDecimal(input).negate());
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

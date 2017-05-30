@@ -29,12 +29,11 @@ import org.apache.commons.lang3.time.DateUtils;
 import org.junit.Assert;
 import org.junit.Test;
 
-import static org.junit.Assert.assertEquals;
-
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.TimeSerializer;
 
 import static org.apache.cassandra.cql3.Duration.*;
-import static org.apache.cassandra.cql3.Duration.NANOS_PER_HOUR;
+import static org.junit.Assert.assertEquals;
 
 public class DurationTest
 {
@@ -167,6 +166,210 @@ public class DurationTest
         assertEquals(toMillis("2017-02-28T00:00:00"), Duration.from("-12mo").substractFrom(toMillis("2016-02-29T00:00:00")));
     }
 
+    @Test
+    public void testInvalidFloorTimestamp()
+    {
+        try
+        {
+            floorTimestamp("2016-09-27T16:12:00", "2h", "2017-09-01T00:00:00");
+            Assert.fail();
+        }
+        catch (InvalidRequestException e)
+        {
+            assertEquals("The floor function starting time is greater than the provided time", e.getMessage());
+        }
+
+        try
+        {
+            floorTimestamp("2016-09-27T16:12:00", "-2h", "2016-09-27T00:00:00");
+            Assert.fail();
+        }
+        catch (InvalidRequestException e)
+        {
+            assertEquals("Negative durations are not supported by the floor function", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testFloorTimestamp()
+    {
+        //~ Test with a duration in hours //////////////////////////////////////////////
+
+        // Test floor with a timestamp equals to the start time
+        long result = floorTimestamp("2016-09-27T16:12:00", "2h", "2016-09-27T16:12:00");
+        assertEquals(toMillis("2016-09-27T16:12:00"), result);
+
+        // Test floor with a duration equals to zero
+        result = floorTimestamp("2016-09-27T18:12:00", "0h", "2016-09-27T16:12:00");
+        assertEquals(toMillis("2016-09-27T18:12:00"), result);
+
+        // Test floor with a timestamp exactly equals to the start time + (1 x duration)
+        result = floorTimestamp("2016-09-27T18:12:00", "2h", "2016-09-27T16:12:00");
+        assertEquals(toMillis("2016-09-27T18:12:00"), result);
+
+        // Test floor with a timestamp in the first bucket
+        result = floorTimestamp("2016-09-27T16:13:00", "2h", "2016-09-27T16:12:00");
+        assertEquals(toMillis("2016-09-27T16:12:00"), result);
+
+        // Test floor with a timestamp in another bucket
+        result = floorTimestamp("2016-09-27T16:12:00", "2h", "2016-09-27T00:00:00");
+        assertEquals(toMillis("2016-09-27T16:00:00"), result);
+
+
+        //~ Test with a duration in days //////////////////////////////////////////////
+
+        // Test floor with a start time at the beginning of the month
+        result = floorTimestamp("2016-09-27T16:12:00", "2d", "2016-09-01T00:00:00");
+        assertEquals(toMillis("2016-09-27T00:00:00"), result);
+
+        // Test floor with a start time in the previous month
+        result = floorTimestamp("2016-09-27T16:12:00", "2d", "2016-08-01T00:00:00");
+        assertEquals(toMillis("2016-09-26T00:00:00"), result);
+
+
+        //~ Test with a duration in days and hours ////////////////////////////////////
+
+        result = floorTimestamp("2016-09-27T16:12:00", "2d12h", "2016-09-01T00:00:00");
+        assertEquals(toMillis("2016-09-26T00:00:00"), result);
+
+
+        //~ Test with a duration in months ////////////////////////////////////////////
+
+        // Test floor with a timestamp equals to the start time
+        result = floorTimestamp("2016-09-01T00:00:00", "2mo", "2016-09-01T00:00:00");
+        assertEquals(toMillis("2016-09-01T00:00:00"), result);
+
+        // Test floor with a timestamp in the first bucket
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo", "2016-09-01T00:00:00");
+        assertEquals(toMillis("2016-09-01T00:00:00"), result);
+
+        // Test floor with a start time at the beginning of the year (LEAP YEAR)
+        result = floorTimestamp("2016-09-27T16:12:00", "1mo", "2016-01-01T00:00:00");
+        assertEquals(toMillis("2016-09-01T00:00:00"), result);
+
+        // Test floor with a start time at the beginning of the previous year
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo", "2015-01-01T00:00:00");
+        assertEquals(toMillis("2016-09-01T00:00:00"), result);
+
+        // Test floor with a start time in the previous year
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo", "2015-02-02T00:00:00");
+        assertEquals(toMillis("2016-08-02T00:00:00"), result);
+
+
+        //~ Test with a duration in months and days ////////////////////////////////////
+
+        // Test floor with a start time at the beginning of the year (LEAP YEAR)
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo2d", "2016-01-01T00:00:00");
+        assertEquals(toMillis("2016-09-09T00:00:00"), result);
+
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo5d", "2016-01-01T00:00:00");
+        assertEquals(toMillis("2016-09-21T00:00:00"), result);
+
+        // Test floor with a timestamp in the first bucket
+        result = floorTimestamp("2016-09-04T16:12:00", "2mo5d", "2016-07-01T00:00:00");
+        assertEquals(toMillis("2016-07-01T00:00:00"), result);
+
+        // Test floor with a timestamp in a bucket starting on the last day of the month
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo10d", "2016-01-01T00:00:00");
+        assertEquals(toMillis("2016-07-31T00:00:00"), result);
+
+        // Test floor with a timestamp in a bucket starting on the first day of the month
+        result = floorTimestamp("2016-09-27T16:12:00", "2mo12d", "2016-01-01T00:00:00");
+        assertEquals(toMillis("2016-08-06T00:00:00"), result);
+
+        // Test leap years
+        result = floorTimestamp("2016-04-27T16:12:00", "1mo30d", "2016-01-01T00:00:00");
+        assertEquals(toMillis("2016-03-02T00:00:00"), result);
+
+        result = floorTimestamp("2015-04-27T16:12:00", "1mo30d", "2015-01-01T00:00:00");
+        assertEquals(toMillis("2015-03-03T00:00:00"), result);
+
+        //~ Test with a duration smaller than precision ////////////////////////////////////
+
+        result = floorTimestamp("2016-09-27T18:14:00", "5us", "2016-09-27T16:12:00");
+        assertEquals(toMillis("2016-09-27T18:14:00"), result);
+
+        result = floorTimestamp("2016-09-27T18:14:00", "1h5us", "2016-09-27T16:12:00");
+        assertEquals(toMillis("2016-09-27T18:12:00"), result);
+
+        //~ Test with leap seconds (Java ignore leap seconds) ////////////////////////////////
+        result = floorTimestamp("2016-07-02T00:00:00", "2m", "2016-06-30T23:58:00");
+        assertEquals(toMillis("2016-07-02T00:00:00"), result);
+    }
+
+    @Test
+    public void testFloorTime()
+    {
+        long result = floorTime("12:00:00", "2h");
+        assertEquals(timeInNanos("12:00:00"), result);
+
+        result = floorTime("16:13:00", "2h");
+        assertEquals(timeInNanos("16:00:00"), result);
+
+        result = floorTime("16:12:00", "10m");
+        assertEquals(timeInNanos("16:10:00"), result);
+
+        result = floorTime("16:12:00.000123000", "10us");
+        assertEquals(timeInNanos("16:12:00.000120000"), result);
+
+        // Test with zero duration
+        result = floorTime("12:00:00", "0h");
+        assertEquals(timeInNanos("12:00:00"), result);
+
+        // Test with duration smaller than precision
+        result = floorTime("12:00:00", "10ms");
+        assertEquals(timeInNanos("12:00:00"), result);
+    }
+
+    @Test
+    public void testInvalidFloorTime()
+    {
+        try
+        {
+            floorTime("16:12:00", "2d");
+            Assert.fail();
+        }
+        catch (InvalidRequestException e)
+        {
+            assertEquals("For time values, the floor can only be computed for durations smaller that a day", e.getMessage());
+        }
+
+        try
+        {
+            floorTime("16:12:00", "25h");
+            Assert.fail();
+        }
+        catch (InvalidRequestException e)
+        {
+            assertEquals("For time values, the floor can only be computed for durations smaller that a day", e.getMessage());
+        }
+
+        try
+        {
+            floorTime("16:12:00", "-2h");
+            Assert.fail();
+        }
+        catch (InvalidRequestException e)
+        {
+            assertEquals("Negative durations are not supported by the floor function", e.getMessage());
+        }
+    }
+
+    private long floorTimestamp(String time, String duration, String startingTime)
+    {
+        return Duration.floorTimestamp(toMillis(time), Duration.from(duration), toMillis(startingTime));
+    }
+
+    private long floorTime(String time, String duration)
+    {
+        return Duration.floorTime(timeInNanos(time), Duration.from(duration));
+    }
+
+    private long timeInNanos(String timeAsString)
+    {
+        return TimeSerializer.timeStringToLong(timeAsString);
+    }
+
     private long toMillis(String timeAsString)
     {
         SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
@@ -175,7 +378,7 @@ public class DurationTest
         return DateUtils.truncate(date, Calendar.SECOND).getTime();
     }
 
-    public void assertInvalidDuration(String duration, String expectedErrorMessage)
+    private void assertInvalidDuration(String duration, String expectedErrorMessage)
     {
         try
         {

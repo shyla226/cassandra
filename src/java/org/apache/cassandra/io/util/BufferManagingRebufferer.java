@@ -20,7 +20,6 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.CompletionException;
@@ -28,7 +27,7 @@ import java.util.concurrent.CompletionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 /**
@@ -82,7 +81,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     @Override
     public BufferHolder rebuffer(long position)
     {
-        assert !TPCScheduler.isTPCThread();
+        assert !TPC.isTPCThread();
 
         offset = alignedPosition(position);
         try

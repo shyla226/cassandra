@@ -76,7 +76,6 @@ public class TrackerTest
     public static void setUp()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
         MockSchema.cleanup();
     }
 

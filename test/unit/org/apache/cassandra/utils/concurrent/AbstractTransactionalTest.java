@@ -33,7 +33,6 @@ public abstract class AbstractTransactionalTest
     public static void setupClass()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     protected abstract TestableTransaction newTest() throws Exception;

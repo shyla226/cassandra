@@ -1,4 +1,6 @@
 dse 6.0.0
+ * Avoid unnecessary deserialization of terminal arguments when executing functions(APOLLO-588)
+ * Allow to aggregate by time intervals (APOLLO-75)
  * Port Memory Only Strategy from DSE to Apollo (APOLLO-342)
  * Internode message interceptors for testing (APOLLO-419)
  * Byte-ordered types and trie-based indices (APOLLO-111)
@@ -8,6 +10,7 @@ dse 6.0.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Show correct protocol version in cqlsh (APOLLO-616)
  * Update to logback-1.2.3 and redefine default rotation policy (APOLLO-643)
  * Guard mapped memory accesses with an assertion instead of segfaulting JVM (APOLLO-586)
  * Backport follow-up commit to CASSANDRA-12929

@@ -42,7 +42,6 @@ public class BufferPoolTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     @Before

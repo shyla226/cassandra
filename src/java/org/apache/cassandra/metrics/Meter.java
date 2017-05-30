@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Metered;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 
 /**
  * A meter metric which measures mean throughput and one-, five-, and fifteen-minute
@@ -84,7 +84,7 @@ public class Meter implements Metered, Composable<Meter>
         this.count = count;
         this.startTime = this.clock.getTick();
         this.lastTick = new AtomicLong(startTime);
-        this.coreId = TPCScheduler.getNextCore();
+        this.coreId = TPC.getNextCore();
 
         scheduleIfComposite();
     }
@@ -95,7 +95,7 @@ public class Meter implements Metered, Composable<Meter>
     private void scheduleIfComposite()
     {
         if (count.getType() == Type.COMPOSITE)
-            TPCScheduler.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+            TPC.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     private void maybeScheduleTick()
@@ -104,7 +104,7 @@ public class Meter implements Metered, Composable<Meter>
             return;
 
         if (scheduled.compareAndSet(false, true))
-            TPCScheduler.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
+            TPC.getForCore(this.coreId).scheduleDirect(this::scheduledTick, TICK_INTERVAL, TimeUnit.NANOSECONDS);
     }
 
     /**

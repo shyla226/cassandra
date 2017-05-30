@@ -27,6 +27,8 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import javax.script.*;
 
+import com.datastax.driver.core.exceptions.InvalidTypeException;
+
 import jdk.nashorn.api.scripting.AbstractJSObject;
 import jdk.nashorn.api.scripting.ClassFilter;
 import jdk.nashorn.api.scripting.NashornScriptEngine;
@@ -163,15 +165,16 @@ final class ScriptBasedUDFunction extends UDFunction
         return executor;
     }
 
-    public ByteBuffer executeUserDefined(ProtocolVersion protocolVersion, List<ByteBuffer> parameters)
+    public ByteBuffer executeUserDefined(Arguments arguments)
     {
-        Object[] params = new Object[argTypes.size()];
-        for (int i = 0; i < params.length; i++)
-            params[i] = compose(protocolVersion, i, parameters.get(i));
+        int size = argTypes.size();
+        Object[] params = new Object[size];
+        for (int i = 0; i < size; i++)
+            params[i] = arguments.get(i);
 
         Object result = executeScriptInternal(params);
 
-        return decompose(protocolVersion, result);
+        return decompose(arguments.getProtocolVersion(), result);
     }
 
     /**
@@ -180,12 +183,12 @@ final class ScriptBasedUDFunction extends UDFunction
      * This is used to prevent superfluous (de)serialization of the state of aggregates.
      * Means: scalar functions of aggregates are called using this variant.
      */
-    protected Object executeAggregateUserDefined(ProtocolVersion protocolVersion, Object firstParam, List<ByteBuffer> parameters)
+    protected Object executeAggregateUserDefined(Object firstParam, Arguments arguments)
     {
         Object[] params = new Object[argTypes.size()];
         params[0] = firstParam;
         for (int i = 1; i < params.length; i++)
-            params[i] = compose(protocolVersion, i, parameters.get(i - 1));
+            params[i] = arguments.get(i - 1);
 
         return executeScriptInternal(params);
     }
@@ -214,59 +217,55 @@ final class ScriptBasedUDFunction extends UDFunction
         if (result == null)
             return null;
 
-        Class<?> javaReturnType = UDHelper.asJavaClass(returnCodec);
-        Class<?> resultType = result.getClass();
-        if (!javaReturnType.isAssignableFrom(resultType))
+        return convert(result, resultType);
+    }
+
+    private static Object convert(Object obj, UDFDataType udfDataType)
+    {
+        Class<?> resultType = obj.getClass();
+        Class<?> type = udfDataType.toJavaClass();
+
+        if (type.isAssignableFrom(resultType))
+            return obj;
+
+        if (obj instanceof Number)
         {
-            if (result instanceof Number)
+            Number number = (Number) obj;
+
+            if (type == Integer.class)
+                return number.intValue();
+
+            if (type == Long.class)
+                return number.longValue();
+
+            if (type == Short.class)
+                return number.shortValue();
+
+            if (type == Byte.class)
+                return number.byteValue();
+
+            if (type == Float.class)
+                return number.floatValue();
+
+            if (type == Double.class)
+                return number.doubleValue();
+
+            if (type == BigInteger.class)
             {
-                Number rNumber = (Number) result;
-                if (javaReturnType == Integer.class)
-                    result = rNumber.intValue();
-                else if (javaReturnType == Long.class)
-                    result = rNumber.longValue();
-                else if (javaReturnType == Short.class)
-                    result = rNumber.shortValue();
-                else if (javaReturnType == Byte.class)
-                    result = rNumber.byteValue();
-                else if (javaReturnType == Float.class)
-                    result = rNumber.floatValue();
-                else if (javaReturnType == Double.class)
-                    result = rNumber.doubleValue();
-                else if (javaReturnType == BigInteger.class)
-                {
-                    if (javaReturnType == Integer.class)
-                        result = rNumber.intValue();
-                    else if (javaReturnType == Short.class)
-                        result = rNumber.shortValue();
-                    else if (javaReturnType == Byte.class)
-                        result = rNumber.byteValue();
-                    else if (javaReturnType == Long.class)
-                        result = rNumber.longValue();
-                    else if (javaReturnType == Float.class)
-                        result = rNumber.floatValue();
-                    else if (javaReturnType == Double.class)
-                        result = rNumber.doubleValue();
-                    else if (javaReturnType == BigInteger.class)
-                    {
-                        if (rNumber instanceof BigDecimal)
-                            result = ((BigDecimal) rNumber).toBigInteger();
-                        else if (rNumber instanceof Double || rNumber instanceof Float)
-                            result = new BigDecimal(rNumber.toString()).toBigInteger();
-                        else
-                            result = BigInteger.valueOf(rNumber.longValue());
-                    }
-                    else if (javaReturnType == BigDecimal.class)
-                        // String c'tor of BigDecimal is more accurate than valueOf(double)
-                        result = new BigDecimal(rNumber.toString());
-                }
-                else if (javaReturnType == BigDecimal.class)
-                    // String c'tor of BigDecimal is more accurate than valueOf(double)
-                    result = new BigDecimal(rNumber.toString());
+                if (number instanceof BigDecimal)
+                    return ((BigDecimal) number).toBigInteger();
+
+                if (number instanceof Double || number instanceof Float)
+                    return new BigDecimal(number.toString()).toBigInteger();
+
+                return BigInteger.valueOf(number.longValue());
             }
+
+            // String c'tor of BigDecimal is more accurate than valueOf(double)
+            return new BigDecimal(number.toString());
         }
 
-        return result;
+        throw new InvalidTypeException("Invalid value for CQL type " + udfDataType.toDataType().getName());
     }
 
     private final class UDFContextWrapper extends AbstractJSObject

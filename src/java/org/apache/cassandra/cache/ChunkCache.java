@@ -24,21 +24,19 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.MoreExecutors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.*;
 import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.*;
@@ -153,7 +151,7 @@ public class ChunkCache
                 {
                     try
                     {
-                        assert !TPCScheduler.isTPCThread(); //better not be blocking the tpc threads
+                        assert !TPC.isTPCThread(); //better not be blocking the tpc threads
                         futureBuffer.join();
                     }
                     catch (CompletionException t)
@@ -243,7 +241,7 @@ public class ChunkCache
     {
         cache = Caffeine.newBuilder()
                 .maximumWeight(cacheSize)
-                .executor(TPCScheduler.getWrappedExecutor())
+                .executor(TPC.getWrappedExecutor())
                 .weigher((key, buffer) -> ((Buffer) buffer).capacity())
                 .removalListener(this)
                 .build(this);
@@ -263,7 +261,7 @@ public class ChunkCache
             {
                 buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
                 assert buffer != null;
-                assert MemoryUtil.getAddress(buffer) % 512 == 0 : "Buffer from pool is not properly aligned!";
+                assert !buffer.isDirect() || MemoryUtil.getAddress(buffer) % 512 == 0 : "Buffer from pool is not properly aligned!";
 
                 //Once the buffer has been filled we can give it an initial reference
                 future = rebufferer.readChunk(key.position, buffer);

@@ -22,7 +22,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -34,14 +33,12 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
-import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex;
-import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndexBuilder;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.PageAware;
@@ -53,7 +50,7 @@ public class PartitionIndexTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
+        TPC.ensureInitialized();
     }
 
     IPartitioner partitioner = Util.testPartitioner();

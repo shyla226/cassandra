@@ -109,7 +109,7 @@ public class CompactionAwareWriterTest extends CQLTester
     {
         ColumnFamilyStore cfs = getColumnFamilyStore();
         cfs.disableAutoCompaction();
-        int rowCount = 10000;
+        int rowCount = 1000;
         populate(rowCount);
         LifecycleTransaction txn = cfs.getTracker().tryModify(cfs.getLiveSSTables(), OperationType.COMPACTION);
         long beforeSize = txn.originals().iterator().next().onDiskLength();
@@ -143,7 +143,7 @@ public class CompactionAwareWriterTest extends CQLTester
     {
         ColumnFamilyStore cfs = getColumnFamilyStore();
         cfs.disableAutoCompaction();
-        int rowCount = 20000;
+        int rowCount = 1000;
         int targetSSTableCount = 50;
         populate(rowCount);
         LifecycleTransaction txn = cfs.getTracker().tryModify(cfs.getLiveSSTables(), OperationType.COMPACTION);

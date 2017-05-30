@@ -36,7 +36,7 @@ import java.util.zip.CRC32;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLog.Configuration;
@@ -91,7 +91,7 @@ public abstract class CommitLogSegment
     static final int SYNC_MARKER_SIZE = 4 + 4;
 
     // The OpOrder used to order appends wrt sync
-    private final OpOrder appendOrder = TPCScheduler.newOpOrderThreaded(this);
+    private final OpOrder appendOrder = TPC.newOpOrder(this);
 
     private final AtomicInteger allocatePosition = new AtomicInteger();
 
@@ -596,6 +596,11 @@ public abstract class CommitLogSegment
         return lastSyncedOffset;
     }
 
+    public long availableSize()
+    {
+        return endOfBuffer - allocatePosition.get();
+    }
+
     @Override
     public String toString()
     {
@@ -677,6 +682,12 @@ public abstract class CommitLogSegment
         void awaitDiskSync(org.apache.cassandra.metrics.Timer waitingOnCommit)
         {
             segment.waitForSync(position, waitingOnCommit);
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("Segment id %d, position %d, limit: %d", segment.id, buffer.position(), buffer.limit());
         }
 
         public CommitLogPosition getCommitLogPosition()

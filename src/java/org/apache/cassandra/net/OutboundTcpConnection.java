@@ -188,7 +188,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
     /**
      * This is a helper method for unit testing. Disclaimer: Do not use this method outside unit tests, as
      * this method is iterating the queue which can be an expensive operation (CPU time, queue locking).
-     * 
+     *
      * @return true, if the queue contains at least one expired element
      */
     @VisibleForTesting // (otherwise = VisibleForTesting.NONE)
@@ -265,7 +265,7 @@ public class OutboundTcpConnection extends FastThreadLocalThread
                 }
                 catch (InternodeAuthFailed e)
                 {
-                    logger.warn("Internode auth failed connecting to " + poolReference.endPoint());
+                    logger.warn("Internode auth failed connecting to {}", poolReference.endPoint());
                     //Remove the connection pool and other thread so messages aren't queued
                     MessagingService.instance().destroyConnectionPool(poolReference.endPoint());
                 }

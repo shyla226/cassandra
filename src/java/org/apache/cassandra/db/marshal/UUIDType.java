@@ -26,6 +26,7 @@ import com.google.common.primitives.UnsignedLongs;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.UUIDSerializer;
@@ -46,6 +47,8 @@ import org.apache.cassandra.utils.UUIDGen;
 public class UUIDType extends AbstractType<UUID>
 {
     public static final UUIDType instance = new UUIDType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     UUIDType()
     {
@@ -195,5 +198,11 @@ public class UUIDType extends AbstractType<UUID>
     public int valueLengthIfFixed()
     {
         return 16;
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

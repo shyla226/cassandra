@@ -60,7 +60,7 @@ public class MonitoringTaskTest
         MonitoringTask.instance = MonitoringTask.make(REPORT_INTERVAL_MS, MAX_TIMEDOUT_OPERATIONS);
 
         // The approximate time needs to be ticked forward manually, this is normally done by
-        // the monitoring thread of MonitoredEpollEventLoopGroup, which also parks for 1 nanosecond
+        // the monitoring thread of EpollTPCEventLoopGroup, which also parks for 1 nanosecond
         Thread advanceApproximateTime = new Thread(() ->
                                                    {
                                                        while(!finished)

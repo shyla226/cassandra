@@ -48,7 +48,6 @@ public class ColumnsTest
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
     }
 
     private static final TableMetadata TABLE_METADATA = MockSchema.newCFS().metadata();

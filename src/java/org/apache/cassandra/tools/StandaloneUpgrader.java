@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.cli.*;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
@@ -50,7 +50,7 @@ public class StandaloneUpgrader
     {
         Options options = Options.parseArgs(args);
         Util.initDatabaseDescriptor();
-        TPCScheduler.register();
+        TPC.ensureInitialized();
 
         try
         {

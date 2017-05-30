@@ -34,6 +34,7 @@ import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -206,6 +207,15 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     public abstract TypeSerializer<T> getSerializer();
+
+    /**
+     * Returns the deserializer used to deserialize the function arguments of this type.
+     * @return the deserializer used to deserialize the function arguments of this type.
+     */
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return new DefaultArgumentDerserializer(this);
+    }
 
     /* convenience method */
     public String getString(Collection<ByteBuffer> names)
@@ -528,6 +538,28 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         default:
             // default is only good for byte comparable
             throw new UnsupportedOperationException(getClass().getSimpleName() + " does not implement asByteComparableSource");
+        }
+    }
+
+    /**
+     * {@code ArgumentDeserializer} that use the type deserialization.
+     */
+    protected static class DefaultArgumentDerserializer implements ArgumentDeserializer
+    {
+        private final AbstractType<?> type;
+
+        public DefaultArgumentDerserializer(AbstractType<?> type)
+        {
+           this.type = type;
+        }
+
+        @Override
+        public Object deserialize(ProtocolVersion protocolVersion, ByteBuffer buffer)
+        {
+            if (buffer == null || (!buffer.hasRemaining() && type.isEmptyValueMeaningless()))
+                return null;
+
+            return type.compose(buffer);
         }
     }
 }

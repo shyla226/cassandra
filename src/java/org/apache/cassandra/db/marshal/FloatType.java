@@ -19,12 +19,15 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 
+import org.apache.commons.lang3.mutable.MutableFloat;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
-import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.FloatSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
@@ -116,50 +119,51 @@ public class FloatType extends NumberType<Float>
     }
 
     @Override
-    protected int toInt(ByteBuffer value)
+    public ByteBuffer add(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return ByteBufferUtil.bytes(left.floatValue() + right.floatValue());
     }
 
     @Override
-    protected float toFloat(ByteBuffer value)
+    public ByteBuffer substract(Number left, Number right)
     {
-        return ByteBufferUtil.toFloat(value);
+        return ByteBufferUtil.bytes(left.floatValue() - right.floatValue());
     }
 
     @Override
-    protected double toDouble(ByteBuffer value)
+    public ByteBuffer multiply(Number left, Number right)
     {
-        return toFloat(value);
+        return ByteBufferUtil.bytes(left.floatValue() * right.floatValue());
     }
 
-    public ByteBuffer add(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ByteBuffer divide(Number left, Number right)
     {
-        return ByteBufferUtil.bytes(leftType.toFloat(left) + rightType.toFloat(right));
+        return ByteBufferUtil.bytes(left.floatValue() / right.floatValue());
     }
 
-    public ByteBuffer substract(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ByteBuffer mod(Number left, Number right)
     {
-        return ByteBufferUtil.bytes(leftType.toFloat(left) - rightType.toFloat(right));
+        return ByteBufferUtil.bytes(left.floatValue() % right.floatValue());
     }
 
-    public ByteBuffer multiply(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ByteBuffer negate(Number input)
     {
-        return ByteBufferUtil.bytes(leftType.toFloat(left) * rightType.toFloat(right));
+        return ByteBufferUtil.bytes(-input.floatValue());
     }
 
-    public ByteBuffer divide(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
     {
-        return ByteBufferUtil.bytes(leftType.toFloat(left) / rightType.toFloat(right));
-    }
-
-    public ByteBuffer mod(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return ByteBufferUtil.bytes(leftType.toFloat(left) % rightType.toFloat(right));
-    }
-
-    public ByteBuffer negate(ByteBuffer input)
-    {
-        return ByteBufferUtil.bytes(-toFloat(input));
+        return new NumberArgumentDeserializer<MutableFloat>(new MutableFloat())
+        {
+            @Override
+            protected void setMutableValue(MutableFloat mutable, ByteBuffer buffer)
+            {
+                mutable.setValue(ByteBufferUtil.toFloat(buffer));
+            }
+        };
     }
 }

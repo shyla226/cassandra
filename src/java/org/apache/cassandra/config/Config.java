@@ -62,6 +62,8 @@ public class Config
     public volatile int credentials_cache_max_entries = 1000;
     public volatile int credentials_update_interval_in_ms = -1;
 
+    public Integer tpc_cores;
+
     /* Hashing strategy Random or OPHF */
     public String partitioner;
 
@@ -161,8 +163,7 @@ public class Config
 
     public boolean snapshot_before_compaction = false;
     public boolean auto_snapshot = true;
-
-    /* if the size of columns or super-columns are more than this, indexing will kick in */
+/* if the size of columns or super-columns are more than this, indexing will kick in */
     public int column_index_size_in_kb = 64;
     public int column_index_cache_size_in_kb = 2;
     public volatile int batch_size_warn_threshold_in_kb = 5;
@@ -172,6 +173,8 @@ public class Config
     public volatile int compaction_throughput_mb_per_sec = 16;
     public volatile int compaction_large_partition_warning_threshold_mb = 100;
     public int min_free_space_per_drive_in_mb = 50;
+
+    public volatile int concurrent_validations = Integer.MAX_VALUE;
 
     /**
      * @deprecated retry support removed on CASSANDRA-10992

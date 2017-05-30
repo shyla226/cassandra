@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.agrona.UnsafeAccess;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -152,7 +153,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         SerializationHelper helper;
 
         //Force all disk callbacks through the same thread
-        private final Executor onReadyExecutor = TPCScheduler.instance().getExecutor();
+        private final Executor onReadyExecutor = TPC.bestTPCScheduler().getExecutor();
 
         volatile State state = State.READY;
         CsSubscriber<Unfiltered> s;

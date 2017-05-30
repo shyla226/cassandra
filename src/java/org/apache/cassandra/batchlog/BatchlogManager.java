@@ -117,6 +117,9 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static Completable remove(UUID id)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Removing batch {}", id);
+
         return new Mutation(PartitionUpdate.fullPartitionDelete(
                 SystemKeyspace.Batches,
                 UUIDType.instance.decompose(id),
@@ -132,6 +135,9 @@ public class BatchlogManager implements BatchlogManagerMBean
 
     public static Completable store(Batch batch, boolean durableWrites)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("Storing batch {}", batch.id);
+
         List<ByteBuffer> mutations = new ArrayList<>(batch.encodedMutations.size() + batch.decodedMutations.size());
         mutations.addAll(batch.encodedMutations);
 

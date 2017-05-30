@@ -42,6 +42,8 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.cql3.statements.RequestValidations;
 import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.aggregation.AggregationSpecification;
+import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.exceptions.ClientWriteException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -526,7 +528,7 @@ public class ContinuousPagingService
         {
             super(options,
                   statement.parameters.isJson,
-                  statement.aggregationSpec == null ? null: statement.aggregationSpec.newGroupMaker(),
+                  newGroupMaker(statement, options),
                   statement.getSelection());
             this.resultMetaData = selection.getResultMetadata(isJson).copy();
             this.state = state;
@@ -541,6 +543,12 @@ public class ContinuousPagingService
             this.avgRowSize = ResultSet.estimatedRowSize(statement.table, selection.getColumnMapping());
 
             allocatePage(1);
+        }
+
+        private static GroupMaker newGroupMaker(SelectStatement statement, QueryOptions options)
+        {
+            AggregationSpecification spec = statement.getAggregationSpec(options);
+            return spec == null ? null : spec.newGroupMaker();
         }
 
         /**

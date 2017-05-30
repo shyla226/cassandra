@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.NativeLibrary;
@@ -54,7 +55,7 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
     {
         try
         {
-            return TPCScheduler.openFileChannel(file, mmapped);
+            return TPC.openFileChannel(file, mmapped);
         }
         catch (IOException e)
         {

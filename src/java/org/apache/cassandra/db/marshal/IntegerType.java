@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.IntegerSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -34,6 +34,8 @@ import org.apache.cassandra.utils.ByteSource;
 public final class IntegerType extends NumberType<BigInteger>
 {
     public static final IntegerType instance = new IntegerType();
+
+    private static final ArgumentDeserializer ARGUMENT_DESERIALIZER = new DefaultArgumentDerserializer(instance);
 
     private static int findMostSignificantByte(ByteBuffer bytes)
     {
@@ -255,69 +257,60 @@ public final class IntegerType extends NumberType<BigInteger>
         return IntegerSerializer.instance;
     }
 
-    @Override
-    protected int toInt(ByteBuffer value)
+    /**
+     * Converts the specified value into a <code>BigInteger</code> if allowed.
+     *
+     * @param value the value to convert
+     * @return the converted value
+     * @throws UnsupportedOperationException if the value cannot be converted without losing precision
+     */
+    private BigInteger toBigInteger(Number number)
     {
-        throw new UnsupportedOperationException();
+        if (number instanceof BigInteger)
+            return (BigInteger) number;
+
+        return BigInteger.valueOf(number.longValue());
     }
 
     @Override
-    protected float toFloat(ByteBuffer value)
+    public ByteBuffer add(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigInteger(left).add(toBigInteger(right)));
     }
 
     @Override
-    protected long toLong(ByteBuffer value)
+    public ByteBuffer substract(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigInteger(left).subtract(toBigInteger(right)));
     }
 
     @Override
-    protected double toDouble(ByteBuffer value)
+    public ByteBuffer multiply(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return decompose(toBigInteger(left).multiply(toBigInteger(right)));
     }
 
     @Override
-    protected BigInteger toBigInteger(ByteBuffer value)
+    public ByteBuffer divide(Number left, Number right)
     {
-        return compose(value);
+        return decompose(toBigInteger(left).divide(toBigInteger(right)));
     }
 
     @Override
-    protected BigDecimal toBigDecimal(ByteBuffer value)
+    public ByteBuffer mod(Number left, Number right)
     {
-        return new BigDecimal(compose(value));
+        return decompose(toBigInteger(left).remainder(toBigInteger(right)));
     }
 
-    public ByteBuffer add(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigInteger(left).add(rightType.toBigInteger(right)));
-    }
-
-    public ByteBuffer substract(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigInteger(left).subtract(rightType.toBigInteger(right)));
-    }
-
-    public ByteBuffer multiply(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigInteger(left).multiply(rightType.toBigInteger(right)));
-    }
-
-    public ByteBuffer divide(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigInteger(left).divide(rightType.toBigInteger(right)));
-    }
-
-    public ByteBuffer mod(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return decompose(leftType.toBigInteger(left).remainder(rightType.toBigInteger(right)));
-    }
-
-    public ByteBuffer negate(ByteBuffer input)
+    @Override
+    public ByteBuffer negate(Number input)
     {
         return decompose(toBigInteger(input).negate());
+    }
+
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
+    {
+        return ARGUMENT_DESERIALIZER;
     }
 }

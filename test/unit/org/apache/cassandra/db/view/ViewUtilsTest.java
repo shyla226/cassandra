@@ -51,7 +51,6 @@ public class ViewUtilsTest
         IEndpointSnitch snitch = new PropertyFileSnitch();
         DatabaseDescriptor.setEndpointSnitch(snitch);
         Keyspace.setInitialized();
-        TPCScheduler.register();
     }
 
     @Test

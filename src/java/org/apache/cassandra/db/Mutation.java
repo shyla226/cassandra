@@ -22,11 +22,13 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
 
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -230,7 +232,7 @@ public class Mutation implements IMutation, Scheduleable
 
     public TPCScheduler getScheduler()
     {
-        return TPCScheduler.getForKey(getKeyspaceName(), key());
+        return TPC.getForKey(Keyspace.open(getKeyspaceName()), key());
     }
 
     public Completable applyAsync(boolean durableWrites, boolean isDroppable)
@@ -253,12 +255,12 @@ public class Mutation implements IMutation, Scheduleable
 
     public void apply(boolean durableWrites, boolean isDroppable)
     {
-        Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable).blockingAwait();
+        TPCUtils.blockingAwait(Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable));
     }
 
     public void apply(boolean durableWrites)
     {
-        applyAsync(durableWrites, true).blockingAwait();
+        TPCUtils.blockingAwait(applyAsync(durableWrites, true));
     }
 
     /*

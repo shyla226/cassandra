@@ -26,7 +26,7 @@ import java.util.Set;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -56,7 +56,7 @@ public class SSTableExpiredBlockers
         }
 
         Util.initDatabaseDescriptor();
-        TPCScheduler.register();
+        TPC.ensureInitialized();
 
         String keyspace = args[args.length - 2];
         String columnfamily = args[args.length - 1];

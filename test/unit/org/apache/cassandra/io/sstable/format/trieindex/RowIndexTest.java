@@ -32,6 +32,7 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -50,7 +51,7 @@ public class RowIndexTest
     public static void initDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        TPCScheduler.register();
+        TPC.ensureInitialized();
     }
 
     static final ClusteringComparator comparator = new ClusteringComparator(UUIDType.instance);

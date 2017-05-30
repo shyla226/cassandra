@@ -21,19 +21,27 @@ package org.apache.cassandra.utils.concurrent;
 import java.util.Iterator;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.collect.Iterators;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.util.concurrent.EventExecutor;
 import junit.framework.Assert;
-import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class LongAdderTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        // This initializes metrics, which depend on the number of cores, which depends on the Yaml.
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testSingleThread()
     {
@@ -119,44 +127,27 @@ public class LongAdderTest
     @Test
     public void testNettyEventLoops() throws InterruptedException
     {
-        final int numCores = TPCScheduler.getNumCores();
-        final int numThreads = numCores * 2; // half TPC threads and half non-TPC threads
-        final int numUpdtes = 1000;
+        final int numCores = TPC.getNumCores();
+        final int numThreads = numCores * 2; // half TPC threads (initialized statically) and half non-TPC threads
+        final int numUpdates = 1000;
         final LongAdder longAdder = new LongAdder();
-        EpollEventLoopGroup tpcLoops = new EpollEventLoopGroup(numCores,
-                                                            new TPCScheduler.NettyRxThreadFactory("eventLoopBench",
-                                                                                                  Thread.MAX_PRIORITY));
-
+        
         EpollEventLoopGroup otherLoops = new EpollEventLoopGroup(numThreads - numCores);
-
-
-        final CountDownLatch latchForSetup = new CountDownLatch(numCores);
-        final AtomicInteger cpuId = new AtomicInteger(0);
-        for (EventExecutor loop : tpcLoops)
-        {
-            loop.submit(() ->
-                         {
-                             TPCScheduler.register(loop, cpuId.getAndIncrement());
-                             latchForSetup.countDown();
-                         });
-        }
-
-        latchForSetup.await(10, TimeUnit.SECONDS);
 
         // fail test early if for any reason Rx scheduler not setup correctly
         for (int i = 0; i < numCores; i++)
-            Assert.assertNotNull(TPCScheduler.getForCore(i));
+            Assert.assertNotNull(TPC.getForCore(i));
 
         // test increment of counter
         final CountDownLatch latchForIncrement = new CountDownLatch(numThreads);
-        for (Iterator<EventExecutor> it = Iterators.concat(tpcLoops.iterator(), otherLoops.iterator()); it.hasNext(); )
+        for (Iterator<EventExecutor> it = Iterators.concat(TPC.eventLoopGroup().iterator(), otherLoops.iterator()); it.hasNext(); )
         {
             EventExecutor loop = it.next();
             loop.submit(() ->
                         {
                             try
                             {
-                                for (int j = 0; j < numUpdtes; j++)
+                                for (int j = 0; j < numUpdates; j++)
                                     longAdder.increment();
                             }
                             finally
@@ -168,22 +159,22 @@ public class LongAdderTest
 
         latchForIncrement.await(10, TimeUnit.SECONDS);
         FBUtilities.sleepQuietly(100);
-        Assert.assertEquals(numThreads * numUpdtes, longAdder.sum());
-        Assert.assertEquals(numThreads * numUpdtes, longAdder.longValue());
-        Assert.assertEquals(numThreads * numUpdtes, longAdder.intValue());
-        Assert.assertEquals(numThreads * numUpdtes, longAdder.doubleValue(), 0.000001);
-        Assert.assertEquals(numThreads * numUpdtes, longAdder.floatValue(), 0.000001);
+        Assert.assertEquals(numThreads * numUpdates, longAdder.sum());
+        Assert.assertEquals(numThreads * numUpdates, longAdder.longValue());
+        Assert.assertEquals(numThreads * numUpdates, longAdder.intValue());
+        Assert.assertEquals(numThreads * numUpdates, longAdder.doubleValue(), 0.000001);
+        Assert.assertEquals(numThreads * numUpdates, longAdder.floatValue(), 0.000001);
 
         //now repeat for decrement
         final CountDownLatch latchForDecrement = new CountDownLatch(numThreads);
-        for (Iterator<EventExecutor> it = Iterators.concat(tpcLoops.iterator(), otherLoops.iterator()); it.hasNext(); )
+        for (Iterator<EventExecutor> it = Iterators.concat(TPC.eventLoopGroup().iterator(), otherLoops.iterator()); it.hasNext(); )
         {
             EventExecutor loop = it.next();
             loop.submit(() ->
                         {
                             try
                             {
-                                for (int j = 0; j < numUpdtes; j++)
+                                for (int j = 0; j < numUpdates; j++)
                                     longAdder.decrement();
                             }
                             finally

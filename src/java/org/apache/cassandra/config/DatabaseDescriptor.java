@@ -19,26 +19,14 @@ package org.apache.cassandra.config;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
-import java.net.UnknownHostException;
 import java.lang.reflect.Constructor;
+import java.net.*;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.Enumeration;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -564,6 +552,9 @@ public class DatabaseDescriptor
 
         if (conf.concurrent_compactors == null)
             conf.concurrent_compactors = Math.min(8, Math.max(2, Math.min(FBUtilities.getAvailableProcessors(), conf.data_file_directories.length)));
+
+        if (conf.concurrent_validations < 1)
+            conf.concurrent_validations = Integer.MAX_VALUE;
 
         if (conf.concurrent_compactors <= 0)
             throw new ConfigurationException("concurrent_compactors should be strictly greater than 0, but was " + conf.concurrent_compactors, false);
@@ -1435,6 +1426,17 @@ public class DatabaseDescriptor
     }
 
     public static int getCompactionLargePartitionWarningThreshold() { return conf.compaction_large_partition_warning_threshold_mb * 1024 * 1024; }
+
+    public static int getConcurrentValidations()
+    {
+        return conf.concurrent_validations;
+    }
+
+    public static void setConcurrentValidations(int value)
+    {
+        value = value > 0 ? value : Integer.MAX_VALUE;
+        conf.concurrent_validations = value;
+    }
 
     public static long getMinFreeSpacePerDriveInBytes()
     {
@@ -2364,5 +2366,13 @@ public class DatabaseDescriptor
     public static void setMetricsHistogramUpdateTimeMillis(int interval)
     {
         conf.metrics_histogram_update_interval_millis = interval;
+    }
+
+    public static int getTPCCores()
+    {
+        // Checking conf == null allows running micro benchmarks without calling DatabaseDescriptor.daemonInitialization(),
+        // which in turns causes initialization problems when running the micro benchmarks directly from the jar, e.g.
+        // java -jar build/test/benchmarks.jar MyBench
+        return conf == null || conf.tpc_cores == null ? FBUtilities.getAvailableProcessors() : conf.tpc_cores;
     }
 }

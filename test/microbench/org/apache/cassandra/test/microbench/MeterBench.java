@@ -37,7 +37,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 3, jvmArgsAppend = {
-                                 "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.MonitoredEpollEventLoopGroup",
+                                 "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.concurrent.EpollTPCEventLoopGroup",
                                  "-Dagrona.disable.bounds.checks=TRUE"
 //      ,"-XX:+UnlockDiagnosticVMOptions", "-XX:+PrintAssembly"
 //       ,"-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",

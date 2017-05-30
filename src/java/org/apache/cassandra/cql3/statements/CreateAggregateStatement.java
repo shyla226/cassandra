@@ -133,11 +133,17 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             String initcondAsCql = stateType.asCQL3Type().toCQLLiteral(initcond, ProtocolVersion.CURRENT);
             assert Objects.equals(initcond, Terms.asBytes(functionName.keyspace, initcondAsCql, stateType));
 
-            if (Constants.NULL_LITERAL != ival && UDHelper.isNullOrEmpty(stateType, initcond))
+            if (Constants.NULL_LITERAL != ival && isNullOrEmpty(stateType, initcond))
                 throw new InvalidRequestException("INITCOND must not be empty for all types except TEXT, ASCII, BLOB");
         }
 
         return super.prepare();
+    }
+
+    public static boolean isNullOrEmpty(AbstractType<?> type, ByteBuffer bb)
+    {
+        return bb == null ||
+               (bb.remaining() == 0 && type.isEmptyValueMeaningless());
     }
 
     private AbstractType<?> prepareType(String typeName, CQL3Type.Raw rawType)
