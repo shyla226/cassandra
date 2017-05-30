@@ -132,7 +132,7 @@ public class BlacklistingCompactionsTest
 
         final int ROWS_PER_SSTABLE = 10;
         final int SSTABLES = cfs.metadata().params.minIndexInterval * 2 / ROWS_PER_SSTABLE;
-        final int SSTABLES_TO_CORRUPT = 4;
+        final int SSTABLES_TO_CORRUPT = 6;
 
         assertTrue(String.format("Not enough sstables (%d), expected at least %d sstables to corrupt", SSTABLES, SSTABLES_TO_CORRUPT),
                    SSTABLES > SSTABLES_TO_CORRUPT);

@@ -22,7 +22,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.util.*;
 import java.util.function.*;
 
@@ -34,7 +33,6 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.sun.org.apache.xml.internal.serialize.TextSerializer;
 import org.apache.cassandra.*;
 import org.apache.cassandra.cache.*;
 import org.apache.cassandra.config.*;
