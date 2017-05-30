@@ -572,4 +572,7 @@ public interface StorageServiceMBean extends NotificationEmitter
 
     /** Sets the hinted handoff throttle in kb per second, per delivery thread. */
     public void setHintedHandoffThrottleInKB(int throttleInKB);
+
+    /** Return the PID of the process */
+    long getPid();
 }

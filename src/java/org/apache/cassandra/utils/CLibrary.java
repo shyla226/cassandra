@@ -18,9 +18,8 @@
 package org.apache.cassandra.utils;
 
 import java.io.FileDescriptor;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.lang.management.ManagementFactory;
 import java.lang.reflect.Field;
 
 import org.slf4j.Logger;
@@ -108,6 +107,7 @@ public final class CLibrary
     private static native int open(String path, int flags) throws LastErrorException;
     private static native int fsync(int fd) throws LastErrorException;
     private static native int close(int fd) throws LastErrorException;
+    private static native long getpid() throws LastErrorException;
 
     private static int errno(RuntimeException e)
     {
@@ -353,5 +353,37 @@ public final class CLibrary
                 // ignore
             }
         }
+    }
+
+    public static long getPid()
+    {
+        if (jnaAvailable)
+        {
+            try
+            {
+                return getpid();
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                // ignore
+            }
+        }
+
+        String name = ManagementFactory.getRuntimeMXBean().getName();
+        int idx = name.indexOf('@');
+        if (idx > 0)
+        {
+            try
+            {
+                return Long.parseLong(name.substring(0, idx));
+            }
+            catch (NumberFormatException e)
+            {
+                // ignore
+            }
+        }
+
+        return -1;
     }
 }
