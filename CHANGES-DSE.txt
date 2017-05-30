@@ -1,3 +1,8 @@
+DSE 5.0.9
+Merged from DSE 4.8.14:
+ * Integrate top threads command in nodetool (APOLLO-652)
+
+
 DSE 5.0.8
  * Handle missing metadata when opening a keyspace (APOLLO-395)
  * Bounded range splitting token allocation for first RF nodes (APOLLO-121)
@@ -14,8 +19,6 @@ DSE 5.0.8
  * Issue CQL native protocol warning that DTCS is deprecated (APOLLO-327)
  * Log message when rebuild has finished (APOLLO-465)
  * Improve repair overstreaming for multi-DCs and large RFs (APOLLO-390)
-Merged from DSE 4.8.13:
-* Integrate top threads command in nodetool (APOLLO-652)
 
 
 DSE 5.0.7
