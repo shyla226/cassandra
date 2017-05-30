@@ -25,11 +25,8 @@
 
 package org.apache.cassandra.transport;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.ArrayUtils;
 
@@ -74,7 +71,6 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
 
     /** Some utility constants for decoding DSE versions */
     private static final byte DSE_VERSION_BIT = 0x40; // 0100 0000
-    private static final byte DSE_VERSION_MASK = 0x4f; // 0011 1111
 
     /** The supported OS versions */
     final static ProtocolVersion[] OS_VERSIONS = new ProtocolVersion[] { V3, V4, V5 };
@@ -89,6 +85,7 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
     /** All supported versions */
     public final static EnumSet<ProtocolVersion> SUPPORTED = EnumSet.copyOf(Arrays.asList((ProtocolVersion[])
                                                                                           ArrayUtils.addAll(OS_VERSIONS, DSE_VERSIONS)));
+    public final static List<String> SUPPORTED_VERSION_NAMES = SUPPORTED.stream().map(ProtocolVersion::toString).collect(Collectors.toList());
 
     /** Old unsupported versions, this is OK as long as we never add newer unsupported versions */
     public final static EnumSet<ProtocolVersion> UNSUPPORTED = EnumSet.complementOf(SUPPORTED);
@@ -99,10 +96,7 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
 
     public static List<String> supportedVersions()
     {
-        List<String> ret = new ArrayList<>(SUPPORTED.size());
-        for (ProtocolVersion version : SUPPORTED)
-            ret.add(version.toString());
-        return ret;
+        return SUPPORTED_VERSION_NAMES;
     }
 
     public static ProtocolVersion decode(int versionNum)
@@ -111,9 +105,8 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
         boolean isDse = isDse(versionNum);
         if (isDse)
         { // DSE version
-            int dseVersionNum = versionNum & DSE_VERSION_MASK;
-            if (dseVersionNum >= MIN_DSE_VERSION.num && dseVersionNum <= MAX_DSE_VERSION.num)
-                ret = DSE_VERSIONS[dseVersionNum - MIN_DSE_VERSION.num];
+            if (versionNum >= MIN_DSE_VERSION.num && versionNum <= MAX_DSE_VERSION.num)
+                ret = DSE_VERSIONS[versionNum - MIN_DSE_VERSION.num];
         }
         else
         { // OS version

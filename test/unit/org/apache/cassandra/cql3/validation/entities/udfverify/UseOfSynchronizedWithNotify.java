@@ -19,29 +19,28 @@
 package org.apache.cassandra.cql3.validation.entities.udfverify;
 
 import java.nio.ByteBuffer;
-import java.util.List;
 
-import com.datastax.driver.core.TypeCodec;
+import org.apache.cassandra.cql3.functions.Arguments;
 import org.apache.cassandra.cql3.functions.JavaUDF;
 import org.apache.cassandra.cql3.functions.UDFContext;
-import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.cql3.functions.UDFDataType;
 
 /**
  * Used by {@link org.apache.cassandra.cql3.validation.entities.UFVerifierTest}.
  */
 public final class UseOfSynchronizedWithNotify extends JavaUDF
 {
-    public UseOfSynchronizedWithNotify(TypeCodec<Object> returnDataType, TypeCodec<Object>[] argDataTypes, UDFContext udfContext)
+    public UseOfSynchronizedWithNotify(UDFDataType returnType, UDFContext udfContext)
     {
-        super(returnDataType, argDataTypes, udfContext);
+        super(returnType, udfContext);
     }
 
-    protected Object executeAggregateImpl(ProtocolVersion protocolVersion, Object firstParam, List<ByteBuffer> params)
+    protected Object executeAggregateImpl(Object state, Arguments arguments)
     {
         throw new UnsupportedOperationException();
     }
 
-    protected ByteBuffer executeImpl(ProtocolVersion protocolVersion, List<ByteBuffer> params)
+    protected ByteBuffer executeImpl(Arguments arguments)
     {
         synchronized (this)
         {

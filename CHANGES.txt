@@ -1,4 +1,9 @@
 4.0
+ * Update repairTime for keyspaces on completion (CASSANDRA-13539)
+ * Add configurable upper bound for validation executor threads (CASSANDRA-13521)
+ * Bring back maxHintTTL propery (CASSANDRA-12982)
+ * Add testing guidelines (CASSANDRA-13497)
+ * Add more repair metrics (CASSANDRA-13531)
  * RangeStreamer should be smarter when picking endpoints for streaming (CASSANDRA-4650)
  * Avoid rewrapping an exception thrown for cache load functions (CASSANDRA-13367)
  * Log time elapsed for each incremental repair phase (CASSANDRA-13498)
@@ -102,6 +107,8 @@
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
  * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
+ * Interned ColumnIdentifiers should use minimal ByteBuffers (CASSANDRA-13533)
+ * Fix repair process violating start/end token limits for small ranges (CASSANDRA-13052)
  * Add storage port options to sstableloader (CASSANDRA-13518)
  * Properly handle quoted index names in cqlsh DESCRIBE output (CASSANDRA-12847)
  * Fix NPE in StorageService.excise() (CASSANDRA-13163)

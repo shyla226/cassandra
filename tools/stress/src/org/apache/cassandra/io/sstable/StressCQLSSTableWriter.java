@@ -38,7 +38,6 @@ import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.CqlParser;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.UpdateParameters;
-import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.cql3.statements.CreateTypeStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
@@ -58,6 +57,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.JavaDriverUtils;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -122,7 +122,7 @@ public class StressCQLSSTableWriter implements Closeable
         this.writer = writer;
         this.insert = insert;
         this.boundNames = boundNames;
-        this.typeCodecs = boundNames.stream().map(bn ->  UDHelper.codecFor(UDHelper.driverType(bn.type)))
+        this.typeCodecs = boundNames.stream().map(bn ->  JavaDriverUtils.codecFor(bn.type))
                                              .collect(Collectors.toList());
     }
 
@@ -313,7 +313,7 @@ public class StressCQLSSTableWriter implements Closeable
     {
         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(insert.keyspace());
         UserType userType = ksm.types.getNullable(ByteBufferUtil.bytes(dataType));
-        return (com.datastax.driver.core.UserType) UDHelper.driverType(userType);
+        return (com.datastax.driver.core.UserType) JavaDriverUtils.driverType(userType);
     }
 
     /**

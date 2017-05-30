@@ -34,10 +34,12 @@ import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.concurrent.JMXConfigurableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.repair.consistent.SyncStatSummary;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -226,7 +228,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         }
 
         long repairedAt;
-        try
+        try (Timer.Context ctx = Keyspace.open(keyspace).metric.repairPrepareTime.time())
         {
             ActiveRepairService.instance.prepareForRepair(parentSession, FBUtilities.getBroadcastAddress(), allNeighbors, options, columnFamilyStores);
             repairedAt = ActiveRepairService.instance.getParentRepairSession(parentSession).getRepairedAt();
@@ -519,8 +521,8 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         private void repairComplete()
         {
             ActiveRepairService.instance.removeParentRepairSession(parentSession);
-            String duration = DurationFormatUtils.formatDurationWords(System.currentTimeMillis() - startTime,
-                                                                      true, true);
+            long durationMillis = System.currentTimeMillis() - startTime;
+            String duration = DurationFormatUtils.formatDurationWords(durationMillis, true, true);
             String message = String.format("Repair command #%d finished in %s", cmd, duration);
             fireProgressEvent(tag, new ProgressEvent(ProgressEventType.COMPLETE, progress.get(), totalProgress, message));
             logger.info(message);
@@ -537,7 +539,9 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
                 Tracing.traceRepair(message);
                 Tracing.instance.stopSession();
             }
+
             executor.shutdown();
+            Keyspace.open(keyspace).metric.repairTime.update(durationMillis, TimeUnit.MILLISECONDS);
         }
     }
 

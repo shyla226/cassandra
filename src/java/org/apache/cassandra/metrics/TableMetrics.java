@@ -145,6 +145,22 @@ public class TableMetrics
     public final LatencyMetrics casCommit;
     /** percent of the data that is repaired */
     public final Gauge<Double> percentRepaired;
+    /** time spent anticompacting data before participating in a consistent repair */
+    public final Timer anticompactionTime;
+    /** time spent creating merkle trees */
+    public final Timer validationTime;
+    /** time spent syncing data in a repair */
+    public final Timer syncTime;
+    /** approximate number of bytes read while creating merkle trees */
+    public final Histogram bytesValidated;
+    /** number of partitions read creating merkle trees */
+    public final Histogram partitionsValidated;
+    /** number of bytes read while doing anticompaction */
+    public final Counter bytesAnticompacted;
+    /** number of bytes where the whole sstable was contained in a repairing range so that we only mutated the repair status */
+    public final Counter bytesMutatedAnticompaction;
+    /** ratio of how much we anticompact vs how much we could mutate the repair status*/
+    public final Gauge<Double> mutatedAnticompactionGauge;
 
     public final Timer coordinatorReadLatency;
     public final Timer coordinatorScanLatency;
@@ -705,6 +721,23 @@ public class TableMetrics
         casPrepare = new LatencyMetrics(factory, aliasFactory, "CasPrepare", cfs.keyspace.metric.casPrepare);
         casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);
         casCommit = new LatencyMetrics(factory, aliasFactory, "CasCommit", cfs.keyspace.metric.casCommit);
+
+        anticompactionTime = createTableTimer("AnticompactionTime", cfs.keyspace.metric.anticompactionTime);
+        validationTime = createTableTimer("ValidationTime", cfs.keyspace.metric.validationTime);
+        syncTime = createTableTimer("SyncTime", cfs.keyspace.metric.repairSyncTime);
+
+        bytesValidated = createTableHistogram("BytesValidated", cfs.keyspace.metric.bytesValidated);
+        partitionsValidated = createTableHistogram("PartitionsValidated", cfs.keyspace.metric.partitionsValidated);
+        bytesAnticompacted = createTableCounter("BytesAnticompacted");
+        bytesMutatedAnticompaction = createTableCounter("BytesMutatedAnticompaction");
+        mutatedAnticompactionGauge = createTableGauge("MutatedAnticompactionGauge", () ->
+        {
+            double bytesMutated = bytesMutatedAnticompaction.getCount();
+            double bytesAnticomp = bytesAnticompacted.getCount();
+            if (bytesAnticomp + bytesMutated > 0)
+                return bytesMutated / (bytesAnticomp + bytesMutated);
+            return 0.0;
+        });
     }
 
     public void updateSSTableIterated(int count)

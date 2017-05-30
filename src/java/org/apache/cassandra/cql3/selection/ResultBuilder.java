@@ -19,18 +19,14 @@
 package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.aggregation.GroupMaker;
-import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * CQL row builder: abstract class for converting filtered rows and cells into CQL rows.
@@ -67,9 +63,7 @@ public abstract class ResultBuilder
      * we don't care about, but since the array below are allocated just once,
      * it doesn't matter performance wise.
      */
-    List<ByteBuffer> current;
-    final long[] timestamps;
-    final int[] ttls;
+    private Selector.InputRow inputRow;
 
     protected final boolean isJson;
     protected boolean completed;
@@ -80,53 +74,17 @@ public abstract class ResultBuilder
         this.protocolVersion = options.getProtocolVersion();
         this.selectors = selection.newSelectors(options);
         this.groupMaker = groupMaker;
-        this.timestamps = selection.collectTimestamps ? new long[selection.columns.size()] : null;
-        this.ttls = selection.collectTTLs ? new int[selection.columns.size()] : null;
         this.isJson = isJson;
-
-        // We use MIN_VALUE to indicate no timestamp and -1 for no ttl
-        if (timestamps != null)
-            Arrays.fill(timestamps, Long.MIN_VALUE);
-        if (ttls != null)
-            Arrays.fill(ttls, -1);
     }
 
     public void add(ByteBuffer v)
     {
-        current.add(v);
+        inputRow.add(v);
     }
 
     public void add(Cell c, int nowInSec)
     {
-        if (c == null)
-        {
-            current.add(null);
-            return;
-        }
-
-        current.add(value(c));
-
-        if (timestamps != null)
-            timestamps[current.size() - 1] = c.timestamp();
-
-        if (ttls != null)
-            ttls[current.size() - 1] = remainingTTL(c, nowInSec);
-    }
-
-    private int remainingTTL(Cell c, int nowInSec)
-    {
-        if (!c.isExpiring())
-            return -1;
-
-        int remaining = c.localDeletionTime() - nowInSec;
-        return remaining >= 0 ? remaining : -1;
-    }
-
-    private ByteBuffer value(Cell c)
-    {
-        return c.isCounterCell()
-             ? ByteBufferUtil.bytes(CounterContext.instance().total(c.value()))
-             : c.value();
+        inputRow.add(c, nowInSec);
     }
 
     /**
@@ -139,25 +97,27 @@ public abstract class ResultBuilder
     {
         // The groupMaker needs to be called for each row
         boolean isNewAggregate = groupMaker == null || groupMaker.isNewGroup(partitionKey, clustering);
-        if (current != null)
+        if (inputRow != null)
         {
-            selectors.addInputRow(protocolVersion, this);
+            selectors.addInputRow(protocolVersion, inputRow);
 
             if (isNewAggregate)
             {
                 boolean res = onRowCompleted(getOutputRow(), true);
-                current = null;
+                inputRow.reset(!selectors.hasProcessing());
                 selectors.reset();
                 if (!res)
                     complete();
             }
             else
             {
-                current = null;
+                inputRow.reset(!selectors.hasProcessing());
             }
-
         }
-        current = new ArrayList<>(selection.columns.size());
+        else
+        {
+            inputRow = new Selector.InputRow(selection.columns.size(), selection.collectTimestamps, selection.collectTTLs);
+        }
     }
 
     /**
@@ -178,12 +138,12 @@ public abstract class ResultBuilder
         if (completed)
             return;
 
-        if (current != null)
+        if (inputRow != null)
         {
-            selectors.addInputRow(protocolVersion, this);
+            selectors.addInputRow(protocolVersion, inputRow);
             onRowCompleted(getOutputRow(), false);
+            inputRow.reset(!selectors.hasProcessing());
             selectors.reset();
-            current = null;
         }
 
         // For aggregates we need to return a row even if no records have been found

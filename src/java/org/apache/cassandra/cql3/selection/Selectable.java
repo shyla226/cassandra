@@ -145,7 +145,7 @@ public interface Selectable extends AssignmentTestable
             // selection will have this name. Which isn't terribly helpful, but it's unclear how to provide
             // something a lot more helpful and in practice user can bind those markers by position or, even better,
             // use bind markers.
-            Term term = rawTerm.prepare(table.keyspace, new ColumnSpecification(table.keyspace, table.name, bindMarkerNameInSelection, type));
+            Term term = getTerm(table, bindMarkerNameInSelection, type);
             term.collectMarkerSpecification(boundNames);
             return TermSelector.newFactory(rawTerm.getText(), term, type);
         }
@@ -160,6 +160,11 @@ public interface Selectable extends AssignmentTestable
         public String toString()
         {
             return rawTerm.getText();
+        }
+
+        public Term getTerm(TableMetadata table, ColumnIdentifier identifier, AbstractType<?> type)
+        {
+            return rawTerm.prepare(table.keyspace, new ColumnSpecification(table.keyspace, table.name, bindMarkerNameInSelection, type));
         }
 
         public static class Raw extends Selectable.Raw
@@ -244,6 +249,24 @@ public interface Selectable extends AssignmentTestable
         {
             this.function = function;
             this.args = args;
+        }
+
+        /**
+         * Returns the underlying function.
+         * @return the underlying function
+         */
+        public Function getFunction()
+        {
+            return function;
+        }
+
+        /**
+         * Returns the function arguments.
+         * @return the function arguments
+         */
+        public List<Selectable> getArguments()
+        {
+            return args;
         }
 
         @Override

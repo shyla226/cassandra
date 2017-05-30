@@ -19,9 +19,12 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 
+import org.apache.commons.lang3.mutable.MutableLong;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.LongSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -132,50 +135,51 @@ public class LongType extends NumberType<Long>
     }
 
     @Override
-    protected int toInt(ByteBuffer value)
+    public ByteBuffer add(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return ByteBufferUtil.bytes(left.longValue() + right.longValue());
     }
 
     @Override
-    protected float toFloat(ByteBuffer value)
+    public ByteBuffer substract(Number left, Number right)
     {
-        throw new UnsupportedOperationException();
+        return ByteBufferUtil.bytes(left.longValue() - right.longValue());
     }
 
     @Override
-    protected long toLong(ByteBuffer value)
+    public ByteBuffer multiply(Number left, Number right)
     {
-        return ByteBufferUtil.toLong(value);
+        return ByteBufferUtil.bytes(left.longValue() * right.longValue());
     }
 
-    public ByteBuffer add(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ByteBuffer divide(Number left, Number right)
     {
-        return ByteBufferUtil.bytes(leftType.toLong(left) + rightType.toLong(right));
+        return ByteBufferUtil.bytes(left.longValue() / right.longValue());
     }
 
-    public ByteBuffer substract(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ByteBuffer mod(Number left, Number right)
     {
-        return ByteBufferUtil.bytes(leftType.toLong(left) - rightType.toLong(right));
+        return ByteBufferUtil.bytes(left.longValue() % right.longValue());
     }
 
-    public ByteBuffer multiply(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ByteBuffer negate(Number input)
     {
-        return ByteBufferUtil.bytes(leftType.toLong(left) * rightType.toLong(right));
+        return ByteBufferUtil.bytes(-input.longValue());
     }
 
-    public ByteBuffer divide(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
+    @Override
+    public ArgumentDeserializer getArgumentDeserializer()
     {
-        return ByteBufferUtil.bytes(leftType.toLong(left) / rightType.toLong(right));
-    }
-
-    public ByteBuffer mod(NumberType<?> leftType, ByteBuffer left, NumberType<?> rightType, ByteBuffer right)
-    {
-        return ByteBufferUtil.bytes(leftType.toLong(left) % rightType.toLong(right));
-    }
-
-    public ByteBuffer negate(ByteBuffer input)
-    {
-        return ByteBufferUtil.bytes(-toLong(input));
+        return new NumberArgumentDeserializer<MutableLong>(new MutableLong())
+        {
+            @Override
+            protected void setMutableValue(MutableLong mutable, ByteBuffer buffer)
+            {
+                mutable.setValue(ByteBufferUtil.toLong(buffer));
+            }
+        };
     }
 }

@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
@@ -37,9 +38,8 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.cql3.selection.RawSelector;
-import org.apache.cassandra.cql3.selection.ResultBuilder;
-import org.apache.cassandra.cql3.selection.Selection;
+import org.apache.cassandra.cql3.selection.*;
+import org.apache.cassandra.cql3.selection.Selectable.WithFunction;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
@@ -83,10 +83,10 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
-import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
+import static org.apache.cassandra.cql3.statements.RequestValidations.*;
+import static org.apache.cassandra.db.aggregation.AggregationSpecification.aggregatePkPrefixFactory;
+import static org.apache.cassandra.db.aggregation.AggregationSpecification.aggregatePkPrefixFactoryWithSelector;
+
 import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 
 /*
@@ -116,9 +116,9 @@ public class SelectStatement implements CQLStatement
     private final boolean isReversed;
 
     /**
-     * The <code>AggregationSpecification</code> used to make the aggregates.
+     * The {@code Factory} used to create the {@code AggregationSpecification}.
      */
-    public final AggregationSpecification aggregationSpec;
+    private final AggregationSpecification.Factory aggregationSpecFactory;
 
     /**
      * The comparator used to orders results when multiple keys are selected (using IN).
@@ -140,7 +140,7 @@ public class SelectStatement implements CQLStatement
                            Selection selection,
                            StatementRestrictions restrictions,
                            boolean isReversed,
-                           AggregationSpecification aggregationSpec,
+                           AggregationSpecification.Factory aggregationSpecFactory,
                            Comparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
                            Term perPartitionLimit)
@@ -150,7 +150,7 @@ public class SelectStatement implements CQLStatement
         this.selection = selection;
         this.restrictions = restrictions;
         this.isReversed = isReversed;
-        this.aggregationSpec = aggregationSpec;
+        this.aggregationSpecFactory = aggregationSpecFactory;
         this.orderingComparator = orderingComparator;
         this.parameters = parameters;
         this.limit = limit;
@@ -172,7 +172,7 @@ public class SelectStatement implements CQLStatement
                                    selection,
                                    restrictions.addIndexRestrictions(indexRestrictions),
                                    isReversed,
-                                   aggregationSpec,
+                                   aggregationSpecFactory,
                                    orderingComparator,
                                    limit,
                                    perPartitionLimit);
@@ -192,7 +192,7 @@ public class SelectStatement implements CQLStatement
                                    selection,
                                    restrictions.addExternalRestrictions(indexRestrictions),
                                    isReversed,
-                                   aggregationSpec,
+                                   aggregationSpecFactory,
                                    orderingComparator,
                                    limit,
                                    perPartitionLimit);
@@ -209,6 +209,9 @@ public class SelectStatement implements CQLStatement
     {
         selection.addFunctionsTo(functions);
         restrictions.addFunctionsTo(functions);
+
+        if (aggregationSpecFactory != null)
+            aggregationSpecFactory.addFunctionsTo(functions);
 
         if (limit != null)
             limit.addFunctionsTo(functions);
@@ -299,7 +302,6 @@ public class SelectStatement implements CQLStatement
     }
 
     public Single<ResultMessage.Rows> execute(QueryState state, QueryOptions options, long queryStartNanoTime)
-    throws RequestValidationException, RequestExecutionException
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
@@ -311,10 +313,8 @@ public class SelectStatement implements CQLStatement
             checkFalse(cl.isSerialConsistency(), "Continuous paging does not support serial reads");
             return executeContinuous(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
         }
-        else
-        {
-            return execute(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
-        }
+
+        return execute(state, options, FBUtilities.nowInSeconds(), cl, queryStartNanoTime);
     }
 
     public Scheduler getScheduler()
@@ -349,16 +349,21 @@ public class SelectStatement implements CQLStatement
              : size.inRows();
     }
 
-    public ReadQuery getQuery(QueryState queryState, QueryOptions options, int nowInSec) throws RequestValidationException
+    public AggregationSpecification getAggregationSpec(QueryOptions options)
     {
-        return getQuery(queryState, options, nowInSec, getLimit(options), getPerPartitionLimit(options), getPageSize(options));
+        return aggregationSpecFactory == null ? null : aggregationSpecFactory.newInstance(options);
     }
 
-    public ReadQuery getQuery(QueryState queryState, QueryOptions options, int nowInSec, int userLimit, int perPartitionLimit, int pageSize)
+    public ReadQuery getQuery(QueryState queryState, QueryOptions options, int nowInSec) throws RequestValidationException
+    {
+        return getQuery(queryState, options, nowInSec, getLimit(options), getPerPartitionLimit(options), getPageSize(options), getAggregationSpec(options));
+    }
+
+    public ReadQuery getQuery(QueryState queryState, QueryOptions options, int nowInSec, int userLimit, int perPartitionLimit, int pageSize, AggregationSpecification aggregationSpec)
     {
         boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing();
 
-        DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize);
+        DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize, aggregationSpec);
 
         if (isPartitionRangeQuery)
             return getRangeCommand(queryState, options, limit, nowInSec);
@@ -370,10 +375,11 @@ public class SelectStatement implements CQLStatement
                                                QueryOptions options,
                                                QueryState state,
                                                int nowInSec,
-                                               int userLimit, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+                                               int userLimit,
+                                               long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         Single<PartitionIterator> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime, false);
-        return processResults(data, options, nowInSec, userLimit);
+        return processResults(data, options, nowInSec, userLimit, null);
     }
 
     /**
@@ -462,9 +468,10 @@ public class SelectStatement implements CQLStatement
                                        int pageSize,
                                        int nowInSec,
                                        int userLimit,
+                                       AggregationSpecification aggregationSpec,
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        if (aggregationSpec != null)
+        if (aggregationSpecFactory != null)
         {
             if (!restrictions.hasPartitionKeyRestrictions())
             {
@@ -488,7 +495,7 @@ public class SelectStatement implements CQLStatement
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
-        msg = processResults(page, options, nowInSec, userLimit).map(r -> {
+        msg = processResults(page, options, nowInSec, userLimit, aggregationSpec).map(r -> {
             if (!pager.isExhausted())
                 r.result.metadata.setPagingResult(new PagingResult(pager.state(false)));
 
@@ -507,9 +514,10 @@ public class SelectStatement implements CQLStatement
     private Single<ResultMessage.Rows> processResults(Single<PartitionIterator> partitions,
                                                       QueryOptions options,
                                                       int nowInSec,
-                                                      int userLimit) throws RequestValidationException
+                                                      int userLimit,
+                                                      AggregationSpecification aggregationSpec) throws RequestValidationException
     {
-        return process(partitions, options, nowInSec, userLimit).map(ResultMessage.Rows::new);
+        return process(partitions, options, nowInSec, userLimit, aggregationSpec).map(ResultMessage.Rows::new);
     }
 
     public Single<ResultMessage.Rows> executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
@@ -522,18 +530,23 @@ public class SelectStatement implements CQLStatement
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         int pageSize = getPageSize(options);
-        ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        AggregationSpecification aggregationSpec = getAggregationSpec(options);
+        ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
 
         if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
         {
             Single<PartitionIterator> data = query.executeInternal();
-            return processResults(data, options, nowInSec, userLimit);
+                    return processResults(data, options, nowInSec, userLimit, null);
         }
-        else
-        {
-            QueryPager pager = getPager(query, options);
-            return execute(Pager.forInternalQuery(pager), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
-        }
+
+        QueryPager pager = getPager(query, options);
+        return execute(Pager.forInternalQuery(pager),
+                       options,
+                       pageSize,
+                       nowInSec,
+                       userLimit,
+                       aggregationSpec,
+                       queryStartNanoTime);
     }
 
     /**
@@ -551,14 +564,15 @@ public class SelectStatement implements CQLStatement
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         int pageSize = getPageSize(options);
-        ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        AggregationSpecification aggregationSpec = getAggregationSpec(options);
+        ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
 
         if (aggregationSpec == null && (pageSize <= 0 || (query.limits().count() <= pageSize)))
             return execute(query, options, state, nowInSec, userLimit, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
 
-        return execute(Pager.forNormalQuery(pager, cl, state.getClientState(), false), options, pageSize, nowInSec, userLimit, queryStartNanoTime);
+        return execute(Pager.forNormalQuery(pager, cl, state.getClientState(), false), options, pageSize, nowInSec, userLimit, aggregationSpec, queryStartNanoTime);
     }
 
     /**
@@ -583,8 +597,9 @@ public class SelectStatement implements CQLStatement
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         int pageSize = getPageSize(options);
+        AggregationSpecification aggregationSpec = getAggregationSpec(options);
 
-        ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize);
+        ReadQuery query = getQuery(state, options, nowInSec, userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
         ContinuousPagingExecutor executor = new ContinuousPagingExecutor(this, options, state, cl, query, queryStartNanoTime, pageSize);
         ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
 
@@ -767,15 +782,19 @@ public class SelectStatement implements CQLStatement
     {
         QueryPager pager = query.getPager(pagingState, protocolVersion);
 
-        if (aggregationSpec == null || query.isEmpty())
+        if (aggregationSpecFactory == null || query.isEmpty())
             return pager;
 
         return new AggregationQueryPager(pager, query.limits());
     }
 
-    public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException
+    public ResultSet process(PartitionIterator partitions, int nowInSec)
     {
-        return process(Single.just(partitions), QueryOptions.DEFAULT, nowInSec, getLimit(QueryOptions.DEFAULT)).blockingGet();
+        return process(Single.just(partitions),
+                       QueryOptions.DEFAULT,
+                       nowInSec,
+                       getLimit(QueryOptions.DEFAULT),
+                       getAggregationSpec(QueryOptions.DEFAULT)).blockingGet();
     }
 
     public String keyspace()
@@ -933,17 +952,15 @@ public class SelectStatement implements CQLStatement
 
             return new ClusteringIndexSliceFilter(slices, isReversed);
         }
-        else
-        {
-            NavigableSet<Clustering> clusterings = getRequestedRows(options);
-            // We can have no clusterings if either we're only selecting the static columns, or if we have
-            // a 'IN ()' for clusterings. In that case, we still want to query if some static columns are
-            // queried. But we're fine otherwise.
-            if (clusterings.isEmpty() && queriedColumns.fetchedColumns().statics.isEmpty())
-                return null;
 
-            return new ClusteringIndexNamesFilter(clusterings, isReversed);
-        }
+        NavigableSet<Clustering> clusterings = getRequestedRows(options);
+        // We can have no clusterings if either we're only selecting the static columns, or if we have
+        // a 'IN ()' for clusterings. In that case, we still want to query if some static columns are
+        // queried. But we're fine otherwise.
+        if (clusterings.isEmpty() && queriedColumns.fetchedColumns().statics.isEmpty())
+            return null;
+
+        return new ClusteringIndexNamesFilter(clusterings, isReversed);
     }
 
     private Slices makeSlices(QueryOptions options)
@@ -981,7 +998,10 @@ public class SelectStatement implements CQLStatement
         return builder.build();
     }
 
-    private DataLimits getDataLimits(int userLimit, int perPartitionLimit, int pageSize)
+    private DataLimits getDataLimits(int userLimit,
+                                     int perPartitionLimit,
+                                     int pageSize,
+                                     AggregationSpecification aggregationSpec)
     {
         int cqlRowLimit = DataLimits.NO_LIMIT;
         int cqlPerPartitionLimit = DataLimits.NO_LIMIT;
@@ -1089,7 +1109,8 @@ public class SelectStatement implements CQLStatement
     private Single<ResultSet> process(final Single<PartitionIterator> partitions,
                                       QueryOptions options,
                                       int nowInSec,
-                                      int userLimit) throws InvalidRequestException
+                                      int userLimit,
+                                      AggregationSpecification aggregationSpec) throws InvalidRequestException
     {
         return partitions.map(p ->
                               {
@@ -1115,13 +1136,9 @@ public class SelectStatement implements CQLStatement
     {
         ByteBuffer key = dk.getKey();
         if (metadata.partitionKeyType instanceof CompositeType)
-        {
             return ((CompositeType)metadata.partitionKeyType).split(key);
-        }
-        else
-        {
-            return new ByteBuffer[]{ key };
-        }
+
+        return new ByteBuffer[]{ key };
     }
 
     // Determines whether, when we have a partition result with not rows, we still return the static content (as a
@@ -1232,7 +1249,7 @@ public class SelectStatement implements CQLStatement
             if (complexData == null)
                 result.add(null);
             else if (def.type.isCollection())
-                result.add(((CollectionType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
+                result.add(((CollectionType<?>) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
             else
                 result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
         }
@@ -1303,13 +1320,15 @@ public class SelectStatement implements CQLStatement
                 validateDistinctSelection(table, selection, restrictions);
             }
 
-            AggregationSpecification aggregationSpec = getAggregationSpecification(table,
-                                                                                   selection,
-                                                                                   restrictions,
-                                                                                   parameters.isDistinct);
+            AggregationSpecification.Factory aggregationSpecFactory = getAggregationSpecFactory(table,
+                                                                                                boundNames,
+                                                                                                selection,
+                                                                                                restrictions,
+                                                                                                parameters.isDistinct);
 
-            checkFalse(aggregationSpec == AggregationSpecification.AGGREGATE_EVERYTHING && perPartitionLimit != null,
-                       "PER PARTITION LIMIT is not allowed with aggregate queries.");
+            checkFalse(aggregationSpecFactory == AggregationSpecification.AGGREGATE_EVERYTHING_FACTORY
+                        && perPartitionLimit != null,
+                           "PER PARTITION LIMIT is not allowed with aggregate queries.");
 
             Comparator<List<ByteBuffer>> orderingComparator = null;
             boolean isReversed = false;
@@ -1332,7 +1351,7 @@ public class SelectStatement implements CQLStatement
                                                        selection,
                                                        restrictions,
                                                        isReversed,
-                                                       aggregationSpec,
+                                                       aggregationSpecFactory,
                                                        orderingComparator,
                                                        prepareLimit(boundNames, limit, keyspace(), limitReceiver()),
                                                        prepareLimit(boundNames, perPartitionLimit, keyspace(), perPartitionLimitReceiver()));
@@ -1407,32 +1426,56 @@ public class SelectStatement implements CQLStatement
         }
 
         /**
-         * Creates the <code>AggregationSpecification</code>s used to make the aggregates.
+         * Creates the {@code AggregationSpecification.Factory} used to make the aggregates.
          *
          * @param metadata the table metadata
          * @param selection the selection
          * @param restrictions the restrictions
          * @param isDistinct <code>true</code> if the query is a DISTINCT one.
-         * @return the <code>AggregationSpecification</code>s used to make the aggregates
+         * @return the {@code AggregationSpecification.Factory} used to make the aggregates
          */
-        private AggregationSpecification getAggregationSpecification(TableMetadata metadata,
-                                                                     Selection selection,
-                                                                     StatementRestrictions restrictions,
-                                                                     boolean isDistinct)
+        private AggregationSpecification.Factory getAggregationSpecFactory(TableMetadata metadata,
+                                                                             VariableSpecifications boundNames,
+                                                                             Selection selection,
+                                                                             StatementRestrictions restrictions,
+                                                                             boolean isDistinct)
         {
             if (parameters.groups.isEmpty())
-                return selection.isAggregate() ? AggregationSpecification.AGGREGATE_EVERYTHING
+                return selection.isAggregate() ? AggregationSpecification.AGGREGATE_EVERYTHING_FACTORY
                                                : null;
 
             int clusteringPrefixSize = 0;
 
             Iterator<ColumnMetadata> pkColumns = metadata.primaryKeyColumns().iterator();
-            for (ColumnMetadata.Raw raw : parameters.groups)
+            Selector.Factory selectorFactory = null;
+            for (Selectable.Raw raw : parameters.groups)
             {
-                ColumnMetadata def = raw.prepare(metadata);
+                Selectable selectable = raw.prepare(metadata);
+                ColumnMetadata def = null;
 
-                checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
-                          "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);
+                // For GROUP BY we only allow column names or functions at the higher level.
+                if (selectable instanceof WithFunction)
+                {
+                    WithFunction withFunction = (WithFunction) selectable;
+                    validateGroupByFunction(withFunction);
+                    List<ColumnMetadata> columns = new ArrayList<ColumnMetadata>();
+                    selectorFactory = selectable.newSelectorFactory(metadata, null, columns, boundNames);
+                    checkFalse(columns.isEmpty(), "GROUP BY functions must have one clustering column name as parameter");
+                    if (columns.size() > 1)
+                        throw invalidRequest("GROUP BY functions accept only one clustering column as parameter, got: %s",
+                                             columns.stream().map(c -> c.name.toCQLString()).collect(Collectors.joining(",")));
+
+                    def = columns.get(0);
+                    checkTrue(def.isClusteringColumn(),
+                              "Group by functions are only supported on clustering columns, got %s", def.name);
+                }
+                else
+                {
+                    def = (ColumnMetadata) selectable;
+                    checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
+                              "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);
+                    checkNull(selectorFactory, "Functions are only supported on the last element of the GROUP BY clause");
+                }
 
                 while (true)
                 {
@@ -1460,7 +1503,22 @@ public class SelectStatement implements CQLStatement
             checkFalse(clusteringPrefixSize > 0 && isDistinct,
                        "Grouping on clustering columns is not allowed for SELECT DISTINCT queries");
 
-            return AggregationSpecification.aggregatePkPrefix(metadata.comparator, clusteringPrefixSize);
+            return selectorFactory == null ? aggregatePkPrefixFactory(metadata.comparator, clusteringPrefixSize)
+                                           : aggregatePkPrefixFactoryWithSelector(metadata.comparator,
+                                                                                  clusteringPrefixSize,
+                                                                                  selectorFactory);
+        }
+
+        /**
+         * Checks that the function used is a valid one for the GROUP BY clause.
+         *
+         * @param withFunction the {@code Selectable} from which the function must be retrieved.
+         * @return the monotonic scalar function that must be used for determining the groups.
+         */
+        private void validateGroupByFunction(WithFunction withFunction)
+        {
+            Function f = withFunction.getFunction();
+            checkFalse(f.isAggregate(), "Aggregate functions are not supported within the GROUP BY clause, got: %s", f.name());
         }
 
         private Comparator<List<ByteBuffer>> getOrderingComparator(TableMetadata metadata,
@@ -1580,13 +1638,13 @@ public class SelectStatement implements CQLStatement
     {
         // Public because CASSANDRA-9858
         public final Map<ColumnMetadata.Raw, Boolean> orderings;
-        public final List<ColumnMetadata.Raw> groups;
+        public final List<Selectable.Raw> groups;
         public final boolean isDistinct;
         public final boolean allowFiltering;
         public final boolean isJson;
 
         public Parameters(Map<ColumnMetadata.Raw, Boolean> orderings,
-                          List<ColumnMetadata.Raw> groups,
+                          List<Selectable.Raw> groups,
                           boolean isDistinct,
                           boolean allowFiltering,
                           boolean isJson)
