@@ -4945,6 +4945,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("Updated hinted_handoff_throttle_in_kb to {}", throttleInKB);
     }
 
+    public long getPid()
+    {
+        return NativeLibrary.getProcessID();
+    }
+
     public static List<PartitionPosition> getDiskBoundaries(ColumnFamilyStore cfs, Directories.DataDirectory[] directories)
     {
         if (!cfs.getPartitioner().splitter().isPresent() || !SPLIT_SSTABLES_BY_TOKEN_RANGE)

@@ -138,6 +138,7 @@ public class NodeTool
                 TopPartitions.class,
                 SetLoggingLevel.class,
                 GetLoggingLevels.class,
+                Sjk.class,
                 DisableHintsForDC.class,
                 EnableHintsForDC.class,
                 FailureDetectorInfo.class,

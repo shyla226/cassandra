@@ -470,6 +470,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.effectiveOwnership(keyspace);
     }
 
+    public MBeanServerConnection getMbeanServerConn()
+    {
+        return mbeanServerConn;
+    }
+
     public CacheServiceMBean getCacheServiceMBean()
     {
         String cachePath = "org.apache.cassandra.db:type=Caches";
@@ -1182,6 +1187,11 @@ public class NodeProbe implements AutoCloseable
         return failed;
     }
 
+    public void failed()
+    {
+        this.failed = true;
+    }
+
     public long getReadRepairAttempted()
     {
         return spProxy.getReadRepairAttempted();
@@ -1527,6 +1537,11 @@ public class NodeProbe implements AutoCloseable
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public long getPid()
+    {
+        return ssProxy.getPid();
     }
 
     public ActiveRepairServiceMBean getRepairServiceProxy()
