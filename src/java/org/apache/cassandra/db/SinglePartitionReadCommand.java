@@ -554,6 +554,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         }
     }
 
+    @SuppressWarnings("resource")
     private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
     {
          /*
@@ -591,7 +592,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                                         minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
 
-                                        @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
                                         UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
                                         oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
                                         allIterators.add(CsFlow.just(FlowablePartitions.fromIterator(iter, null)));
@@ -800,6 +800,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
+    @SuppressWarnings("resource")
     private CsFlow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, final ClusteringIndexNamesFilter initFilter)
     {
 
