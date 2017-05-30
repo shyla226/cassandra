@@ -1,5 +1,7 @@
 DSE 5.1.2
  * Show correct protocol version in cqlsh (APOLLO-616)
+Merged from DSE 4.8.13:
+* Integrate top threads command in nodetool (APOLLO-652)
 
 
 DSE 5.1.1
