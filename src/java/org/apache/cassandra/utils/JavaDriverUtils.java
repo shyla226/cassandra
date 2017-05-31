@@ -65,9 +65,19 @@ public final class JavaDriverUtils
      */
     public static DataType driverType(AbstractType<?> abstractType)
     {
+        return driverType(abstractType.toString());
+    }
+
+    /**
+     * Returns the Java Driver {@link com.datastax.driver.core.DataType} for the C* internal type.
+     *
+     * Used by DSE, please don't remove.
+     */
+    public static DataType driverType(String abstractType)
+    {
         try
         {
-            return (DataType) methodParseOne.invoke(abstractType.toString(),
+            return (DataType) methodParseOne.invoke(abstractType,
                                                     com.datastax.driver.core.ProtocolVersion.fromInt(ProtocolVersion.CURRENT.asInt()),
                                                     CodecRegistry.DEFAULT_INSTANCE);
         }
@@ -78,7 +88,7 @@ public final class JavaDriverUtils
         }
         catch (Throwable e)
         {
-            throw new RuntimeException("cannot parse driver type " + abstractType.toString(), e);
+            throw new RuntimeException("cannot parse driver type " + abstractType, e);
         }
     }
 
