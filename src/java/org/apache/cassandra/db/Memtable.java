@@ -575,7 +575,7 @@ public class Memtable implements Comparable<Memtable>
                 if (BlacklistedDirectories.isUnwritable(flushTableDir))
                     throw new FSWriteError(new IOException("SSTable flush dir has been blacklisted"), flushTableDir.getAbsolutePath());
 
-                // // exclude directory if its total writeSize does not fit to data directory
+                // exclude directory if its total writeSize does not fit to data directory
                 if (flushLocation.getAvailableSpace() < estimatedSize)
                     throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + estimatedSize + " bytes"), "");
 
@@ -646,8 +646,6 @@ public class Memtable implements Comparable<Memtable>
                             break;
 
                         AtomicBTreePartition partition = partitionSet.next();
-
-                        //logger.debug("Processing partition {}", partition.partitionKey());
 
                         // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
                         // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
