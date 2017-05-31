@@ -48,8 +48,8 @@ public class RangeTest
     @BeforeClass
     public static void setupDD()
     {
-        DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        DatabaseDescriptor.daemonInitialization();
     }
 
     @Test

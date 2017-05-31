@@ -56,8 +56,8 @@ public class KeyCollisionTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
-        DatabaseDescriptor.daemonInitialization();
         oldPartitioner = DatabaseDescriptor.setPartitionerUnsafe(LengthPartitioner.instance);
+        DatabaseDescriptor.daemonInitialization();
 
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,

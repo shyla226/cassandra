@@ -44,7 +44,6 @@ import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.schema.*;

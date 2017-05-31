@@ -37,7 +37,6 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.FBUtilities;
 
 public class ViewFilteringTest extends CQLTester
 {
@@ -73,10 +72,6 @@ public class ViewFilteringTest extends CQLTester
     private void updateView(String query, Object... params) throws Throwable
     {
         executeNet(protocolVersion, query, params);
-
-        //Fixme check view metrics
-        Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
-
     }
 
     private void dropView(String name) throws Throwable

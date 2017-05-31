@@ -1512,6 +1512,12 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
         else
             logger.warn("No local state, state is in silent shutdown, or node hasn't joined, not announcing shutdown");
+
+        stopWithoutAnnouncing();
+    }
+
+    public void stopWithoutAnnouncing()
+    {
         if (scheduledGossipTask != null)
             scheduledGossipTask.cancel(false);
     }

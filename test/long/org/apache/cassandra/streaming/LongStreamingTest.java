@@ -52,10 +52,8 @@ public class LongStreamingTest
     @BeforeClass
     public static void setup() throws Exception
     {
-        DatabaseDescriptor.daemonInitialization();
-        StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
-
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        DatabaseDescriptor.daemonInitialization();
 
         SchemaLoader.cleanupAndLeaveDirs();
         Keyspace.setInitialized();

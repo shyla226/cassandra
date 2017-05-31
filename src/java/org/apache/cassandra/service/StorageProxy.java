@@ -712,7 +712,7 @@ public class StorageProxy implements StorageProxyMBean
 
         completables.addAll(handlers.stream().map(WriteHandler::toObservable).collect(Collectors.toList()));
 
-        // now actually perform the writes (but don't wait on them)
+        // now actually perform the writes
         writeBatchedMutations(mutationsAndEndpoints, handlers, localDataCenter, Verbs.WRITES.VIEW_WRITE);
 
         return Completable.merge(completables)
