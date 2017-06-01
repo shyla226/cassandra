@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.compress;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.CompressionParams;
 
 import java.io.IOException;
@@ -223,7 +224,6 @@ public class DeflateCompressor implements ICompressor
 
     public BufferType preferredBufferType()
     {
-        // TPC Requires OFF HEAP
-        return BufferType.OFF_HEAP;
+        return TPC.USE_AIO ? BufferType.OFF_HEAP : BufferType.ON_HEAP;
     }
 }

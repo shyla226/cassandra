@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import com.datastax.shaded.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.AIOEpollFileChannel;
+import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -73,7 +74,8 @@ public class TPC
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
-    private static boolean FORCE_DISABLE_AIO = System.getProperty("cassandra.force_disable_aio", "false").equalsIgnoreCase("true");
+    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
+                                          && Aio.isAvailable();
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
@@ -403,7 +405,7 @@ public class TPC
 
     public static AsynchronousFileChannel openFileChannel(File file, boolean mmapped) throws IOException
     {
-        if (FORCE_DISABLE_AIO || !USE_EPOLL || mmapped || !isStarted())
+        if (!USE_AIO || mmapped || !isStarted())
             return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
 
         Integer coreId = getCoreId();
