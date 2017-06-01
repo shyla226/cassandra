@@ -30,6 +30,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 
 import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCBoundaries;
 import org.apache.cassandra.utils.flow.CsFlow;
 import io.reactivex.Single;
 
@@ -136,13 +137,17 @@ public class Memtable implements Comparable<Memtable>
         }
     }
 
+    // The boundaries for the keyspace as they were calculated when the memtable is created.
+    // The boundaries will be NONE for system keyspaces or if StorageService is not yet initialized.
+    private final TPCBoundaries boundaries;
+
     // We index the memtable by PartitionPosition only for the purpose of being able
     // to select key range using Token.KeyBound. However put() ensures that we
     // actually only store DecoratedKey.
     private final List<TreeMap<PartitionPosition, AtomicBTreePartition>> partitions;
+
     public final ColumnFamilyStore cfs;
     private final long creationNano = System.nanoTime();
-    private final boolean hasSplits;
 
     // The smallest timestamp for all partitions stored in this memtable
     private AtomicLong minTimestamp = new AtomicLong(Long.MAX_VALUE);
@@ -169,28 +174,25 @@ public class Memtable implements Comparable<Memtable>
         this.initialComparator = cfs.metadata().comparator;
         this.cfs.scheduleFlush();
         this.columnsCollector = new ColumnsCollector(cfs.metadata().regularAndStaticColumns());
-        this.hasSplits = !cfs.hasSpecialHandlingForTPC;
+        this.boundaries = cfs.keyspace.getTPCBoundaries();
         this.partitions = generatePartitionMaps();
     }
 
     // ONLY to be used for testing, to create a mock Memtable
     @VisibleForTesting
-    public Memtable(TableMetadata metadata)
+    public Memtable(TableMetadata metadata, TPCBoundaries boundaries)
     {
         this.initialComparator = metadata.comparator;
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
-        this.hasSplits = false;
+        this.boundaries = boundaries;
         this.partitions = generatePartitionMaps();
     }
 
     private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
     {
-        if (!hasSplits)
-            return Collections.singletonList(new TreeMap<>());
-
-        int capacity = TPC.getNumCores();
+        int capacity = boundaries.num() + 1; // there are num_boundaries+1 cores
         ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
         for (int i = 0; i < capacity; i++)
             partitionMapContainer.add(new TreeMap<>());
@@ -199,10 +201,7 @@ public class Memtable implements Comparable<Memtable>
 
     private Map<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(DecoratedKey key)
     {
-        if (!hasSplits)
-            return partitions.get(0);
-
-        int coreId = TPC.getCoreForKey(cfs.keyspace, key);
+        int coreId = TPC.getCoreForKey(boundaries, key);
         assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id: " + Integer.toString(coreId);
 
         return partitions.get(coreId);
@@ -352,7 +351,7 @@ public class Memtable implements Comparable<Memtable>
                        currentOperations.addAndGet(update.operationCount());
 
                        return p.left[1];
-                   }).subscribeOn(TPC.getForKey(cfs.keyspace, key));
+                   }).subscribeOn(TPC.getForKey(boundaries, key));
     }
 
     private void updateIfMin(AtomicLong val, long newVal)
@@ -369,7 +368,9 @@ public class Memtable implements Comparable<Memtable>
 
     public int partitionCount()
     {
-        return partitions.size();
+        // technically we should scatter gather on all the core threads because the size in TreeMap
+        // is not volatile but for metrics purpose this should be good enough
+        return partitions.stream().map(m -> m.size()).reduce(Integer::sum).orElse(0);
     }
 
     public List<FlushRunnable> flushRunnables(LifecycleTransaction txn)
@@ -460,16 +461,12 @@ public class Memtable implements Comparable<Memtable>
                 }
                 return ret;
             }));
-
-            // For system tables we just use the first core
-            if (!hasSplits)
-                break;
         }
 
         return CsFlow.fromIterable(all)
                      .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
                      .flatMap(list -> CsFlow.fromIterable(list))
-                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForKey(cfs.keyspace, iterator.partitionKey())));
+                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForKey(boundaries, iterator.partitionKey())));
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has

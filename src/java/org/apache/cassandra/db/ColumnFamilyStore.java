@@ -255,8 +255,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     private volatile boolean compactionSpaceCheck = true;
 
-    public final boolean hasSpecialHandlingForTPC;
-
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
         postFlushExecutor.shutdown();
@@ -422,7 +420,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         metric = new TableMetrics(this);
         fileIndexGenerator.set(generation);
         sampleLatencyNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getReadRpcTimeout() / 2);
-        hasSpecialHandlingForTPC = SchemaConstants.isSystemKeyspace(keyspace.getName());
 
         logger.info("Initializing {}.{}", keyspace.getName(), name);
 
