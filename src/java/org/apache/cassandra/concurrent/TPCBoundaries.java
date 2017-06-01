@@ -84,6 +84,16 @@ public class TPCBoundaries
         return boundaries.length;
     }
 
+    /**
+     * Return the number of boundaries, that is the length of the array containing the tokens.
+     *
+     * @return
+     */
+    public int num()
+    {
+        return boundaries.length;
+    }
+
     @Override
     public String toString()
     {
