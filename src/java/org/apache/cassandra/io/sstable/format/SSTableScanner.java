@@ -37,6 +37,8 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -56,6 +58,7 @@ class SSTableScanner implements ISSTableScanner
 
     private final ColumnFilter columns;
     private final DataRange dataRange;
+    private final SSTableReadsListener listener;
     private long startScan = -1;
     private long bytesScanned = 0;
 
@@ -64,12 +67,15 @@ class SSTableScanner implements ISSTableScanner
     // Full scan of the sstables
     public static ISSTableScanner getScanner(SSTableReader sstable)
     {
-        return new SSTableScanner(sstable, ColumnFilter.all(sstable.metadata()), null, Iterators.singletonIterator(fullRange(sstable)));
+        return getScanner(sstable, Iterators.singletonIterator(fullRange(sstable)));
     }
 
-    public static ISSTableScanner getScanner(SSTableReader sstable, ColumnFilter columns, DataRange dataRange)
+    public static ISSTableScanner getScanner(SSTableReader sstable,
+                                             ColumnFilter columns,
+                                             DataRange dataRange,
+                                             SSTableReadsListener listener)
     {
-        return new SSTableScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator());
+        return new SSTableScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
     }
 
     public static ISSTableScanner getScanner(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
@@ -79,15 +85,19 @@ class SSTableScanner implements ISSTableScanner
         if (positions.isEmpty())
             return new EmptySSTableScanner(sstable);
 
-        return new SSTableScanner(sstable, ColumnFilter.all(sstable.metadata()), null, makeBounds(sstable, tokenRanges).iterator());
+        return getScanner(sstable, makeBounds(sstable, tokenRanges).iterator());
     }
 
     public static ISSTableScanner getScanner(SSTableReader sstable, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
     {
-        return new SSTableScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator);
+        return new SSTableScanner(sstable, ColumnFilter.all(sstable.metadata()), null, rangeIterator, SSTableReadsListener.NOOP_LISTENER);
     }
 
-    private SSTableScanner(SSTableReader sstable, ColumnFilter columns, DataRange dataRange, Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
+    private SSTableScanner(SSTableReader sstable,
+                           ColumnFilter columns,
+                           DataRange dataRange,
+                           Iterator<AbstractBounds<PartitionPosition>> rangeIterator,
+                           SSTableReadsListener listener)
     {
         assert sstable != null;
 
@@ -96,6 +106,7 @@ class SSTableScanner implements ISSTableScanner
         this.columns = columns;
         this.dataRange = dataRange;
         this.rangeIterator = rangeIterator;
+        this.listener = listener;
     }
 
     private static List<AbstractBounds<PartitionPosition>> makeBounds(SSTableReader sstable, Collection<Range<Token>> tokenRanges)
@@ -228,6 +239,7 @@ class SSTableScanner implements ISSTableScanner
 
     private CloseableIterator<UnfilteredRowIterator> createIterator()
     {
+        this.listener.onScanningStarted(sstable);
         return new KeyScanningIterator();
     }
 

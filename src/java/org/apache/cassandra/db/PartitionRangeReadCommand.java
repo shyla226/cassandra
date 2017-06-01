@@ -36,6 +36,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -214,10 +215,11 @@ public class PartitionRangeReadCommand extends ReadCommand
                 iterators.add(iter);
             }
 
+            SSTableReadsListener readCountUpdater = newReadCountUpdater();
             for (SSTableReader sstable : view.sstables)
             {
                 @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-                UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange());
+                UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange(), readCountUpdater);
                 iterators.add(iter);
                 if (!sstable.isRepaired())
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
@@ -239,6 +241,22 @@ public class PartitionRangeReadCommand extends ReadCommand
 
             throw e;
         }
+    }
+
+    /**
+     * Creates a new {@code SSTableReadsListener} to update the SSTables read counts.
+     * @return a new {@code SSTableReadsListener} to update the SSTables read counts.
+     */
+    private static SSTableReadsListener newReadCountUpdater()
+    {
+        return new SSTableReadsListener()
+                {
+                    @Override
+                    public void onScanningStarted(SSTableReader sstable)
+                    {
+                        sstable.incrementReadCount();
+                    }
+                };
     }
 
     @Override

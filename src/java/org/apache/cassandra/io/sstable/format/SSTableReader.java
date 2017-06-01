@@ -1001,16 +1001,28 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
+     * Retrieves the position while updating the key cache and the stats.
      * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
      * allow key selection by token bounds but only if op != * EQ
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
-     * @return The index entry corresponding to the key, or null if the key is not present
      */
-    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op);
+    public RowIndexEntry getPosition(PartitionPosition key, Operator op)
+    {
+        return getPosition(key, op, SSTableReadsListener.NOOP_LISTENER);
+    }
+
+    /**
+     * Retrieves the position while updating the key cache and the stats.
+     * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
+     * allow key selection by token bounds but only if op != * EQ
+     * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
+     * @param listener the {@code SSTableReaderListener} that must handle the notifications.
+     */
+    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener);
     public abstract RowIndexEntry getExactPosition(DecoratedKey key);
     public abstract boolean contains(DecoratedKey key);
 
-    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener);
     public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
 
     public abstract PartitionIndexIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException;
@@ -1041,11 +1053,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * @param columns the columns to return.
      * @param dataRange filter to use when reading the columns
+     * @param listener a listener used to handle internal read events
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange)
+    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
     {
-        return SSTableScanner.getScanner(this, columns, dataRange);
+        return SSTableScanner.getScanner(this, columns, dataRange, listener);
     }
 
     /**
@@ -1472,25 +1485,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
-     * Increment the total row read count and read rate for this SSTable.  This should not be incremented for range
-     * slice queries, row cache hits, or non-query reads, like compaction.
+     * Increment the total read count and read rate for this SSTable.  This should not be incremented for non-query reads,
+     * like compaction.
      */
     public void incrementReadCount()
     {
         if (readMeter != null)
             readMeter.mark();
-    }
-
-    private int compare(List<ByteBuffer> values1, List<ByteBuffer> values2)
-    {
-        ClusteringComparator comparator = metadata().comparator;
-        for (int i = 0; i < Math.min(values1.size(), values2.size()); i++)
-        {
-            int cmp = comparator.subtype(i).compare(values1.get(i), values2.get(i));
-            if (cmp != 0)
-                return cmp;
-        }
-        return 0;
     }
 
     public EncodingStats stats()
