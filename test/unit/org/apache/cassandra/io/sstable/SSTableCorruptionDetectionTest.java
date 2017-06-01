@@ -46,7 +46,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -56,7 +55,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     private static final Logger logger = LoggerFactory.getLogger(SSTableCorruptionDetectionTest.class);
 
     private static final int numberOfPks = 1000;
-    private static final int numberOfRuns = 4; //AIO is too hard on the CI disks
+    private static final int numberOfRuns = 6; //AIO is too hard on the CI disks
     private static final int valueSize = 512 * 1024;
     // Set corruption size larger or in comparable size to value size, otherwise
     // chance for corruption to land in the middle of value is quite high.
