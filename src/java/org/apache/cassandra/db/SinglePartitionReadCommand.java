@@ -438,10 +438,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         {
             RowCacheSentinel sentinel = new RowCacheSentinel();
             boolean sentinelSuccess = CacheService.instance.rowCache.putIfAbsent(key, sentinel);
-            WrappedBoolean sentinelReplaced = new WrappedBoolean(false);
 
-            //try
-            //{
             int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
             @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
             CsFlow<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).deferredQuery(cfs, executionController);
@@ -450,6 +447,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             {
                 UnfilteredRowIterator i = FlowablePartitions.toIterator(fup);
                 CachedPartition toCache;
+                boolean sentinelReplaced = false;
                 try
                 {
                     // We want to cache only rowsToCache rows
@@ -462,15 +460,18 @@ public class SinglePartitionReadCommand extends ReadCommand
                         Tracing.trace("Caching {} rows", toCache.rowCount());
                         CacheService.instance.rowCache.replace(key, sentinel, toCache);
                         // Whether or not the previous replace has worked, our sentinel is not in the cache anymore
-                        sentinelReplaced.set(true);
+                        sentinelReplaced = true;
                     }
                 }
                 catch (Throwable t)
                 {
-                    if (sentinelSuccess && !sentinelReplaced.get())
-                        cfs.invalidateCachedPartition(key);
                     i.close();
                     throw t;
+                }
+                finally
+                {
+                    if (sentinelSuccess && !sentinelReplaced)
+                        cfs.invalidateCachedPartition(key);
                 }
 
                 // We then re-filter out what this query wants.
