@@ -26,11 +26,14 @@ import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.ColumnFilter.Builder;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 public final class SimpleSelector extends Selector
 {
@@ -38,52 +41,92 @@ public final class SimpleSelector extends Selector
     {
         protected Selector deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata) throws IOException
         {
-            String columnName = in.readUTF();
+            ColumnMetadata column = metadata.getColumn(ByteBufferUtil.readWithVIntLength(in));
             int idx = in.readInt();
-            AbstractType<?> type = readType(metadata, in);
-            return new SimpleSelector(columnName, idx, type);
+            return new SimpleSelector(column, idx);
         }
     };
 
-    private final String columnName;
+    /**
+     * The Factory for {@code SimpleSelector}.
+     */
+    public static final class SimpleSelectorFactory extends Factory
+    {
+        private final int idx;
+
+        private final ColumnMetadata column;
+
+        private SimpleSelectorFactory(int idx, ColumnMetadata def)
+        {
+            this.idx = idx;
+            this.column = def;
+        }
+
+        @Override
+        protected String getColumnName()
+        {
+            return column.name.toString();
+        }
+
+        @Override
+        protected AbstractType<?> getReturnType()
+        {
+            return column.type;
+        }
+
+        protected void addColumnMapping(SelectionColumnMapping mapping, ColumnSpecification resultColumn)
+        {
+           mapping.addMapping(resultColumn, column);
+        }
+
+        @Override
+        public Selector newInstance(QueryOptions options)
+        {
+            return new SimpleSelector(column, idx);
+        }
+
+        @Override
+        public boolean isSimpleSelectorFactory()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean isSimpleSelectorFactoryFor(int index)
+        {
+            return index == idx;
+        }
+
+        public boolean areAllFetchedColumnsKnown()
+        {
+            return true;
+        }
+
+        public void addFetchedColumns(ColumnFilter.Builder builder)
+        {
+            builder.add(column);
+        }
+
+        public ColumnMetadata getColumn()
+        {
+            return column;
+        }
+    }
+
+    public final ColumnMetadata column;
     private final int idx;
-    private final AbstractType<?> type;
     private ByteBuffer current;
     private boolean isSet;
 
     public static Factory newFactory(final ColumnMetadata def, final int idx)
     {
-        return new Factory()
-        {
-            @Override
-            protected String getColumnName()
-            {
-                return def.name.toString();
-            }
+        return new SimpleSelectorFactory(idx, def);
+    }
 
-            @Override
-            protected AbstractType<?> getReturnType()
-            {
-                return def.type;
-            }
-
-            protected void addColumnMapping(SelectionColumnMapping mapping, ColumnSpecification resultColumn)
-            {
-               mapping.addMapping(resultColumn, def);
-            }
-
-            @Override
-            public Selector newInstance(QueryOptions options)
-            {
-                return new SimpleSelector(def.name.toString(), idx, def.type);
-            }
-
-            @Override
-            public boolean isSimpleSelectorFactory(int index)
-            {
-                return index == idx;
-            }
-        };
+    @Override
+    public void addFetchedColumns(Builder builder)
+    {
+        builder.add(column);
     }
 
     @Override
@@ -112,21 +155,20 @@ public final class SimpleSelector extends Selector
     @Override
     public AbstractType<?> getType()
     {
-        return type;
+        return column.type;
     }
 
     @Override
     public String toString()
     {
-        return columnName;
+        return column.name.toString();
     }
 
-    private SimpleSelector(String columnName, int idx, AbstractType<?> type)
+    private SimpleSelector(ColumnMetadata column, int idx)
     {
         super(Kind.SIMPLE_SELECTOR);
-        this.columnName = columnName;
+        this.column = column;
         this.idx = idx;
-        this.type = type;
     }
 
     @Override
@@ -145,30 +187,27 @@ public final class SimpleSelector extends Selector
 
         SimpleSelector s = (SimpleSelector) o;
 
-        return Objects.equal(columnName, s.columnName)
-            && Objects.equal(idx, s.idx)
-            && Objects.equal(type, s.type);
+        return Objects.equal(column, s.column)
+            && Objects.equal(idx, s.idx);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(columnName, idx, type);
+        return Objects.hashCode(column, idx);
     }
 
     @Override
     protected int serializedSize(ReadVersion version)
     {
-        return TypeSizes.sizeof(columnName)
-                + TypeSizes.sizeof(idx)
-                + sizeOf(type);
+        return TypeSizes.sizeofWithVIntLength(column.name.bytes)
+                + TypeSizes.sizeof(idx);
     }
 
     @Override
     protected void serialize(DataOutputPlus out, ReadVersion version) throws IOException
     {
-        out.writeUTF(columnName);
+        ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
         out.writeInt(idx);
-        writeType(out, type);
     }
 }

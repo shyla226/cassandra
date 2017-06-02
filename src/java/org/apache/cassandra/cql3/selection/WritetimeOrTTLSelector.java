@@ -28,6 +28,7 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
@@ -42,14 +43,14 @@ final class WritetimeOrTTLSelector extends Selector
     {
         protected Selector deserialize(DataInputPlus in, ReadVersion version, TableMetadata metadata) throws IOException
         {
-            String columnName = in.readUTF();
+            ColumnMetadata column = metadata.getColumn(ByteBufferUtil.readWithVIntLength(in));
             int idx = in.readInt();
             boolean isWritetime = in.readBoolean();
-            return new WritetimeOrTTLSelector(columnName, idx, isWritetime);
+            return new WritetimeOrTTLSelector(column, idx, isWritetime);
         }
     };
 
-    private final String columnName;
+    private final ColumnMetadata column;
     private final int idx;
     private final boolean isWritetime;
     private ByteBuffer current;
@@ -76,7 +77,7 @@ final class WritetimeOrTTLSelector extends Selector
 
             public Selector newInstance(QueryOptions options)
             {
-                return new WritetimeOrTTLSelector(def.name.toString(), idx, isWritetime);
+                return new WritetimeOrTTLSelector(def, idx, isWritetime);
             }
 
             public boolean isWritetimeSelectorFactory()
@@ -88,7 +89,22 @@ final class WritetimeOrTTLSelector extends Selector
             {
                 return !isWritetime;
             }
+
+            public boolean areAllFetchedColumnsKnown()
+            {
+                return true;
+            }
+
+            public void addFetchedColumns(ColumnFilter.Builder builder)
+            {
+                builder.add(def);
+            }
         };
+    }
+
+    public void addFetchedColumns(ColumnFilter.Builder builder)
+    {
+        builder.add(column);
     }
 
     public void addInput(ProtocolVersion protocolVersion, InputRow input)
@@ -129,13 +145,13 @@ final class WritetimeOrTTLSelector extends Selector
     @Override
     public String toString()
     {
-        return columnName;
+        return column.name.toString();
     }
 
-    private WritetimeOrTTLSelector(String columnName, int idx, boolean isWritetime)
+    private WritetimeOrTTLSelector(ColumnMetadata column, int idx, boolean isWritetime)
     {
         super(Kind.WRITETIME_OR_TTL_SELECTOR);
-        this.columnName = columnName;
+        this.column = column;
         this.idx = idx;
         this.isWritetime = isWritetime;
     }
@@ -151,7 +167,7 @@ final class WritetimeOrTTLSelector extends Selector
 
         WritetimeOrTTLSelector s = (WritetimeOrTTLSelector) o;
 
-        return Objects.equal(columnName, s.columnName)
+        return Objects.equal(column, s.column)
             && Objects.equal(idx, s.idx)
             && Objects.equal(isWritetime, s.isWritetime);
     }
@@ -159,13 +175,13 @@ final class WritetimeOrTTLSelector extends Selector
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(columnName, idx, isWritetime);
+        return Objects.hashCode(column, idx, isWritetime);
     }
 
     @Override
     protected int serializedSize(ReadVersion version)
     {
-        return TypeSizes.sizeof(columnName)
+        return TypeSizes.sizeofWithVIntLength(column.name.bytes)
                 + TypeSizes.sizeof(idx)
                 + TypeSizes.sizeof(isWritetime);
     }
@@ -173,7 +189,7 @@ final class WritetimeOrTTLSelector extends Selector
     @Override
     protected void serialize(DataOutputPlus out, ReadVersion version) throws IOException
     {
-        out.writeUTF(columnName);
+        ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
         out.writeInt(idx);
         out.writeBoolean(isWritetime);
     }

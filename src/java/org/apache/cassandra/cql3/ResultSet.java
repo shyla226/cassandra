@@ -289,15 +289,16 @@ public class ResultSet
         }
 
         /**
-         * Adds the specified column which will not be serialized.
+         * Adds the specified columns which will not be serialized.
          *
-         * @param name the column
+         * @param columns the columns
          */
-        public void addNonSerializedColumn(ColumnSpecification name)
+        public ResultMetadata addNonSerializedColumns(Collection<? extends ColumnSpecification> columns)
         {
             // See comment above. Because columnCount doesn't account the newly added name, it
             // won't be serialized.
-            names.add(name);
+            names.addAll(columns);
+            return this;
         }
 
         public void setPagingResult(PagingResult pagingResult)
@@ -760,15 +761,17 @@ public class ResultSet
         return ret;
     }
 
-    public static Builder makeBuilder(QueryOptions options, boolean isJson, Selection selection)
+    public static Builder makeBuilder(ResultSet.ResultMetadata resultMetadata, Selection.Selectors selectors)
     {
-        return new ResultSet.Builder(options, isJson, null, selection);
+        return new ResultSet.Builder(resultMetadata, selectors, null);
     }
 
-    public static Builder makeBuilder(QueryOptions options, boolean isJson, AggregationSpecification aggregationSpec, Selection selection)
+    public static Builder makeBuilder(ResultSet.ResultMetadata resultMetadata,
+                                      Selection.Selectors selectors,
+                                      AggregationSpecification aggregationSpec)
     {
-        return aggregationSpec == null ? new ResultSet.Builder(options, isJson, null, selection)
-                                       : new ResultSet.Builder(options, isJson, aggregationSpec.newGroupMaker(), selection);
+        return aggregationSpec == null ? new ResultSet.Builder(resultMetadata, selectors, null)
+                                       : new ResultSet.Builder(resultMetadata, selectors, aggregationSpec.newGroupMaker());
     }
 
     /**
@@ -778,10 +781,10 @@ public class ResultSet
     {
         private ResultSet resultSet;
 
-        public Builder(QueryOptions options, boolean isJson, GroupMaker groupMaker, Selection selection)
+        public Builder(ResultSet.ResultMetadata resultMetadata, Selection.Selectors selectors, GroupMaker groupMaker)
         {
-            super(options, isJson, groupMaker, selection);
-            this.resultSet = new ResultSet(selection.getResultMetadata(isJson).copy(), new ArrayList<>());
+            super(selectors, groupMaker);
+            this.resultSet = new ResultSet(resultMetadata, new ArrayList<>());
         }
 
         public boolean onRowCompleted(List<ByteBuffer> row, boolean nextRowPending)

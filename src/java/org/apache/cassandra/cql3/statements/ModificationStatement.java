@@ -536,7 +536,7 @@ public abstract class ModificationStatement implements CQLStatement
         Selection selection;
         if (columnsWithConditions == null)
         {
-            selection = Selection.wildcard(metadata);
+            selection = Selection.wildcard(metadata, false);
         }
         else
         {
@@ -551,8 +551,7 @@ public abstract class ModificationStatement implements CQLStatement
             selection = Selection.forColumns(metadata, new ArrayList<>(defs));
 
         }
-
-        ResultSet.Builder builder = ResultSet.makeBuilder(options, false, selection);
+        ResultSet.Builder builder = ResultSet.makeBuilder(selection.getResultMetadata(), selection.newSelectors(options));
         SelectStatement.forSelection(metadata, selection).processPartition(partition,
                                                                            options,
                                                                            builder,

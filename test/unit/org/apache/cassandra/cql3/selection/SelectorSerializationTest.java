@@ -52,7 +52,7 @@ public class SelectorSerializationTest extends CQLTester
     @Test
     public void testSerDes() throws IOException
     {
-        createTable("CREATE TABLE %s (pk int, c1 int, c2 timestamp, v int, PRIMARY KEY(pk, c1, c2))");
+        createTable("CREATE TABLE %s (pk int, c1 int, c2 timestamp, v int, m map<int, int>, PRIMARY KEY(pk, c1, c2))");
 
         KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(KEYSPACE);
         TableMetadata table = keyspace.getTableOrViewNullable(currentTable());
@@ -115,6 +115,12 @@ public class SelectorSerializationTest extends CQLTester
         checkSerialization(new Selectable.WithFunction(floor, asList(table.getColumn(new ColumnIdentifier("c2", false)),
                                                                      new Selectable.WithTerm(Literal.duration("5m")),
                                                                      new Selectable.WithTerm(Literal.string("2016-09-27 16:00:00 UTC")))), table);
+
+        // Test element selection serialization
+        checkSerialization(new Selectable.WithElementSelection(table.getColumn(new ColumnIdentifier("m", false)), Literal.integer("1")), table);
+
+        // Test slice selection serialization
+        checkSerialization(new Selectable.WithSliceSelection(table.getColumn(new ColumnIdentifier("m", false)), Literal.integer("1"), Literal.integer("3")), table);
     }
 
     private void checkSerialization(Selectable selectable, TableMetadata table) throws IOException
