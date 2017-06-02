@@ -807,6 +807,7 @@
         <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
         <dependency groupId="org.jctools" artifactId="jctools-core"/>
         <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.5.4" />
+        <dependency groupId="org.psjava" artifactId="psjava" version="0.1.19" />
       </artifact:pom>
       <artifact:pom id="dist-pom"
                     artifactId="apache-cassandra"
