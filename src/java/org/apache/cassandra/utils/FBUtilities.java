@@ -899,6 +899,7 @@ public class FBUtilities
         public static final class ThreadInfo
         {
             private final String name;
+            private final boolean isDaemon;
             private final StackTraceElement[] stack;
 
             public ThreadInfo()
@@ -909,6 +910,7 @@ public class FBUtilities
             public ThreadInfo(Thread thread)
             {
                 this.name =  thread.getName();
+                this.isDaemon = thread.isDaemon();
                 this.stack = thread.getStackTrace();
             }
 
@@ -928,7 +930,12 @@ public class FBUtilities
         public static String getStackTrace(ThreadInfo threadInfo)
         {
             StringBuilder sb = new StringBuilder();
-            sb.append("Thread ").append(threadInfo.name).append("\n");
+            sb.append("Thread ")
+              .append(threadInfo.name)
+              .append(" (")
+              .append(threadInfo.isDaemon ? "daemon" : "non-daemon")
+              .append(")")
+              .append("\n");
             for (StackTraceElement element : threadInfo.stack)
             {
                 sb.append(element);

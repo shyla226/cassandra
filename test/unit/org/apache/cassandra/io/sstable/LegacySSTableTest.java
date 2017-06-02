@@ -92,10 +92,10 @@ public class LegacySSTableTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
-        DatabaseDescriptor.daemonInitialization();
-
         // legacy sstables have been created with BOP
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+
+        DatabaseDescriptor.daemonInitialization();
 
         String scp = System.getProperty(LEGACY_SSTABLE_PROP);
         Assert.assertNotNull("System property " + LEGACY_SSTABLE_ROOT + " not set", scp);

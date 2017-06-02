@@ -38,7 +38,6 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -84,13 +83,19 @@ public class MoveTest
     @BeforeClass
     public static void setup() throws Exception
     {
+        DatabaseDescriptor.setPartitionerUnsafe(partitioner);
         DatabaseDescriptor.daemonInitialization();
-        StorageService.instance.setPartitionerUnsafe(partitioner);
+
         SchemaLoader.loadSchema();
         SchemaLoader.schemaDefinition("MoveTest");
+
         addNetworkTopologyKeyspace(Network_11_KeyspaceName, 1, 1);
         addNetworkTopologyKeyspace(Network_22_KeyspaceName, 2, 2);
         addNetworkTopologyKeyspace(Network_33_KeyspaceName, 3, 3);
+
+        // the Gossip status checks may unexpectedly remove nodes from the
+        // endpoint map, causing NPEs
+        Gossiper.instance.stopWithoutAnnouncing();
     }
 
     @Before
@@ -355,7 +360,6 @@ public class MoveTest
                 generatePendingMapEntry(10, 20, "127.0.0.1"), generatePendingMapEntry(70, 80, "127.0.0.2")), Simple_RF3_KeyspaceName);
 
         finishMove(hosts.get(MOVING_NODE), 35, tmd);
-
     }
 
     @Test

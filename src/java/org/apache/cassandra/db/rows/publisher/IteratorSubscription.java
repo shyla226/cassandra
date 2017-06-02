@@ -87,7 +87,7 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
             current = null;
         }
 
-        current = new PartitionIterator(partition, subscription);
+        current = new PartitionIterator(this, partition, subscription);
         Uninterruptibles.putUninterruptibly(queue, current);
     }
 
@@ -110,16 +110,9 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 
     public void onError(Throwable error)
     {
+        this.error = error;
         if (current != null)
-        {
-            current.error = error;
             current.put(PartitionIterator.POISON_PILL);
-            current = null;
-        }
-        else
-        {
-            this.error = error;
-        }
 
         Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
     }
@@ -127,20 +120,30 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
     protected AbstractUnfilteredRowIterator computeNext()
     {
         if (next != null)
+        {
+            maybePropagateError();
             return next;
+        }
 
         next = Uninterruptibles.takeUninterruptibly(queue);
-
-        if (error != null)
-            throw Exceptions.propagate(error);
-
+        maybePropagateError();
         return next;
+    }
+
+    private void maybePropagateError()
+    {
+        if (next == POISON_PILL && error != null)
+        {
+            Throwable t = error;
+            error = null;
+            throw Exceptions.propagate(t);
+        }
     }
 
     @Override
     public boolean hasNext()
     {
-        return computeNext() != POISON_PILL;
+        return computeNext() != POISON_PILL || error != null;
     }
 
     @Override
@@ -156,16 +159,17 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 
     private static class PartitionIterator<T extends Unfiltered> extends AbstractUnfilteredRowIterator
     {
-        private final static PartitionIterator EMPTY = new PartitionIterator(PartitionData.EMPTY, null);
+        private final static PartitionIterator EMPTY = new PartitionIterator(null, PartitionData.EMPTY, null);
         private final static Row POISON_PILL = Rows.EMPTY_STATIC_ROW;
 
+        private final IteratorSubscription parent;
         private final BlockingQueue<T> queue;
         private final PartitionsSubscription subscription;
-        private Throwable error;
 
-        private PartitionIterator(PartitionTrait partition, PartitionsSubscription subscription)
+        private PartitionIterator(IteratorSubscription parent, PartitionTrait partition, PartitionsSubscription subscription)
         {
             super(partition);
+            this.parent = parent;
             // unbounded and with poor performance because it should be used for tests only and at most partition publisher will return a page of data
             this.queue = new LinkedBlockingDeque<>();
             this.subscription = subscription;
@@ -189,10 +193,11 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
             if (logger.isTraceEnabled())
                 logger.trace("{} - Iterator returns {}", hashCode(), ret.toString(metadata));
 
-            if (error != null)
-                throw Exceptions.propagate(error);
+            if (ret != POISON_PILL)
+                return ret;
 
-            return ret == POISON_PILL ? endOfData() : ret;
+            parent.maybePropagateError();
+            return endOfData();
         }
     }
 }

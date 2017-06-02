@@ -62,8 +62,9 @@ public class SSTableScannerTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
-        DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        DatabaseDescriptor.daemonInitialization();
+
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),

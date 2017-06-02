@@ -333,8 +333,21 @@ public class TPC
     @Inline
     public static int getCoreForKey(Keyspace keyspace, DecoratedKey key)
     {
-        TPCBoundaries boundaries = keyspace.getTPCBoundaries();
+        return getCoreForKey(keyspace.getTPCBoundaries(), key);
+    }
 
+    /**
+     * Return the id of the core that is assigned to run operations on the specified keyspace boundaries and partition key.
+     * <p>
+     * Core zero is returned if no boundaries are available.
+     *
+     * @param boundaries - the keyspace boundaries
+     * @param key - the partition key
+     *
+     * @return the core id for this partition
+     */
+    public static int getCoreForKey(TPCBoundaries boundaries, DecoratedKey key)
+    {
         // Handles both the system keyspace (but cheaper that comparing strings) and if the node is not sufficiently
         // initialized yet than we can compute its boundaries
         if (boundaries == TPCBoundaries.NONE)
@@ -365,6 +378,21 @@ public class TPC
     public static TPCScheduler getForKey(Keyspace keyspace, DecoratedKey key)
     {
         return getForCore(getCoreForKey(keyspace, key));
+    }
+
+    /**
+     * Return the TPC scheduler of the core that is assigned to run operations on the specified boundaries
+     * and partition key, see {@link TPC#perCoreSchedulers}.
+     *
+     * @param boundaries - the keyspace boundaries
+     * @param key - the partition key
+     *
+     * @return the TPC scheduler
+     */
+    @Inline
+    public static TPCScheduler getForKey(TPCBoundaries boundaries, DecoratedKey key)
+    {
+        return getForCore(getCoreForKey(boundaries, key));
     }
 
     /**

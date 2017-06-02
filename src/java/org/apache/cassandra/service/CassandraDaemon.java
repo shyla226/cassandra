@@ -25,6 +25,7 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import javax.management.MBeanServer;
@@ -43,6 +44,7 @@ import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -179,6 +181,7 @@ public class CassandraDaemon
     private final boolean runManaged;
     protected final StartupChecks startupChecks;
     private boolean setupCompleted;
+    private final CountDownLatch isRunning = new CountDownLatch(1);
 
     public CassandraDaemon()
     {
@@ -584,6 +587,9 @@ public class CassandraDaemon
             }
 
             start();
+
+            // as long as the process is running, keep the main thread around so we don't exist prematurely, e.g. on DRAIN
+            Uninterruptibles.awaitUninterruptibly(isRunning);
         }
         catch (Throwable e)
         {
@@ -644,6 +650,7 @@ public class CassandraDaemon
         stop();
         destroy();
         // completely shut down cassandra
+        isRunning.countDown();
         if(!runManaged)
         {
             System.exit(0);

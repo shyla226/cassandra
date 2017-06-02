@@ -40,8 +40,8 @@ public class StreamStateStoreTest
     @BeforeClass
     public static void initDD()
     {
-        DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+        DatabaseDescriptor.daemonInitialization();
     }
 
     @Test
