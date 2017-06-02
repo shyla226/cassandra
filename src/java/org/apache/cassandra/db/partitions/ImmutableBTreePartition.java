@@ -35,6 +35,7 @@ import org.apache.cassandra.utils.btree.BTree;
 
 public class ImmutableBTreePartition extends AbstractBTreePartition
 {
+    public static final int INITIAL_ROW_CAPACITY = 16;
 
     protected final Holder holder;
     protected final TableMetadata metadata;
@@ -72,7 +73,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      */
     public static ImmutableBTreePartition create(UnfilteredRowIterator iterator)
     {
-        return create(iterator, 16);
+        return create(iterator, INITIAL_ROW_CAPACITY);
     }
 
     /**
@@ -87,7 +88,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      */
     public static ImmutableBTreePartition create(UnfilteredRowIterator iterator, boolean ordered)
     {
-        return create(iterator, 16, ordered);
+        return create(iterator, INITIAL_ROW_CAPACITY, ordered);
     }
 
     /**
@@ -132,7 +133,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      */
     public static Single<List<ImmutableBTreePartition>> create(PartitionsPublisher publisher)
     {
-        return create(publisher, 16);
+        return create(publisher, INITIAL_ROW_CAPACITY);
     }
 
     /**
@@ -145,7 +146,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      */
     public static Single<List<ImmutableBTreePartition>> create(PartitionsPublisher publisher, boolean ordered)
     {
-        return create(publisher, 16, ordered);
+        return create(publisher, INITIAL_ROW_CAPACITY, ordered);
     }
 
     /**
@@ -181,12 +182,15 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
             (list, builders, unfiltered) -> addUnfiltered(builders, unfiltered),
 
             (list, builders, partition) -> {
-                list.add(new ImmutableBTreePartition(partition.metadata(),
-                                                    partition.partitionKey(),
-                                                    build(partition, builders)));
+                list.add(create(partition, builders));
                 return list;
             }
         ));
+    }
+
+    public static ImmutableBTreePartition create(PartitionTrait partition, Pair<BTree.Builder, MutableDeletionInfo.Builder> builders)
+    {
+        return new ImmutableBTreePartition(partition.metadata(), partition.partitionKey(), AbstractBTreePartition.build(partition, builders));
     }
 
     public TableMetadata metadata()

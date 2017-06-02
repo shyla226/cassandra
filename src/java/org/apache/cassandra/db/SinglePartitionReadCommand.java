@@ -1028,7 +1028,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public Single<PartitionIterator> executeInternal(Monitor monitor)
         {
-            return Single.fromCallable(() -> executeLocally(monitor, false).toIterator()) // TODO - add filterint to partition publisher
+            return Single.fromCallable(() -> executeLocally(monitor, false).toIterator(metadata())) // TODO - add filterint to partition publisher
                          .map(p -> limits.filter(UnfilteredPartitionIterators.filter(p, nowInSec), nowInSec));
         }
 

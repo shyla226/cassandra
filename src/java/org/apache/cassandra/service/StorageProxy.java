@@ -1975,39 +1975,42 @@ public class StorageProxy implements StorageProxyMBean
 
         checkNotBootstrappingOrSystemQuery(Collections.singletonList(command), rangeMetrics);
 
-        Tracing.trace("Querying local ranges");
+        if (logger.isTraceEnabled())
+            logger.trace("Querying local ranges {} for continuous paging", command);
 
-        Monitor monitor = Monitor.createAndStartNoReporting(command,
-                                                            System.currentTimeMillis(),
-                                                            DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
+        final Monitor monitor = Monitor.createAndStartNoReporting(command,
+                                                                  System.currentTimeMillis(),
+                                                                  DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
 
-        try
-        {
-            // Same reasoning as in readLocalContinuous, see there for details.
-            final PartitionIterator iter = command.withLimitsAndPostReconciliation(command.executeInternal(monitor).blockingGet());
-            return Single.just(new PartitionIterator()
-            {
-                public boolean hasNext()
-                {
-                    return iter.hasNext();
-                }
+        // Same reasoning as in readLocalContinuous, see there for details.
+        return command.executeInternal(monitor)
+                      .map(it -> {
+                          final PartitionIterator iter = command.withLimitsAndPostReconciliation(it);
+                          return new PartitionIterator()
+                          {
+                              public boolean hasNext()
+                              {
+                                  return iter.hasNext();
+                              }
 
-                public RowIterator next()
-                {
-                    return iter.next();
-                }
+                              public RowIterator next()
+                              {
+                                  return iter.next();
+                              }
 
-                public void close()
-                {
-                    monitor.complete();
-                }
-            });
-        }
-        catch (Throwable e)
-        {
-            rangeMetrics.failures.mark();
-            throw e;
-        }
+                              public void close()
+                              {
+                                  logger.debug("Completing monitor");
+                                  monitor.complete();
+                              }
+                          };
+                      })
+                      .onErrorResumeNext(e -> {
+                          // TODO - errors in the iterator don't get handled by this...
+                          rangeMetrics.failures.mark();
+                          return Single.error(e);
+                      })
+                      .cast(PartitionIterator.class);
     }
 
 

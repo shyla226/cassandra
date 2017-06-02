@@ -38,6 +38,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.transform.BaseIterator;
 import org.apache.cassandra.db.transform.Stack;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.flow.CsFlow;
 
@@ -113,9 +114,33 @@ public class PartitionsPublisher
         return ret;
     }
 
-    public UnfilteredPartitionIterator toIterator()
+    /**
+     * Convert the asynchronous partitions to an iterator.
+     *
+     * @param metadata - the metadata of the read command for this publisher
+     *
+     * @return an iterator that might block
+     */
+    public UnfilteredPartitionIterator toIterator(TableMetadata metadata)
     {
-       return new IteratorSubscription(this);
+       IteratorSubscription ret = new IteratorSubscription(metadata);
+       subscribe(ret);
+       return ret;
+    }
+
+    /**
+     * Convert the asynchronous partitions to an iterator and then return a Single
+     * that will complete only when the iterator has been fully materialized in memory.
+     *
+     * @param metadata - the metadata of the read command for this publisher
+     *
+     * @return an iterator that will not block
+     */
+    public Single<UnfilteredPartitionIterator> toDelayedIterator(TableMetadata metadata)
+    {
+        IteratorSubscription ret = new IteratorSubscription(metadata);
+        subscribe(ret);
+        return ret.toSingle();
     }
 
     public final <R1, R2> Single<R1> reduce(ReduceCallbacks<R1, R2> callbacks) {

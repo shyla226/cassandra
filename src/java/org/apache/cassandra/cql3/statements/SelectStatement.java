@@ -679,29 +679,34 @@ public class SelectStatement implements CQLStatement
 
             pager.fetchPage(pageSize, queryStart)
                  .subscribe(page -> process(page, builder),
-                            error ->
-                            {
-                                if (error instanceof AbortedOperationException)
-                                {
-                                    // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
-                                    // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
-                                    // don't hold OpOrder for too long).
-                                    if (!builder.isCompleted())
-                                        schedule(pager.state(false), builder);
-                                }
-                                else if (error instanceof ClientWriteException)
-                                {
-                                    logger.debug("Continuous paging client did not keep up: {}", error.getMessage());
-                                    builder.complete(error);
-                                }
-                                else
-                                {
-                                    JVMStabilityInspector.inspectThrowable(error);
-                                    logger.error("Continuous paging failed with unexpected error: {}", error.getMessage(), error);
+                            error -> handleError(error, builder));
+        }
 
-                                    builder.complete(error);
-                                }
-                            });
+        private void handleError(Throwable error, ResultBuilder builder)
+        {
+            if (error instanceof AbortedOperationException)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Continuous paging aborted, rescheduling? {}", !builder.isCompleted());
+
+                // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
+                // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
+                // don't hold OpOrder for too long).
+                if (!builder.isCompleted())
+                    schedule(pager.state(false), builder);
+            }
+            else if (error instanceof ClientWriteException)
+            {
+                logger.debug("Continuous paging client did not keep up: {}", error.getMessage());
+                builder.complete(error);
+            }
+            else
+            {
+                JVMStabilityInspector.inspectThrowable(error);
+                logger.error("Continuous paging failed with unexpected error: {}", error.getMessage(), error);
+
+                builder.complete(error);
+            }
         }
 
         /**
@@ -712,19 +717,27 @@ public class SelectStatement implements CQLStatement
          */
         void process(PartitionIterator partitions, ResultBuilder builder) throws InvalidRequestException
         {
-            while (partitions.hasNext())
+            try
             {
-                try (RowIterator partition = partitions.next())
+                while (partitions.hasNext())
                 {
-                    statement.processPartition(partition, options, builder, query.nowInSec());
+                    try (RowIterator partition = partitions.next())
+                    {
+                        statement.processPartition(partition, options, builder, query.nowInSec());
+                    }
+
+                    if (builder.isCompleted())
+                        break;
                 }
 
-                if (builder.isCompleted())
-                    break;
+                partitions.close();
+                maybeReschedule(builder);
             }
-
-            partitions.close();
-            maybeReschedule(builder);
+            catch (Throwable error)
+            {
+                partitions.close();
+                handleError(error, builder);
+            }
         }
 
         /**
