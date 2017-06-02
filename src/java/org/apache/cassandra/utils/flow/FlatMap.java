@@ -18,20 +18,18 @@
 
 package org.apache.cassandra.utils.flow;
 
-import javax.swing.text.html.CSS;
-
 import io.reactivex.functions.Function;
 import org.apache.cassandra.utils.Throwables;
 
 /**
- * Implementation of {@link CsFlow#flatMap(Function)}, which applies a method to a flow and concatenates the results.
+ * Implementation of {@link CsFlow#flatMap(FlatMapper)}, which applies a method to a flow and concatenates the results.
  * <p>
  * This is done in depth-first fashion, i.e. one item is requested from the flow, and the result of the conversion
  * is issued to the downstream subscriber completely before requesting the next item.
  */
-class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubscriber<I>
+public class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubscriber<I>
 {
-    public static <I, O> CsFlow<O> flatMap(CsFlow<I> source, Function<I, CsFlow<O>> op)
+    public static <I, O> CsFlow<O> flatMap(CsFlow<I> source, FlatMapper<I, O> op)
     {
         class FlatMapFlow extends CsFlow<O>
         {
@@ -48,10 +46,11 @@ class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubs
      */
     private final CsSubscriber<O> subscriber;
 
+
     /**
      * The mapper converts each input (upstream) item into a CsFlow of output (downstream) items
      */
-    private final Function<I, CsFlow<O>> mapper;
+    private final FlatMapper<I, O> mapper;
 
     /**
      * Upstream subscription which will be requested to supply source items.
@@ -63,7 +62,7 @@ class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubs
      */
     volatile FlatMapChild current;
 
-    FlatMap(CsSubscriber<O> subscriber, Function<I, CsFlow<O>> mapper, CsFlow<I> source) throws Exception
+    FlatMap(CsSubscriber<O> subscriber, FlatMapper<I, O> mapper, CsFlow<I> source) throws Exception
     {
         this.subscriber = subscriber;
         this.mapper = mapper;
@@ -89,6 +88,11 @@ class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubs
         {
             source.close();
         }
+    }
+
+    public Throwable addSubscriberChainFromSource(Throwable throwable)
+    {
+        return source.addSubscriberChainFromSource(throwable);
     }
 
     public void onNext(I next)
@@ -135,7 +139,7 @@ class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubs
 
     public String toString()
     {
-        return "flatmap(" + mapper.toString() + ")\n\tsubscriber " + subscriber;
+        return CsFlow.formatTrace("flatMap", mapper, subscriber);
     }
 
     class FlatMapChild implements CsSubscriber<O>
@@ -187,5 +191,9 @@ class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubs
         {
             return FlatMap.this.toString();
         }
+    }
+
+    public interface FlatMapper<I, O> extends Function<I, CsFlow<O>>
+    {
     }
 }

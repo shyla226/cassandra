@@ -36,19 +36,19 @@ public class Merge<In, Out> extends CsFlow<Out>
     protected final Comparator<? super In> comparator;
 
     public static <In, Out> CsFlow<Out> get(
-            List<? extends CsFlow<In>> sources,
-            Comparator<? super In> comparator,
-            Reducer<In, Out> reducer)
+                                           List<? extends CsFlow<In>> sources,
+                                           Comparator<? super In> comparator,
+                                           Reducer<In, Out> reducer)
     {
         if (sources.size() == 1)
         {
             if (!reducer.trivialReduceIsTrivial())
                 return sources.get(0).map(next ->
-                {
-                    reducer.onKeyChange();
-                    reducer.reduce(0, next);
-                    return reducer.getReduced();
-                });
+                                          {
+                                              reducer.onKeyChange();
+                                              reducer.reduce(0, next);
+                                              return reducer.getReduced();
+                                          });
 
             @SuppressWarnings("unchecked")
             CsFlow<Out> converted = (CsFlow<Out>) sources.get(0);
@@ -111,7 +111,7 @@ public class Merge<In, Out> extends CsFlow<Out>
      * The iterator is further complicated by the need to avoid advancing the input iterators until an output is
      * actually requested. To achieve this {@code consume} walks the heap to find equal items without advancing the
      * iterators, and {@code advance} moves them and restores the heap structure before any items can be consumed.
-     * 
+     *
      * To avoid having to do additional comparisons in consume to identify the equal items, we keep track of equality
      * between children and their parents in the heap. More precisely, the lines in the diagram above define the
      * following relationship:
@@ -174,6 +174,16 @@ public class Merge<In, Out> extends CsFlow<Out>
             Throwables.maybeFail(t);
         }
 
+        public Throwable addSubscriberChainFromSource(Throwable error)
+        {
+            return CsFlow.wrapException(error, this);
+        }
+
+        public String toString()
+        {
+            return CsFlow.formatTrace("merge", reducer, subscriber);
+        }
+
         /**
          * Advance all iterators that need to be advanced and place them into suitable positions in the heap.
          *
@@ -195,7 +205,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             int prev = advancing.getAndIncrement();
             if (prev != 0)
             {
-                subscriber.onError(new AssertionError("Merge advance called while another has " + prev + " outstanding requests.\n\t" + this));
+                subscriber.onError(new AssertionError("Merge advance called while another has " + prev + " outstanding requests."));
                 return;
             }
 
@@ -253,22 +263,31 @@ public class Merge<In, Out> extends CsFlow<Out>
                 return;
             }
 
-            reducer.onKeyChange();
+            try
+            {
+                reducer.onKeyChange();
 
-            heap[0].consume(reducer);
-            final int size = this.size;
-            final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
-            int i;
-            consume: {
-                for (i = 1; i < sortedSectionSize; ++i)
+                heap[0].consume(reducer);
+                final int size = this.size;
+                final int sortedSectionSize = Math.min(size, SORTED_SECTION_SIZE);
+                int i;
+                consume:
                 {
-                    if (!heap[i].equalParent)
-                        break consume;
-                    heap[i].consume(reducer);
+                    for (i = 1; i < sortedSectionSize; ++i)
+                    {
+                        if (!heap[i].equalParent)
+                            break consume;
+                        heap[i].consume(reducer);
+                    }
+                    i = Math.max(i, consumeHeap(i) + 1);
                 }
-                i = Math.max(i, consumeHeap(i) + 1);
+                needingAdvance = i;
             }
-            needingAdvance = i;
+            catch (Throwable t)
+            {
+                subscriber.onError(addSubscriberChainFromSource(t));
+                return;
+            }
 
             Throwable error = reducer.getErrors();
             if (error != null)
@@ -451,16 +470,16 @@ public class Merge<In, Out> extends CsFlow<Out>
             if (prev == from && (!itemShouldBeNull || item == null))
                 return;
 
-            throw onOurError(new AssertionError("Invalid state " + prev +
-                                                (item == null ? "/" : "/non-") + "null item to transition " +
-                                                from + (itemShouldBeNull ? "/null item" : "") + "->" + to + " in loop of " + this));
+            onOurError(new AssertionError("Invalid state " + prev +
+                                          (item == null ? "/" : "/non-") + "null item to transition " +
+                                          from + (itemShouldBeNull ? "/null item" : "") + "->" + to));
         }
 
         private AssertionError onOurError(AssertionError e)
         {
             // We are in a bad state. We can't expect to pass this error through the merge, so pass on to subscriber
             // directly and abort everything we can.
-            merger.subscriber.onError(e);
+            merger.subscriber.onError(source.addSubscriberChainFromSource(e));
             return e;
         }
 
@@ -480,7 +499,7 @@ public class Merge<In, Out> extends CsFlow<Out>
         @Override
         public void onError(Throwable error)
         {
-            this.error = error;
+            this.error = source.addSubscriberChainFromSource(error);
             onAdvance(null);
         }
 
@@ -490,7 +509,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             if (next != null)
                 onAdvance(next);
             else
-                onError(new AssertionError("null item in onNext call of " + this));
+                onError(new AssertionError("null item in onNext"));
         }
 
         private void onAdvance(In next)
@@ -545,7 +564,7 @@ public class Merge<In, Out> extends CsFlow<Out>
 
         public String toString()
         {
-            return "merge\n\tsubscriber " + merger.subscriber;
+            return merger.toString();
         }
     }
 }

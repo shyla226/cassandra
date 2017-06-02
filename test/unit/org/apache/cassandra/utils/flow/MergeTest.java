@@ -877,6 +877,16 @@ public class MergeTest
                 {
                 }
 
+                public Throwable addSubscriberChainFromSource(Throwable throwable)
+                {
+                    return CsFlow.wrapException(throwable, this);
+                }
+
+                public String toString()
+                {
+                    return "\tBadCsFlow " + Arrays.toString(inputs) + "\n" + subscriber;
+                }
+
                 private void process(Object o)
                 {
                     if (o instanceof String)

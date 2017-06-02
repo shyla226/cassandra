@@ -91,7 +91,7 @@ public final class LineNumberInference
 
     public LineNumberInference()
     {
-        this(null);
+        this((x) -> true);
     }
 
     /**
