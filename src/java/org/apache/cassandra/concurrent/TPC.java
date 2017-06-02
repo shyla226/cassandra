@@ -75,7 +75,7 @@ public class TPC
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
     public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
-                                          && Aio.isAvailable();
+                                          && Aio.isAvailable() && USE_EPOLL;
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
