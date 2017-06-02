@@ -246,7 +246,7 @@ public abstract class Selection
                           .toString();
     }
 
-    private static List<ByteBuffer> rowToJson(List<ByteBuffer> row, ProtocolVersion protocolVersion, ResultSet.ResultMetadata metadata)
+    public static List<ByteBuffer> rowToJson(List<ByteBuffer> row, ProtocolVersion protocolVersion, ResultSet.ResultMetadata metadata)
     {
         StringBuilder sb = new StringBuilder("{");
         for (int i = 0; i < metadata.names.size(); i++)
