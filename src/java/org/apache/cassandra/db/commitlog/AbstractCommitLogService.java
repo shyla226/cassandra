@@ -42,7 +42,7 @@ public abstract class AbstractCommitLogService
     private final AtomicLong written = new AtomicLong(0);
     protected final AtomicLong pending = new AtomicLong(0);
 
-    public BehaviorSubject<Long> syncTimePublisher = BehaviorSubject.createDefault(0L);
+    private BehaviorSubject<Long> syncTimePublisher = BehaviorSubject.createDefault(0L);
 
     final CommitLog commitLog;
     private final String name;

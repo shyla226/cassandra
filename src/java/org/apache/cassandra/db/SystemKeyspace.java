@@ -642,8 +642,8 @@ public final class SystemKeyspace
             return;
 
         String req = "INSERT INTO system.%s (peer, tokens) VALUES (?, ?)";
-        logger.info("PEERS TOKENS for {} = {}", ep, tokensAsSet(tokens));
-        executeInternal(String.format(req, PEERS), ep, tokensAsSet(tokens));
+        logger.debug("PEERS TOKENS for {} = {}", ep, tokensAsSet(tokens));
+        executeInternal(format(req, PEERS), ep, tokensAsSet(tokens));
     }
 
     public static synchronized void updatePreferredIP(InetAddress ep, InetAddress preferred_ip)
@@ -673,10 +673,10 @@ public final class SystemKeyspace
     }
 
     // TODO need proper synchronization for async version
-    public static synchronized UntypedResultSet updateSchemaVersion(UUID version)
+    public static synchronized void updateSchemaVersion(UUID version)
     {
         String req = "INSERT INTO system.%s (key, schema_version) VALUES ('%s', ?)";
-        return executeInternal(format(req, LOCAL, LOCAL), version);
+        executeInternal(format(req, LOCAL, LOCAL), version);
     }
 
     private static Set<String> tokensAsSet(Collection<Token> tokens)
@@ -685,17 +685,6 @@ public final class SystemKeyspace
             return Collections.emptySet();
         Token.TokenFactory factory = StorageService.instance.getTokenFactory();
         Set<String> s = new HashSet<>(tokens.size());
-        for (Token tk : tokens)
-            s.add(factory.toString(tk));
-        return s;
-    }
-
-    private static List<String> tokensAsList(Collection<Token> tokens)
-    {
-        if (tokens.isEmpty())
-            return Collections.emptyList();
-        Token.TokenFactory factory = StorageService.instance.getTokenFactory();
-        List<String> s = new ArrayList<>(tokens.size());
         for (Token tk : tokens)
             s.add(factory.toString(tk));
         return s;
