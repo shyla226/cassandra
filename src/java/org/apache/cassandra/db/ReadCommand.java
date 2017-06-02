@@ -393,9 +393,8 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     public Single<PartitionIterator> executeInternal(Monitor monitor)
     {
-        return ImmutableBTreePartition.create(executeLocally(monitor))
-                                      .map(partitions -> new ReadResponse.InMemoryPartitionsIterator(partitions, this))
-                                      .map(it -> UnfilteredPartitionIterators.filter(it, nowInSec)); // TODO - filter in the publisher
+        // TODO - filter in the publisher
+        return Single.just(UnfilteredPartitionIterators.filter(executeLocally(monitor).toIterator(), nowInSec));
     }
 
     public ReadExecutionController executionController()
