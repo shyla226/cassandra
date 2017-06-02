@@ -3459,7 +3459,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return new FutureTask<>(task, null);
     }
 
-    public void forceTerminateAllRepairSessions() {
+    public void forceTerminateAllRepairSessions()
+    {
         ActiveRepairService.instance.terminateSessions();
     }
 
@@ -4965,5 +4966,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public long getPid()
     {
         return NativeLibrary.getProcessID();
+    }
+
+    public int forceMarkAllSSTablesAsUnrepaired(String keyspace, String... tables) throws IOException
+    {
+        int marked = 0;
+        for (ColumnFamilyStore cfs : getValidColumnFamilies(false, false, keyspace, tables))
+        {
+            try
+            {
+                marked += cfs.forceMarkAllSSTablesAsUnrepaired();
+            } catch (Throwable t)
+            {
+                logger.error("Error while marking all SSTables from table {}.{} as unrepaired. Please trigger operation again " +
+                             "or manually mark SSTables as unrepaired otherwise rows already purged on other replicas may be " +
+                             "propagated to other replicas during incremental repair without their respectives tombstones.",
+                             keyspace, cfs.name, t);
+                throw new RuntimeException(t);
+            }
+        }
+        return marked;
     }
 }

@@ -1,4 +1,5 @@
 DSE 5.0.10
+ * Add nodetool mark_unrepaired command (APOLLO-692)
  * Make full repair default and disallow incremental repair on MV tables (APOLLO-596)
  * Revert CASSANDRA-11223 behavior in AbstractReadCommandBuilder (APOLLO-1010)
  * Simplify role-permissions handling (APOLLO-796)

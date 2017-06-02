@@ -2495,4 +2495,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         return new TableInfo(hasViews(), metadata.isView(), getLiveSSTables().stream().anyMatch(s -> s.isRepaired()));
     }
+
+    public int forceMarkAllSSTablesAsUnrepaired()
+    {
+        return runWithCompactionsDisabled(() ->
+                                   {
+                                       Set<SSTableReader> repairedSSTables = getLiveSSTables().stream().filter(SSTableReader::isRepaired).collect(Collectors.toSet());
+                                       int mutated = mutateRepairedAt(repairedSSTables, ActiveRepairService.UNREPAIRED_SSTABLE);
+                                       logger.debug("Marked {} sstables from table {}.{} as repaired.", mutated, keyspace.getName(), name);
+                                   return mutated;
+                                   }, true, true);
+    }
 }
