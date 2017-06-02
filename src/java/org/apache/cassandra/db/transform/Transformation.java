@@ -30,8 +30,6 @@ import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
 
 /**
  * We have a single common superclass for all Transformations to make implementation efficient.

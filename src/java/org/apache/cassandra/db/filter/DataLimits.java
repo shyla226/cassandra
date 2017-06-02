@@ -120,7 +120,6 @@ public abstract class DataLimits
 
     public abstract boolean isUnlimited();
     public abstract boolean isDistinct();
-    public abstract boolean isZero();
 
     public boolean isGroupByLimit()
     {
@@ -302,6 +301,15 @@ public abstract class DataLimits
         protected abstract void applyToPartition(DecoratedKey partitionKey, Row staticRow);
 
         @Override
+        public void attachTo(PartitionsPublisher publisher)
+        {
+            if (enforceLimits)
+                super.attachTo(publisher);
+            if (isDone())
+                stop();
+        }
+
+        @Override
         protected void attachTo(BasePartitions partitions)
         {
             if (enforceLimits)
@@ -309,6 +317,7 @@ public abstract class DataLimits
             if (isDone())
                 stop();
         }
+
 
         @Override
         protected void attachTo(BaseRows rows)
@@ -373,11 +382,6 @@ public abstract class DataLimits
         public boolean isDistinct()
         {
             return isDistinct;
-        }
-
-        public boolean isZero()
-        {
-            return rowLimit == 0 || perPartitionLimit == 0;
         }
 
         public DataLimits forPaging(int pageSize)
@@ -681,11 +685,6 @@ public abstract class DataLimits
         public boolean isGroupByLimit()
         {
             return true;
-        }
-
-        public boolean isZero()
-        {
-            return groupLimit == 0 || groupPerPartitionLimit == 0 || rowLimit == 0;
         }
 
         public boolean isUnlimited()

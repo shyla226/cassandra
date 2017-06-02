@@ -345,10 +345,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     @Override
     public PartitionsPublisher executeLocally(Monitor monitor)
     {
-        //Easy win: Avoid doing any work when limit is zero
-        if (limits().isZero())
-            return PartitionsPublisher.empty();
-
         long startTimeNanos = System.nanoTime();
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
         Index index = getIndex(cfs);
@@ -385,7 +381,6 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
         // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
         // processing we do on it).
-        //boolean log = false; //metadata.keyspace.startsWith("cql_test_keyspace");
         return limits().filter(updatedFilter.filter(ret, cfs.metadata(), nowInSec()), nowInSec());
     }
 
@@ -497,10 +492,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 
-    static class PurgeOp extends Transformation
+    private static class PurgeOp extends Transformation
     {
         private final DeletionPurger purger;
-        private int nowInSec;
+        private final int nowInSec;
 
         public PurgeOp(int nowInSec, int gcBefore, Supplier<Integer> oldestUnrepairedTombstone, boolean onlyPurgeRepairedTombstones)
         {
@@ -517,11 +512,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
             if (partition.isEmpty() || purger.shouldPurge(header.partitionLevelDeletion))
                 return null;
 
-            FlowableUnfilteredPartition purged = new FlowableUnfilteredPartition(header,
-                                                                                 applyToStatic(partition.staticRow),
-                                                                                 partition.content,
-                                                                                 partition.hasData);
-            return purged;
+            return new FlowableUnfilteredPartition(header,
+                                                   applyToStatic(partition.staticRow),
+                                                   partition.content,
+                                                   partition.hasData);
         }
 
         @Override
@@ -538,25 +532,12 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         }
     }
 
+
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwidth, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artifact of compaction lagging behind and hence counting them is somewhat unintuitive).
-    protected Transformation withoutPurgeableTombstones(ColumnFamilyStore cfs)
+    private Transformation withoutPurgeableTombstones(ColumnFamilyStore cfs)
     {
-//        class WithoutPurgeableTombstones extends PurgeFunction
-//        {
-//            public WithoutPurgeableTombstones()
-//            {
-//                super(nowInSec(), cfs.gcBefore(nowInSec()), oldestUnrepairedTombstone(), cfs.getCompactionStrategyManager().onlyPurgeRepairedTombstones());
-//            }
-//
-//            protected Predicate<Long> getPurgeEvaluator()
-//            {
-//                return time -> true;
-//            }
-//        }
-
-
         return new PurgeOp(nowInSec(),
                            cfs.gcBefore(nowInSec()),
                            this::oldestUnrepairedTombstone,
