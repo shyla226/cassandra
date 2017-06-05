@@ -18,9 +18,9 @@
 
 package org.apache.cassandra.repair;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -34,9 +34,11 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static org.junit.Assert.assertEquals;
@@ -53,6 +55,7 @@ public class RepairSessionTest
     @Test
     public void testConviction() throws Exception
     {
+        InetAddress other = InetAddress.getByName("127.0.0.3");
         InetAddress remote = InetAddress.getByName("127.0.0.2");
         Gossiper.instance.initializeNodeUnsafe(remote, UUID.randomUUID(), 1);
 
@@ -64,18 +67,37 @@ public class RepairSessionTest
         Set<InetAddress> endpoints = Sets.newHashSet(remote);
         RepairSession session = new RepairSession(parentSessionId, sessionId, Arrays.asList(repairRange), "Keyspace1", RepairParallelism.SEQUENTIAL, endpoints, ActiveRepairService.UNREPAIRED_SSTABLE, false, "Standard1");
 
+        RepairJobDesc desc = new RepairJobDesc(parentSessionId, sessionId, "ks", "table", Collections.emptyList());
+        RemoteSyncTask syncTask = new RemoteSyncTask(desc, new TreeResponse(remote, null), new TreeResponse(other, null), session,
+                                                     null, null,
+                                                     null);
+        session.waitForSync(Pair.create(desc, new NodePair(remote, other)), syncTask);
+        ValidationTask validationTask = new ValidationTask(desc, remote,0);
+        session.waitForValidation(Pair.create(desc, remote), validationTask);
+
         // perform convict
         session.convict(remote, Double.MAX_VALUE);
 
-        // RepairSession should throw ExecutorException with the cause of IOException when getting its value
+        // Any ongoing sync or validation tests of the failed node should fail
         try
         {
-            session.get();
+            syncTask.get();
             fail();
         }
         catch (ExecutionException ex)
         {
-            assertEquals(IOException.class, ex.getCause().getClass());
+            assertEquals(RepairException.class, ex.getCause().getClass());
+        }
+
+        // Any ongoing sync or validation tests of the failed node should fail
+        try
+        {
+            validationTask.get();
+            fail();
+        }
+        catch (ExecutionException ex)
+        {
+            assertEquals(RepairException.class, ex.getCause().getClass());
         }
     }
 }
