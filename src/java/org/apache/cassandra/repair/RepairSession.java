@@ -196,7 +196,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
      */
     public void syncComplete(RepairJobDesc desc, NodePair nodes, boolean success, List<SessionSummary> summaries)
     {
-        RemoteSyncTask task = syncingTasks.get(Pair.create(desc, nodes));
+        RemoteSyncTask task = syncingTasks.remove(Pair.create(desc, nodes));
         if (task == null)
         {
             assert terminated;
@@ -271,7 +271,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         for (String cfname : cfnames)
         {
             RepairJob job = new RepairJob(this, cfname, isConsistent, previewKind);
-            executor.execute(job);
+            executor.submit(job);
             jobs.add(job);
         }
 
@@ -287,6 +287,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
                 // only shutdown task executor after setting the callback future
                 taskExecutor.shutdown();
                 // mark this session as terminated
+                assert validating.isEmpty() && syncingTasks.isEmpty() : "All tasks should be finished on RepairJob completion.";
                 terminate();
             }
 
@@ -302,7 +303,14 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public void terminate()
     {
         terminated = true;
+
+        //Fail remaining tasks to unblock RepairJob
+        for (ValidationTask v : validating.values())
+            v.treesReceived(null);
         validating.clear();
+
+        for (RemoteSyncTask s : syncingTasks.values())
+            s.syncComplete(false);
         syncingTasks.clear();
     }
 
