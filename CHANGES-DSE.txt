@@ -1,6 +1,8 @@
 DSE 5.1.2
  * Show correct protocol version in cqlsh (APOLLO-616)
  * null assertion in MemtablePostFlush (APOLLO-708)
+Merged from dse5.0:
+ * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)
 Merged from DSE 4.8.14:
 * Integrate top threads command in nodetool (APOLLO-652)
 
