@@ -95,8 +95,6 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
     public final boolean isConsistent;
     public final PreviewKind previewKind;
 
-    private final AtomicBoolean isFailed = new AtomicBoolean(false);
-
     // Each validation task waits response from replica in validating ConcurrentMap (keyed by CF name and endpoint address)
     private final ConcurrentMap<Pair<RepairJobDesc, InetAddress>, ValidationTask> validating = new ConcurrentHashMap<>();
     // Remote syncing jobs wait response in syncingTasks map
@@ -310,7 +308,7 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         validating.clear();
 
         for (RemoteSyncTask s : syncingTasks.values())
-            s.syncComplete(false);
+            s.syncComplete(false, null);
         syncingTasks.clear();
     }
 
@@ -351,14 +349,28 @@ public class RepairSession extends AbstractFuture<RepairSessionResult> implement
         if (phi < 2 * DatabaseDescriptor.getPhiConvictThreshold())
             return;
 
-        // Though unlikely, it is possible to arrive here multiple time and we
-        // want to avoid print an error message twice
-        if (!isFailed.compareAndSet(false, true))
-            return;
+        logger.warn("[repair #{}] Endpoint {] died, will fail all the active tasks of this node.", getId(), endpoint);
 
-        Exception exception = new IOException(String.format("Endpoint %s died", endpoint));
-        logger.error("{} session completed with the following error", previewKind.logPrefix(getId()), exception);
-        // If a node failed, we stop everything (though there could still be some activity in the background)
-        forceShutdown(exception);
+        // If a node failed, we fail all the active tasks of that node, what will eventually make the RepairJob fail.
+        // We don't fail the repair job straight away because other replicas may still be working
+        for(Iterator<Map.Entry<Pair<RepairJobDesc, InetAddress>, ValidationTask>> it = validating.entrySet().iterator(); it.hasNext();)
+        {
+            Map.Entry<Pair<RepairJobDesc, InetAddress>, ValidationTask> entry = it.next();
+            if (endpoint.equals(entry.getKey().right))
+            {
+                it.remove();
+                entry.getValue().treesReceived(null);
+            }
+        }
+
+        for(Iterator<Map.Entry<Pair<RepairJobDesc, NodePair>, RemoteSyncTask>> it = syncingTasks.entrySet().iterator(); it.hasNext();)
+        {
+            Map.Entry<Pair<RepairJobDesc, NodePair>, RemoteSyncTask> entry = it.next();
+            if (endpoint.equals(entry.getKey().right.endpoint1))
+            {
+                it.remove();
+                entry.getValue().syncComplete(false, null);
+            }
+        }
     }
 }
