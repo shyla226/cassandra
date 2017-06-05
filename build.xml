@@ -408,7 +408,14 @@
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2" />
           <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="2.0.9.2" />
           <dependency groupId="net.sf.supercsv" artifactId="super-csv" version="2.1.0" />
-	      <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" />
+          <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" />
+
+          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli" version="0.5.1"/>
+          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-core" version="0.5.1"/>
+          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-stacktrace" version="0.5.1"/>
+          <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump" version="0.5.1"/>
+          <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" version="1.2"/>
+          <dependency groupId="com.beust" artifactId="jcommander" version="1.30"/>
         </dependencyManagement>
         <developer id="alakshman" name="Avinash Lakshman"/>
         <developer id="aleksey" name="Aleksey Yeschenko"/>
@@ -527,6 +534,13 @@
         <!-- don't need jamm unless running a server in which case it needs to be a -javagent to be used anyway -->
         <dependency groupId="com.github.jbellis" artifactId="jamm"/>
         <dependency groupId="io.netty" artifactId="netty-all"/>
+
+        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli"/>
+        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-core"/>
+        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-stacktrace"/>
+        <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump"/>
+        <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api"/>
+        <dependency groupId="com.beust" artifactId="jcommander"/>
       </artifact:pom>
       <artifact:pom id="thrift-pom"
                     artifactId="cassandra-thrift"
