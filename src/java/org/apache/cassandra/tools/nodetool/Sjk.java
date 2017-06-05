@@ -43,7 +43,7 @@ public class Sjk extends NodeToolCmd
 
     public void run()
     {
-        wrapper.prepare(args.toArray(new String[0]));
+        wrapper.prepare(args != null ? args.toArray(new String[0]) : new String[]{"help"});
 
         if (!wrapper.requiresMbeanServerConn())
         {
