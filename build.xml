@@ -414,6 +414,12 @@
           </dependency>
           <dependency groupId="joda-time" artifactId="joda-time" version="2.4" />
 
+          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli" version="0.5.1"/>
+          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-core" version="0.5.1"/>
+          <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-stacktrace" version="0.5.1"/>
+          <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump" version="0.5.1"/>
+          <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" version="1.2"/>
+          <dependency groupId="com.beust" artifactId="jcommander" version="1.30"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>
@@ -580,6 +586,13 @@
         <dependency groupId="org.fusesource" artifactId="sigar"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>
         <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core"/>
+
+        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli"/>
+        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-core"/>
+        <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-stacktrace"/>
+        <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump"/>
+        <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api"/>
+        <dependency groupId="com.beust" artifactId="jcommander"/>
       </artifact:pom>
       <artifact:pom id="thrift-pom"
                     artifactId="cassandra-thrift"
