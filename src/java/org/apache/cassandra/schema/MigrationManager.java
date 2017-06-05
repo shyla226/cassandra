@@ -54,6 +54,8 @@ public class MigrationManager
 
     private static final int MIGRATION_DELAY_IN_MS = 60000;
 
+    private static final Semaphore migrationLock = new Semaphore(1, true);
+
     private static final int MIGRATION_TASK_WAIT_IN_SECONDS = Integer.parseInt(System.getProperty("cassandra.migration_task_wait_in_seconds", "1"));
 
     private MigrationManager() {}
@@ -166,13 +168,22 @@ public class MigrationManager
 
     public static Completable announceNewKeyspace(KeyspaceMetadata ksm, long timestamp, boolean announceLocally) throws ConfigurationException
     {
-        ksm.validate();
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
+                                     ksm.validate();
 
-        if (Schema.instance.getKeyspaceMetadata(ksm.name) != null)
-            return Completable.error(new AlreadyExistsException(ksm.name));
+                                     if (Schema.instance.getKeyspaceMetadata(ksm.name) != null)
+                                         return Completable.error(new AlreadyExistsException(ksm.name));
 
-        logger.info("Create new Keyspace: {}", ksm);
-        return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
+                                     logger.info("Create new Keyspace: {}", ksm);
+                                     return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceNewTable(TableMetadata cfm) throws ConfigurationException
@@ -207,32 +218,53 @@ public class MigrationManager
 
     private static Completable announceNewTable(TableMetadata cfm, boolean announceLocally, boolean throwOnDuplicate, long timestamp)
     {
-        cfm.validate();
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(cfm.keyspace);
-        if (ksm == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.name, cfm.keyspace)));
 
-        // If we have a table or a view which has the same name, we can't add a new one
-        else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
-            return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
+                                     cfm.validate();
 
-        logger.info("Create new table: {}/{}", cfm, cfm.id);
-        return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(cfm.keyspace);
+                                     if (ksm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.name, cfm.keyspace)));
+
+                                         // If we have a table or a view which has the same name, we can't add a new one
+                                     else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
+                                         return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
+
+                                     logger.info("Create new table: {}/{}", cfm, cfm.id);
+                                     return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceNewView(ViewMetadata view, boolean announceLocally) throws ConfigurationException
     {
-        view.metadata.validate();
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
-        if (ksm == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.name, view.keyspace)));
-        else if (ksm.getTableOrViewNullable(view.name) != null)
-            return Completable.error(new AlreadyExistsException(view.keyspace, view.name));
+                                     view.metadata.validate();
 
-        logger.info("Create new view: {}", view);
-        return announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
+                                     if (ksm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.name, view.keyspace)));
+                                     else if (ksm.getTableOrViewNullable(view.name) != null)
+                                         return Completable.error(new AlreadyExistsException(view.keyspace, view.name));
+
+                                     logger.info("Create new view: {}", view);
+                                     return announce(SchemaKeyspace.makeCreateViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceNewType(UserType newType, boolean announceLocally)
@@ -262,14 +294,24 @@ public class MigrationManager
 
     public static Completable announceKeyspaceUpdate(KeyspaceMetadata ksm, boolean announceLocally) throws ConfigurationException
     {
-        ksm.validate();
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksm.name);
-        if (oldKsm == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name)));
+                                     ksm.validate();
 
-        logger.info("Update Keyspace '{}' From {} To {}", ksm.name, oldKsm, ksm);
-        return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
+                                     KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksm.name);
+                                     if (oldKsm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot update non existing keyspace '%s'.", ksm.name)));
+
+                                     logger.info("Update Keyspace '{}' From {} To {}", ksm.name, oldKsm, ksm);
+                                     return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm.name, ksm.params, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceTableUpdate(TableMetadata tm) throws ConfigurationException
@@ -279,34 +321,54 @@ public class MigrationManager
 
     public static Completable announceTableUpdate(TableMetadata updated, boolean announceLocally) throws ConfigurationException
     {
-        updated.validate();
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        TableMetadata current = Schema.instance.getTableMetadata(updated.keyspace, updated.name);
-        if (current == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot update non existing table '%s' in keyspace '%s'.", updated.name, updated.keyspace)));
+                                     updated.validate();
 
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(current.keyspace);
+                                     TableMetadata current = Schema.instance.getTableMetadata(updated.keyspace, updated.name);
+                                     if (current == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot update non existing table '%s' in keyspace '%s'.", updated.name, updated.keyspace)));
 
-        current.validateCompatibility(updated);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(current.keyspace);
 
-        logger.info("Update table '{}/{}' From {} To {}", current.keyspace, current.name, current, updated);
-        return announce(SchemaKeyspace.makeUpdateTableMutation(ksm, current, updated, FBUtilities.timestampMicros()), announceLocally);
+                                     current.validateCompatibility(updated);
+
+                                     logger.info("Update table '{}/{}' From {} To {}", current.keyspace, current.name, current, updated);
+                                     return announce(SchemaKeyspace.makeUpdateTableMutation(ksm, current, updated, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceViewUpdate(ViewMetadata view, boolean announceLocally) throws ConfigurationException
     {
-        view.metadata.validate();
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        ViewMetadata oldView = Schema.instance.getView(view.keyspace, view.name);
-        if (oldView == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot update non existing materialized view '%s' in keyspace '%s'.", view.name, view.keyspace)));
+                                     view.metadata.validate();
 
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
+                                     ViewMetadata oldView = Schema.instance.getView(view.keyspace, view.name);
+                                     if (oldView == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot update non existing materialized view '%s' in keyspace '%s'.", view.name, view.keyspace)));
 
-        oldView.metadata.validateCompatibility(view.metadata);
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
 
-        logger.info("Update view '{}/{}' From {} To {}", view.keyspace, view.name, oldView, view);
-        return announce(SchemaKeyspace.makeUpdateViewMutation(ksm, oldView, view, FBUtilities.timestampMicros()), announceLocally);
+                                     oldView.metadata.validateCompatibility(view.metadata);
+
+                                     logger.info("Update view '{}/{}' From {} To {}", view.keyspace, view.name, oldView, view);
+                                     return announce(SchemaKeyspace.makeUpdateViewMutation(ksm, oldView, view, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceTypeUpdate(UserType updatedType, boolean announceLocally)
@@ -322,12 +384,22 @@ public class MigrationManager
 
     public static Completable announceKeyspaceDrop(String ksName, boolean announceLocally) throws ConfigurationException
     {
-        KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksName);
-        if (oldKsm == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName)));
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        logger.info("Drop Keyspace '{}'", oldKsm.name);
-        return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
+                                     KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksName);
+                                     if (oldKsm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName)));
+
+                                     logger.info("Drop Keyspace '{}'", oldKsm.name);
+                                     return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceTableDrop(String ksName, String cfName) throws ConfigurationException
@@ -337,24 +409,44 @@ public class MigrationManager
 
     public static Completable announceTableDrop(String ksName, String cfName, boolean announceLocally) throws ConfigurationException
     {
-        TableMetadata tm = Schema.instance.getTableMetadata(ksName, cfName);
-        if (tm == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName)));
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        logger.info("Drop table '{}/{}'", tm.keyspace, tm.name);
-        return announce(SchemaKeyspace.makeDropTableMutation(ksm, tm, FBUtilities.timestampMicros()), announceLocally);
+                                     TableMetadata tm = Schema.instance.getTableMetadata(ksName, cfName);
+                                     if (tm == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName)));
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+
+                                     logger.info("Drop table '{}/{}'", tm.keyspace, tm.name);
+                                     return announce(SchemaKeyspace.makeDropTableMutation(ksm, tm, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceViewDrop(String ksName, String viewName, boolean announceLocally) throws ConfigurationException
     {
-        ViewMetadata view = Schema.instance.getView(ksName, viewName);
-        if (view == null)
-            return Completable.error(new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName)));
-        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+        return Completable.using(() ->
+                                 {
+                                     migrationLock.acquireUninterruptibly();
+                                     return migrationLock;
+                                 },
+                                 lock ->
+                                 {
 
-        logger.info("Drop table '{}/{}'", view.keyspace, view.name);
-        return announce(SchemaKeyspace.makeDropViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                     ViewMetadata view = Schema.instance.getView(ksName, viewName);
+                                     if (view == null)
+                                         return Completable.error(new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", viewName, ksName)));
+                                     KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
+
+                                     logger.info("Drop table '{}/{}'", view.keyspace, view.name);
+                                     return announce(SchemaKeyspace.makeDropViewMutation(ksm, view, FBUtilities.timestampMicros()), announceLocally);
+                                 },
+                                 lock -> lock.release());
     }
 
     public static Completable announceTypeDrop(UserType droppedType, boolean announceLocally)
