@@ -22,5 +22,20 @@ public interface SerializationNode<Value>
     int childCount();
     Value payload();
     byte transition(int i);
-    long serializedPosition(int i); // note: this could return -1 if called from sizeofNode
+
+    /**
+     * Returns the distance between this node's position and the child at index i.
+     * Given as a difference calculation to be able to handle two different types of calls:
+     * - writing nodes where all children's positions are already completely determined
+     * - sizing and writing branches within a page where we don't know where we'll actually place
+     *   the nodes, but we know how far backward the child nodes will end up
+     */
+    long serializedPositionDelta(int i, long nodePosition);
+
+    /**
+     * Returns the furthest distance that needs to be written to store this node, i.e.
+     *   min(i, nodePosition) for 0 <= i < childCount()
+     * Given separately as the loop above can be inefficient (e.g. when children are not yet written).
+     */
+    long maxPositionDelta(long nodePosition);
 }

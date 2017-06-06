@@ -70,7 +70,7 @@ implements IncrementalTrieWriter<Value>
     private final static Comparator<Node<?>> branchSizeComparator = (l, r) ->
     {
         // Smaller branches first.
-        int c = Integer.compare(l.branchSize, r.branchSize);
+        int c = Integer.compare(l.branchSize + l.nodeSize, r.branchSize + r.nodeSize);
         if (c != 0)
             return c;
 
@@ -93,18 +93,16 @@ implements IncrementalTrieWriter<Value>
     {
         Node<Value> root = super.performCompletion();
 
-        long nodePosition = dest.position();
-        int actualSize = recalcBranchSize(root, nodePosition);
-        int bytesLeft = bytesLeftInPage(nodePosition);
+        int actualSize = recalcTotalSize(root, dest.position());
+        int bytesLeft = bytesLeftInPage();
         if (actualSize > bytesLeft)
         {
             if (actualSize <= PageAware.PAGE_SIZE)
             {
                 PageAware.pad(dest);
-                nodePosition = dest.position();
                 bytesLeft = PageAware.PAGE_SIZE;
                 // position changed, recalc again
-                actualSize = recalcBranchSize(root, nodePosition);
+                actualSize = recalcTotalSize(root, dest.position());
             }
 
             if (actualSize > bytesLeft)
@@ -112,15 +110,18 @@ implements IncrementalTrieWriter<Value>
                 // Still greater. Lay out children separately.
                 layoutChildren(root);
 
-                // Else pad and place.
-                if (root.branchSize > bytesLeftInPage(dest.position()))
+                // Pad if needed and place.
+                if (root.nodeSize > bytesLeftInPage())
+                {
                     PageAware.pad(dest);
-                nodePosition = dest.position();
+                    // Recalc again as pointer size may have changed, triggering assertion in writeRecursive.
+                    recalcTotalSize(root, dest.position());
+                }
             }
         }
 
-        writeForwardRecursive(root, nodePosition);
-        root.finalizeWithPosition(nodePosition);
+
+        root.finalizeWithPosition(writeRecursive(root));
         return root;
     }
 
@@ -131,21 +132,28 @@ implements IncrementalTrieWriter<Value>
 
         int branchSize = 0;
         for (Node<Value> child : node.children)
-            branchSize += child.branchSize;
+            branchSize += child.branchSize + child.nodeSize;
 
-        int nodeSize = serializer.inpageSizeofNode(node, dest.position());
+        node.branchSize = branchSize;
+
+        int nodeSize = serializer.sizeofNode(node, dest.position());
         if (nodeSize + branchSize < PageAware.PAGE_SIZE)
         {
             // Good. This node and all children will (most probably) fit page.
-            node.branchSize = nodeSize + branchSize;
             node.nodeSize = nodeSize;
             node.hasOutOfPageChildren = false;
-            node.hasOutOfPageDescendants = node.children.stream().anyMatch(child -> child.hasOutOfPageDescendants);
+            node.hasOutOfPageInBranch = false;
+
+            for (Node<Value> child : node.children)
+                if (child.filePos != -1)
+                    node.hasOutOfPageChildren = true;
+                else if (child.hasOutOfPageChildren || child.hasOutOfPageInBranch)
+                    node.hasOutOfPageInBranch = true;
+
             return;
         }
 
-        // Cannot fit. Lay out children; some child (already laid out or due to be laid out now) will not be in the
-        // current page.
+        // Cannot fit. Lay out children; The current node will be marked with one with out-of-page children.
         layoutChildren(node);
     }
 
@@ -158,10 +166,10 @@ implements IncrementalTrieWriter<Value>
             if (child.filePos == -1)
                 children.add(child);
 
-        long nodePosition = dest.position();
-        int bytesLeft = bytesLeftInPage(nodePosition);
+        int bytesLeft = bytesLeftInPage();
         Node<Value> cmp = new Node<Value>((byte) 0);
         cmp.filePos = 0;        // goes after all equal-sized unplaced nodes (whose filePos is -1)
+        cmp.nodeSize = 0;
         while (!children.isEmpty())
         {
             cmp.branchSize = bytesLeft;
@@ -169,16 +177,15 @@ implements IncrementalTrieWriter<Value>
             if (child == null)
             {
                 PageAware.pad(dest);
-                nodePosition = dest.position();
                 bytesLeft = PageAware.PAGE_SIZE;
                 child = children.pollLast();       // just biggest
             }
 
-            if (child.hasOutOfPageDescendants)
+            if (child.hasOutOfPageChildren || child.hasOutOfPageInBranch)
             {
                 // We didn't know what size this branch will actually need to be, node's children may be far.
                 // We now know where we would place it, so let's reevaluate size.
-                int actualSize = recalcBranchSize(child, nodePosition);
+                int actualSize = recalcTotalSize(child, dest.position());
                 if (actualSize > bytesLeft)
                 {
                     if (bytesLeft == PageAware.PAGE_SIZE)
@@ -190,8 +197,7 @@ implements IncrementalTrieWriter<Value>
                         // This is not trivial to fix but should be very rare.
 
                         layoutChildren(child);
-                        nodePosition = dest.position();
-                        bytesLeft = bytesLeftInPage(nodePosition);
+                        bytesLeft = bytesLeftInPage();
 
                         assert (child.filePos == -1);
                     }
@@ -203,68 +209,55 @@ implements IncrementalTrieWriter<Value>
                 }
             }
 
-            int branchSize = child.branchSize;
-            writeForwardRecursive(child, nodePosition);
-            child.finalizeWithPosition(nodePosition);
-            nodePosition = dest.position();
-            bytesLeft = bytesLeftInPage(nodePosition);
+            child.finalizeWithPosition(writeRecursive(child));
+            bytesLeft = bytesLeftInPage();
         }
 
-        node.branchSize = node.nodeSize = serializer.sizeofNode(node, nodePosition);
+        // The sizing below will use the branch size, so make sure it's set.
+        node.branchSize = 0;
         node.hasOutOfPageChildren = true;
-        node.hasOutOfPageDescendants = true;
+        node.hasOutOfPageInBranch = false;
+        node.nodeSize = serializer.sizeofNode(node, dest.position());
     }
 
-    private int recalcBranchSize(Node<Value> node, long nodePosition)
+    private int recalcTotalSize(Node<Value> node, long nodePosition)
     {
-        assert node.hasOutOfPageDescendants || !node.hasOutOfPageChildren;
-        if (!node.hasOutOfPageDescendants)
-            return node.branchSize;
-        if (node.hasOutOfPageChildren)
-            node.nodeSize = serializer.sizeofNode(node, nodePosition);
-        int sz = node.nodeSize;
-        for (Node<Value> child : node.children)
-            sz += recalcBranchSize(child, nodePosition + sz);
-        return node.branchSize = sz;
-    }
-
-    private void writeForwardRecursive(Node<Value> node, long nodePosition) throws IOException
-    {
-        long pos = nodePosition + node.nodeSize;
-
-        // Calculate the position of each child that is not yet written.
-        boolean inpageOffsets = true;
-        for (Node<Value> child : node.children)
+        if (node.hasOutOfPageInBranch)
         {
-            if (child.filePos == -1)
-                child.filePos = pos;
-            else
-                inpageOffsets = false;
-            pos += child.branchSize;
+            int sz = 0;
+            for (Node<Value> child : node.children)
+                sz += recalcTotalSize(child, nodePosition + sz);
+            node.branchSize = sz;
         }
-        assert !inpageOffsets == node.hasOutOfPageChildren;
 
-        // Write current node.
-        if (inpageOffsets)
-            serializer.inpageWrite(dest, node, nodePosition);
-        else
-            serializer.write(dest, node, nodePosition);
+        // The sizing below will use the branch size, so make sure it's set.
+        if (node.hasOutOfPageChildren)
+            node.nodeSize = serializer.sizeofNode(node, nodePosition + node.branchSize);
 
-        // Write the children recursively
-        pos = nodePosition + node.nodeSize;
-        for (Node<Value> child : node.children)
-            if (child.filePos == pos)
-            {
-                assert dest.position() == pos;
-                writeForwardRecursive(child, pos);
-                pos += child.branchSize;
-                // This is not necessary as we will drop the pointer to child.
-                // child.finalizeWithPosition(childPos);
-            }
+        return node.branchSize + node.nodeSize;
     }
 
-    int bytesLeftInPage(long position)
+    private long writeRecursive(Node<Value> node) throws IOException
     {
+        long nodePosition = dest.position();
+        for (Node<Value> child : node.children)
+            if (child.filePos == -1)
+                child.filePos = writeRecursive(child);
+
+        nodePosition += node.branchSize;
+        assert dest.position() == nodePosition;
+
+        serializer.write(dest, node, nodePosition);
+
+        assert dest.position() == nodePosition + node.nodeSize
+               || PageAware.padded(dest.position()) == dest.position(); // For PartitionIndexTest.testPointerGrowth where position may jump on page boundaries.
+
+        return nodePosition;
+    }
+
+    int bytesLeftInPage()
+    {
+        long position = dest.position();
         long bytesLeft = PageAware.pageLimit(position) - position;
         return (int) bytesLeft;
     }
@@ -308,10 +301,29 @@ implements IncrementalTrieWriter<Value>
 
     static class Node<Value> extends IncrementalTrieWriterBase.BaseNode<Value, Node<Value>>
     {
+        /**
+         * Currently calculated size of the branch below this node, not including the node itself.
+         * If hasOutOfPageInBranch is true, this may be underestimated as the size
+         * depends on the position the branch is written.
+         */
         int branchSize = -1;
+        /**
+         * Currently calculated node size. If hasOutOfPageChildren is true, this may be underestimated as the size
+         * depends on the position the node is written.
+         */
         int nodeSize = -1;
-        boolean hasOutOfPageDescendants = false;
-        boolean hasOutOfPageChildren = false;
+
+        /**
+         * Whether there is an out-of-page, already written node in the branches below the immediate children of the
+         * node.
+         */
+        boolean hasOutOfPageInBranch = false;
+        /**
+         * Whether a child of the node is out of page, already written.
+         * Forced to true before being set to make sure maxPositionDelta performs its evaluation on non-completed
+         * nodes for makePartialRoot.
+         */
+        boolean hasOutOfPageChildren = true;
 
         Node(byte transition)
         {
@@ -324,10 +336,52 @@ implements IncrementalTrieWriter<Value>
             return new Node<Value>(transition);
         }
 
+        public long serializedPositionDelta(int i, long nodePosition)
+        {
+            if (children.get(i).filePos != -1)
+                return children.get(i).filePos - nodePosition;
+
+            int dist = children.get(i).nodeSize;
+            for (int j = i + 1; j < children.size(); ++j)
+                dist += children.get(j).branchSize + children.get(j).nodeSize;
+            return -dist;
+        }
+
+        /**
+         * The max delta is the delta with either:
+         * - the position where the first child not-yet-placed child will be laid out.
+         * - the position of the furthest child that is already placed.
+         *
+         * This method assumes all children's branch and node sizes, as well as this node's branchSize, are already
+         * calculated.
+         */
+        public long maxPositionDelta(long nodePosition)
+        {
+            // The max delta is the position the first child would be laid out.
+            assert (childCount() > 0);
+
+            if (!hasOutOfPageChildren)
+                // We need to be able to address the first child. We don't need to cover its branch, though.
+                return -(branchSize - children.get(0).branchSize);
+
+            long minPlaced = 0;
+            long minUnplaced = 1;
+            for (Node<Value> child : children)
+            {
+                if (child.filePos != -1)
+                    minPlaced = Math.min(minPlaced, child.filePos - nodePosition);
+                else if (minUnplaced > 0)   // triggers once
+                    minUnplaced = -(branchSize - child.branchSize);
+            }
+
+            return Math.min(minPlaced, minUnplaced);
+        }
+
         void finalizeWithPosition(long position)
         {
             this.branchSize = 0;                // takes no space in current page
-            this.hasOutOfPageDescendants = false;  // its size no longer needs to be recalculated
+            this.nodeSize = 0;
+            this.hasOutOfPageInBranch = false;  // its size no longer needs to be recalculated
             this.hasOutOfPageChildren = false;
             super.finalizeWithPosition(position);
         }

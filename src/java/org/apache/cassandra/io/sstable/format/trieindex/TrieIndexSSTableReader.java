@@ -332,6 +332,7 @@ class TrieIndexSSTableReader extends SSTableReader
 
         if ((filterFirst() && first.compareTo(dk) > 0) || (filterLast() && last.compareTo(dk) < 0))
         {
+            bloomFilterTracker.addFalsePositive();
             listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             return null;
         }
@@ -341,6 +342,7 @@ class TrieIndexSSTableReader extends SSTableReader
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
             {
+                bloomFilterTracker.addFalsePositive();
                 listener.onSSTableSkipped(this, SkippingReason.PARTITION_INDEX_LOOKUP);
                 return null;
             }

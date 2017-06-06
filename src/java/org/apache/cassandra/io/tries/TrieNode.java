@@ -21,7 +21,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.SizedInts;
 
 /**
  * Trie node types and manipulation mechanisms. The main purpose of this is to allow for handling tries directly as
@@ -89,12 +89,21 @@ public abstract class TrieNode
      */
     abstract public int transitionRange(ByteBuffer src, int position);
     /**
+     * Returns the delta between the position of this node and the position of the target of the specified transition.
+     * This is always a negative number. Dense nodes use 0 to specify "no transition".
+     */
+    abstract long transitionDelta(ByteBuffer src, int position, int searchIndex);
+    /**
      * Returns position of node to transition to for the given search index. Argument must be positive. May return -1
      * if a transition with that index does not exist (DENSE nodes).
      * Position is the offset of the node within the ByteBuffer. positionLong is its global placement, which is the
      * base for any offset calculations.
      */
-    abstract public long transition(ByteBuffer src, int position, long positionLong, int searchIndex);
+    public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+    {
+        // note: incorrect for dense nodes
+        return positionLong + transitionDelta(src, position, searchIndex);
+    }
     /**
      * Returns the highest transition for this node, or -1 if none exist (PAYLOAD_ONLY nodes).
      */
@@ -123,42 +132,23 @@ public abstract class TrieNode
         int c = node.childCount();
         if (c == 0)
             return PAYLOAD_ONLY;
-        int bppIndex = 0;
-        for (int i = 0; i < c; ++i)
+
+        int bitsPerPointerIndex = 0;
+        long delta = node.maxPositionDelta(nodePosition);
+        while (!singles[bitsPerPointerIndex].fits(delta))
+            ++bitsPerPointerIndex;
+
+        if (c == 1)
         {
-            long childPosition = node.serializedPosition(i);
-            if (childPosition == -1)
-                continue;
-            while (!singles[bppIndex].fits(childPosition, nodePosition))
-                ++bppIndex;
+            if (node.payload() != null && singles[bitsPerPointerIndex].bytesPerPointer == FRACTIONAL_BYTES)
+                ++bitsPerPointerIndex; // next index will permit payload
+
+            return singles[bitsPerPointerIndex];
         }
-        if (bppIndex == 0)
-            return inpageTypeFor(node);
-        if (c == 1)
-            return singles[bppIndex];
-        TrieNode sparse = sparses[bppIndex];
-        TrieNode dense = denses[bppIndex];
+
+        TrieNode sparse = sparses[bitsPerPointerIndex];
+        TrieNode dense = denses[bitsPerPointerIndex];
         return (sparse.sizeofNode(node) < dense.sizeofNode(node)) ? sparse : dense;
-    }
-
-    static final long FORWARD_MAX = PageAware.PAGE_SIZE;
-
-    /**
-     * Returns a node type that is suitable to store the node if all transition targets are assumed to be in the
-     * same page.
-     */
-    public static TrieNode inpageTypeFor(SerializationNode<?> node)
-    {
-        int c = node.childCount();
-        if (c == 0)
-            return PAYLOAD_ONLY;
-        if (c == 1)
-            return node.payload() != null ? SINGLE_16 : INPAGE_SINGLE;
-        int l = node.transition(0) & 0xFF;
-        int r = node.transition(c - 1) & 0xFF;
-        if (r - l + 1 <= c * 5 / 3)
-            return INPAGE_DENSE;
-        return INPAGE_SPARSE;
     }
 
     /**
@@ -174,6 +164,7 @@ public abstract class TrieNode
     // Implementations
 
     final int bytesPerPointer;
+    static final int FRACTIONAL_BYTES = 0;
 
     TrieNode(int bytesPerPointer)
     {
@@ -189,7 +180,7 @@ public abstract class TrieNode
         // var payload
         PayloadOnly()
         {
-            super(0);
+            super(FRACTIONAL_BYTES);
         }
 
         @Override
@@ -202,6 +193,12 @@ public abstract class TrieNode
         public int search(ByteBuffer src, int position, int transitionByte)
         {
             return -1;
+        }
+
+        @Override
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        {
+            return 0;
         }
 
         @Override
@@ -252,9 +249,8 @@ public abstract class TrieNode
         }
     };
 
+    static final Single SINGLE_8 = new Single(1);
     static final Single SINGLE_16 = new Single(2);
-    static final Single SINGLE_24 = new Single(3);
-    static final Single SINGLE_32 = new Single(4);
 
     static class Single extends TrieNode
     {
@@ -283,9 +279,9 @@ public abstract class TrieNode
             return transitionByte < c ? -1 : -2;
         }
 
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
         {
-            return readBytes(src, position + 2) + positionLong;
+            return -readBytes(src, position + 2);
         }
 
         @Override
@@ -331,26 +327,89 @@ public abstract class TrieNode
             dest.writeByte((ordinal << 4) + (payloadBits & 0x0F));
 
             dest.writeByte(node.transition(0));
-            writeBytes(dest, node.serializedPosition(0) - nodePosition);
+            writeBytes(dest, -node.serializedPositionDelta(0, nodePosition));
         }
     };
 
-    static final Single INPAGE_SINGLE = new InPageSingle();
-    static class InPageSingle extends Single
+
+    static final Single SINGLE_NOPAYLOAD_4 = new SingleNoPayload4();
+    static class SingleNoPayload4 extends Single
     {
         // 4-bit type ordinal
-        // 12-bit target offset from page start
+        // 4-bit target delta
         // byte transition
         // no payload!
-        InPageSingle()
+        SingleNoPayload4()
         {
-            super(1);
+            super(FRACTIONAL_BYTES);
         }
 
         @Override
         public int payloadFlags(ByteBuffer src, int position)
         {
             return 0;
+        }
+
+        // Although we don't have a payload position, provide one for calculating the size of the node.
+        @Override
+        public int payloadPosition(ByteBuffer src, int position)
+        {
+            return position + 2;
+        }
+
+        @Override
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        {
+            return -(src.get(position) & 0xF);
+        }
+
+        @Override
+        boolean fits(long delta)
+        {
+            return delta < 0 && delta >= -0xF;
+        }
+
+        @Override
+        public void serialize(DataOutput dest, SerializationNode<?> node, int payloadBits, long nodePosition) throws IOException
+        {
+            assert payloadBits == 0;
+            int childCount = node.childCount();
+            assert childCount == 1;
+            long pd = -node.serializedPositionDelta(0, nodePosition);
+            assert pd > 0 && pd < 0x10;
+            dest.writeByte((ordinal << 4) + (int) (pd & 0x0F));
+            dest.writeByte(node.transition(0));
+        }
+
+        public int sizeofNode(SerializationNode<?> node)
+        {
+            return 2;
+        }
+    };
+
+    static final Single SINGLE_NOPAYLOAD_12 = new SingleNoPayload12();
+    static class SingleNoPayload12 extends Single
+    {
+        // 4-bit type ordinal
+        // 12-bit target delta
+        // byte transition
+        // no payload!
+        SingleNoPayload12()
+        {
+            super(FRACTIONAL_BYTES);
+        }
+
+        @Override
+        public int payloadFlags(ByteBuffer src, int position)
+        {
+            return 0;
+        }
+
+        // Although we don't have a payload position, provide one for calculating the size of the node.
+        @Override
+        public int payloadPosition(ByteBuffer src, int position)
+        {
+            return position + 3;
         }
 
         @Override
@@ -363,9 +422,9 @@ public abstract class TrieNode
         }
 
         @Override
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
         {
-            return (src.getShort(position) & 0xFFF) | (positionLong & ~0xFFF);
+            return -(src.getShort(position) & 0xFFF);
         }
 
         @Override
@@ -375,21 +434,33 @@ public abstract class TrieNode
         }
 
         @Override
+        boolean fits(long delta)
+        {
+            return delta < 0 && delta >= -0xFFF;
+        }
+
+        @Override
         public void serialize(DataOutput dest, SerializationNode<?> node, int payloadBits, long nodePosition) throws IOException
         {
             assert payloadBits == 0;
             int childCount = node.childCount();
             assert childCount == 1;
-            int offset = (int) node.serializedPosition(0) & 0xFFF;
-            dest.writeByte((ordinal << 4) + ((offset >> 8) & 0x0F));
-            dest.writeByte((byte) offset);
+            long pd = -node.serializedPositionDelta(0, nodePosition);
+            assert pd > 0 && pd < 0x1000;
+            dest.writeByte((ordinal << 4) + (int) ((pd >> 8) & 0x0F));
+            dest.writeByte((byte) pd);
             dest.writeByte(node.transition(0));
+        }
+
+        public int sizeofNode(SerializationNode<?> node)
+        {
+            return 3;
         }
     };
 
+    static final Sparse SPARSE_8 = new Sparse(1);
     static final Sparse SPARSE_16 = new Sparse(2);
     static final Sparse SPARSE_24 = new Sparse(3);
-    static final Sparse SPARSE_32 = new Sparse(4);
     static final Sparse SPARSE_40 = new Sparse(5);
     static class Sparse extends TrieNode
     {
@@ -437,9 +508,9 @@ public abstract class TrieNode
             return -r - 1;
         }
 
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
         {
-            return readBytes(src, position + 2 + transitionRange(src, position) + bytesPerPointer * searchIndex) + positionLong;
+            return -readBytes(src, position + 2 + transitionRange(src, position) + bytesPerPointer * searchIndex);
         }
 
         public long greaterTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
@@ -485,21 +556,21 @@ public abstract class TrieNode
             for (int i = 0; i < childCount; ++i)
                 dest.writeByte(node.transition(i));
             for (int i = 0; i < childCount; ++i)
-                writeBytes(dest, node.serializedPosition(i) - nodePosition);
+                writeBytes(dest, -node.serializedPositionDelta(i, nodePosition));
         }
     };
     
-    static final InPageSparse INPAGE_SPARSE = new InPageSparse();
-    static class InPageSparse extends Sparse
+    static final Sparse12 SPARSE_12 = new Sparse12();
+    static class Sparse12 extends Sparse
     {
         // byte flags
         // byte count (<= 255)
         // count bytes transitions
         // count 12-bits transition targets
         // var payload
-        InPageSparse()
+        Sparse12()
         {
-            super(1);
+            super(FRACTIONAL_BYTES);
         }
 
         public int payloadPosition(ByteBuffer src, int position)
@@ -508,9 +579,9 @@ public abstract class TrieNode
             return position + 2 + (5 * count + 1) / 2;
         }
 
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
         {
-            return read12Bits(src, position + 2 + transitionRange(src, position), searchIndex) | (positionLong & ~0xFFF);
+            return -read12Bits(src, position + 2 + transitionRange(src, position), searchIndex);
         }
 
         public int sizeofNode(SerializationNode<?> node)
@@ -531,14 +602,20 @@ public abstract class TrieNode
             int i;
             for (i = 0; i + 2 <= childCount; i += 2)
             {
-                int p0 = (int) node.serializedPosition(i + 0) & 0xFFF;
-                int p1 = (int) node.serializedPosition(i + 1) & 0xFFF;
+                int p0 = (int) -node.serializedPositionDelta(i, nodePosition);
+                int p1 = (int) -node.serializedPositionDelta(i + 1, nodePosition);
+                assert p0 > 0 && p0 < (1 << 12);
+                assert p1 > 0 && p1 < (1 << 12);
                 dest.writeByte(p0 >> 4);
                 dest.writeByte((p0 << 4) | (p1 >> 8));
                 dest.writeByte(p1);
             }
             if (i < childCount)
-                dest.writeShort((short) (node.serializedPosition(i) & 0xFFF) << 4);
+            {
+                long pd = -node.serializedPositionDelta(i, nodePosition);
+                assert pd > 0 && pd < (1 << 12);
+                dest.writeShort((short) (pd << 4));
+            }
         }
     };
 
@@ -553,6 +630,8 @@ public abstract class TrieNode
         // byte length-1
         // length ints transition targets (-1 for not present)
         // var payload
+
+        static final int NULL_VALUE = 0;
 
         Dense(int bytesPerPointer)
         {
@@ -582,10 +661,15 @@ public abstract class TrieNode
             return t != -1 ? i : -i - 1;
         }
 
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
+        {
+            return -readBytes(src, position + 3 + searchIndex * bytesPerPointer);
+        }
+
         public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
         {
-            long v = readBytes(src, position + 3 + searchIndex * bytesPerPointer);
-            return v != -1 ? v + positionLong : -1;
+            long v = transitionDelta(src, position, searchIndex);
+            return v != NULL_VALUE ? v + positionLong : -1;
         }
 
         public long greaterTransition(ByteBuffer src, int position, long positionLong, int searchIndex, long defaultValue)
@@ -650,22 +734,17 @@ public abstract class TrieNode
                 int next = node.transition(i) & 0xFF;
                 while (l < next)
                 {
-                    writeBytes(dest, -1);
+                    writeBytes(dest, NULL_VALUE);
                     ++l;
                 }
-                writeTarget(dest, node.serializedPosition(i), nodePosition);
+                writeBytes(dest, -node.serializedPositionDelta(i, nodePosition));
                 ++l;
             }
         }
-
-        public void writeTarget(DataOutput dest, long target, long nodePosition) throws IOException
-        {
-            writeBytes(dest, target - nodePosition);
-        }
     };
 
-    static final InPageDense INPAGE_DENSE = new InPageDense();
-    static class InPageDense extends Dense
+    static final Dense12 DENSE_12 = new Dense12();
+    static class Dense12 extends Dense
     {
         // byte flags
         // byte start
@@ -673,9 +752,9 @@ public abstract class TrieNode
         // length 12-bits transition targets (-1 for not present)
         // var payload
 
-        InPageDense()
+        Dense12()
         {
-            super(1);
+            super(FRACTIONAL_BYTES);
         }
 
         public int payloadPosition(ByteBuffer src, int position)
@@ -683,10 +762,9 @@ public abstract class TrieNode
             return position + 3 + (transitionRange(src, position) * 3 + 1) / 2;
         }
 
-        public long transition(ByteBuffer src, int position, long positionLong, int searchIndex)
+        public long transitionDelta(ByteBuffer src, int position, int searchIndex)
         {
-            int res = read12Bits(src, position + 3, searchIndex);
-            return res == 0xFFF ? -1 : res | (positionLong & ~0xFFF);
+            return -read12Bits(src, position + 3, searchIndex);
         }
 
         public int sizeofNode(SerializationNode<?> node)
@@ -713,11 +791,11 @@ public abstract class TrieNode
                 int next = node.transition(i) & 0xFF;
                 while (l < next)
                 {
-                    carry = write12Bits(dest, 0xFFF, l - start, carry);
+                    carry = write12Bits(dest, NULL_VALUE, l - start, carry);
                     ++l;
                 }
-                assert (node.serializedPosition(i) & 0xFFF) != 0xFFF;
-                carry = write12Bits(dest, (int) node.serializedPosition(i) & 0xFFF, l - start, carry);
+                long pd = node.serializedPositionDelta(i, nodePosition);
+                carry = write12Bits(dest, (int) -pd, l - start, carry);
                 ++l;
             }
             if (((l - start) & 1) == 1)
@@ -739,26 +817,19 @@ public abstract class TrieNode
             super(8);
         }
 
-        public long transition(ByteBuffer src, int position, long positionLong, int childIndex)
+        public long transitionDelta(ByteBuffer src, int position, int childIndex)
         {
-            return src.getLong(position + 3 + childIndex * 8);
+            return -src.getLong(position + 3 + childIndex * 8);
         }
 
         @Override
-        public void writeTarget(DataOutput dest, long target, long nodePosition) throws IOException
-        {
-            dest.writeLong(target);
-        }
-        
-        @Override
         public void writeBytes(DataOutput dest, long ofs) throws IOException
         {
-            assert ofs == -1;
             dest.writeLong(ofs);
         }
         
         @Override
-        boolean fits(long target, long nodePosition)
+        boolean fits(long delta)
         {
             return true;
         }
@@ -770,11 +841,12 @@ public abstract class TrieNode
         int word = src.getShort(base + (3 * searchIndex) / 2);
         if ((searchIndex & 1) == 0)
             word = (word >> 4);
-        return (word & 0xFFF);
+        return word & 0xFFF;
     }
 
     static int write12Bits(DataOutput dest, int value, int index, int carry) throws IOException
     {
+        assert value >= 0 && value < (1 << 12);
         if ((index & 1) == 0)
         {
             dest.writeByte(value >> 4);
@@ -790,33 +862,24 @@ public abstract class TrieNode
 
     long readBytes(ByteBuffer src, int position)
     {
-        long ofs = 0;
-        for (int i = 0; i < bytesPerPointer; ++i)
-            ofs = (ofs << 8) + (src.get(position + i) & 0xFF);
-        if (ofs >= FORWARD_MAX)
-            ofs -= (1L << 8 * bytesPerPointer);
-        return ofs;
+        return SizedInts.readUnsigned(src, position, bytesPerPointer);
     }
 
     void writeBytes(DataOutput dest, long ofs) throws IOException
     {
-        assert ofs < FORWARD_MAX && ofs >= (-1L << bytesPerPointer * 8) + FORWARD_MAX;
-        for (int i = bytesPerPointer - 1; i >= 0; --i)
-            dest.writeByte((int) (ofs >> (i * 8)));
+        assert fits(ofs);
+        SizedInts.write(dest, ofs, bytesPerPointer);
     }
 
-    boolean fits(long target, long nodePosition)
+    boolean fits(long ofs)
     {
-        if (bytesPerPointer == 1)       // in-page
-            return PageAware.pageStart(target) == PageAware.pageStart(nodePosition);
-        long ofs = target - nodePosition;
-        return ofs < FORWARD_MAX && ofs >= (-1L << bytesPerPointer * 8) + FORWARD_MAX;
+        return ofs >= 0 && ofs < (1L << (bytesPerPointer * 8));
     }
 
     public String toString()
     {
         String res = getClass().getSimpleName();
-        if (bytesPerPointer > 1)
+        if (bytesPerPointer >= 1)
             res += (bytesPerPointer * 8);
         return res;
     }
@@ -827,17 +890,18 @@ public abstract class TrieNode
     }
 
     static final TrieNode[] values = new TrieNode[] { PAYLOAD_ONLY,
-                                                      INPAGE_SINGLE, INPAGE_SPARSE, INPAGE_DENSE,
-                                                      SINGLE_16, SPARSE_16, DENSE_16,
-                                                      SINGLE_24, SPARSE_24, DENSE_24,
-                                                      SINGLE_32, SPARSE_32, DENSE_32,
-                                                      SPARSE_40, DENSE_40,
-                                                      LONG_DENSE};
-    // There are only 16 possible types, and we want to encode 5 pointer sizes * 3 types plus PAYLOAD_ONLY and LONG_DENSE.
-    // SINGLE_40 does not fit, thus we replace it with something that can do its job using one extra byte.
-    static final TrieNode[] singles = new TrieNode[] { INPAGE_SINGLE, SINGLE_16, SINGLE_24, SINGLE_32, DENSE_40, LONG_DENSE };
-    static final TrieNode[] sparses = new TrieNode[] { INPAGE_SPARSE, SPARSE_16, SPARSE_24, SPARSE_32, SPARSE_40, LONG_DENSE };
-    static final TrieNode[] denses = new TrieNode[] { INPAGE_DENSE, DENSE_16, DENSE_24, DENSE_32, DENSE_40, LONG_DENSE };
+                                                      SINGLE_NOPAYLOAD_4, SINGLE_8, SINGLE_NOPAYLOAD_12, SINGLE_16,
+                                                      SPARSE_8, SPARSE_12, SPARSE_16, SPARSE_24, SPARSE_40,
+                                                      DENSE_12, DENSE_16, DENSE_24, DENSE_32, DENSE_40,
+                                                      LONG_DENSE}; // Catch-all
+    // We can't fit all types * all sizes in 4 bits, so we use a selection. When we don't have a matching instance
+    // we just use something more general that can do its job.
+    // The arrays below must have corresponding types for all sizes specified by the singles row.
+    // Note: 12 bit sizes are important, because that size will fit any pointer within a page-packed branch.
+    static final TrieNode[] singles = new TrieNode[] { SINGLE_NOPAYLOAD_4, SINGLE_8,
+                                                       SINGLE_NOPAYLOAD_12, SINGLE_16, DENSE_24, DENSE_32, DENSE_40, LONG_DENSE };
+    static final TrieNode[] sparses = new TrieNode[] { SPARSE_8, SPARSE_8, SPARSE_12, SPARSE_16, SPARSE_24, SPARSE_40, SPARSE_40, LONG_DENSE };
+    static final TrieNode[] denses = new TrieNode[] { DENSE_12, DENSE_12, DENSE_12, DENSE_16, DENSE_24, DENSE_32, DENSE_40, LONG_DENSE };
     static
     {
         assert values.length <= 16;
