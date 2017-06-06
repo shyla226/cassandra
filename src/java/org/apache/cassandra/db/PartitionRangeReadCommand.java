@@ -30,14 +30,9 @@ import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
-import org.apache.cassandra.db.filter.ClusteringIndexFilter;
-import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.db.partitions.CachedPartition;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
@@ -46,6 +41,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -53,9 +49,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.pager.PagingState;
-import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
-import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.flow.CsFlow;
@@ -230,10 +224,11 @@ public class PartitionRangeReadCommand extends ReadCommand
             iterators.add(iter);
         }
 
+        SSTableReadsListener readCountUpdater = newReadCountUpdater();
         for (SSTableReader sstable : view.sstables)
         {
             @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-            UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange());
+            UnfilteredPartitionIterator iter = sstable.getScanner(columnFilter(), dataRange(), readCountUpdater);
             iterators.add(FlowablePartitions.fromPartitions(iter, Schedulers.io()));
             if (!sstable.isRepaired())
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
@@ -245,6 +240,22 @@ public class PartitionRangeReadCommand extends ReadCommand
 
         // TODO: open and close when subscribed -- make sure no resource allocated on create
         return FlowablePartitions.mergePartitions(iterators, nowInSec());
+    }
+
+    /**
+     * Creates a new {@code SSTableReadsListener} to update the SSTables read counts.
+     * @return a new {@code SSTableReadsListener} to update the SSTables read counts.
+     */
+    private static SSTableReadsListener newReadCountUpdater()
+    {
+        return new SSTableReadsListener()
+                {
+                    @Override
+                    public void onScanningStarted(SSTableReader sstable)
+                    {
+                        sstable.incrementReadCount();
+                    }
+                };
     }
 
     @Override

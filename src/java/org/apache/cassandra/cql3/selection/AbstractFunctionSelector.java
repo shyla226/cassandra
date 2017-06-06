@@ -25,6 +25,8 @@ import java.util.Optional;
 
 import com.google.common.base.Objects;
 
+import com.google.common.collect.Iterables;
+
 import org.apache.commons.lang3.text.StrBuilder;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -33,6 +35,7 @@ import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.RequestValidations;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -236,6 +239,19 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
                 }
                 return new ScalarFunctionSelector(version, partialFunction, remainingSelectors);
             }
+
+            @Override
+            public boolean areAllFetchedColumnsKnown()
+            {
+                return Iterables.all(factories, f -> f.areAllFetchedColumnsKnown());
+            }
+
+            @Override
+            public void addFetchedColumns(ColumnFilter.Builder builder)
+            {
+                for (Selector.Factory factory : factories)
+                    factory.addFetchedColumns(builder);
+            }
         };
     }
 
@@ -267,6 +283,13 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
     public int hashCode()
     {
         return Objects.hashCode(fun.name(), fun.argTypes(), argSelectors);
+    }
+
+    @Override
+    public void addFetchedColumns(ColumnFilter.Builder builder)
+    {
+        for (Selector selector : argSelectors)
+            selector.addFetchedColumns(builder);
     }
 
     // Sets a given arg value. We should use that instead of directly setting the args list for the

@@ -4959,6 +4959,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("Updated hinted_handoff_throttle_in_kb to {}", throttleInKB);
     }
 
+    public long getPid()
+    {
+        return NativeLibrary.getProcessID();
+    }
+
     public static List<Range<Token>> getStartupTokenRanges(Keyspace keyspace)
     {
         if (!DatabaseDescriptor.getPartitioner().splitter().isPresent())

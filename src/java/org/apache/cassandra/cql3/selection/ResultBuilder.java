@@ -21,12 +21,10 @@ package org.apache.cassandra.cql3.selection;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 /**
  * CQL row builder: abstract class for converting filtered rows and cells into CQL rows.
@@ -38,12 +36,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public abstract class ResultBuilder
 {
-    /**
-     * The parent selection that created this row builder.
-     */
-    protected final Selection selection;
-    private final ProtocolVersion protocolVersion;
-
     /**
      * As multiple thread can access a <code>Selection</code> instance each <code>ResultSetBuilder</code> will use
      * its own <code>Selectors</code> instance.
@@ -65,16 +57,12 @@ public abstract class ResultBuilder
      */
     private Selector.InputRow inputRow;
 
-    protected final boolean isJson;
     protected boolean completed;
 
-    protected ResultBuilder(QueryOptions options, boolean isJson, GroupMaker groupMaker, Selection selection)
+    protected ResultBuilder(Selection.Selectors selectors, GroupMaker groupMaker)
     {
-        this.selection = selection;
-        this.protocolVersion = options.getProtocolVersion();
-        this.selectors = selection.newSelectors(options);
+        this.selectors = selectors;
         this.groupMaker = groupMaker;
-        this.isJson = isJson;
     }
 
     public void add(ByteBuffer v)
@@ -99,11 +87,11 @@ public abstract class ResultBuilder
         boolean isNewAggregate = groupMaker == null || groupMaker.isNewGroup(partitionKey, clustering);
         if (inputRow != null)
         {
-            selectors.addInputRow(protocolVersion, inputRow);
+            selectors.addInputRow(inputRow);
 
             if (isNewAggregate)
             {
-                boolean res = onRowCompleted(getOutputRow(), true);
+                boolean res = onRowCompleted(selectors.getOutputRow(), true);
                 inputRow.reset(!selectors.hasProcessing());
                 selectors.reset();
                 if (!res)
@@ -116,7 +104,7 @@ public abstract class ResultBuilder
         }
         else
         {
-            inputRow = new Selector.InputRow(selection.columns.size(), selection.collectTimestamps, selection.collectTTLs);
+            inputRow = selectors.newInputRow();
         }
     }
 
@@ -140,15 +128,15 @@ public abstract class ResultBuilder
 
         if (inputRow != null)
         {
-            selectors.addInputRow(protocolVersion, inputRow);
-            onRowCompleted(getOutputRow(), false);
+            selectors.addInputRow(inputRow);
+            onRowCompleted(selectors.getOutputRow(), false);
             inputRow.reset(!selectors.hasProcessing());
             selectors.reset();
         }
 
         // For aggregates we need to return a row even if no records have been found
         if (resultIsEmpty() && groupMaker != null && groupMaker.returnAtLeastOneRow())
-            onRowCompleted(getOutputRow(), false);
+            onRowCompleted(selectors.getOutputRow(), false);
 
         completed = true;
     }
@@ -172,11 +160,4 @@ public abstract class ResultBuilder
      * @return - true if there is at least one row.
      */
     public abstract boolean resultIsEmpty();
-
-    private List<ByteBuffer> getOutputRow()
-    {
-        List<ByteBuffer> outputRow = selectors.getOutputRow(protocolVersion);
-        return isJson ? Selection.rowToJson(outputRow, protocolVersion, selection.metadata)
-                      : outputRow;
-    }
 }

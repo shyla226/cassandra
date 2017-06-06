@@ -25,6 +25,7 @@ New features
    - Support for arithmetic operations on number has been added. See CASSANDRA-11935
    - Preview expected streaming required for a repair (nodetool repair --preview), and validate the
      consistency of repaired data between nodes (nodetool repair --validate). See CASSANDRA-13257
+   - Support for selecting Map values and Set elements has been added for SELECT queries. See CASSANDRA-7396 
 
 Upgrading
 ---------
@@ -69,6 +70,8 @@ Upgrading
      to be a performance regression. The default for 3.11.0 and newer has
      been reverted to 'DISABLED'. Users upgrading from Cassandra 2.2 or 3.0 should
      be aware that the default has changed.
+   - The StorageHook interface has been modified to allow to retrieve read information from
+     SSTableReader (CASSANDRA-13120).
 
 3.10
 ====

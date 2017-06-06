@@ -1,4 +1,6 @@
 dse 6.0.0
+ * Fix LWT asserts for immutable TableMetadata (APOLLO-728)
+ * Add DSE columns to system tables (APOLLO-716)
  * Avoid unnecessary deserialization of terminal arguments when executing functions(APOLLO-588)
  * Allow to aggregate by time intervals (APOLLO-75)
  * Port Memory Only Strategy from DSE to Apollo (APOLLO-342)
@@ -10,6 +12,7 @@ dse 6.0.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * null assertion in MemtablePostFlush (APOLLO-708)
  * Show correct protocol version in cqlsh (APOLLO-616)
  * Update to logback-1.2.3 and redefine default rotation policy (APOLLO-643)
  * Guard mapped memory accesses with an assertion instead of segfaulting JVM (APOLLO-586)
@@ -57,6 +60,8 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * On node failure, fail only repair tasks of that node (APOLLO-669)
+ * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)
  * Handle missing metadata when opening a keyspace (APOLLO-395)
  * Bounded range splitting token allocation for first RF nodes (APOLLO-121)
  * Backport CASSANDRA-12858: Add the range limit for the split ratio in PartitionerTestCase (APOLLO-121)
@@ -85,3 +90,6 @@ Merged from dse5.0:
  * Backport CASSANDRA-12461: (Add pre- and post-shutdown hooks to Storage Service) (APOLLO-48)
  * Wait for remaining tasks to finish on RepairJob after task failure (APOLLO-87)
  * Exponential backoff when hint delivery fails (APOLLO-17)
+Merged from DSE 4.8.14:
+* Integrate top threads command in nodetool (APOLLO-652)
+

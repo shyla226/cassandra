@@ -44,7 +44,9 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -358,8 +360,17 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-                                      TPC.getCoreForKey(cfs.keyspace, partitionKey()));
+        final SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
+        return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController, metricsCollector),
+                                      TPC.getCoreForKey(cfs.keyspace, partitionKey()))
+                      .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector));
+    }
+
+    private void updateMetrics(TableMetrics metrics, SSTableReadMetricsCollector metricsCollector)
+    {
+        int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
+        metrics.updateSSTableIterated(mergedSSTablesIterated);
+        Tracing.trace("Merged data from memtables and {} sstables", mergedSSTablesIterated);
     }
 
     /**
@@ -505,7 +516,9 @@ public class SinglePartitionReadCommand extends ReadCommand
      * Also note that one must have created a {@code ReadExecutionController} on the queried table and we require it as
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
-    private FlowableUnfilteredPartition queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    private FlowableUnfilteredPartition queryMemtableAndDisk(ColumnFamilyStore cfs,
+                                                             ReadExecutionController executionController,
+                                                             SSTableReadMetricsCollector metricsCollector)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);
@@ -522,9 +535,9 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
         if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
-            return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
+            return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter(), metricsCollector);
 
-        return queryMemtableAndDiskInternal(cfs);
+        return queryMemtableAndDiskInternal(cfs, metricsCollector);
     }
 
     @Override
@@ -533,7 +546,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
-    private FlowableUnfilteredPartition queryMemtableAndDiskInternal(ColumnFamilyStore cfs)
+    private FlowableUnfilteredPartition queryMemtableAndDiskInternal(ColumnFamilyStore cfs, SSTableReadMetricsCollector metricsCollector)
     {
         Tracing.trace("Acquiring sstable references");
         ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
@@ -571,7 +584,6 @@ public class SinglePartitionReadCommand extends ReadCommand
             Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
             long mostRecentPartitionTombstone = Long.MIN_VALUE;
             int nonIntersectingSSTables = 0;
-            int ssTablesIterated = 0;
             List<SSTableReader> skippedSSTablesWithTombstones = null;
 
             for (SSTableReader sstable : view.sstables)
@@ -598,13 +610,11 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                 @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception,
                 // or through the closing of the final merged iterator
-                FlowableUnfilteredPartition/*WithLowerBound*/ iter = makeFlowable(cfs, sstable);
+                FlowableUnfilteredPartition/*WithLowerBound*/ iter = makeFlowable(cfs, sstable, metricsCollector);
                 if (!sstable.isRepaired())
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
                 iterators.add(iter);
-                ssTablesIterated++;
-                sstable.incrementReadCount();
                 mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
                                                         iter.header.partitionLevelDeletion.markedForDeleteAt());
             }
@@ -620,14 +630,12 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                     @SuppressWarnings("resource") // 'iter' is added to iterators which is close on exception,
                     // or through the closing of the final merged iterator
-                    FlowableUnfilteredPartition/*WithLowerBound*/ iter = makeFlowable(cfs, sstable);
+                    FlowableUnfilteredPartition/*WithLowerBound*/ iter = makeFlowable(cfs, sstable, metricsCollector);
                     if (!sstable.isRepaired())
                         oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
                     iterators.add(iter);
-                    ssTablesIterated++;
                     includedDueToTombstones++;
-                    sstable.incrementReadCount();
                 }
             }
             if (Tracing.isTracing())
@@ -643,12 +651,9 @@ public class SinglePartitionReadCommand extends ReadCommand
 
             DecoratedKey key = merged.header.partitionKey;
             cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(merged.header.partitionKey.getKey(), key.hashCode(), 1);
-            cfs.metric.updateSSTableIterated(ssTablesIterated);
-
             return merged;
         }
     }
-
 
     private boolean shouldInclude(SSTableReader sstable)
     {
@@ -661,20 +666,25 @@ public class SinglePartitionReadCommand extends ReadCommand
         return clusteringIndexFilter().shouldInclude(sstable);
     }
 
-//    private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs, final SSTableReader sstable)
+//    private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs, 
+//                                                             SSTableReader sstable,
+//                                                             SSTableReadsListener listener)
 //    {
 //        return StorageHook.instance.makeRowIteratorWithLowerBound(cfs,
 //                                                                  partitionKey(),
 //                                                                  sstable,
 //                                                                  clusteringIndexFilter(),
-//                                                                  columnFilter());
+//                                                                  columnFilter(),
+//                                                                  listener);
 //
 //    }
 
-    private FlowableUnfilteredPartition makeFlowable(ColumnFamilyStore cfs, final SSTableReader sstable)
+    private FlowableUnfilteredPartition makeFlowable(final ColumnFamilyStore cfs, 
+                                                     final SSTableReader sstable, 
+                                                     final SSTableReadsListener listener)
     {
         // synchronous!
-        return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed());
+        return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), listener);
     }
 
 //    /**
@@ -683,7 +693,8 @@ public class SinglePartitionReadCommand extends ReadCommand
 //     * would cause all iterators to be initialized and hence all sstables to be accessed.
 //     */
 //    private FlowableUnfilteredPartition withSSTablesIterated(List<FlowableUnfilteredPartition> iterators,
-//                                                             TableMetrics metrics)
+//                                                             TableMetrics metrics,
+//                                                             SSTableReadMetricsCollector metricsCollector)
 //    {
 //        if(!merged.isEmpty())
 //        {
@@ -698,8 +709,9 @@ public class SinglePartitionReadCommand extends ReadCommand
 //                                                .filter(it -> ((LazilyInitializedUnfilteredRowIterator)it).initialized())
 //                                                .count();
 //
-//            //metrics.updateSSTableIterated(sstablesIterated);
-//            Tracing.trace("Merged data from memtables and {} sstables", sstablesIterated);
+//            int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
+//            metrics.updateSSTableIterated(mergedSSTablesIterated);
+//            Tracing.trace("Merged data from memtables and {} sstables", mergedSSTablesIterated);
 //        });
 //        return Transformation.apply(merged, new UpdateSstablesIterated());
 //    }
@@ -726,7 +738,9 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private FlowableUnfilteredPartition queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs, ClusteringIndexNamesFilter filter)
+    private FlowableUnfilteredPartition queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs,
+                                                                                 ClusteringIndexNamesFilter filter,
+                                                                                 SSTableReadMetricsCollector metricsCollector)
     {
         // FIXME: Code here is synchronous aka bad.
         Tracing.trace("Acquiring sstable references");
@@ -752,7 +766,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         /* add the SSTables on disk */
         Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
-        int sstablesIterated = 0;
         boolean onlyUnrepaired = true;
         // read sorted sstables
         for (SSTableReader sstable : view.sstables)
@@ -778,10 +791,14 @@ public class SinglePartitionReadCommand extends ReadCommand
                     continue; // no tombstone at all, we can skip that sstable
 
                 // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-                sstable.incrementReadCount();
-                try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed()))
+                try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
+                                                                                       sstable,
+                                                                                       partitionKey(),
+                                                                                       filter.getSlices(metadata()),
+                                                                                       columnFilter(),
+                                                                                       filter.isReversed(),
+                                                                                       metricsCollector))
                 {
-                    sstablesIterated++;
                     if (!iter.partitionLevelDeletion().isLive())
                         result = add(UnfilteredRowIterators.noRowsIterator(iter.metadata(), iter.partitionKey(), Rows.EMPTY_STATIC_ROW, iter.partitionLevelDeletion(), filter.isReversed()), result, filter, sstable.isRepaired());
                     else
@@ -790,21 +807,24 @@ public class SinglePartitionReadCommand extends ReadCommand
                 continue;
             }
 
-            Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
-            sstable.incrementReadCount();
-            try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs, sstable, partitionKey(), filter.getSlices(metadata()), columnFilter(), filter.isReversed()))
+            try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
+                                                                                   sstable,
+                                                                                   partitionKey(),
+                                                                                   filter.getSlices(metadata()),
+                                                                                   columnFilter(),
+                                                                                   filter.isReversed(),
+                                                                                   metricsCollector))
             {
                 if (iter.isEmpty())
                     continue;
 
                 if (sstable.isRepaired())
                     onlyUnrepaired = false;
-                sstablesIterated++;
                 result = add(iter, result, filter, sstable.isRepaired());
             }
         }
 
-        cfs.metric.updateSSTableIterated(sstablesIterated);
+        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables());
 
         if (result == null || result.isEmpty())
             return FlowablePartitions.empty(metadata(), partitionKey(), false);
@@ -814,7 +834,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         StorageHook.instance.reportRead(cfs.metadata.id, partitionKey());
 
         // "hoist up" the requested data into a more recent sstable
-        if (sstablesIterated > cfs.getMinimumCompactionThreshold()
+        if (metricsCollector.getMergedSSTables() > cfs.getMinimumCompactionThreshold()
             && onlyUnrepaired
             && !cfs.isAutoCompactionDisabled()
             && cfs.getCompactionStrategyManager().shouldDefragment())
@@ -1123,6 +1143,34 @@ public class SinglePartitionReadCommand extends ReadCommand
             DecoratedKey key = metadata.partitioner.decorateKey(metadata.partitionKeyType.readValue(in, DatabaseDescriptor.getMaxValueSize()));
             ClusteringIndexFilter filter = ClusteringIndexFilter.serializers.get(version).deserialize(in, metadata);
             return new SinglePartitionReadCommand(digestVersion, metadata, nowInSec, columnFilter, rowFilter, limits, key, filter);
+        }
+    }
+
+    /**
+     * {@code SSTableReaderListener} used to collect metrics about SSTable read access.
+     */
+    private static final class SSTableReadMetricsCollector implements SSTableReadsListener
+    {
+        /**
+         * The number of SSTables that need to be merged. This counter is only updated for single partition queries
+         * since this has been the behavior so far.
+         */
+        private int mergedSSTables;
+
+        @Override
+        public void onSSTableSelected(SSTableReader sstable, RowIndexEntry indexEntry, SelectionReason reason)
+        {
+            sstable.incrementReadCount();
+            mergedSSTables++;
+        }
+
+        /**
+         * Returns the number of SSTables that need to be merged.
+         * @return the number of SSTables that need to be merged.
+         */
+        public int getMergedSSTables()
+        {
+            return mergedSSTables;
         }
     }
 }

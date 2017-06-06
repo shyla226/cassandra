@@ -169,6 +169,14 @@ public final class SystemKeyspace
               + "schema_version uuid,"
               + "tokens set<varchar>,"
               + "truncated_at map<uuid, blob>,"
+
+              // DSE-specific extra columns:
+              + "dse_version text,"
+              + "graph boolean,"
+              + "server_id text,"
+              + "workload text,"
+              + "workloads frozen<set<text>>,"
+
               + "PRIMARY KEY ((key)))")
               .recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
               .build();
@@ -186,6 +194,14 @@ public final class SystemKeyspace
               + "rpc_address inet,"
               + "schema_version uuid,"
               + "tokens set<varchar>,"
+
+              // DSE-specific extra columns:
+              + "dse_version text,"
+              + "graph boolean,"
+              + "server_id text,"
+              + "workload text,"
+              + "workloads frozen<set<text>>,"
+
               + "PRIMARY KEY ((peer)))")
               .build();
 

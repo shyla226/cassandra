@@ -295,7 +295,7 @@ public final class TableMetadata
      */
     public ColumnMetadata getColumn(ColumnIdentifier name)
     {
-        return columns.get(name.bytes);
+        return getColumn(name.bytes);
     }
 
     /*

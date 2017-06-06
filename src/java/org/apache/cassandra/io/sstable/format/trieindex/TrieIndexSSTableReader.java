@@ -19,8 +19,6 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -43,6 +41,9 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SelectionReason;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReason;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
@@ -179,9 +180,13 @@ class TrieIndexSSTableReader extends SSTableReader
         return partitionIndex.size();
     }
 
-    public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator iterator(DecoratedKey key,
+                                          Slices slices,
+                                          ColumnFilter selectedColumns,
+                                          boolean reversed,
+                                          SSTableReadsListener listener)
     {
-        RowIndexEntry rie = getExactPosition(key);
+        RowIndexEntry rie = getExactPosition(key, listener);
         return iterator(null, key, rie, slices, selectedColumns, reversed);
     }
 
@@ -194,22 +199,17 @@ class TrieIndexSSTableReader extends SSTableReader
              : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns);
     }
 
-    public FlowableUnfilteredPartition flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public FlowableUnfilteredPartition flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
-        return FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed), Schedulers.io());
+        return FlowablePartitions.fromIterator(iterator(key, slices, selectedColumns, reversed, listener), Schedulers.io());
     }
 
-    /**
-     * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
-     * allow key selection by token bounds but only if op != * EQ
-     * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
-     * @return The index entry corresponding to the key, or null if the key is not present
-     */
-    public RowIndexEntry getPosition(PartitionPosition key, Operator op)
+    @Override
+    public RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener)
     {
         if (op == Operator.EQ)
         {
-            return getExactPosition((DecoratedKey) key);
+            return getExactPosition((DecoratedKey) key, listener);
         }
         else
         {
@@ -323,37 +323,51 @@ class TrieIndexSSTableReader extends SSTableReader
         return key;
     }
 
+    @Override
     public RowIndexEntry getExactPosition(DecoratedKey dk)
+    {
+        return getExactPosition(dk, SSTableReadsListener.NOOP_LISTENER);
+    }
+
+    private RowIndexEntry getExactPosition(DecoratedKey dk, SSTableReadsListener listener)
     {
         if (!bf.isPresent(dk))
         {
+            listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
             Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.generation);
             return null;
         }
-        if (filterFirst() && first.compareTo(dk) > 0)
+
+        if ((filterFirst() && first.compareTo(dk) > 0) || (filterLast() && last.compareTo(dk) < 0))
+        {
+            listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
             return null;
-        if (filterLast() && last.compareTo(dk) < 0)
-            return null;
+        }
 
         try (PartitionIndex.Reader reader = partitionIndex.openReader())
         {
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
+            {
+                listener.onSSTableSkipped(this, SkippingReason.PARTITION_INDEX_LOOKUP);
                 return null;
+            }
 
             try (FileDataInput in = createIndexOrDataReader(indexPos))
             {
                 if (!ByteBufferUtil.equalsWithShortLength(in, dk.getKey()))
                 {
                     bloomFilterTracker.addFalsePositive();
+                    listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
                     return null;
                 }
 
                 bloomFilterTracker.addTruePositive();
-                if (indexPos >= 0)
-                    return TrieIndexEntry.deserialize(in, in.getFilePointer());
-                else
-                    return new RowIndexEntry(~indexPos);
+                RowIndexEntry entry = indexPos >= 0 ? TrieIndexEntry.deserialize(in, in.getFilePointer())
+                                                    : new RowIndexEntry(~indexPos);
+
+                listener.onSSTableSelected(this, entry, SelectionReason.INDEX_ENTRY_FOUND);
+                return entry;
             }
         }
         catch (IOException e)

@@ -45,8 +45,11 @@ public class PaxosState
 
     public PaxosState(Commit promised, Commit accepted, Commit mostRecentCommit)
     {
-        assert promised.update.partitionKey().equals(accepted.update.partitionKey()) && accepted.update.partitionKey().equals(mostRecentCommit.update.partitionKey());
-        assert promised.update.metadata() == accepted.update.metadata() && accepted.update.metadata() == mostRecentCommit.update.metadata();
+        assert promised.update.partitionKey().equals(accepted.update.partitionKey());
+        assert accepted.update.partitionKey().equals(mostRecentCommit.update.partitionKey());
+
+        assert promised.update.metadata().id.equals(accepted.update.metadata().id);
+        assert accepted.update.metadata().id.equals(mostRecentCommit.update.metadata().id);
 
         this.promised = promised;
         this.accepted = accepted;
