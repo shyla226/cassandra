@@ -41,6 +41,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -54,7 +55,7 @@ public class MigrationManager
 
     private static final int MIGRATION_DELAY_IN_MS = 60000;
 
-    private static final Semaphore migrationLock = new Semaphore(1, true);
+    public static final Semaphore migrationLock = new Semaphore(1, true);
 
     private static final int MIGRATION_TASK_WAIT_IN_SECONDS = Integer.parseInt(System.getProperty("cassandra.migration_task_wait_in_seconds", "1"));
 
@@ -178,7 +179,13 @@ public class MigrationManager
                                      ksm.validate();
 
                                      if (Schema.instance.getKeyspaceMetadata(ksm.name) != null)
+                                     {
+                                         //Avoid races from other nodes
+                                         if (SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(ksm.name))
+                                             return Completable.complete();
+
                                          return Completable.error(new AlreadyExistsException(ksm.name));
+                                     }
 
                                      logger.info("Create new Keyspace: {}", ksm);
                                      return announce(SchemaKeyspace.makeCreateKeyspaceMutation(ksm, timestamp), announceLocally);
@@ -225,14 +232,17 @@ public class MigrationManager
                                  },
                                  lock ->
                                  {
-
-
                                      cfm.validate();
 
                                      KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(cfm.keyspace);
                                      if (ksm == null)
-                                         return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.name, cfm.keyspace)));
+                                     {
+                                         //Avoid races from other nodes
+                                         if (SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(cfm.keyspace))
+                                             return Completable.complete();
 
+                                         return Completable.error(new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.name, cfm.keyspace)));
+                                     }
                                          // If we have a table or a view which has the same name, we can't add a new one
                                      else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
                                          return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
@@ -252,7 +262,6 @@ public class MigrationManager
                                  },
                                  lock ->
                                  {
-
                                      view.metadata.validate();
 
                                      KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(view.keyspace);
@@ -301,7 +310,6 @@ public class MigrationManager
                                  },
                                  lock ->
                                  {
-
                                      ksm.validate();
 
                                      KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksm.name);
@@ -354,7 +362,6 @@ public class MigrationManager
                                  },
                                  lock ->
                                  {
-
                                      view.metadata.validate();
 
                                      ViewMetadata oldView = Schema.instance.getView(view.keyspace, view.name);
@@ -394,7 +401,13 @@ public class MigrationManager
 
                                      KeyspaceMetadata oldKsm = Schema.instance.getKeyspaceMetadata(ksName);
                                      if (oldKsm == null)
+                                     {
+                                         //Avoid races from other nodes
+                                         if (SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(ksName))
+                                             return Completable.complete();
+
                                          return Completable.error(new ConfigurationException(String.format("Cannot drop non existing keyspace '%s'.", ksName)));
+                                     }
 
                                      logger.info("Drop Keyspace '{}'", oldKsm.name);
                                      return announce(SchemaKeyspace.makeDropKeyspaceMutation(oldKsm, FBUtilities.timestampMicros()), announceLocally);
@@ -419,7 +432,14 @@ public class MigrationManager
 
                                      TableMetadata tm = Schema.instance.getTableMetadata(ksName, cfName);
                                      if (tm == null)
+                                     {
+                                         //Avoid races from other nodes
+                                         if (SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(ksName))
+                                             return Completable.complete();
+
                                          return Completable.error(new ConfigurationException(String.format("Cannot drop non existing table '%s' in keyspace '%s'.", cfName, ksName)));
+                                     }
+
                                      KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ksName);
 
                                      logger.info("Drop table '{}/{}'", tm.keyspace, tm.name);
@@ -479,8 +499,7 @@ public class MigrationManager
 
         if (announceLocally)
             return Completable.fromRunnable(() -> Schema.instance.merge(migration))
-                              .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
-                                           ImmediateThinScheduler.INSTANCE);
+                              .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
         else
             return announce(migration);
     }
@@ -493,22 +512,19 @@ public class MigrationManager
     // Returns a future on the local application of the schema
     private static Completable announce(final SchemaMigration schema)
     {
-        return Completable.defer(() -> {
-             Completable observable = Completable.fromRunnable(() -> Schema.instance.mergeAndAnnounceVersion(schema))
-                                                 .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
-                                                              ImmediateThinScheduler.INSTANCE);
+        return Completable.fromRunnable(() ->
+                                        {
+                                            Schema.instance.mergeAndAnnounceVersion(schema);
 
-             for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
-             {
-                 // only push schema to nodes with known and equal versions
-                 if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
-                     MessagingService.instance().knowsVersion(endpoint) &&
-                     MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
-                     pushSchemaMutation(endpoint, schema);
-             }
-
-             return observable;
-         });
+                                            for (InetAddress endpoint : Gossiper.instance.getLiveMembers())
+                                            {
+                                                // only push schema to nodes with known and equal versions
+                                                if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
+                                                    MessagingService.instance().knowsVersion(endpoint) &&
+                                                    MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
+                                                    pushSchemaMutation(endpoint, schema);
+                                            }
+                                        }).subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
     }
 
     /**

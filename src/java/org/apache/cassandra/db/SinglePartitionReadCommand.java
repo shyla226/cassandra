@@ -67,6 +67,7 @@ import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Threads;
 
 /**
  * A read command that selects a (part of a) single partition.
@@ -362,9 +363,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        //return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController),
-        //                              TPC.getCoreForKey(cfs.keyspace, partitionKey()));
-        return queryMemtableAndDisk(cfs, executionController);
+        return queryMemtableAndDisk(cfs, executionController);//.lift(Threads.requestOnCore(TPC.getCoreForKey(cfs.keyspace, partitionKey)));
     }
 
     /**
