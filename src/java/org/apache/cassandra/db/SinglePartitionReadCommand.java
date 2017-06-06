@@ -824,8 +824,6 @@ public class SinglePartitionReadCommand extends ReadCommand
             }
         }
 
-        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables());
-
         if (result == null || result.isEmpty())
             return FlowablePartitions.empty(metadata(), partitionKey(), false);
 

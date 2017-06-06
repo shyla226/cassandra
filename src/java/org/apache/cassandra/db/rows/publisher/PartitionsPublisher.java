@@ -283,16 +283,18 @@ public class PartitionsPublisher
                     for (Transformation transformation : transformations)
                         transformation.onClose();
 
+                    // we must close before onComplete, otherwise actions performed onClose
+                    // will not be synchronous, e.g. updating the metrics (reproduce with KeySpaceTest.testLimitSSTables
+                    // by adding a sleep at the beginning of SinglePartitionsReadCommand.updateMetrics()
+                    release();
+
                     if (error == null)
                         subscriber.onComplete();
                 }
                 catch(Throwable t)
                 {
+                    release(); // idem-potent but it must be called before the final onError, see comment above
                     onError(t);
-                }
-                finally
-                {
-                    release();
                 }
             }
         }
@@ -303,13 +305,13 @@ public class PartitionsPublisher
             JVMStabilityInspector.inspectThrowable(error);
             logger.debug("Got exception: {}/{}", error.getClass().getName(), error.getMessage());
 
+            release();
+
             if (this.error == null)
             {
                 this.error = error;
                 subscriber.onError(error);
             }
-
-            release();
         }
 
         private void release()

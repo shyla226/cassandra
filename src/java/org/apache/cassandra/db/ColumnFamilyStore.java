@@ -1194,7 +1194,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 catch (Throwable t)
                 {
                     logger.error("Flushing {} failed with error", memtable.toString(), t);
-                    flushRunnables.stream().forEach(Memtable.FlushRunnable::abort);
+                    if (flushRunnables != null)
+                        flushRunnables.stream().forEach(Memtable.FlushRunnable::abort);
 
                     t = perform(t, () -> FBUtilities.waitOnFutures(futures));
                     t = txn.abort(t);
