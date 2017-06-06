@@ -78,6 +78,8 @@ import org.apache.cassandra.utils.memory.MemtablePool;
 import org.apache.cassandra.utils.memory.NativePool;
 import org.apache.cassandra.utils.memory.SlabPool;
 
+import static org.apache.cassandra.utils.Throwables.maybeFail;
+
 public class Memtable implements Comparable<Memtable>
 {
     private static final Logger logger = LoggerFactory.getLogger(Memtable.class);
@@ -403,16 +405,9 @@ public class Memtable implements Comparable<Memtable>
         }
         catch (Throwable e)
         {
-            throw Throwables.propagate(abortRunnables(runnables, e));
+            runnables.stream().forEach(FlushRunnable::abort);
+            throw Throwables.propagate(e);
         }
-    }
-
-    public Throwable abortRunnables(List<FlushRunnable> runnables, Throwable t)
-    {
-        if (runnables != null)
-            for (FlushRunnable runnable : runnables)
-                t = runnable.writer.abort(t);
-        return t;
     }
 
     public String toString()
@@ -532,6 +527,8 @@ public class Memtable implements Comparable<Memtable>
         private final PartitionPosition from;
         private final PartitionPosition to;
 
+        private volatile boolean aborted;
+
         FlushRunnable(PartitionPosition from, PartitionPosition to, Directories.DataDirectory flushLocation, LifecycleTransaction txn)
         {
             this(getSortedSubrange(from, to), flushLocation, from, to, txn);
@@ -605,72 +602,99 @@ public class Memtable implements Comparable<Memtable>
         {
             logger.debug("Writing {}, flushed range = ({}, {}]", Memtable.this.toString(), from, to);
 
-            List<Iterator<AtomicBTreePartition>> partitions = partitionsToFlush();
-
-            // TPC: For OrderPreservingPartitioners we must merge across the memtable ranges
-            // To ensure the partitions are written in the correct order.
-            // As the ranges in TPC are based on long token and not the ordered token
-            if (cfs.metadata().partitioner.preservesOrder() && partitions.size() > 1)
+            try
             {
-                partitions = Collections.singletonList(MergeIterator.get(partitions, Comparator.comparing(AtomicBTreePartition::partitionKey), new Reducer<AtomicBTreePartition, AtomicBTreePartition>()
+                List<Iterator<AtomicBTreePartition>> partitions = partitionsToFlush();
+
+                // TPC: For OrderPreservingPartitioners we must merge across the memtable ranges
+                // To ensure the partitions are written in the correct order.
+                // As the ranges in TPC are based on long token and not the ordered token
+                if (cfs.metadata().partitioner.preservesOrder() && partitions.size() > 1)
                 {
-                    AtomicBTreePartition reduced = null;
-
-                    @Override
-                    public boolean trivialReduceIsTrivial()
+                    partitions = Collections.singletonList(MergeIterator.get(partitions, Comparator.comparing(AtomicBTreePartition::partitionKey), new Reducer<AtomicBTreePartition, AtomicBTreePartition>()
                     {
-                        return true;
-                    }
+                        AtomicBTreePartition reduced = null;
 
-                    public void reduce(int idx, AtomicBTreePartition current)
-                    {
-                        reduced = current;
-                    }
-
-                    public AtomicBTreePartition getReduced()
-                    {
-                        return reduced;
-                    }
-                }));
-            }
-
-            // (we can't clear out the map as-we-go to free up memory,
-            //  since the memtable is being used for queries in the "pending flush" category)
-            for (Iterator<AtomicBTreePartition> partitionSet : partitions)
-            {
-                logger.debug("Processing sub-range");
-
-                while (partitionSet.hasNext())
-                {
-                    AtomicBTreePartition partition  = partitionSet.next();
-
-                    //logger.debug("Processing partition {}", partition.partitionKey());
-
-                    // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
-                    // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
-                    // we don't need to preserve tombstones for repair. So if both operation are in this
-                    // memtable (which will almost always be the case if there is no ongoing failure), we can
-                    // just skip the entry (CASSANDRA-4667).
-                    if (isBatchLogTable && !partition.partitionLevelDeletion().isLive() && partition.hasRows())
-                        continue;
-
-                    if (!partition.isEmpty())
-                    {
-                        try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+                        @Override
+                        public boolean trivialReduceIsTrivial()
                         {
-                            writer.append(iter);
+                            return true;
+                        }
+
+                        public void reduce(int idx, AtomicBTreePartition current)
+                        {
+                            reduced = current;
+                        }
+
+                        public AtomicBTreePartition getReduced()
+                        {
+                            return reduced;
+                        }
+                    }));
+                }
+
+                // (we can't clear out the map as-we-go to free up memory,
+                //  since the memtable is being used for queries in the "pending flush" category)
+                for (Iterator<AtomicBTreePartition> partitionSet : partitions)
+                {
+                    if (aborted)
+                        break;
+
+                    while (partitionSet.hasNext())
+                    {
+                        if (aborted)
+                            break;
+
+                        AtomicBTreePartition partition = partitionSet.next();
+
+                        //logger.debug("Processing partition {}", partition.partitionKey());
+
+                        // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
+                        // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,
+                        // we don't need to preserve tombstones for repair. So if both operation are in this
+                        // memtable (which will almost always be the case if there is no ongoing failure), we can
+                        // just skip the entry (CASSANDRA-4667).
+                        if (isBatchLogTable && !partition.partitionLevelDeletion().isLive() && partition.hasRows())
+                            continue;
+
+                        if (!partition.isEmpty())
+                        {
+                            try (UnfilteredRowIterator iter = partition.unfilteredIterator())
+                            {
+                                writer.append(iter);
+                            }
+                            catch (Throwable t)
+                            {
+                                logger.debug("Error when flushing rows: {}/{}", t.getClass().getName(), t.getMessage());
+                                Throwables.propagate(t);
+                            }
                         }
                     }
                 }
             }
+            finally
+            {
+                if (aborted)
+                {
+                    logger.debug("Flushing of {} aborted", writer.getFilename());
+                    maybeFail(writer.abort(null));
+                }
+                else
+                {
+                    long bytesFlushed = writer.getFilePointer();
+                    logger.debug("Completed flushing {} ({}) for commitlog position {}",
+                                 writer.getFilename(),
+                                 FBUtilities.prettyPrintMemory(bytesFlushed),
+                                 commitLogUpperBound);
+                    // Update the metrics
+                    cfs.metric.bytesFlushed.inc(bytesFlushed);
+                }
+            }
+        }
 
-            long bytesFlushed = writer.getFilePointer();
-            logger.debug("Completed flushing {} ({}) for commitlog position {}",
-                                                                              writer.getFilename(),
-                                                                              FBUtilities.prettyPrintMemory(bytesFlushed),
-                                                                              commitLogUpperBound);
-            // Update the metrics
-            cfs.metric.bytesFlushed.inc(bytesFlushed);
+        public void abort()
+        {
+            this.aborted = true;
         }
 
         public SSTableMultiWriter createFlushWriter(LifecycleTransaction txn,

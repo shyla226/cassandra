@@ -89,6 +89,7 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
+import static org.apache.cassandra.utils.Throwables.perform;
 
 public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 {
@@ -1189,14 +1190,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     if (flushNonCf2i)
                         indexManager.flushAllNonCFSBackedIndexesBlocking();
 
-                    flushResults = Lists.newArrayList(FBUtilities.waitOnFutures(futures));
                 }
                 catch (Throwable t)
                 {
                     logger.error("Flushing {} failed with error", memtable.toString(), t);
-                    t = memtable.abortRunnables(flushRunnables, t);
+                    flushRunnables.stream().forEach(Memtable.FlushRunnable::abort);
+
+                    t = perform(t, () -> FBUtilities.waitOnFutures(futures));
                     t = txn.abort(t);
-                    throw Throwables.propagate(t);
+                    Throwables.propagate(t);
+                }
+
+                try
+                {
+                    flushResults = Lists.newArrayList(FBUtilities.waitOnFutures(futures));
+                }
+                catch (Throwable t)
+                {
+                    logger.error("Flushing {} failed when waiting for flush runnables", memtable.toString(), t);
+                    t = txn.abort(t);
+                    Throwables.propagate(t);
                 }
 
                 try
