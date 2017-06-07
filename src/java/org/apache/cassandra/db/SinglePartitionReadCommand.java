@@ -363,7 +363,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        return queryMemtableAndDisk(cfs, executionController);//.lift(Threads.requestOnCore(TPC.getCoreForKey(cfs.keyspace, partitionKey)));
+        return queryMemtableAndDisk(cfs, executionController).lift(Threads.requestOnCore(TPC.getCoreForKey(cfs.keyspace, partitionKey)));
     }
 
     /**
@@ -567,8 +567,8 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
-            return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
+        //if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
+        //    return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter());
 
         return CsFlow.using(() ->
                             {

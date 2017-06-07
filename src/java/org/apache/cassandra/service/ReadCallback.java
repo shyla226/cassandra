@@ -111,9 +111,10 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     {
         return publishSubject
                .first(EmptyIterators.partition())
-               .onErrorResumeNext(exc -> {
-                  int received = this.received.get();
-                  boolean failed = !(exc instanceof ReadTimeoutException);
+               .onErrorResumeNext(exc ->
+                                  {
+                                      int received = this.received.get();
+                                      boolean failed = !(exc instanceof ReadTimeoutException);
 
                                       if (failed)
                                       {
@@ -129,8 +130,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
                                           }
                                       }
 
-                                      return Single.error( exc);
-
+                                      return Single.error(exc);
                                   });
     }
 
