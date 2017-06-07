@@ -864,7 +864,7 @@ class ContinuousPagingTestUtils
 
             private void checkError(Throwable t, int expectedPageNum)
             {
-                assertTrue(exception != null);
+                assertTrue("An unexpected error has occurred: " + t.getMessage(), exception != null);
                 assertEquals(exception, t.getClass());
                 assertEquals(failAfter, numPagesReceived);
                 assertEquals(numPagesReceived, expectedPageNum - 1);
