@@ -93,7 +93,7 @@ public abstract class Selection
     public ResultSet.ResultMetadata getResultMetadata()
     {
         if (!isJson)
-            return metadata;
+            return metadata.copy();
 
         ColumnSpecification firstColumn = metadata.names.get(0);
         ColumnSpecification jsonSpec = new ColumnSpecification(firstColumn.ksName, firstColumn.cfName, Json.JSON_COLUMN_ID, UTF8Type.instance);
@@ -385,7 +385,7 @@ public abstract class Selection
                 @Override
                 public List<ByteBuffer> getOutputRow()
                 {
-                    return current;
+                    return isJson ? rowToJson(current, options.getProtocolVersion(), metadata) : current;
                 }
 
                 @Override
