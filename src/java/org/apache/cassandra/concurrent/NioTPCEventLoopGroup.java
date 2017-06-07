@@ -29,8 +29,10 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
+import io.netty.channel.nio.NioEventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.AbstractEventExecutor;
+import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ScheduledFuture;
 
@@ -61,6 +63,17 @@ public class NioTPCEventLoopGroup extends NioEventLoopGroup implements TPCEventL
     {
         assert executor instanceof TPCThread.TPCThreadsCreator;
         return new SingleCoreEventLoop(super.newChild(executor, args), (TPCThread.TPCThreadsCreator)executor);
+    }
+
+    // Overriding to avoid direct cast of SingleCoreEventLoop to NioEventLoop, see SingleCoreEventLoop implementation
+    // note for details.
+    @Override
+    public void setIoRatio(int ioRatio) {
+        for (EventExecutor eventExecutor : this)
+        {
+            SingleCoreEventLoop eventLoop = (SingleCoreEventLoop) eventExecutor;
+            ((NioEventLoop) eventLoop.nettyLoop).setIoRatio(ioRatio);
+        }
     }
 
     // Implementation note: we'd really want to extend Netty NioEventLoop here, but its ctor is package protected (and
