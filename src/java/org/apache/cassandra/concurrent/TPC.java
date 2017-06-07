@@ -74,8 +74,8 @@ public class TPC
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
-    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
-                                          && Aio.isAvailable() && USE_EPOLL;
+    public static final boolean USE_AIO = false;//Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
+                                          //&& Aio.isAvailable() && USE_EPOLL;
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
