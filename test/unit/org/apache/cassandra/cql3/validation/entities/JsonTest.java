@@ -1120,6 +1120,23 @@ public class JsonTest extends CQLTester
         assertRows(execute("SELECT JSON * FROM %s"), row("{\"k\": 0, \"a\": {\"a\": 0, \"b\": true}}"));
     }
 
+    @Test
+    public void testTimestampJson() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk TEXT PRIMARY KEY, d TIMESTAMP)");
+
+        int maxInt = Integer.MAX_VALUE;
+        long longNum = ((long) maxInt) + 1;
+
+        execute("INSERT INTO %s JSON '{ \"pk\" : \"a\", \"d\" : " + maxInt + " }'");
+        execute("INSERT INTO %s JSON '{ \"pk\" : \"b\", \"d\" : " + longNum + " }'");
+
+        assertRows(execute("SELECT * FROM %s WHERE pk = 'a'"),
+                   row("a", new Date(maxInt)));
+        assertRows(execute("SELECT * FROM %s WHERE pk = 'b'"),
+                   row("b", new Date(longNum)));
+    }
+
     // done for CASSANDRA-11048
     @Test
     public void testJsonThreadSafety() throws Throwable
