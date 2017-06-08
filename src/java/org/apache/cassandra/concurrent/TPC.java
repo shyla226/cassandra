@@ -436,8 +436,11 @@ public class TPC
 
     public static AsynchronousFileChannel openFileChannel(File file, boolean mmapped) throws IOException
     {
-        if (!USE_AIO || mmapped || !isStarted())
+        if (!USE_AIO || mmapped)
+        {
+            logger.info("NonAIO {}", file);
             return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+        }
 
         Integer coreId = getCoreId();
 
