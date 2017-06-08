@@ -349,7 +349,8 @@ public class PagingState
         @Override
         public String toString()
         {
-            return mark == null ? "null" : ByteBufferUtil.bytesToHex(mark);
+            return String.format("[%s]",
+                                 mark == null ? "null" : ByteBufferUtil.bytesToHex(mark));
         }
     }
 }

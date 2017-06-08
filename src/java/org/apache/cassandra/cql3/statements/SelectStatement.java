@@ -1140,24 +1140,36 @@ public class SelectStatement implements CQLStatement
                                       int userLimit,
                                       AggregationSpecification aggregationSpec)
     {
-        return partitions.map(p ->
-                              {
-                                  try
-                                  {
-                                      ResultSet.Builder res = ResultSet.makeBuilder(getResultMetadata(), selectors, aggregationSpec);
-                                      while (p.hasNext())
-                                          processPartition(p.next(), options, res, nowInSec);
-                                      ResultSet cqlRows = res.build();
-                                      orderResults(cqlRows);
-                                      cqlRows.trim(userLimit);
-                                      return cqlRows;
-                                  }
-                                  finally
-                                  {
-                                      p.close();
-                                  }
-                              }
-        );
+        return partitions.map(p -> {
+            try
+            {
+                ResultSet.Builder result = ResultSet.makeBuilder(getResultMetadata(), selectors, aggregationSpec);
+                while (p.hasNext())
+                {
+                    try (RowIterator partition = p.next())
+                    {
+                        processPartition(partition, options, result, nowInSec);
+                    }
+                }
+                return postQueryProcessing(result, userLimit);
+            }
+            finally
+            {
+                p.close();
+            }
+
+        });
+    }
+
+    private ResultSet postQueryProcessing(ResultSet.Builder result, int userLimit)
+    {
+        ResultSet cqlRows = result.build();
+
+        orderResults(cqlRows);
+
+        cqlRows.trim(userLimit);
+
+        return cqlRows;
     }
 
     public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
@@ -1185,48 +1197,17 @@ public class SelectStatement implements CQLStatement
     void processPartition(RowIterator partition, QueryOptions options, ResultBuilder result, int nowInSec)
     throws InvalidRequestException
     {
-        try
+        ProtocolVersion protocolVersion = options.getProtocolVersion();
+
+        ByteBuffer[] keyComponents = getComponents(table, partition.partitionKey());
+
+        Row staticRow = partition.staticRow();
+        // If there is no rows, we include the static content if we should and we're done.
+        if (!partition.hasNext())
         {
-            if (partition == null)
-                return;
-
-            ProtocolVersion protocolVersion = options.getProtocolVersion();
-
-            ByteBuffer[] keyComponents = getComponents(table, partition.partitionKey());
-
-            Row staticRow = partition.staticRow();
-            // If there is no rows, we include the static content if we should and we're done.
-            if (!partition.hasNext())
+            if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
             {
-                if (!staticRow.isEmpty() && returnStaticContentOnPartitionWithNoRows())
-                {
-                    result.newRow(partition.partitionKey(), staticRow.clustering());
-                    for (ColumnMetadata def : selection.getColumns())
-                    {
-                        switch (def.kind)
-                        {
-                            case PARTITION_KEY:
-                                result.add(keyComponents[def.position()]);
-                                break;
-                            case STATIC:
-                                addValue(result, def, staticRow, nowInSec, protocolVersion);
-                                break;
-                            default:
-                                result.add(null);
-                        }
-                    }
-                }
-                return;
-            }
-
-            if (result.isCompleted())
-                return;
-
-            while (partition.hasNext())
-            {
-                Row row = partition.next();
-                result.newRow(partition.partitionKey(), row.clustering());
-                // Respect selection order
+                result.newRow(partition.partitionKey(), staticRow.clustering());
                 for (ColumnMetadata def : selection.getColumns())
                 {
                     switch (def.kind)
@@ -1234,29 +1215,46 @@ public class SelectStatement implements CQLStatement
                         case PARTITION_KEY:
                             result.add(keyComponents[def.position()]);
                             break;
-                        case CLUSTERING:
-                            result.add(row.clustering().get(def.position()));
-                            break;
-                        case REGULAR:
-                            addValue(result, def, row, nowInSec, protocolVersion);
-                            break;
                         case STATIC:
                             addValue(result, def, staticRow, nowInSec, protocolVersion);
                             break;
+                        default:
+                            result.add(null);
                     }
                 }
-
-                if (result.isCompleted())
-                    break;
             }
+            return;
         }
-        finally
-        {
-            if (partition != null)
-                partition.close();
-        }
+        if (result.isCompleted())
+            return;
 
-        return;
+        while (partition.hasNext())
+        {
+            Row row = partition.next();
+            result.newRow(partition.partitionKey(), row.clustering());
+            // Respect selection order
+            for (ColumnMetadata def : selection.getColumns())
+            {
+                switch (def.kind)
+                {
+                    case PARTITION_KEY:
+                        result.add(keyComponents[def.position()]);
+                        break;
+                    case CLUSTERING:
+                        result.add(row.clustering().get(def.position()));
+                        break;
+                    case REGULAR:
+                        addValue(result, def, row, nowInSec, protocolVersion);
+                        break;
+                    case STATIC:
+                        addValue(result, def, staticRow, nowInSec, protocolVersion);
+                        break;
+                }
+            }
+
+            if (result.isCompleted())
+                break;
+        }
     }
 
     /**

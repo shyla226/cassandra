@@ -20,6 +20,9 @@ package org.apache.cassandra.service.pager;
 import io.reactivex.Single;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.*;
@@ -34,6 +37,8 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 {
+    private static final Logger logger = LoggerFactory.getLogger(AbstractQueryPager.class);
+
     protected final T command;
     protected final DataLimits limits;
     protected final ProtocolVersion protocolVersion;
@@ -94,7 +99,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
         internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        Single<UnfilteredPartitionIterator> iter = Single.defer(() -> Single.just(pageCommand.executeForTests()));  // tpc TODO
+        Single<UnfilteredPartitionIterator> iter = pageCommand.executeLocally().toDelayedIterator(metadata);
         return iter.map(it -> Transformation.apply(it, internalPager));
     }
 
@@ -187,6 +192,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         @Override
         public void onClose()
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - closing with {}/{}", AbstractQueryPager.this.hashCode(), lastKey, lastRow);
+
             // In some case like GROUP BY a counter need to know when the processing is completed.
             counter.onClose();
 
@@ -197,6 +205,10 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
             // if the counter did not count up to the page limits, then the iteration must have reached the end
             exhausted = pageLimits.isExhausted(counter);
+
+            if (logger.isTraceEnabled())
+                logger.trace("{} - exhausted {}, counter: {}, remaining: {}/{}",
+                            AbstractQueryPager.this.hashCode(), exhausted, counter, remaining, remainingInPartition);
 
             // remove the internal page so that we know that the iteration is finished
             internalPager = null;
@@ -213,8 +225,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         // within the partition.
         private int getRemainingInPartition()
         {
-            if (lastRow != null && (lastRow.clustering() == Clustering.STATIC_CLUSTERING
-                                    || lastRow.clustering() == Clustering.EMPTY))
+            if (lastRow != null && lastRow.clustering().size() == 0)
             {
                 return 0;
             }

@@ -526,6 +526,12 @@ public abstract class DataLimits
             {
                 return isDone() || rowInCurrentPartition >= perPartitionLimit;
             }
+
+            @Override
+            public String toString()
+            {
+                return String.format("[counted: %d, count: %d", counted(), count());
+            }
         }
 
         @Override
