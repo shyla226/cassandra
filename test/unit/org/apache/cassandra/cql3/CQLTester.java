@@ -264,6 +264,9 @@ public abstract class CQLTester
             //put the SS through join.
             StorageService.instance.initServer();
 
+            // clear the SS shutdown hook as it makes the test take longer on Jenkins
+            JVMStabilityInspector.removeShutdownHooks();
+
             logger.info("Server initialized");
             boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.INITIALIZED);
             assertTrue("Unexpected server status: " + serverStatus, ret);
