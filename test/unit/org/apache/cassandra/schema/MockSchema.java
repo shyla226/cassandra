@@ -48,7 +48,7 @@ public class MockSchema
 
     public static Memtable memtable(ColumnFamilyStore cfs)
     {
-        return new Memtable(cfs.metadata(), cfs.keyspace.getTPCBoundaries());
+        return new Memtable(cfs.metadata());
     }
 
     public static SSTableReader sstable(int generation, ColumnFamilyStore cfs)
