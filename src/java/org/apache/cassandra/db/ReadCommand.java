@@ -509,8 +509,11 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
         {
             PartitionHeader header = partition.header;
-            if (partition.isEmpty() || purger.shouldPurge(header.partitionLevelDeletion))
+            if (partition.isEmpty())
                 return null;
+
+            if (purger.shouldPurge(header.partitionLevelDeletion))
+                header = header.with(DeletionTime.LIVE);
 
             return new FlowableUnfilteredPartition(header,
                                                    applyToStatic(partition.staticRow),
