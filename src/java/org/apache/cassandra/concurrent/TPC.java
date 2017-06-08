@@ -20,6 +20,7 @@ package org.apache.cassandra.concurrent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.AsynchronousFileChannel;
+import java.nio.file.FileSystems;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,10 +42,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.SigarLibrary;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
@@ -74,8 +77,8 @@ public class TPC
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
-    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "false"))
-                                          && Aio.isAvailable() && USE_EPOLL;
+    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
+                                          && Aio.isAvailable() && USE_EPOLL && FileUtils.isSSD();
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
