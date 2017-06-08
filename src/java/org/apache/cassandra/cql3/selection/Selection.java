@@ -76,6 +76,15 @@ public abstract class Selection
     }
 
     /**
+     * Returns the columns requested by the user
+     * @return the columns requested by the user
+     */
+    public final List<ColumnSpecification> getSelectedColumns()
+    {
+        return new ArrayList<>(metadata.requestNames());
+    }
+
+    /**
      * Checks if this selection contains static columns.
      * @return <code>true</code> if this selection contains static columns, <code>false</code> otherwise;
      */
