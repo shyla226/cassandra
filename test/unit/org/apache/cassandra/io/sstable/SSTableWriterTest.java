@@ -34,6 +34,7 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -237,7 +238,11 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             try
             {
                 DecoratedKey dk = Util.dk("large_value");
-                UnfilteredRowIterator rowIter = sstable.iterator(dk, Slices.ALL, ColumnFilter.all(cfs.metadata()), false);
+                UnfilteredRowIterator rowIter = sstable.iterator(dk,
+                                                                 Slices.ALL,
+                                                                 ColumnFilter.all(cfs.metadata()),
+                                                                 false,
+                                                                 SSTableReadsListener.NOOP_LISTENER);
                 while (rowIter.hasNext())
                 {
                     rowIter.next();

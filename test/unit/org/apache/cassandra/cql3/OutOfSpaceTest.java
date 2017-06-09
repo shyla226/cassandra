@@ -171,7 +171,8 @@ public class OutOfSpaceTest extends CQLTester
             Throwable t = e.getCause();
             while (t != null && (t.getClass() == ExecutionException.class || t.getClass() == RuntimeException.class))
                 t = t.getCause();
-            Assert.assertTrue(errorClass.isInstance(t));
+            Assert.assertTrue(String.format("%s is not an instance of %s", t.getClass().getName(), errorClass.getName()),
+                              errorClass.isInstance(t));
 
             if (t instanceof FSError)
                 FileUtils.handleFSError((FSError) t);

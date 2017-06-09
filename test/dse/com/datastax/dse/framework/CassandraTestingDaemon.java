@@ -20,7 +20,7 @@ public class CassandraTestingDaemon extends CassandraDaemon
 {
     public static void main(String[] args)
     {
-        CassandraDaemon.main(args);
+        CassandraDaemon.startForDseTesting();
         new DseMobilityControllerImpl().getConnectionManager().bindConnectionListener(new ConnectionId(FBUtilities.getLocalAddress().getHostAddress(), EmbeddedMobilityServer.DEFAULT_PORT));
     }
 }

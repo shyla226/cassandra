@@ -60,6 +60,12 @@ public class ChunkCache
     private final LoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
 
+    public static int bufferToChunkSize(int bufferSize)
+    {
+        int chunkSize = Integer.highestOneBit(bufferSize);
+        return Math.min(DiskOptimizationStrategy.MAX_BUFFER_SIZE, Math.max(4096, chunkSize));
+    }
+
     static class Key
     {
         final ChunkReader file;

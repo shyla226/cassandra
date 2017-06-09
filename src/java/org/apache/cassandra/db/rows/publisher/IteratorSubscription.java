@@ -26,19 +26,30 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Single;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.subjects.BehaviorSubject;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.MutableDeletionInfo;
+import org.apache.cassandra.db.RegularAndStaticColumns;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.AbstractBTreePartition;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.PartitionTrait;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.btree.BTree;
 
 /**
- * Subscribe to {@link PartitionsPublisher} to conver asynchronous events back to an iterator.
+ * Subscribe to {@link PartitionsPublisher} to convert asynchronous events back to an iterator.
  * This is required only for backwards compatibility, to avoid making all code asynchronous in one go.
  * It should be limited to tests.
  */
@@ -46,32 +57,47 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 {
     private static final Logger logger = LoggerFactory.getLogger(IteratorSubscription.class);
 
-    private final static PartitionIterator POISON_PILL = PartitionIterator.EMPTY;
+    private static final int INITIAL_ROW_CAPACITY = ImmutableBTreePartition.INITIAL_ROW_CAPACITY;
 
-    private final BlockingQueue<PartitionIterator> queue;
+    private final static UnfilteredRowIterator POISON_PILL = new AbstractUnfilteredRowIterator(PartitionData.EMPTY)
+    {
+        protected Unfiltered computeNext()
+        {
+            return endOfData();
+        }
+    };
+
+    private final BlockingQueue<UnfilteredRowIterator> queue;
+    private final TableMetadata metadata;
+    private final BehaviorSubject<UnfilteredPartitionIterator> subject;
 
     private PartitionsSubscription subscription;
     private Throwable error = null;
-    private PartitionIterator current;
-    private PartitionIterator next;
+    private UnfilteredRowIterator next;
 
-    IteratorSubscription(PartitionsPublisher publisher)
+    private PartitionTrait partition;
+    private Pair<BTree.Builder, MutableDeletionInfo.Builder> partitionBuilders;
+
+    IteratorSubscription(TableMetadata metadata)
     {
-        // unbounded and with poor performance because it should be used for tests only and at most partition publisher will return a page of data
         this.queue = new LinkedBlockingDeque<>();
+        this.metadata = metadata;
+        this.subject = BehaviorSubject.create();
+    }
 
-        publisher.subscribe(this);
+    public Single<UnfilteredPartitionIterator> toSingle()
+    {
+        return subject.firstOrError();
     }
 
     public TableMetadata metadata()
     {
-        return null;
+        return metadata;
     }
 
     public void close()
     {
         subscription.close();
-        Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
     }
 
     public void onSubscribe(PartitionsSubscription subscription)
@@ -81,43 +107,55 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
 
     public void onNextPartition(PartitionTrait partition)
     {
-        if (current != null)
-        {
-            current.put(PartitionIterator.POISON_PILL);
-            current = null;
-        }
+        publishPartition();
 
-        current = new PartitionIterator(this, partition, subscription);
-        Uninterruptibles.putUninterruptibly(queue, current);
+        this.partition = partition;
+        this.partitionBuilders = AbstractBTreePartition.getBuilders(partition, INITIAL_ROW_CAPACITY, true);
     }
 
     public void onNext(Unfiltered item)
     {
-        assert current != null : "No current inner iterator";
-        current.put(item);
+        assert partitionBuilders != null;
+        AbstractBTreePartition.addUnfiltered(partitionBuilders, item);
+    }
+
+    private void publishPartition()
+    {
+        if (partition == null)
+            return;
+
+        assert partitionBuilders != null;
+        Uninterruptibles.putUninterruptibly(queue,ImmutableBTreePartition.create(partition, partitionBuilders)
+                                                                         .unfilteredIterator(ColumnFilter.selection(partition.columns()),
+                                                                                             Slices.ALL,
+                                                                                             partition.isReverseOrder()));
+
+        partitionBuilders = null;
+        partition = null;
     }
 
     public void onComplete()
     {
-        if (current != null)
-        {
-            current.put(PartitionIterator.POISON_PILL);
-            current = null;
-        }
-
+        publishPartition();
         Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
+
+        // signal any delayed observers, see PartitionsPublisher.toDelayedIterator
+        subject.onNext(this);
     }
 
     public void onError(Throwable error)
     {
+        publishPartition();
         this.error = error;
-        if (current != null)
-            current.put(PartitionIterator.POISON_PILL);
-
         Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
+
+        // signal any delayed observers, see PartitionsPublisher.toDelayedIterator
+        // note that we want to publish the iterator and not the error, which will
+        // be thrown during iteration
+        subject.onNext(this);
     }
 
-    protected AbstractUnfilteredRowIterator computeNext()
+    protected UnfilteredRowIterator computeNext()
     {
         if (next != null)
         {
@@ -155,49 +193,5 @@ class IteratorSubscription implements UnfilteredPartitionIterator, PartitionsSub
         UnfilteredRowIterator ret = next;
         next = null;
         return ret;
-    }
-
-    private static class PartitionIterator<T extends Unfiltered> extends AbstractUnfilteredRowIterator
-    {
-        private final static PartitionIterator EMPTY = new PartitionIterator(null, PartitionData.EMPTY, null);
-        private final static Row POISON_PILL = Rows.EMPTY_STATIC_ROW;
-
-        private final IteratorSubscription parent;
-        private final BlockingQueue<T> queue;
-        private final PartitionsSubscription subscription;
-
-        private PartitionIterator(IteratorSubscription parent, PartitionTrait partition, PartitionsSubscription subscription)
-        {
-            super(partition);
-            this.parent = parent;
-            // unbounded and with poor performance because it should be used for tests only and at most partition publisher will return a page of data
-            this.queue = new LinkedBlockingDeque<>();
-            this.subscription = subscription;
-        }
-
-        public void close()
-        {
-            if (subscription != null)
-                subscription.closePartition(partitionKey());
-        }
-
-        private void put(T item)
-        {
-            Uninterruptibles.putUninterruptibly(queue, item);
-        }
-
-        protected Unfiltered computeNext()
-        {
-            Unfiltered ret = Uninterruptibles.takeUninterruptibly(queue);
-
-            if (logger.isTraceEnabled())
-                logger.trace("{} - Iterator returns {}", hashCode(), ret.toString(metadata));
-
-            if (ret != POISON_PILL)
-                return ret;
-
-            parent.maybePropagateError();
-            return endOfData();
-        }
     }
 }

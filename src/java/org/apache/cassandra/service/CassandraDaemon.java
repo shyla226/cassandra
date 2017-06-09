@@ -544,7 +544,7 @@ public class CassandraDaemon
     /**
      * A convenience method to initialize and start the daemon in one shot.
      */
-    public void activate()
+    public void activate(boolean wait)
     {
         // Do not put any references to DatabaseDescriptor above the forceStaticInitialization call.
         try
@@ -588,8 +588,11 @@ public class CassandraDaemon
 
             start();
 
-            // as long as the process is running, keep the main thread around so we don't exist prematurely, e.g. on DRAIN
-            Uninterruptibles.awaitUninterruptibly(isRunning);
+            if (wait)
+            {
+                // as long as the process is running, keep the main thread around so we don't exist prematurely, e.g. on DRAIN
+                Uninterruptibles.awaitUninterruptibly(isRunning);
+            }
         }
         catch (Throwable e)
         {
@@ -664,7 +667,12 @@ public class CassandraDaemon
 
     public static void main(String[] args)
     {
-        instance.activate();
+        instance.activate(true);
+    }
+
+    public static void startForDseTesting()
+    {
+        instance.activate(false);
     }
 
     private void exitOrFail(int code, String message)

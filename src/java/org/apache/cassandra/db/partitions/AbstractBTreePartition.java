@@ -29,7 +29,6 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.BTreeSearchIterator;
-import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
@@ -316,7 +315,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return new Holder(columns, builder.build(), deletionBuilder.build(), iterator.staticRow(), iterator.stats());
     }
 
-    protected static Pair<BTree.Builder, MutableDeletionInfo.Builder> getBuilders(PartitionTrait partition, int initialRowCapacity, boolean ordered)
+    public static Pair<BTree.Builder, MutableDeletionInfo.Builder> getBuilders(PartitionTrait partition, int initialRowCapacity, boolean ordered)
     {
         final TableMetadata metadata = partition.metadata();
 
@@ -324,7 +323,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
                            MutableDeletionInfo.builder(partition.partitionLevelDeletion(), metadata.comparator, partition.isReverseOrder()));
     }
 
-    protected static Pair<BTree.Builder, MutableDeletionInfo.Builder> addUnfiltered(Pair<BTree.Builder, MutableDeletionInfo.Builder> builders, Unfiltered unfiltered)
+    public static Pair<BTree.Builder, MutableDeletionInfo.Builder> addUnfiltered(Pair<BTree.Builder, MutableDeletionInfo.Builder> builders, Unfiltered unfiltered)
     {
         if (unfiltered.kind() == Unfiltered.Kind.ROW)
             builders.left.add(unfiltered);
@@ -334,7 +333,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return builders;
     }
 
-    protected static Holder build(PartitionTrait partition, Pair<BTree.Builder, MutableDeletionInfo.Builder> builders)
+    public static Holder build(PartitionTrait partition, Pair<BTree.Builder, MutableDeletionInfo.Builder> builders)
     {
         final RegularAndStaticColumns columns = partition.columns();
         final boolean reversed = partition.isReverseOrder();

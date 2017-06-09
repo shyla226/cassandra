@@ -30,8 +30,6 @@ import java.util.zip.Checksum;
 
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.service.CassandraDaemon;
-import org.apache.cassandra.service.StorageService;
 import org.junit.*;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -40,6 +38,7 @@ import org.junit.runners.Parameterized.Parameters;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor.CommitLogVersion;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -556,11 +555,13 @@ public class CommitLogTest
 
             assertEquals(2, CommitLog.instance.segmentManager.getActiveSegments().size());
             CommitLogPosition position = CommitLog.instance.getCurrentPosition();
-            for (Keyspace keyspace : Keyspace.system())
-                for (ColumnFamilyStore syscfs : keyspace.getColumnFamilyStores())
+            for (String keyspace : new String[] {SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME})
+                for (ColumnFamilyStore syscfs : Keyspace.open(keyspace).getColumnFamilyStores())
                     CommitLog.instance.discardCompletedSegments(syscfs.metadata().id, CommitLogPosition.NONE, position);
             CommitLog.instance.discardCompletedSegments(cfs2.metadata().id, CommitLogPosition.NONE, position);
-            assertEquals(1, CommitLog.instance.segmentManager.getActiveSegments().size());
+
+            Collection<CommitLogSegment> segments = CommitLog.instance.segmentManager.getActiveSegments();
+            assertEquals(1, segments.size());
         }
         finally
         {
@@ -796,7 +797,7 @@ public class CommitLogTest
         catch (Throwable t)
         {
             // expected after makeUnflushable. Cause (after some wrappings) should be a write error
-            while (!(t instanceof FSWriteError))
+            while (!(t instanceof FSWriteError) && (t.getCause() != null))
                 t = t.getCause();
             // Wait for started flushes to complete.
             cfs.switchMemtableIfCurrent(current).blockingGet();

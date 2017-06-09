@@ -20,6 +20,10 @@ package org.apache.cassandra.io.util;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
+
 import static org.junit.Assert.assertEquals;
 
 public class DiskOptimizationStrategyTest
@@ -81,5 +85,33 @@ public class DiskOptimizationStrategyTest
         assertEquals(8192, strategy.bufferSize(100));
         assertEquals(8192, strategy.bufferSize(4096));
         assertEquals(16384, strategy.bufferSize(4097));
+    }
+
+    @Test
+    public void testBufferSizeToChunkeSize()
+    {
+        Config cfg = new Config();
+        cfg.file_cache_size_in_mb = 64 * 1024 * 1024;
+        DatabaseDescriptor.setConfig(cfg);
+        assertEquals(4096, ChunkCache.bufferToChunkSize(-1));
+        assertEquals(4096, ChunkCache.bufferToChunkSize(0));
+        assertEquals(4096, ChunkCache.bufferToChunkSize(1));
+        assertEquals(4096, ChunkCache.bufferToChunkSize(4095));
+        assertEquals(4096, ChunkCache.bufferToChunkSize(4096));
+        assertEquals(4096, ChunkCache.bufferToChunkSize(4097));
+        assertEquals(4096, ChunkCache.bufferToChunkSize(4098));
+        assertEquals(8192, ChunkCache.bufferToChunkSize(8193));
+        assertEquals(8192, ChunkCache.bufferToChunkSize(12288));
+        assertEquals(65536, ChunkCache.bufferToChunkSize(65536));
+        assertEquals(65536, ChunkCache.bufferToChunkSize(65537));
+        assertEquals(65536, ChunkCache.bufferToChunkSize(131072));
+
+        for (int cs = 4096; cs < 65536; cs <<= 1)
+        {
+            for (int i = cs; i < cs * 2 - 1; i++)
+            {
+                assertEquals(cs, ChunkCache.bufferToChunkSize(i));
+            }
+        }
     }
 }

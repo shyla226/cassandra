@@ -66,6 +66,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
     static final long STATE_OFFSET = UnsafeAccess.UNSAFE.objectFieldOffset(FBUtilities.getProtectedField(PartitionSubscription.class, "state"));
 
     PartitionSubscription subscr;
+    final SSTableReadsListener listener;
     final OpOrder readOrdering;
     final DecoratedKey key;
     final ColumnFilter selectedColumns;
@@ -77,9 +78,10 @@ class PartitionFlowable extends CsFlow<Unfiltered>
 
     Slices slices;
 
-    public PartitionFlowable(SSTableReader table, OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse, long limit)
+    public PartitionFlowable(SSTableReader table, SSTableReadsListener listener, OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse, long limit)
     {
         this.table = table;
+        this.listener = listener;
         this.readOrdering = readOrdering;
         this.key = key;
         this.selectedColumns = selectedColumns;
@@ -96,6 +98,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
     {
         this.table = o.table;
         this.readOrdering = readOrdering;
+        this.listener = o.listener;
         this.key = o.key;
         this.selectedColumns = o.selectedColumns;
         this.slices = o.slices;
@@ -359,7 +362,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             {
                 assert state != CLOSED;
 
-                indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, rc);
+                indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, listener, rc);
                 if (indexEntry == null)
                 {
                     cancel();

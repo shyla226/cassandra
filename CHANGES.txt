@@ -1,4 +1,6 @@
 4.0
+ * Allow selecting Map values and Set elements (CASSANDRA-7396)
+ * Fast and garbage-free Streaming Histogram (CASSANDRA-13444)
  * Update repairTime for keyspaces on completion (CASSANDRA-13539)
  * Add configurable upper bound for validation executor threads (CASSANDRA-13521)
  * Bring back maxHintTTL propery (CASSANDRA-12982)
@@ -72,6 +74,7 @@
 
 
 3.11.0
+ * Fix formatting of duration columns in CQLSH (CASSANDRA-13549)
  * Fix the problem with duplicated rows when using paging with SASI (CASSANDRA-13302)
  * Allow CONTAINS statements filtering on the partition key and it’s parts (CASSANDRA-13275)
  * Fall back to even ranges calculation in clusters with vnodes when tokens are distributed unevenly (CASSANDRA-13229)
@@ -107,6 +110,10 @@
  * Fix cqlsh automatic protocol downgrade regression (CASSANDRA-13307)
  * Tracing payload not passed from QueryMessage to tracing session (CASSANDRA-12835)
 Merged from 3.0:
+ * nodetool scrub/cleanup/upgradesstables exit code is wrong (CASSANDRA-13542)
+ * Fix the reported number of sstable data files accessed per read (CASSANDRA-13120)
+ * Fix schema digest mismatch during rolling upgrades from versions before 3.0.12 (CASSANDRA-13559)
+ * Upgrade JNA version to 4.4.0 (CASSANDRA-13072)
  * Interned ColumnIdentifiers should use minimal ByteBuffers (CASSANDRA-13533)
  * Fix repair process violating start/end token limits for small ranges (CASSANDRA-13052)
  * Add storage port options to sstableloader (CASSANDRA-13518)
@@ -161,6 +168,7 @@ Merged from 3.0:
  * Nodetool upgradesstables/scrub/compact ignores system tables (CASSANDRA-13410)
  * Fix schema version calculation for rolling upgrades (CASSANDRA-13441)
 Merged from 2.2:
+ * cqlsh COPY FROM: increment error count only for failures, not for attempts (CASSANDRA-13209)
  * Avoid starting gossiper in RemoveTest (CASSANDRA-13407)
  * Fix weightedSize() for row-cache reported by JMX and NodeTool (CASSANDRA-13393)
  * Fix JVM metric names (CASSANDRA-13103)
@@ -189,6 +197,7 @@ Merged from 2.1:
  * Fix Thread Leak in OutboundTcpConnection (CASSANDRA-13204)
  * Upgrade netty version to fix memory leak with client encryption (CASSANDRA-13114)
  * Coalescing strategy can enter infinite loop (CASSANDRA-13159)
+
 
 3.10
  * Fix secondary index queries regression (CASSANDRA-13013)

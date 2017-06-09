@@ -21,10 +21,8 @@ package org.apache.cassandra.db;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
 import org.junit.Test;
 

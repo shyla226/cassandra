@@ -23,6 +23,9 @@ import org.apache.cassandra.utils.AbstractIterator;
 
 import java.util.Arrays;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -47,6 +50,8 @@ import org.apache.cassandra.service.ClientState;
  */
 public class MultiPartitionPager implements QueryPager
 {
+    private static final Logger logger = LoggerFactory.getLogger(MultiPartitionPager.class);
+
     private final SinglePartitionPager[] pagers;
     private final DataLimits limit;
 
@@ -113,6 +118,8 @@ public class MultiPartitionPager implements QueryPager
             return null;
 
         PagingState state = pagers[current].state(inclusive);
+        if (logger.isTraceEnabled())
+            logger.trace("{} - state: {}, current: {}", hashCode(), state, current);
         return new PagingState(pagers[current].key(),
                                state == null ? null : state.rowMark,
                                remaining,
@@ -130,6 +137,8 @@ public class MultiPartitionPager implements QueryPager
             if (!pagers[current].isExhausted())
                 return false;
 
+            if (logger.isTraceEnabled())
+                logger.trace("{}, current: {} -> {}", hashCode(), current, current+1);
             current++;
         }
         return true;

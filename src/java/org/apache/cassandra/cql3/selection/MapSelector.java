@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
+import org.apache.cassandra.db.filter.ColumnFilter.Builder;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -158,7 +159,39 @@ final class MapSelector extends Selector
                 }
                 return false;
             }
+
+            @Override
+            boolean areAllFetchedColumnsKnown()
+            {
+                for (Pair<Factory, Factory> entry : factories)
+                {
+                    if (!entry.left.areAllFetchedColumnsKnown() || !entry.right.areAllFetchedColumnsKnown())
+                        return false;
+                }
+                return true;
+            }
+
+            @Override
+            void addFetchedColumns(Builder builder)
+            {
+                for (Pair<Factory, Factory> entry : factories)
+                {
+                    entry.left.addFetchedColumns(builder);
+                    entry.right.addFetchedColumns(builder);
+                }
+            }
         };
+    }
+
+    @Override
+    public void addFetchedColumns(Builder builder)
+    {
+        for (int i = 0, m = elements.size(); i < m; i++)
+        {
+            Pair<Selector, Selector> pair = elements.get(i);
+            pair.left.addFetchedColumns(builder);
+            pair.right.addFetchedColumns(builder);
+        }
     }
 
     public void addInput(ProtocolVersion protocolVersion, InputRow input)

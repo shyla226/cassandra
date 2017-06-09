@@ -17,24 +17,13 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
-import java.io.BufferedInputStream;
-import java.io.Closeable;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
+import java.io.*;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -58,16 +47,7 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DataRange;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.mos.MemoryLockedBuffer;
@@ -86,22 +66,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.sstable.BloomFilterTracker;
-import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.CorruptSSTableException;
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.RowIndexEntry;
-import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
-import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
-import org.apache.cassandra.io.sstable.metadata.MetadataType;
-import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
-import org.apache.cassandra.io.util.AsynchronousChannelProxy;
-import org.apache.cassandra.io.util.FileDataInput;
-import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.sstable.*;
+import org.apache.cassandra.io.sstable.metadata.*;
+import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.io.util.FileHandle.Builder;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -1043,16 +1010,28 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
+     * Retrieves the position while updating the key cache and the stats.
      * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
      * allow key selection by token bounds but only if op != * EQ
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
-     * @return The index entry corresponding to the key, or null if the key is not present
      */
-    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, Rebufferer.ReaderConstraint rc);
+    public RowIndexEntry getPosition(PartitionPosition key, Operator op)
+    {
+        return getPosition(key, op, SSTableReadsListener.NOOP_LISTENER, Rebufferer.ReaderConstraint.NONE);
+    }
+
+    /**
+     * Retrieves the position while updating the key cache and the stats.
+     * @param key The key to apply as the rhs to the given Operator. A 'fake' key is allowed to
+     * allow key selection by token bounds but only if op != * EQ
+     * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
+     * @param listener the {@code SSTableReaderListener} that must handle the notifications.
+     */
+    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc);
     public abstract RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc);
     public abstract boolean contains(DecoratedKey key, Rebufferer.ReaderConstraint rc);
 
-    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener);
     public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
     public abstract AbstractSSTableIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter columnFilter, boolean reversed, DeletionTime partitionLevelDeletion, Row staticRow);
 
@@ -1060,12 +1039,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
     public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
 
-    public CsFlow<FlowableUnfilteredPartition> flow(OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public CsFlow<FlowableUnfilteredPartition> flow(OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
         return CsFlow.using(() -> readOrdering.start(),
                             (opGroup) ->
                             {
-                                PartitionFlowable pf = new PartitionFlowable(this, readOrdering, key, slices, selectedColumns, reversed, 2);
+                                PartitionFlowable pf = new PartitionFlowable(this, listener, readOrdering, key, slices, selectedColumns, reversed, 2);
 
                                 //Convert from PartitionFlowable to FlowableUnfilteredPartition
                                 //First two items are header info. The rest is partition data
@@ -1108,11 +1087,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     /**
      * @param columns the columns to return.
      * @param dataRange filter to use when reading the columns
+     * @param listener a listener used to handle internal read events
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange)
+    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
     {
-        return SSTableScanner.getScanner(this, columns, dataRange);
+        return SSTableScanner.getScanner(this, columns, dataRange, listener);
     }
 
     /**
@@ -1515,11 +1495,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected abstract FileHandle getIndexFile();
 
-    public RowIndexEntry getPosition(PartitionPosition key, Operator op)
-    {
-        return getPosition(key, op, Rebufferer.ReaderConstraint.NONE);
-    }
-
     /**
      * @param component component to get timestamp.
      * @return last modified time for given component. 0 if given component does not exist or IO error occurs.
@@ -1546,25 +1521,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     }
 
     /**
-     * Increment the total row read count and read rate for this SSTable.  This should not be incremented for range
-     * slice queries, row cache hits, or non-query reads, like compaction.
+     * Increment the total read count and read rate for this SSTable.  This should not be incremented for non-query reads,
+     * like compaction.
      */
     public void incrementReadCount()
     {
         if (readMeter != null)
             readMeter.mark();
-    }
-
-    private int compare(List<ByteBuffer> values1, List<ByteBuffer> values2)
-    {
-        ClusteringComparator comparator = metadata().comparator;
-        for (int i = 0; i < Math.min(values1.size(), values2.size()); i++)
-        {
-            int cmp = comparator.subtype(i).compare(values1.get(i), values2.get(i));
-            if (cmp != 0)
-                return cmp;
-        }
-        return 0;
     }
 
     public EncodingStats stats()

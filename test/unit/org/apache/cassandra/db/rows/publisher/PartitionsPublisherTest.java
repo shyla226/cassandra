@@ -58,7 +58,7 @@ public class PartitionsPublisherTest extends CQLTester
 
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore(), Util.dk(ByteBufferUtil.bytes("p1"))).build();
         List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().toIterator())
+        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().toIterator(cmd.metadata()))
         {
             while (iterator.hasNext())
             {
@@ -80,7 +80,7 @@ public class PartitionsPublisherTest extends CQLTester
 
         ReadCommand cmd = Util.cmd(getCurrentColumnFamilyStore(), Util.dk(ByteBufferUtil.bytes("p1"))).build();
         List<ImmutableBTreePartition> results = new ArrayList<>();
-        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().toIterator())
+        try (UnfilteredPartitionIterator iterator = cmd.executeLocally().toIterator(cmd.metadata()))
         {
             while (iterator.hasNext())
             {

@@ -526,11 +526,9 @@ public class ContinuousPagingService
                     SessionKey key,
                     ContinuousPagingConfig config)
         {
-            super(options,
-                  statement.parameters.isJson,
-                  newGroupMaker(statement, options),
-                  statement.getSelection());
-            this.resultMetaData = selection.getResultMetadata(isJson).copy();
+            super(statement.getSelection().newSelectors(options),
+                  newGroupMaker(statement, options));
+            this.resultMetaData = statement.getResultMetadata();
             this.state = state;
             this.options = options;
             this.pagingExecutor = pagingExecutor;
@@ -540,7 +538,7 @@ public class ContinuousPagingService
             this.pageWriter = new ContinuousPageWriter(state.getConnection(),
                                                        pagingOptions.maxPagesPerSecond(),
                                                        config);
-            this.avgRowSize = ResultSet.estimatedRowSize(statement.table, selection.getColumnMapping());
+            this.avgRowSize = ResultSet.estimatedRowSize(statement.table, statement.getSelection().getColumnMapping());
 
             allocatePage(1);
         }

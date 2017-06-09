@@ -390,7 +390,7 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        try (UnfilteredPartitionIterator iter = cmd.executeLocally().toIterator())
+        try (UnfilteredPartitionIterator iter = cmd.executeLocally().toIterator(cmd.metadata()))
         {
             while (iter.hasNext())
             {

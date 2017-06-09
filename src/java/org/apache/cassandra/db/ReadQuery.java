@@ -270,6 +270,6 @@ public interface ReadQuery extends Monitorable
      */
     default public UnfilteredPartitionIterator executeForTests()
     {
-        return executeLocally().toIterator();
+        return executeLocally().toIterator(metadata());
     }
 }

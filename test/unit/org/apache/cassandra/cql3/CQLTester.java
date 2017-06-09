@@ -264,6 +264,9 @@ public abstract class CQLTester
             //put the SS through join.
             StorageService.instance.initServer();
 
+            // clear the SS shutdown hook as it makes the test take longer on Jenkins
+            JVMStabilityInspector.removeShutdownHooks();
+
             logger.info("Server initialized");
             boolean ret = serverStatus.compareAndSet(ServerStatus.PENDING, ServerStatus.INITIALIZED);
             assertTrue("Unexpected server status: " + serverStatus, ret);
@@ -1183,6 +1186,9 @@ public abstract class CQLTester
             return;
         }
 
+        if (logger.isTraceEnabled())
+            logger.trace("ROWS:\n{}", String.join("\n", Arrays.stream(getRows(result)).map(row -> Arrays.toString(row)).collect(Collectors.toList())));
+
         List<ColumnSpecification> meta = result.metadata();
         Iterator<UntypedResultSet.Row> iter = result.iterator();
         int i = 0;
@@ -1372,7 +1378,7 @@ public abstract class CQLTester
         assertTrue(String.format("Got %s rows than expected. Expected %d but got %d", numExpectedRows>i ? "less" : "more", numExpectedRows, i), i == numExpectedRows);
     }
 
-    protected Object[][] getRows(UntypedResultSet result)
+    protected static Object[][] getRows(UntypedResultSet result)
     {
         if (result == null)
             return new Object[0][];
@@ -1835,7 +1841,7 @@ public abstract class CQLTester
     protected Map map(Object...values)
     {
         if (values.length % 2 != 0)
-            throw new IllegalArgumentException();
+            throw new IllegalArgumentException("Invalid number of arguments, got " + values.length);
 
         int size = values.length / 2;
         Map m = new LinkedHashMap(size);

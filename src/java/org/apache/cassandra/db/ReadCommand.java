@@ -393,8 +393,14 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     public Single<PartitionIterator> executeInternal(Monitor monitor)
     {
-        // TODO - filter in the publisher
-        return Single.just(UnfilteredPartitionIterators.filter(executeLocally(monitor).toIterator(), nowInSec));
+        // TODO 1: filter in the publisher.
+        // TODO 2: note how we have to wait for the iterator to be fully materialized in memory, see
+        // PartitionsPublisher.toDelayedIterator()
+        // This is because otherwise if we iterate in parallel with the partitions being published the Group By counters become
+        // confused, which results in SelectGroupByTest being flaky, mostly with the floor function (APOLLO-75) - we should
+        // investigate further
+        return executeLocally(monitor).toDelayedIterator(metadata())
+                                      .map(it -> UnfilteredPartitionIterators.filter(it, nowInSec));
     }
 
     public ReadExecutionController executionController()
