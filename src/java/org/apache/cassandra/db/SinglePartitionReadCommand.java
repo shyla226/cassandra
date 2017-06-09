@@ -580,7 +580,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
+        if (clusteringIndexFilter().kind() == ClusteringIndexFilter.Kind.NAMES && !queriesMulticellType(cfs.metadata()))
             return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter(), metricsCollector);
 
         return CsFlow.using(() ->
@@ -651,7 +651,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                                         allIterators.add(iter);
                                         ssTableReaders.add(sstable);
-                                        sstable.incrementReadCount();
                                     }
 
                                     int includedDueToTombstones = 0;
@@ -672,7 +671,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                                             allIterators.add(iter);
                                             ssTableReaders.add(sstable);
                                             includedDueToTombstones++;
-                                            sstable.incrementReadCount();
                                         }
                                     }
 
@@ -907,8 +905,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                                       return CsFlow.empty(); // no tombstone at all, we can skip that sstable
 
                                                                                   // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-                                                                                  sstable.incrementReadCount();
-                                                                                  sstablesIterated.increment();
                                                                                   if (!fup.header.partitionLevelDeletion.isLive())
                                                                                   {
                                                                                       result.set(add(UnfilteredRowIterators.noRowsIterator(fup.header.metadata, fup.header.partitionKey, fup.staticRow, fup.header.partitionLevelDeletion, filter.get().isReversed()), result.get(), filter.get(), sstable.isRepaired()));
@@ -917,7 +913,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                               }
 
                                                                               Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
-                                                                              sstable.incrementReadCount();
 
                                                                               if (fup.isEmpty())
                                                                                   return CsFlow.empty();
@@ -925,7 +920,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                               if (sstable.isRepaired())
                                                                                   onlyUnrepaired.set(false);
 
-                                                                              sstablesIterated.increment();
 
                                                                               return fup.content.toList()
                                                                                                 .map(u ->

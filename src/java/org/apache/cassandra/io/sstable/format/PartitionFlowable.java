@@ -59,6 +59,16 @@ import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WOR
  * The second item is *ALWAYS* the static row.
  * Followed by all the partition rows.
  *
+ * All data fetched through the {@link org.apache.cassandra.cache.ChunkCache}
+ * Since we could require data that's not yet in the Cache we catch any
+ * {@link NotInCacheException}s and register a retry once the data is fetched
+ * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
+ * In order to start from the last finished item.
+ *
+ * Finally the state machine here needs to account for CsFlow asking for new data or closing us
+ * while we are busy waiting for data back from the disk.
+ *
+ * If that happens the request will be handled after the data we are waiting for has arrived.
  */
 class PartitionFlowable extends CsFlow<Unfiltered>
 {
@@ -108,6 +118,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         this.limit = Long.MAX_VALUE;
         this.mmapped = o.mmapped;
     }
+
 
 
     @Override
