@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.TPC;
 
 public class ExpiringMap<K, V>
 {
@@ -87,11 +88,6 @@ public class ExpiringMap<K, V>
 
     private final ConcurrentMap<K, CacheableObject<V>> cache = new ConcurrentHashMap<K, CacheableObject<V>>();
     private final long defaultExpiration;
-
-    public ExpiringMap(long defaultExpiration)
-    {
-        this(defaultExpiration, null);
-    }
 
     /**
      *
@@ -162,7 +158,16 @@ public class ExpiringMap<K, V>
             // So we'll just sit on this thread until the rest of the server shutdown completes.
             //
             // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
-            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+            // TPC: If we are on a TPC thread we cannot wait and so we just ignore the request
+            if (!TPC.isTPCThread())
+            {
+                Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+            }
+            else
+            {
+                logger.debug("Received request after messaging service shutdown, ignoring it");
+                return null;
+            }
         }
         CacheableObject<V> previous = cache.put(key, new CacheableObject<V>(value, timeout));
         return (previous == null) ? null : previous.value;

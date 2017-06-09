@@ -17,25 +17,38 @@
  */
 package org.apache.cassandra.transport;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.channel.Channel;
 import org.apache.cassandra.auth.IAuthenticator;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.FBUtilities;
 
 public class ServerConnection extends Connection
 {
+    private static final Logger logger = LoggerFactory.getLogger(ServerConnection.class);
     private enum State { UNINITIALIZED, AUTHENTICATION, READY }
 
     private volatile IAuthenticator.SaslNegotiator saslNegotiator;
     private final ClientState clientState;
     private volatile State state;
+    private AtomicLong inFlightRequests;
 
     public ServerConnection(Channel channel, ProtocolVersion version, Connection.Tracker tracker)
     {
         super(channel, version, tracker);
         this.clientState = ClientState.forExternalCalls(channel.remoteAddress(), this);
         this.state = State.UNINITIALIZED;
+        this.inFlightRequests = new AtomicLong(0L);
     }
 
     public QueryState validateNewMessage(Message.Request request, ProtocolVersion version)
@@ -97,5 +110,57 @@ public class ServerConnection extends Connection
         if (saslNegotiator == null)
             saslNegotiator = DatabaseDescriptor.getAuthenticator().newSaslNegotiator(queryState.getClientAddress());
         return saslNegotiator;
+    }
+
+    /**
+     * Increment the number of in-flight requests, i.e. the number of RX chains that have been
+     * created to handle a client request. This is currently called just before subscribing, but
+     * once we are sure the chain exists.
+     */
+    public void onNewRequest()
+    {
+        inFlightRequests.incrementAndGet();
+    }
+
+    /**
+     * Decrement the number of in-flight requests, i.e. the number of RX chains servicing client
+     * requests. This is currently called when the chain completes, either successfully or with
+     * an error.
+     */
+    public void onRequestCompleted()
+    {
+        inFlightRequests.decrementAndGet();
+    }
+
+    /**
+     * Return a future that will complete when the number of in flight requests is zero.
+     * <p>
+     * This method should be called after the channel has been closed so that there are no
+     * more incoming client requests. It is currently used to ensure that no RX chains are still
+     * active when draining a node, since such chains could cause errors if other services
+     * are stopped, for example stopping messaging service or the mutation stages causes
+     * execution rejected exceptions.
+     *
+     * @return a future that will complete when the number of in flight requests is zero.
+     */
+    public CompletableFuture<Void> waitForInFlightRequests()
+    {
+        if (logger.isTraceEnabled())
+            logger.trace("Waiting for {} in flight requests to complete", inFlightRequests.get());
+
+        if (inFlightRequests.get() == 0)
+            return CompletableFuture.completedFuture(null);
+
+        final CompletableFuture<Void> ret = new CompletableFuture<>();
+        StageManager.getScheduler(Stage.REQUEST_RESPONSE).scheduleDirect(() -> checkInFlightRequests(ret), 1, TimeUnit.MILLISECONDS);
+        return ret;
+    }
+
+    private void checkInFlightRequests(final CompletableFuture<Void> fut)
+    {
+        if (inFlightRequests.get() == 0)
+            fut.complete(null);
+        else
+            StageManager.getScheduler(Stage.REQUEST_RESPONSE).scheduleDirect(() -> checkInFlightRequests(fut), 1, TimeUnit.MILLISECONDS);
     }
 }

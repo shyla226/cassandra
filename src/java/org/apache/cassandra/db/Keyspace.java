@@ -89,6 +89,9 @@ public class Keyspace
     //Keyspaces in the case of Views (batchlog of view mutations)
     public static final OpOrder writeOrder = TPC.newOpOrder(Keyspace.class);
 
+    // this is set during draining and it indicates that no more mutations should be accepted
+    private volatile OpOrder.Barrier writeBarrier = null;
+
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
     private volatile AbstractReplicationStrategy replicationStrategy;
@@ -481,6 +484,20 @@ public class Keyspace
         }
     }
 
+    /**
+     * Close this keyspace to further mutations, called when draining or shutting down.
+     *
+     * A final write barrier is issued and returned. After this barrier is set, new mutations
+     * will be rejected, see {@link Keyspace#applyInternal(Mutation, boolean, boolean, boolean)}.
+     */
+    public OpOrder.Barrier stopMutations()
+    {
+        assert writeBarrier == null : "Keyspace has already been closed to mutations";
+        writeBarrier = writeOrder.newBarrier();
+        writeBarrier.issue();
+        return writeBarrier;
+    }
+
     public Completable apply(final Mutation mutation, final boolean writeCommitLog)
     {
         return apply(mutation, writeCommitLog, true, true);
@@ -518,11 +535,16 @@ public class Keyspace
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Testing write failures"));
 
+        if (writeBarrier != null)
+            return failDueToWriteBarrier(mutation);
+
         final boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
-        return maybeAcquireLocksForView(mutation, isDroppable, requiresViewUpdate).flatMapCompletable(locks ->
+        return maybeAcquireLocksForView(mutation, isDroppable, requiresViewUpdate).flatMapCompletable(locks -> {
+              if (writeBarrier != null)
+                  return failDueToWriteBarrier(mutation);
 
-              Completable.using(
+              return Completable.using(
                   () -> writeOrder.start(),
 
                   (opGroup) -> (writeCommitLog ? CommitLog.instance.add(mutation) : Single.just(CommitLogPosition.NONE))
@@ -597,7 +619,16 @@ public class Keyspace
                           logger.error("Fail to release view locks", t);
                       }
                   }
-              ));
+              );});
+    }
+
+    private Completable failDueToWriteBarrier(Mutation mutation)
+    {
+        assert writeBarrier != null : "Expected non null write barrier";
+
+        logger.debug(FBUtilities.Debug.getStackTrace());
+        logger.error("Attempted to apply mutation {} after final write barrier", mutation);
+        return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations"));
     }
 
     /**
