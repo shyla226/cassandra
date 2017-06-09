@@ -237,36 +237,36 @@ public class BatchStatement implements CQLStatement
         return statements;
     }
 
-    private Collection<? extends IMutation> getMutations(BatchQueryOptions options, boolean local, long now, long queryStartNanoTime)
+    private Single<Collection<? extends IMutation>> getMutations(BatchQueryOptions options, boolean local, long now, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        Set<String> tablesWithZeroGcGs = null;
+        final Set<String> tablesWithZeroGcGs = new HashSet<>();
         UpdatesCollector collector = new UpdatesCollector(updatedColumns, updatedRows());
+        List<Completable> completables = new ArrayList<>(statements.size());
         for (int i = 0; i < statements.size(); i++)
         {
             ModificationStatement statement = statements.get(i);
             if (isLogged() && statement.metadata().params.gcGraceSeconds == 0)
-            {
-                if (tablesWithZeroGcGs == null)
-                    tablesWithZeroGcGs = new HashSet<>();
                 tablesWithZeroGcGs.add(statement.metadata.toString());
-            }
+
             QueryOptions statementOptions = options.forStatement(i);
             long timestamp = attrs.getTimestamp(now, statementOptions);
-            statement.addUpdates(collector, statementOptions, local, timestamp, queryStartNanoTime);
+            completables.add(statement.addUpdates(collector, statementOptions, local, timestamp, queryStartNanoTime));
         }
 
-        if (tablesWithZeroGcGs != null)
-        {
-            String suffix = tablesWithZeroGcGs.size() == 1 ? "" : "s";
-            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES, LOGGED_BATCH_LOW_GCGS_WARNING,
-                             suffix, tablesWithZeroGcGs);
-            ClientWarn.instance.warn(MessageFormatter.arrayFormat(LOGGED_BATCH_LOW_GCGS_WARNING, new Object[] { suffix, tablesWithZeroGcGs })
-                                                     .getMessage());
-        }
+        return Completable.merge(completables).andThen(Single.fromCallable(() -> {
+            if (!tablesWithZeroGcGs.isEmpty())
+            {
+                String suffix = tablesWithZeroGcGs.size() == 1 ? "" : "s";
+                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES, LOGGED_BATCH_LOW_GCGS_WARNING,
+                                 suffix, tablesWithZeroGcGs);
+                ClientWarn.instance.warn(MessageFormatter.arrayFormat(LOGGED_BATCH_LOW_GCGS_WARNING, new Object[] { suffix, tablesWithZeroGcGs })
+                                                         .getMessage());
+            }
 
-        collector.validateIndexedColumns();
-        return collector.toMutations();
+            collector.validateIndexedColumns();
+            return collector.toMutations();
+        }));
     }
 
     private int updatedRows()
@@ -383,25 +383,29 @@ public class BatchStatement implements CQLStatement
         }).subscribeOn(Schedulers.io());
     }
 
-    private Single<? extends ResultMessage> executeWithoutConditions(Collection<? extends IMutation> mutations, ConsistencyLevel cl, long queryStartNanoTime)
+    private Single<? extends ResultMessage> executeWithoutConditions(Single<Collection<? extends IMutation>> mutationsSingle,
+                                                                     ConsistencyLevel cl,
+                                                                     long queryStartNanoTime)
     {
-        if (mutations.isEmpty())
-            return Single.just(new ResultMessage.Void());
+        return mutationsSingle.flatMap(mutations -> {
+            if (mutations.isEmpty())
+                return Single.just(new ResultMessage.Void());
 
-        try
-        {
-            verifyBatchSize(mutations);
-            verifyBatchType(mutations);
-        }
-        catch (InvalidRequestException exc)
-        {
-            return Single.error(exc);
-        }
+            try
+            {
+                verifyBatchSize(mutations);
+                verifyBatchType(mutations);
+            }
+            catch (InvalidRequestException exc)
+            {
+                return Single.error(exc);
+            }
 
-        updatePartitionsPerBatchMetrics(mutations.size());
+            updatePartitionsPerBatchMetrics(mutations.size());
 
-        boolean mutateAtomic = (isLogged() && mutations.size() > 1);
-        return StorageProxy.mutateWithTriggers(mutations, cl, mutateAtomic, queryStartNanoTime);
+            boolean mutateAtomic = (isLogged() && mutations.size() > 1);
+            return StorageProxy.mutateWithTriggers(mutations, cl, mutateAtomic, queryStartNanoTime);
+        });
     }
 
     private void updatePartitionsPerBatchMetrics(int updatedPartitions)
@@ -500,18 +504,21 @@ public class BatchStatement implements CQLStatement
 
     private Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        Collection<? extends IMutation> mutations = getMutations(BatchQueryOptions.withoutPerStatementVariables(options), true, queryState.getTimestamp(), queryStartNanoTime);
-        if (mutations.isEmpty())
-            return Single.just(new ResultMessage.Void());
+        return getMutations(BatchQueryOptions.withoutPerStatementVariables(options), true, queryState.getTimestamp(), queryStartNanoTime)
+               .flatMapCompletable(mutations -> {
+                   if (mutations.isEmpty())
+                       return Completable.complete();
 
-        List<Completable> mutationObservables = new ArrayList<>(mutations.size());
-        for (IMutation mutation : mutations)
-            mutationObservables.add(mutation.applyAsync());
+                   List<Completable> mutationObservables = new ArrayList<>(mutations.size());
+                   for (IMutation mutation : mutations)
+                       mutationObservables.add(mutation.applyAsync());
 
-        if (mutationObservables.size() == 1)
-            return mutationObservables.get(0).toSingle(() -> new ResultMessage.Void());
-        else
-            return Completable.merge(mutationObservables).toSingle(() -> new ResultMessage.Void());
+                   if (mutationObservables.size() == 1)
+                       return mutationObservables.get(0);
+                   else
+                       return Completable.merge(mutationObservables);
+               })
+               .andThen(Single.just(new ResultMessage.Void()));
     }
 
     private Single<? extends ResultMessage> executeInternalWithConditions(BatchQueryOptions options, QueryState state) throws RequestExecutionException, RequestValidationException
@@ -523,11 +530,21 @@ public class BatchStatement implements CQLStatement
         String ksName = request.metadata.keyspace;
         String tableName = request.metadata.name;
 
-        // TODO rx-ify
-        try (RowIterator result = ModificationStatement.casInternal(request, state))
-        {
-            return Single.just(new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName, tableName, result, columnsWithConditions, true, options.forStatement(0))));
-        }
+        return ModificationStatement.casInternal(request, state).map(result -> {
+            try
+            {
+                return new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName,
+                                                                                      tableName,
+                                                                                      result.orElse(null),
+                                                                                      columnsWithConditions,
+                                                                                      true,
+                                                                                      options.forStatement(0)));
+            }
+            finally
+            {
+                result.ifPresent(RowIterator::close);
+            }
+        });
     }
 
     public String toString()

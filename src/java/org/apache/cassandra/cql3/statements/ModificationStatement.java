@@ -27,6 +27,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.UUID;
@@ -382,7 +383,7 @@ public abstract class ModificationStatement implements CQLStatement
         return requiresRead;
     }
 
-    private Map<DecoratedKey, Partition> readRequiredLists(Collection<ByteBuffer> partitionKeys,
+    private Single<Map<DecoratedKey, Partition>> readRequiredLists(Collection<ByteBuffer> partitionKeys,
                                                            ClusteringIndexFilter filter,
                                                            DataLimits limits,
                                                            boolean local,
@@ -390,7 +391,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                            long queryStartNanoTime)
     {
         if (!requiresRead)
-            return null;
+            return Single.just(Collections.emptyMap());
 
         try
         {
@@ -414,18 +415,19 @@ public abstract class ModificationStatement implements CQLStatement
 
         SinglePartitionReadCommand.Group group = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-        if (local)
-        {
-            try ( PartitionIterator iter = group.executeInternal().blockingGet())
+        Single<PartitionIterator> iterSingle = local
+                                               ? group.executeInternal()
+                                               : group.execute(cl, null, queryStartNanoTime, false);
+        return iterSingle.map(iter -> {
+            try
             {
                 return asMaterializedMap(iter);
             }
-        }
-
-        try (PartitionIterator iter = group.execute(cl, null, queryStartNanoTime, false).blockingGet())
-        {
-            return asMaterializedMap(iter);
-        }
+            finally
+            {
+                iter.close();
+            }
+        });
     }
 
     private Map<DecoratedKey, Partition> asMaterializedMap(PartitionIterator iterator)
@@ -482,11 +484,12 @@ public abstract class ModificationStatement implements CQLStatement
             return Single.error(exc);
         }
 
-        Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState), queryStartNanoTime);
-        if (!mutations.isEmpty())
-            return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
+        return getMutations(options, false, options.getTimestamp(queryState), queryStartNanoTime).flatMap(mutations -> {
+            if (!mutations.isEmpty())
+                return StorageProxy.mutateWithTriggers(mutations, cl, false, queryStartNanoTime);
 
-        return Single.just(new ResultMessage.Void());
+            return Single.just(new ResultMessage.Void());
+        });
     }
 
     public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
@@ -617,50 +620,67 @@ public abstract class ModificationStatement implements CQLStatement
 
     public Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        Collection<? extends IMutation> mutations = getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime);
-        if (mutations.isEmpty())
-            return Single.just(new ResultMessage.Void());
+        return getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime)
+               .flatMapCompletable(mutations -> {
+                    if (mutations.isEmpty())
+                        return Completable.complete();
 
-        List<Completable> mutationObservables = new ArrayList<>(mutations.size());
-        for (IMutation mutation : mutations)
-            mutationObservables.add(mutation.applyAsync());
+                    List<Completable> mutationObservables = new ArrayList<>(mutations.size());
+                    for (IMutation mutation : mutations)
+                        mutationObservables.add(mutation.applyAsync());
 
-        if (mutationObservables.size() == 1)
-            return mutationObservables.get(0).toSingle(ResultMessage.Void::new);
-        else
-            return Completable.merge(mutationObservables).toSingle(ResultMessage.Void::new);
+                    if (mutationObservables.size() == 1)
+                        return mutationObservables.get(0);
+                    else
+                        return Completable.merge(mutationObservables);
+               }).andThen(Single.just(new ResultMessage.Void()));
     }
 
     public Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         CQL3CasRequest request = makeCasRequest(state, options);
-        try (RowIterator result = casInternal(request, state))
-        {
-            // TODO rx-ify
-            return Single.just(new ResultMessage.Rows(buildCasResultSet(result, options)));
-        }
+        return casInternal(request,state).map(result -> {
+            try
+            {
+                return new ResultMessage.Rows(buildCasResultSet(result.orElse(null), options));
+            }
+            finally
+            {
+                result.ifPresent(RowIterator::close);
+            }
+        });
     }
 
-    static RowIterator casInternal(CQL3CasRequest request, QueryState state)
+    static Single<Optional<RowIterator>> casInternal(CQL3CasRequest request, QueryState state)
     {
         UUID ballot = UUIDGen.getTimeUUIDFromMicros(state.getTimestamp());
 
         SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
-        FilteredPartition current;
-        try (PartitionIterator iter = readCommand.executeInternal().blockingGet())
-        {
-            current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
-        }
+        Single<PartitionIterator> iterSingle = readCommand.executeInternal();
 
-        if (!request.appliesTo(current))
-            return current.rowIterator();
+        return iterSingle.flatMap(iter -> {
+            FilteredPartition current;
 
-        PartitionUpdate updates = request.makeUpdates(current);
-        updates = TriggerExecutor.instance.execute(updates);
+            try
+            {
+                current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
+            }
+            finally
+            {
+                iter.close();
+            }
 
-        Commit proposal = Commit.newProposal(ballot, updates);
-        proposal.makeMutation().apply();
-        return null;
+            if (!request.appliesTo(current))
+                return Single.just(Optional.of(current.rowIterator()));
+
+            PartitionUpdate updates = request.makeUpdates(current);
+            updates = TriggerExecutor.instance.execute(updates);
+
+            Commit proposal = Commit.newProposal(ballot, updates);
+            return proposal.makeMutation()
+                           .applyAsync()
+                           .andThen(Single.just(Optional.empty()));
+        });
     }
 
     /**
@@ -672,16 +692,17 @@ public abstract class ModificationStatement implements CQLStatement
      *
      * @return list of the mutations
      */
-    private Collection<? extends IMutation> getMutations(QueryOptions options, boolean local, long now, long queryStartNanoTime)
+    private Single<Collection<? extends IMutation>> getMutations(QueryOptions options, boolean local, long now, long queryStartNanoTime)
     {
-        UpdatesCollector collector = new UpdatesCollector(Collections.singletonMap(metadata.id, updatedColumns), 1);
-        addUpdates(collector, options, local, now, queryStartNanoTime);
-        collector.validateIndexedColumns();
-
-        return collector.toMutations();
+        final UpdatesCollector collector = new UpdatesCollector(Collections.singletonMap(metadata.id, updatedColumns), 1);
+        return addUpdates(collector, options, local, now, queryStartNanoTime)
+               .andThen(Single.fromCallable(() -> {
+                   collector.validateIndexedColumns();
+                   return collector.toMutations();
+               }));
     }
 
-    final void addUpdates(UpdatesCollector collector,
+    final Completable addUpdates(UpdatesCollector collector,
                           QueryOptions options,
                           boolean local,
                           long now,
@@ -697,25 +718,30 @@ public abstract class ModificationStatement implements CQLStatement
 
             // If all the ranges were invalid we do not need to do anything.
             if (slices.isEmpty())
-                return;
+                return Completable.complete();
 
-            UpdateParameters params = makeUpdateParameters(keys,
-                                                           new ClusteringIndexSliceFilter(slices, false),
-                                                           options,
-                                                           DataLimits.NONE,
-                                                           local,
-                                                           now,
-                                                           queryStartNanoTime);
-            for (ByteBuffer key : keys)
-            {
-                Validation.validateKey(metadata(), key);
-                DecoratedKey dk = metadata().partitioner.decorateKey(key);
+            Single<UpdateParameters> paramsSingle = makeUpdateParameters(keys,
+                                                                         new ClusteringIndexSliceFilter(slices, false),
+                                                                         options,
+                                                                         DataLimits.NONE,
+                                                                         local,
+                                                                         now,
+                                                                         queryStartNanoTime);
 
-                PartitionUpdate upd = collector.getPartitionUpdate(metadata(), dk, options.getConsistency());
+            return paramsSingle.flatMapCompletable((params) -> {
+                for (ByteBuffer key : keys)
+                {
+                    Validation.validateKey(metadata(), key);
+                    DecoratedKey dk = metadata().partitioner.decorateKey(key);
 
-                for (Slice slice : slices)
-                    addUpdateForKey(upd, slice, params);
-            }
+                    PartitionUpdate upd = collector.getPartitionUpdate(metadata(), dk, options.getConsistency());
+
+                    for (Slice slice : slices)
+                        addUpdateForKey(upd, slice, params);
+                }
+
+                return Completable.complete();
+            });
         }
         else
         {
@@ -723,37 +749,40 @@ public abstract class ModificationStatement implements CQLStatement
 
             // If some of the restrictions were unspecified (e.g. empty IN restrictions) we do not need to do anything.
             if (restrictions.hasClusteringColumnsRestrictions() && clusterings.isEmpty())
-                return;
+                return Completable.complete();
 
-            UpdateParameters params = makeUpdateParameters(keys, clusterings, options, local, now, queryStartNanoTime);
-
-            for (ByteBuffer key : keys)
-            {
-                Validation.validateKey(metadata(), key);
-                DecoratedKey dk = metadata().partitioner.decorateKey(key);
-
-                PartitionUpdate upd = collector.getPartitionUpdate(metadata, dk, options.getConsistency());
-
-                if (!restrictions.hasClusteringColumnsRestrictions())
+            Single<UpdateParameters> paramsSingle = makeUpdateParameters(keys, clusterings, options, local, now, queryStartNanoTime);
+            return paramsSingle.flatMapCompletable((params -> {
+                for (ByteBuffer key : keys)
                 {
-                    addUpdateForKey(upd, Clustering.EMPTY, params);
-                }
-                else
-                {
-                    for (Clustering clustering : clusterings)
+                    Validation.validateKey(metadata(), key);
+                    DecoratedKey dk = metadata().partitioner.decorateKey(key);
+
+                    PartitionUpdate upd = collector.getPartitionUpdate(metadata, dk, options.getConsistency());
+
+                    if (!restrictions.hasClusteringColumnsRestrictions())
                     {
-                       for (ByteBuffer c : clustering.getRawValues())
-                       {
-                           if (c != null && c.remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
-                               throw new InvalidRequestException(String.format("Key length of %d is longer than maximum of %d",
-                                                                               clustering.dataSize(),
-                                                                               FBUtilities.MAX_UNSIGNED_SHORT));
-                       }
+                        addUpdateForKey(upd, Clustering.EMPTY, params);
+                    }
+                    else
+                    {
+                        for (Clustering clustering : clusterings)
+                        {
+                            for (ByteBuffer c : clustering.getRawValues())
+                            {
+                                if (c != null && c.remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
+                                    throw new InvalidRequestException(String.format("Key length of %d is longer than maximum of %d",
+                                                                                    clustering.dataSize(),
+                                                                                    FBUtilities.MAX_UNSIGNED_SHORT));
+                            }
 
-                        addUpdateForKey(upd, clustering, params);
+                            addUpdateForKey(upd, clustering, params);
+                        }
                     }
                 }
-            }
+
+                return Completable.complete();
+            }));
         }
     }
 
@@ -765,7 +794,7 @@ public abstract class ModificationStatement implements CQLStatement
         return toSlices(startBounds, endBounds);
     }
 
-    private UpdateParameters makeUpdateParameters(Collection<ByteBuffer> keys,
+    private Single<UpdateParameters> makeUpdateParameters(Collection<ByteBuffer> keys,
                                                   NavigableSet<Clustering> clusterings,
                                                   QueryOptions options,
                                                   boolean local,
@@ -790,7 +819,7 @@ public abstract class ModificationStatement implements CQLStatement
                                     queryStartNanoTime);
     }
 
-    private UpdateParameters makeUpdateParameters(Collection<ByteBuffer> keys,
+    private Single<UpdateParameters> makeUpdateParameters(Collection<ByteBuffer> keys,
                                                   ClusteringIndexFilter filter,
                                                   QueryOptions options,
                                                   DataLimits limits,
@@ -799,8 +828,8 @@ public abstract class ModificationStatement implements CQLStatement
                                                   long queryStartNanoTime)
     {
         // Some lists operation requires reading
-        Map<DecoratedKey, Partition> lists = readRequiredLists(keys, filter, limits, local, options.getConsistency(), queryStartNanoTime);
-        return new UpdateParameters(metadata(), updatedColumns(), options, getTimestamp(now, options), getTimeToLive(options), lists);
+        return readRequiredLists(keys, filter, limits, local, options.getConsistency(), queryStartNanoTime)
+               .map(lists -> new UpdateParameters(metadata(), updatedColumns(), options, getTimestamp(now, options), getTimeToLive(options), lists));
     }
 
     private Slices toSlices(SortedSet<ClusteringBound> startBounds, SortedSet<ClusteringBound> endBounds)

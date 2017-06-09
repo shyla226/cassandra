@@ -45,7 +45,7 @@ public class UpdateParameters
 
     private final DeletionTime deletionTime;
 
-    // For lists operation that require a read-before-write. Will be null otherwise.
+    // For lists operation that require a read-before-write. Will be empty otherwise.
     private final Map<DecoratedKey, Partition> prefetchedRows;
 
     private Row.Builder staticBuilder;
@@ -212,7 +212,7 @@ public class UpdateParameters
      */
     public Row getPrefetchedRow(DecoratedKey key, Clustering clustering)
     {
-        if (prefetchedRows == null)
+        if (prefetchedRows.isEmpty())
             return null;
 
         Partition partition = prefetchedRows.get(key);
