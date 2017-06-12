@@ -183,12 +183,12 @@ public class ChunkCache
     }
 
     @Override
+    @SuppressWarnings("resource")
     public CompletableFuture<Buffer> asyncLoad(Key key, Executor executor)
     {
         ChunkReader rebufferer = key.file;
         metrics.misses.mark();
 
-        @SuppressWarnings("unchecked")
         Timer.Context ctx = metrics.missLatency.time();
         try
         {
