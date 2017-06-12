@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
+        implements AsyncCacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
     private static final Logger logger = LoggerFactory.getLogger(ChunkCache.class);
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
@@ -55,9 +55,7 @@ public class ChunkCache
     public static boolean enabled = cacheSize > 0;
     public static final ChunkCache instance = enabled ? new ChunkCache() : null;
 
-    private static int UNINITIALISED = Integer.MIN_VALUE;
-
-    private final LoadingCache<Key, Buffer> cache;
+    private final AsyncLoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
 
     public static int bufferToChunkSize(int bufferSize)
@@ -112,67 +110,30 @@ public class ChunkCache
     public static class Buffer implements Rebufferer.BufferHolder
     {
         private final Key key;
-        private final CompletableFuture<ByteBuffer> futureBuffer;
+        private final ByteBuffer buffer;
         private final long offset;
-        private final int capacity;
         private final AtomicInteger references;
 
-        public Buffer(Key key ,CompletableFuture<ByteBuffer> futureBuffer, long offset, int capacity) throws Exception
+        public Buffer(Key key, ByteBuffer buffer, long offset)
         {
             this.key = key;
             this.offset = offset;
-            this.capacity = capacity;
 
-            // start un-referenced.
-            // Once the async disk read is done we will reference.
-            // We need to avoid anyone trying to reference the buffer before
-            // its been initialized.
-            references = new AtomicInteger(UNINITIALISED);
-            this.futureBuffer = futureBuffer.handle((buf, t) ->
-                                                       {
-                                                           boolean success = references.compareAndSet(UNINITIALISED, 1);
-                                                           assert success : "Buffer was referenced before it was initialized: " + key;
-
-                                                           if (t != null)
-                                                           {
-                                                               if (t instanceof CompletionException)
-                                                                   throw (CompletionException) t;
-
-                                                               throw new CompletionException(t);
-                                                           }
-
-                                                           return buf;
-                                                       });
+            // Start referenced
+            this.references = new AtomicInteger(1);
+            this.buffer = buffer;
         }
 
-        Buffer reference(Rebufferer.ReaderConstraint rc)
+        Buffer reference()
         {
             int refCount;
             do
             {
                 refCount = references.get();
 
-                // Might need to block on the buffer depending on the constraing
-                if (rc == Rebufferer.ReaderConstraint.NONE && refCount == UNINITIALISED)
-                {
-                    try
-                    {
-                        assert !TPC.isTPCThread(); //better not be blocking the tpc threads
-                        futureBuffer.join();
-                    }
-                    catch (CompletionException t)
-                    {
-                        if (t.getCause() != null && t.getCause() instanceof RuntimeException)
-                            throw (RuntimeException) t.getCause();
-
-                        throw t;
-                    }
-                }
-
-                if (refCount == 0 || refCount == UNINITIALISED)
+                if (refCount == 0)
                 {
                     // Buffer was released before we managed to reference it.
-                    // Or it's an async request and not ready yet
                     return null;
                 }
             } while (!references.compareAndSet(refCount, refCount + 1));
@@ -184,37 +145,7 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert references.get() > 0;
-            return futureBuffer.join().duplicate();
-        }
-
-        /**
-         * Callback handler for async disk reads.
-         *
-         * @param onReady called when buffer is ready.
-         * @param onSchedule called if the buffer isn't ready yet and will be scheduled
-         * @param onError called if there was a problem reading the buffer
-         * @param executor if not instantly ready the callback will happen on this executor
-         */
-        public void onReadyHandler(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
-        {
-            if (futureBuffer.isDone() && !futureBuffer.isCompletedExceptionally())
-            {
-                onReady.run();
-            }
-            else
-            {
-                onSchedule.run();
-
-                //Track the ThreadLocals
-                Runnable wrappedOnReady = new ExecutorLocals.WrappedRunnable(onReady);
-
-                futureBuffer.thenRunAsync(() -> wrappedOnReady.run(), executor)
-                            .exceptionally(t ->
-                                           {
-                                               onError.accept(t);
-                                               return null;
-                                           });
-            }
+            return buffer.duplicate();
         }
 
         @Override
@@ -223,18 +154,13 @@ public class ChunkCache
             return offset;
         }
 
-        public int capacity()
-        {
-            return capacity;
-        }
-
         @Override
         public void release()
         {
             //The read from disk read may be in flight
             //We need to keep this buffer till the async callback has fire
-            if (references.get() != UNINITIALISED && references.decrementAndGet() == 0)
-                BufferPool.put(futureBuffer.join());
+            if (references.decrementAndGet() == 0)
+                BufferPool.put(buffer);
         }
 
         public String toString()
@@ -248,40 +174,34 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                 .maximumWeight(cacheSize)
                 .executor(TPC.getWrappedExecutor())
-                .weigher((key, buffer) -> ((Buffer) buffer).capacity())
+                .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                 .removalListener(this)
-                .build(this);
+                .buildAsync(this);
         metrics = new CacheMissMetrics("ChunkCache", this);
     }
 
     @Override
-    public Buffer load(Key key) throws Exception
+    public CompletableFuture<Buffer> asyncLoad(Key key, Executor executor)
     {
-        CompletableFuture<ByteBuffer> future = null;
-        ByteBuffer buffer = null;
+        ChunkReader rebufferer = key.file;
+        metrics.misses.mark();
+
+        Timer.Context ctx = metrics.missLatency.time();
+
         try
         {
-            ChunkReader rebufferer = key.file;
-            metrics.misses.mark();
-            try (Timer.Context ctx = metrics.missLatency.time())
-            {
-                buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
-                assert buffer != null;
-                assert !buffer.isDirect() || MemoryUtil.getAddress(buffer) % 512 == 0 : "Buffer from pool is not properly aligned!";
+            ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
+            assert buffer != null;
+            assert (MemoryUtil.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
 
-                //Once the buffer has been filled we can give it an initial reference
-                future = rebufferer.readChunk(key.position, buffer);
-                return new Buffer(key, future, key.position, buffer.capacity());
-            }
+            return rebufferer.readChunk(key.position, buffer)
+                             .thenApply(b -> new Buffer(key, b, key.position))
+                             .whenComplete((b, t) -> ctx.close());
         }
         catch (Throwable t)
         {
-            logger.error("Error loading buffer for {}: ", key, t);
-            if (future == null)
-                future = new CompletableFuture<>();
-
-            future.completeExceptionally(t);
-            return new Buffer(key, future, key.position, buffer.capacity());
+           ctx.close();
+           throw t;
         }
     }
 
@@ -293,7 +213,7 @@ public class ChunkCache
 
     public void close()
     {
-        cache.invalidateAll();
+        cache.synchronous().invalidateAll();
     }
 
     public RebuffererFactory wrap(ChunkReader file)
@@ -319,14 +239,14 @@ public class ChunkCache
 
     public void invalidateFile(String fileName)
     {
-        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.path.equals(fileName)));
+        cache.synchronous().invalidateAll(Iterables.filter(cache.synchronous().asMap().keySet(), x -> x.path.equals(fileName)));
     }
 
     @VisibleForTesting
     public void enable(boolean enabled)
     {
         ChunkCache.enabled = enabled;
-        cache.invalidateAll();
+        cache.synchronous().invalidateAll();
         metrics.reset();
     }
 
@@ -365,9 +285,9 @@ public class ChunkCache
                 //There is a small window when a released buffer/invalidated chunk
                 //is still in the cache. In this case it will return null
                 //so we spin loop while waiting for the cache to re-populate
-                while(page == null || ((buf = page.reference(ReaderConstraint.NONE)) == null))
+                while(page == null || ((buf = page.reference()) == null))
                 {
-                    page = cache.get(pageKey);
+                    page = cache.get(pageKey).join();
 
                     if (page != null && buf == null && ++spin == 1024)
                         logger.error("Spinning for {}", pageKey);
@@ -392,9 +312,15 @@ public class ChunkCache
             long pageAlignedPos = position & alignmentMask;
             Key key = new Key(source, pageAlignedPos);
 
-            Buffer buf = cache.getIfPresent(key);
-            if (buf != null && (buf = buf.reference(rc)) != null)
-                return buf;
+            CompletableFuture<Buffer> asyncBuffer = cache.get(key);
+
+            if (asyncBuffer.isDone())
+            {
+                Buffer buf = asyncBuffer.join();
+
+                if (buf != null && (buf = buf.reference()) != null)
+                    return buf;
+            }
 
             metrics.misses.mark();
 
@@ -402,13 +328,13 @@ public class ChunkCache
              * Notify the caller this page isn't ready
              * but give them the Buffer container so they can register a callback
              */
-            throw new NotInCacheException(buf != null ? buf : cache.get(key));
+            throw new NotInCacheException(asyncBuffer);
         }
 
         public void invalidate(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, pageAlignedPos));
+            cache.synchronous().invalidate(new Key(source, pageAlignedPos));
         }
 
         @Override
@@ -469,14 +395,14 @@ public class ChunkCache
     @Override
     public int size()
     {
-        return cache.asMap().size();
+        return cache.synchronous().asMap().size();
     }
 
     @Override
     public long weightedSize()
     {
-        return cache.policy().eviction()
-                .map(policy -> policy.weightedSize().orElseGet(cache::estimatedSize))
-                .orElseGet(cache::estimatedSize);
+        return cache.synchronous().policy().eviction()
+                .map(policy -> policy.weightedSize().orElseGet(cache.synchronous()::estimatedSize))
+                .orElseGet(cache.synchronous()::estimatedSize);
     }
 }

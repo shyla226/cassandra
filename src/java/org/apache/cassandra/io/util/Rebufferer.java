@@ -20,12 +20,14 @@ package org.apache.cassandra.io.util;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 
 /**
  * Rebufferer for reading data by a RandomAccessReader.
@@ -65,9 +67,9 @@ public interface Rebufferer extends ReaderFileProxy
     {
         private static final long serialVersionUID = 1L;
 
-        private final ChunkCache.Buffer asyncBuffer;
+        private final CompletableFuture<ChunkCache.Buffer> asyncBuffer;
 
-        public NotInCacheException(ChunkCache.Buffer asyncBuffer)
+        public NotInCacheException(CompletableFuture<ChunkCache.Buffer> asyncBuffer)
         {
             super("Requested data is not in cache. Retry with ReaderConstraint.NONE.");
             this.asyncBuffer = asyncBuffer;
@@ -84,7 +86,25 @@ public interface Rebufferer extends ReaderFileProxy
         {
             //Registers a callback to be issued when the async buffer is ready
             assert asyncBuffer != null;
-            asyncBuffer.onReadyHandler(onReady, onSchedule, onError, executor);
+
+            if (asyncBuffer.isDone() && !asyncBuffer.isCompletedExceptionally())
+            {
+                onReady.run();
+            }
+            else
+            {
+                onSchedule.run();
+
+                //Track the ThreadLocals
+                Runnable wrappedOnReady = new ExecutorLocals.WrappedRunnable(onReady);
+
+                asyncBuffer.thenRunAsync(() -> wrappedOnReady.run(), executor)
+                            .exceptionally(t ->
+                                           {
+                                               onError.accept(t);
+                                               return null;
+                                           });
+            }
         }
 
         public String toString()
