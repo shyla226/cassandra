@@ -90,8 +90,8 @@ public class TimestampType extends TemporalType<Date>
     @Override
     public Term fromJSONObject(Object parsed) throws MarshalException
     {
-        if (parsed instanceof Long)
-            return new Constants.Value(ByteBufferUtil.bytes((Long) parsed));
+        if (parsed instanceof Long || parsed instanceof Integer)
+            return new Constants.Value(ByteBufferUtil.bytes(((Number)parsed).longValue()));
 
         try
         {
