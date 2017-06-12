@@ -234,7 +234,7 @@ public class MigrationManager
                                      else if (throwOnDuplicate && ksm.getTableOrViewNullable(cfm.name) != null)
                                          return Completable.error(new AlreadyExistsException(cfm.keyspace, cfm.name));
 
-                                     logger.info("Create new table: {}/{}", cfm, cfm.id);
+                                     logger.info("Create new table: {}", cfm.toDebugString());
                                      return announce(SchemaKeyspace.makeCreateTableMutation(ksm, cfm, timestamp), announceLocally);
                                  });
     }
@@ -315,7 +315,7 @@ public class MigrationManager
 
                                      current.validateCompatibility(updated);
 
-                                     logger.info("Update table '{}/{}' From {} To {}", current.keyspace, current.name, current, updated);
+                                     logger.info("Update table '{}/{}' From {} To {}", current.keyspace, current.name, current.toDebugString(), updated.toDebugString());
                                      return announce(SchemaKeyspace.makeUpdateTableMutation(ksm, current, updated, FBUtilities.timestampMicros()), announceLocally);
                                  });
     }

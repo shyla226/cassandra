@@ -1,4 +1,5 @@
 dse 6.0.0
+ * MigrationManager should use toDebugString() when logging TableMetadata (APOLLO-739)
  * Fix LWT asserts for immutable TableMetadata (APOLLO-728)
  * Add DSE columns to system tables (APOLLO-716)
  * Avoid unnecessary deserialization of terminal arguments when executing functions(APOLLO-588)
@@ -60,6 +61,7 @@ Merged from dse5.1:
  * Backport CASSANDRA-12946: cqlsh auto completion: refactor definition of compaction strategy options (no APOLLO ticket)
  * Backport CASSANDRA-11935: Add support for arithmetic operators (no APOLLO ticket)
 Merged from dse5.0:
+ * Coerce integer JSON values to timestamp as well as long values (APOLLO-483)
  * On node failure, fail only repair tasks of that node (APOLLO-669)
  * Fail remaining ongoing tasks when aborting a repair job (APOLLO-669)
  * Handle missing metadata when opening a keyspace (APOLLO-395)
