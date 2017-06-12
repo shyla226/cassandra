@@ -439,7 +439,8 @@ public class MigrationManager
 
         if (announceLocally)
             return Completable.fromRunnable(() -> Schema.instance.merge(migration))
-                              .subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+                              .subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                           ImmediateThinScheduler.INSTANCE);
         else
             return announce(migration);
     }
@@ -464,7 +465,8 @@ public class MigrationManager
                                                     MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
                                                     pushSchemaMutation(endpoint, schema);
                                             }
-                                        }).subscribeOn(StageManager.getScheduler(Stage.MIGRATION));
+                                        }).subscribeOn(TPC.isTPCThread() ? StageManager.getScheduler(Stage.MIGRATION) :
+                                                       ImmediateThinScheduler.INSTANCE);
     }
 
     /**

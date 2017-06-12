@@ -56,7 +56,7 @@ public class RowIndexTest
 
     static final ClusteringComparator comparator = new ClusteringComparator(UUIDType.instance);
     static final long END_MARKER = 1L << 40;
-    static final int COUNT = 145256;
+    static final int COUNT = 8192;
 
     @Test
     public void testSingletons() throws IOException

@@ -877,8 +877,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                          .last()
                          .map(f ->
                               {
-                                  cfs.metric.updateSSTableIterated(sstablesIterated.get());
-
                                   if (result.get() == null || result.get().isEmpty())
                                       return FlowablePartitions.empty(metadata(), partitionKey(), filter.get().isReversed());
 
