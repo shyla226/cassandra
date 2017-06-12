@@ -188,6 +188,15 @@ public class SelectStatement implements CQLStatement
                                    perPartitionLimit);
     }
 
+    /**
+     * Returns the columns requested by the user
+     * @return the columns requested by the user
+     */
+    public final List<ColumnSpecification> getSelectedColumns()
+    {
+        return selection.getSelectedColumns();
+    }
+
     public Iterable<Function> getFunctions()
     {
         List<Function> functions = new ArrayList<>();
