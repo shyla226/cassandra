@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -51,6 +52,9 @@ import org.apache.cassandra.utils.flow.CsSubscription;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSED;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSING;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.DONE_WAITING;
+import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.READY;
+import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.RETRYING;
+import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WAITING;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WORKING;
 
 /**
@@ -73,53 +77,43 @@ import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WOR
 class PartitionFlowable extends CsFlow<Unfiltered>
 {
     private static final Logger logger = LoggerFactory.getLogger(PartitionFlowable.class);
-    static final long STATE_OFFSET = UnsafeAccess.UNSAFE.objectFieldOffset(FBUtilities.getProtectedField(PartitionSubscription.class, "state"));
 
     PartitionSubscription subscr;
     final SSTableReadsListener listener;
-    final OpOrder readOrdering;
     final DecoratedKey key;
     final ColumnFilter selectedColumns;
     final SSTableReader table;
     final boolean reverse;
-    final int offset;
-    final long limit;
-    final boolean mmapped;
+    final ReaderConstraint rc;
 
     Slices slices;
 
-    public PartitionFlowable(SSTableReader table, SSTableReadsListener listener, OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse, long limit)
+    private PartitionFlowable(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
         this.table = table;
         this.listener = listener;
-        this.readOrdering = readOrdering;
         this.key = key;
         this.selectedColumns = selectedColumns;
         this.slices = slices;
         this.reverse = reverse;
         this.subscr = null;
-        this.offset = 0;
-        this.limit = limit;
-        this.mmapped = table.dataFile.mmapped();
+        this.rc = table.dataFile.mmapped() ? ReaderConstraint.NONE : ReaderConstraint.IN_CACHE_ONLY;
     }
 
-
-    public PartitionFlowable(PartitionFlowable o, OpOrder readOrdering, int offset)
+    public static CsFlow<FlowableUnfilteredPartition> create(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
-        this.table = o.table;
-        this.readOrdering = readOrdering;
-        this.listener = o.listener;
-        this.key = o.key;
-        this.selectedColumns = o.selectedColumns;
-        this.slices = o.slices;
-        this.reverse = o.reverse;
-        this.subscr = new PartitionSubscription(o.subscr, offset);
-        this.offset = offset;
-        this.limit = Long.MAX_VALUE;
-        this.mmapped = o.mmapped;
+        PartitionFlowable flowable = new PartitionFlowable(table, listener, key, slices, selectedColumns, reverse);
+
+        return flowable.take(2)
+                       .toList()
+                       .map(head ->
+                            {
+                                if (head.size() != 2)
+                                    return new FlowablePartitions.EmptyFlowableUnfilteredPartition(new PartitionHeader(table.metadata(), key, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reverse, EncodingStats.NO_STATS));
+
+                                return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), flowable);
+                            });
     }
-
-
 
     @Override
     public CsSubscription subscribe(CsSubscriber<Unfiltered> s)
@@ -127,7 +121,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         if (subscr == null)
             subscr = new PartitionSubscription(s);
         else
-            subscr.setSubscriber(s);
+            subscr.replaceSubscriber(s);
 
         return subscr;
     }
@@ -151,7 +145,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
 
     class PartitionSubscription implements CsSubscription
     {
-        volatile OpOrder.Group opGroup;
         volatile FileDataInput dfile = null;
         volatile AbstractSSTableIterator ssTableIterator = null;
 
@@ -169,87 +162,36 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         //Force all disk callbacks through the same thread
         private final Executor onReadyExecutor = TPC.bestTPCScheduler().getExecutor();
 
-        volatile State state = State.READY;
-        CsSubscriber<Unfiltered> s;
-
         AtomicInteger count = new AtomicInteger(0);
-        AtomicLong requests = new AtomicLong(0);
+        volatile State state = State.READY;
+        volatile CsSubscriber<Unfiltered> s;
 
         PartitionSubscription(CsSubscriber<Unfiltered> s)
         {
             this.s = s;
-            this.opGroup = readOrdering.start();
             this.helper = new SerializationHelper(table.metadata(), table.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, selectedColumns);
         }
 
-
-        PartitionSubscription(PartitionSubscription p, int offset)
+        public void replaceSubscriber(CsSubscriber<Unfiltered> s)
         {
-            this.s = null;
-            this.helper = p.helper;
-            this.count.set(offset);
-            this.indexEntry = p.indexEntry;
-            this.filePos = p.filePos;
-            this.partitionLevelDeletion = p.partitionLevelDeletion;
-            this.staticRow = p.staticRow;
-        }
-
-        void setSubscriber(CsSubscriber<Unfiltered> s)
-        {
-            //FIXME: PartitionFlowableBase.unused() subscribes twice
-            //assert this.s == null;
-            if (this.s != null)
-                return;
-
-            this.opGroup = readOrdering.start();
+            this.state = READY;
             this.s = s;
         }
 
-        public void cancel()
-        {
-            switch (state)
-            {
-                case WAITING:
-                case WORKING:
-                case RETRYING:
-                    boolean r = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, state, State.CLOSING);
-                    assert r;
-                    break;
-                case READY:
-                case DONE_WORKING:
-                case DONE_WAITING:
-                case CLOSING:
-                case CLOSED:
-                    break;
-                default:
-                    throw new IllegalStateException();
-            }
-        }
-
+        @Override
         public void close()
         {
-            //FIXME PartitionFlowableBase.unused calls subscribe
-            //assert state != CLOSED : "Already closed";
-            if (state == CLOSED)
-                return;
-
-            boolean r = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, state, State.CLOSED);
-            assert r : state;
-
-            opGroup.close();
+            state = CLOSED;
             FileUtils.closeQuietly(dfile);
             FileUtils.closeQuietly(ssTableIterator);
+
+            dfile = null;
+            ssTableIterator = null;
         }
 
-        public void pull()
+        @Override
+        public void request()
         {
-            //Avoid doing any work beyond our limit
-            if (count.get() >= limit)
-            {
-                s.onComplete();
-                return;
-            }
-
             switch (count.getAndIncrement())
             {
                 case 0:
@@ -258,9 +200,11 @@ class PartitionFlowable extends CsFlow<Unfiltered>
                 case 1:
                     perform(indexEntry.isIndexed() ? this::issueStaticRowIndexed : this::issueStaticRowUnindexed);
                     break;
+                case 2:
+                    s.onComplete();
+                    break;
                 default:
                     perform(this::issueNextUnfiltered);
-                    break;
             }
         }
 
@@ -268,50 +212,19 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         {
             try
             {
-                action.accept(mmapped ? ReaderConstraint.NONE : ReaderConstraint.IN_CACHE_ONLY);
+                action.accept(rc);
 
-                switch (state)
-                {
-                    case RETRYING:
-                    case WORKING:
-                        boolean r = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, state, State.DONE_WORKING);
-                        assert r;
-                        break;
-                    case WAITING:
-                        boolean r2 = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.WAITING, State.DONE_WAITING);
-                        assert r2;
-                        break;
-                    case CLOSING:
-                        return;
-                    case READY:
-                    case CLOSED:
-                        return;
-                    default:
-                        throw new IllegalStateException("" + state);
-                }
-
-                //If this is an async wait callback then start the request
-                //chain again
-                if (state == State.DONE_WAITING)
-                {
-                    request(0, State.DONE_WAITING);
-                }
+                if (state != CLOSING)
+                    state = READY;
             }
             catch (NotInCacheException e)
             {
                 if (state == WORKING)
-                    UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.WORKING, State.RETRYING);
+                    state = RETRYING;
 
                 // Retry the request once data is in the cache
                 e.accept(() -> perform(action),
-                         () ->
-                         {
-                             if (state != State.WAITING)
-                             {
-                                 boolean f = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, state, State.WAITING);
-                                 assert f : state;
-                             }
-                         },
+                         () -> state = WAITING,
                          (t) -> {
 
                              // Calling completeExceptionally() wraps the original exception into a CompletionException even
@@ -329,44 +242,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        @Override
-        public void request()
-        {
-            request(1, State.READY);
-        }
-
-
-        private void request(long howMany, State expectedState)
-        {
-            if (howMany > 0)
-                requests.addAndGet(howMany);
-
-            //logger.info("key={} requested={}, total={}, expected={}, current={} count={} limit={}", key, howMany, requests.get(), expectedState, state, count, limit);
-
-            long r = 0;
-            while (requests.get() > 0 && UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, expectedState, State.WORKING))
-            {
-                r = requests.decrementAndGet();
-                assert r >= 0 : "" + howMany + " " + expectedState;
-                pull();
-
-                //pull may not have finished working if we hit an async wait
-                //so we only put the state back to ready if it's DONE_WORKING.
-                //It could be in WAITING state which we will just stop and let
-                //the callback handle it.
-                UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, State.DONE_WORKING, expectedState);
-            }
-
-            // When finishing a callback request
-            // We must ensure we put it back into the ready state
-            // So RX requests can start working again
-            if (state == DONE_WAITING)
-            {
-                boolean p = UnsafeAccess.UNSAFE.compareAndSwapObject(this, STATE_OFFSET, DONE_WAITING, State.READY);
-                assert p;
-            }
-        }
-
         private void issueHeader(ReaderConstraint rc)
         {
             try
@@ -376,7 +251,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
                 indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, listener, rc);
                 if (indexEntry == null)
                 {
-                    cancel();
                     s.onComplete();
                     return;
                 }
@@ -409,7 +283,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
             catch (Throwable t)
             {
-                cancel();
                 s.onError(t);
             }
         }
@@ -454,7 +327,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
             catch (Throwable t)
             {
-                cancel();
                 s.onError(t);
             }
         }
@@ -495,7 +367,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
             catch (Throwable t)
             {
-                cancel();
                 s.onError(t);
             }
         }
@@ -539,7 +410,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
                     boolean hasNext = iter.hasNext();
                     if (!hasNext)
                     {
-                        cancel();
                         s.onComplete();
                         return;
                     }
@@ -559,7 +429,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
             catch (Throwable t)
             {
-                cancel();
                 s.onError(t);
             }
         }

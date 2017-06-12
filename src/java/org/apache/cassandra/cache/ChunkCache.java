@@ -192,7 +192,7 @@ public class ChunkCache
         {
             ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
             assert buffer != null;
-            assert (MemoryUtil.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
+            assert !buffer.isDirect() || (MemoryUtil.getAddress(buffer) & (512 - 1)) == 0 : "Buffer from pool is not properly aligned!";
 
             return rebufferer.readChunk(key.position, buffer)
                              .thenApply(b -> new Buffer(key, b, key.position))

@@ -1039,27 +1039,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
     public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
 
-    public CsFlow<FlowableUnfilteredPartition> flow(OpOrder readOrdering, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    public CsFlow<FlowableUnfilteredPartition> flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
-        return CsFlow.using(() -> readOrdering.start(),
-                            (opGroup) ->
-                            {
-                                PartitionFlowable pf = new PartitionFlowable(this, listener, readOrdering, key, slices, selectedColumns, reversed, 2);
-
-                                //Convert from PartitionFlowable to FlowableUnfilteredPartition
-                                //First two items are header info. The rest is partition data
-                                return pf.take(2)
-                                         .toList()
-                                         .map(head ->
-                                              {
-                                                  if (head.size() != 2)
-                                                      return new FlowablePartitions.EmptyFlowableUnfilteredPartition(new PartitionHeader(metadata(), key, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS));
-
-                                                  PartitionFlowable u = new PartitionFlowable(pf, readOrdering, 2);
-                                                  return new FlowableUnfilteredPartition((PartitionHeader) head.get(0), (Row) head.get(1), u);
-                                              });
-                            },
-                            (opGroup) -> opGroup.close());
+        return PartitionFlowable.create(this, listener, key, slices, selectedColumns, reversed);
     }
 
 
