@@ -428,27 +428,6 @@ public class TPC
         }
     }
 
-    public static boolean isStarted()
-    {
-        // nothing we can do until we have the local ranges
-        return StorageService.instance.isInitialized();
-    }
-
-    public static AsynchronousFileChannel openFileChannel(File file, boolean mmapped) throws IOException
-    {
-        if (!USE_AIO || mmapped)
-            return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
-
-        Integer coreId = getCoreId();
-
-        if (coreId == null || coreId == perCoreSchedulers.length)
-            coreId = getNextCore();
-
-        EpollEventLoop loop = (EpollEventLoop)perCoreSchedulers[coreId].eventLoop;
-
-        return new AIOEpollFileChannel(file, loop);
-    }
-
     /**
      * Creates an executor that tries to stay on the local thread.
      * Used by ChunkCache
@@ -457,26 +436,7 @@ public class TPC
      */
     public static Executor getWrappedExecutor()
     {
-        return command ->
-        {
-            Executor executor = null;
-
-            if (!isStarted())
-            {
-                executor = GlobalEventExecutor.INSTANCE.next();
-            }
-            else
-            {
-                Integer coreId = getCoreId();
-
-                if (coreId == null || coreId == perCoreSchedulers.length)
-                    coreId = getNextCore();
-
-                executor = perCoreSchedulers[coreId].eventLoop;
-            }
-
-            executor.execute(command);
-        };
+        return command -> TPC.bestTPCScheduler().getExecutor().execute(command);
     }
 
 }

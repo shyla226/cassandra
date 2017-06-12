@@ -19,43 +19,33 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.agrona.UnsafeAccess;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
-import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
 
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSED;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSING;
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.DONE_WAITING;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.READY;
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.RETRYING;
 import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WAITING;
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WORKING;
 
 /**
  * Internal representation of a partition in flowable form.
@@ -69,10 +59,10 @@ import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WOR
  * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
  * In order to start from the last finished item.
  *
- * Finally the state machine here needs to account for CsFlow asking for new data or closing us
- * while we are busy waiting for data back from the disk.
+ * The state logic is very straight fwd since CsFlow gives us garuntees that
+ * request/close will not be called until after a previous call finishes.
  *
- * If that happens the request will be handled after the data we are waiting for has arrived.
+ * We only need to track if we are waiting for data since we need to reset the reader state.
  */
 class PartitionFlowable extends CsFlow<Unfiltered>
 {
@@ -134,11 +124,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
     enum State
     {
         READY,
-        WORKING,
-        RETRYING,
-        DONE_WORKING,
         WAITING,
-        DONE_WAITING,
         CLOSING,
         CLOSED
     }
@@ -163,7 +149,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         private final Executor onReadyExecutor = TPC.bestTPCScheduler().getExecutor();
 
         AtomicInteger count = new AtomicInteger(0);
-        volatile State state = State.READY;
+        volatile State state = READY;
         volatile CsSubscriber<Unfiltered> s;
 
         PartitionSubscription(CsSubscriber<Unfiltered> s)
@@ -219,9 +205,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
             catch (NotInCacheException e)
             {
-                if (state == WORKING)
-                    state = RETRYING;
-
                 // Retry the request once data is in the cache
                 e.accept(() -> perform(action),
                          () -> state = WAITING,
@@ -397,7 +380,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
 
                 //If this was an async response
                 //Make sure the state is reset
-                if (state.equals(State.WAITING) || state.equals(State.RETRYING) || state.equals(State.CLOSING))
+                if (state.equals(WAITING) || state.equals(CLOSING))
                 {
                     iter.resetReaderState();
                     dfile.seek(filePos);

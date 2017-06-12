@@ -24,17 +24,20 @@ import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
 import java.nio.channels.WritableByteChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ExecutionException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.channel.epoll.AIOEpollFileChannel;
+import io.netty.channel.epoll.EpollEventLoop;
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
+
 
 /**
  * A proxy of a FileChannel that:
@@ -51,11 +54,16 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
     private final String filePath;
     private final AsynchronousFileChannel channel;
 
-    public static AsynchronousFileChannel openChannel(File file, boolean mmapped)
+    public static AsynchronousFileChannel openFileChannel(File file, boolean mmapped)
     {
         try
         {
-            return TPC.openFileChannel(file, mmapped);
+            if (!TPC.USE_AIO || mmapped)
+                return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+
+            EpollEventLoop loop = (EpollEventLoop) TPC.bestTPCScheduler().getExecutor();
+
+            return new AIOEpollFileChannel(file, loop);
         }
         catch (IOException e)
         {
@@ -70,7 +78,7 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
 
     public AsynchronousChannelProxy(File file, boolean mmapped)
     {
-        this(file.getPath(), openChannel(file, mmapped));
+        this(file.getPath(), openFileChannel(file, mmapped));
     }
 
     public AsynchronousChannelProxy(String filePath, AsynchronousFileChannel channel)
