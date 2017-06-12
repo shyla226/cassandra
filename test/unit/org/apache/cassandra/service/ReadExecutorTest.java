@@ -29,7 +29,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import io.reactivex.Completable;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -46,10 +45,10 @@ import static org.junit.Assert.fail;
 
 public class ReadExecutorTest
 {
-    static Keyspace ks;
-    static ColumnFamilyStore cfs;
-    static List<InetAddress> targets;
-    long rpcTimeout;
+    private static Keyspace ks;
+    private static ColumnFamilyStore cfs;
+    private static List<InetAddress> targets;
+    private long rpcTimeout;
 
     @BeforeClass
     public static void setUpClass() throws Throwable
@@ -89,7 +88,7 @@ public class ReadExecutorTest
         assertEquals(0, ks.metric.speculativeInsufficientReplicas.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         AbstractReadExecutor executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime(), true);
-        DatabaseDescriptor.setReadRpcTimeout(0);
+        DatabaseDescriptor.setReadRpcTimeout(1); // we must give a chance to the task scheduled by AbstractReadExecutor.NeverSpeculatingReadExecutor.maybeTryAdditionalReplicas() to run first
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
         try
@@ -139,18 +138,16 @@ public class ReadExecutorTest
         AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime());
         DatabaseDescriptor.setReadRpcTimeout(TimeUnit.DAYS.toMillis(365));
         executor.maybeTryAdditionalReplicas().blockingAwait();
-        new Thread()
-        {
-            @Override
-            public void run()
-            {
-                //Failures end the read promptly but don't require mock data to be supplied
-                Request<ReadCommand, ReadResponse> request0 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.READ, command);
-                executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
-                Request<ReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.READ, command);
-                executor.handler.onFailure(request1.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
-            }
-        }.start();
+
+        // make sure that we send the failures after having executed the task scheduled in AbstractReadExecutor.SpeculatingReadExecutor.maybeTryAdditionalReplicas(),
+        // hence the cfs.sampleLatencyNanos + 10 nanoseconds delay
+        command.getScheduler().scheduleDirect(() -> {
+            //Failures end the read promptly but don't require mock data to be supplied
+            Request<ReadCommand, ReadResponse> request0 = Request.fakeTestRequest(targets.get(0), -1, Verbs.READS.READ, command);
+            executor.handler.onFailure(request0.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
+            Request<ReadCommand, ReadResponse> request1 = Request.fakeTestRequest(targets.get(1), -1, Verbs.READS.READ, command);
+            executor.handler.onFailure(request1.respondWithFailure(RequestFailureReason.READ_TOO_MANY_TOMBSTONES));
+        }, cfs.sampleLatencyNanos + 10, TimeUnit.NANOSECONDS); // see comment above
 
         try
         {
@@ -181,7 +178,7 @@ public class ReadExecutorTest
         assertEquals(0, ks.metric.speculativeFailedRetries.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime());
-        DatabaseDescriptor.setReadRpcTimeout(0);
+        DatabaseDescriptor.setReadRpcTimeout(1); // we must give a chance to the task scheduled by AbstractReadExecutor.SpeculatingReadExecutor.maybeTryAdditionalReplicas() to run first
         executor.maybeTryAdditionalReplicas().blockingAwait();
         try
         {
