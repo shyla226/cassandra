@@ -593,11 +593,9 @@ public final class FileUtils
 
     public static Map<Path, String> getDiskPartitions() throws IOException
     {
-        BufferedReader bufferedReader = null;
         Map<Path, String> dirToDisk = new TreeMap<>();
-        try
+        try (BufferedReader bufferedReader =  new BufferedReader(new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8")))
         {
-            bufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8"));
             String line;
             while ((line = bufferedReader.readLine()) != null)
             {
@@ -618,31 +616,18 @@ public final class FileUtils
                 dirToDisk.put(Paths.get(parts[1]), disk);
             }
         }
-        finally
-        {
-            if (bufferedReader != null)
-                closeQuietly(bufferedReader);
-        }
 
         return dirToDisk;
     }
 
     public static boolean isSSD(String device) throws IOException
     {
-        BufferedReader bufferedReader = null;
-
-        try
+        try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(String.format("/sys/block/%s/queue/rotational", device)), "UTF-8")))
         {
-            bufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(String.format("/sys/block/%s/queue/rotational", device)), "UTF-8"));
             String line = bufferedReader.readLine().trim();
 
             if (line.equals("0"))
                 return true;
-        }
-        finally
-        {
-            if (bufferedReader != null)
-                closeQuietly(bufferedReader);
         }
 
         return false;

@@ -27,6 +27,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import javax.annotation.Resource;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
@@ -186,8 +188,8 @@ public class ChunkCache
         ChunkReader rebufferer = key.file;
         metrics.misses.mark();
 
+        @SuppressWarnings("unchecked")
         Timer.Context ctx = metrics.missLatency.time();
-
         try
         {
             ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
