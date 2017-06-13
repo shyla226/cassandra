@@ -22,12 +22,8 @@ package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
-
-import javax.annotation.Resource;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
@@ -37,7 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.*;
-import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
@@ -160,7 +155,7 @@ public class ChunkCache
         public void release()
         {
             //The read from disk read may be in flight
-            //We need to keep this buffer till the async callback has fire
+            //We need to keep this buffer till the async callback has fired
             if (references.decrementAndGet() == 0)
                 BufferPool.put(buffer);
         }

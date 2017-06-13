@@ -54,7 +54,7 @@ import org.apache.cassandra.utils.flow.CsSubscription;
  * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
  * In order to start from the last finished item.
  *
- * The state logic is very straight fwd since CsFlow gives us garuntees that
+ * The state logic is very straight fwd since CsFlow gives us guarantees that
  * request/close will not be called until after a previous call finishes.
  *
  * We only need to track if we are waiting for data since we need to reset the reader state.

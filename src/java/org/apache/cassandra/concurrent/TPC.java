@@ -17,23 +17,15 @@
  */
 package org.apache.cassandra.concurrent;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.file.FileSystems;
-import java.nio.file.StandardOpenOption;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.shaded.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
-import io.netty.channel.epoll.EpollEventLoop;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -47,7 +39,6 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.SigarLibrary;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.OpOrderSimple;
 import org.apache.cassandra.utils.concurrent.OpOrderThreaded;
