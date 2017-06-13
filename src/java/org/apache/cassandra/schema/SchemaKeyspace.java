@@ -1304,7 +1304,7 @@ public final class SchemaKeyspace
                         .collect(toSet());
     }
 
-    static void applyChanges(Collection<Mutation> mutations)
+    static synchronized void applyChanges(Collection<Mutation> mutations)
     {
         // TODO - schould we merge rather than concat? (merge would process mutations in parallel)
         Completable.concat(mutations.stream().map(Mutation::applyAsync).collect(toList())).blockingAwait();
