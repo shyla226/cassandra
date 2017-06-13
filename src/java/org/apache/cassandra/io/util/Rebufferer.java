@@ -82,7 +82,13 @@ public interface Rebufferer extends ReaderFileProxy
             return this;
         }
 
-        public void accept(Runnable onReady, Runnable onSchedule, Consumer<Throwable> onError, Executor executor)
+        /**
+         * Handles callbacks for async buffers
+         * @param onReady will be run if completable future is ready
+         * @param onError will be run if the buffer errored
+         * @param executor the executor to schedule on
+         */
+        public void accept(Runnable onReady, Consumer<Throwable> onError, Executor executor)
         {
             //Registers a callback to be issued when the async buffer is ready
             assert asyncBuffer != null;
@@ -93,8 +99,6 @@ public interface Rebufferer extends ReaderFileProxy
             }
             else
             {
-                onSchedule.run();
-
                 //Track the ThreadLocals
                 Runnable wrappedOnReady = new ExecutorLocals.WrappedRunnable(onReady);
 

@@ -42,11 +42,6 @@ import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
 
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSED;
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.CLOSING;
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.READY;
-import static org.apache.cassandra.io.sstable.format.PartitionFlowable.State.WAITING;
-
 /**
  * Internal representation of a partition in flowable form.
  * The first item is *ALWAYS* the partition header.
@@ -121,14 +116,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         return subscr;
     }
 
-    enum State
-    {
-        READY,
-        WAITING,
-        CLOSING,
-        CLOSED
-    }
-
     class PartitionSubscription implements CsSubscription
     {
         volatile FileDataInput dfile = null;
@@ -149,7 +136,6 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         private final Executor onReadyExecutor = TPC.bestTPCScheduler().getExecutor();
 
         AtomicInteger count = new AtomicInteger(0);
-        volatile State state = READY;
         volatile CsSubscriber<Unfiltered> s;
 
         PartitionSubscription(CsSubscriber<Unfiltered> s)
@@ -160,14 +146,12 @@ class PartitionFlowable extends CsFlow<Unfiltered>
 
         public void replaceSubscriber(CsSubscriber<Unfiltered> s)
         {
-            this.state = READY;
             this.s = s;
         }
 
         @Override
         public void close()
         {
-            state = CLOSED;
             FileUtils.closeQuietly(dfile);
             FileUtils.closeQuietly(ssTableIterator);
 
@@ -181,35 +165,31 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             switch (count.getAndIncrement())
             {
                 case 0:
-                    perform(this::issueHeader);
+                    perform(this::issueHeader, false);
                     break;
                 case 1:
-                    perform(indexEntry.isIndexed() ? this::issueStaticRowIndexed : this::issueStaticRowUnindexed);
+                    perform(indexEntry.isIndexed() ? this::issueStaticRowIndexed : this::issueStaticRowUnindexed, false);
                     break;
                 case 2:
                     s.onComplete();
                     break;
                 default:
-                    perform(this::issueNextUnfiltered);
+                    perform(this::issueNextUnfiltered, false);
             }
         }
 
-        void perform(Consumer<ReaderConstraint> action)
+        void perform(Consumer<Boolean> action, boolean isRetry)
         {
             try
             {
-                action.accept(rc);
-
-                if (state != CLOSING)
-                    state = READY;
+                action.accept(isRetry);
             }
             catch (NotInCacheException e)
             {
                 // Retry the request once data is in the cache
-                e.accept(() -> perform(action),
-                         () -> state = WAITING,
-                         (t) -> {
-
+                e.accept(() -> perform(action, true),
+                         (t) ->
+                         {
                              // Calling completeExceptionally() wraps the original exception into a CompletionException even
                              // though the documentation says otherwise
                              if (t instanceof CompletionException && t.getCause() != null)
@@ -225,12 +205,10 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        private void issueHeader(ReaderConstraint rc)
+        private void issueHeader(Boolean isRetry)
         {
             try
             {
-                assert state != CLOSED;
-
                 indexEntry = table.getPosition(key, SSTableReader.Operator.EQ, listener, rc);
                 if (indexEntry == null)
                 {
@@ -270,13 +248,10 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        private void issueStaticRowIndexed(ReaderConstraint rc)
+        private void issueStaticRowIndexed(Boolean isRetry)
         {
-
             try
             {
-                assert state != CLOSED;
-
                 Columns statics = selectedColumns.fetchedColumns().statics;
                 assert indexEntry != null;
 
@@ -314,12 +289,10 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        private void issueStaticRowUnindexed(ReaderConstraint rc)
+        private void issueStaticRowUnindexed(Boolean isRetry)
         {
             try
             {
-                assert state != CLOSED;
-
                 Columns statics = selectedColumns.fetchedColumns().statics;
                 assert indexEntry != null;
 
@@ -354,7 +327,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        AbstractSSTableIterator maybeInitIterator(ReaderConstraint rc)
+        AbstractSSTableIterator maybeInitIterator()
         {
             if (ssTableIterator == null)
             {
@@ -370,17 +343,15 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             return ssTableIterator;
         }
 
-        private void issueNextUnfiltered(ReaderConstraint rc)
+        private void issueNextUnfiltered(Boolean isRetry)
         {
             try
             {
-                assert state != CLOSED;
-
-                AbstractSSTableIterator iter = maybeInitIterator(rc);
+                AbstractSSTableIterator iter = maybeInitIterator();
 
                 //If this was an async response
                 //Make sure the state is reset
-                if (state.equals(WAITING) || state.equals(CLOSING))
+                if (isRetry)
                 {
                     iter.resetReaderState();
                     dfile.seek(filePos);
