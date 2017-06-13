@@ -25,6 +25,9 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Maps;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -46,6 +49,7 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  */
 public class TableMetrics
 {
+    private final static Logger logger = LoggerFactory.getLogger(TableMetrics.class);
 
     public static final long[] EMPTY = new long[0];
 
@@ -754,7 +758,14 @@ public class TableMetrics
         {
             CassandraMetricsRegistry.MetricName name = factory.createMetricName(entry.getKey());
             CassandraMetricsRegistry.MetricName alias = aliasFactory.createMetricName(entry.getValue());
-            allTableMetrics.get(entry.getKey()).remove(Metrics.getMetrics().get(name.getMetricName()));
+            try
+            {
+                allTableMetrics.get(entry.getKey()).remove(Metrics.getMetrics().get(name.getMetricName()));
+            }
+            catch (Throwable t)
+            {
+                logger.warn("Error releasing metric {}", name, t);
+            }
             Metrics.remove(name, alias);
         }
         readLatency.release();
