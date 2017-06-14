@@ -615,7 +615,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
             iterators.add(iter);
-            sstable.incrementReadCount();
             mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
                                                     iter.header.partitionLevelDeletion.markedForDeleteAt());
         }
@@ -652,7 +651,6 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         DecoratedKey key = merged.header.partitionKey;
         cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(merged.header.partitionKey.getKey(), key.hashCode(), 1);
-
         return merged;
     }
 

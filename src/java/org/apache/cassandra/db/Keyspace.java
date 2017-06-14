@@ -530,28 +530,25 @@ public class Keyspace
     private Completable applyWithViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
     {
         Single<Semaphore[]> lockAcquisition =  acquireLocksForView(mutation, isDroppable);
-        return lockAcquisition.flatMapCompletable(locks -> {
-            if (writeBarrier != null)
-                return failDueToWriteBarrier(mutation);
+        return lockAcquisition.flatMapCompletable(locks ->
+            Completable.using(writeOrder::start,
+                              opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true),
+                              opGroup -> {
+                                  opGroup.close();
 
-            return Completable.using(writeOrder::start,
-                                     opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true),
-                                     opGroup -> {
-                                         opGroup.close();
-
-                                         try
-                                         {
-                                             for (Semaphore lock : locks)
-                                                 ViewManager.release(lock);
-                                         }
-                                         catch (Throwable t)
-                                         {
-                                             JVMStabilityInspector.inspectThrowable(t);
-                                             logger.error("Fail to release view locks", t);
-                                         }
-                                     }
-            );
-        });
+                                  try
+                                  {
+                                      for (Semaphore lock : locks)
+                                          ViewManager.release(lock);
+                                  }
+                                  catch (Throwable t)
+                                  {
+                                      JVMStabilityInspector.inspectThrowable(t);
+                                      logger.error("Fail to release view locks", t);
+                                  }
+                              }
+            )
+        );
     }
 
     private Completable applyNoViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
@@ -563,6 +560,9 @@ public class Keyspace
 
     private Completable applyInternal(OpOrder.Group opGroup, Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean requiresViewUpdate)
     {
+        if (writeBarrier != null && !writeBarrier.isAfter(opGroup))
+            return failDueToWriteBarrier(mutation);
+
         if (!writeCommitLog)
             return postCommitLogApply(opGroup, mutation, CommitLogPosition.NONE, updateIndexes, requiresViewUpdate);
 
