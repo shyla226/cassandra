@@ -41,7 +41,7 @@ public class RevokePermissionsStatement extends PermissionsManagementStatement
     {
         return Single.fromCallable(() -> {
            DatabaseDescriptor.getAuthorizer().revoke(state.getUser(), permissions, resource, grantee);
-           return (ResultMessage)(new ResultMessage.Void());
+           return new ResultMessage.Void();
        });
     }
 }

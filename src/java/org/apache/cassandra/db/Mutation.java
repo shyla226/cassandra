@@ -253,11 +253,6 @@ public class Mutation implements IMutation, Scheduleable
         return applyAsync(Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
     }
 
-    public void apply(boolean durableWrites, boolean isDroppable)
-    {
-        TPCUtils.blockingAwait(Keyspace.open(keyspaceName).apply(this, durableWrites, true, isDroppable));
-    }
-
     public void apply(boolean durableWrites)
     {
         TPCUtils.blockingAwait(applyAsync(durableWrites, true));

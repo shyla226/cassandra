@@ -37,7 +37,7 @@ public class RevokeRoleStatement extends RoleManagementStatement
     {
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getRoleManager().revokeRole(state.getUser(), role, grantee);
-            return (ResultMessage)(new ResultMessage.Void());
+            return new ResultMessage.Void();
         });
     }
 }

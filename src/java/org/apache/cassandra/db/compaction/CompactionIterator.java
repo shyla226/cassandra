@@ -266,11 +266,6 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
         return this.getCompactionInfo().toString();
     }
 
-    public CsFlow<UnfilteredRowIterator> asObservable()
-    {
-        return CsFlow.empty();
-    }
-
     private class Purger extends PurgeFunction
     {
         private final CompactionController controller;

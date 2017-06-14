@@ -85,13 +85,16 @@ public class TPCBoundaries
     }
 
     /**
-     * Return the number of boundaries, that is the length of the array containing the tokens.
+     * The number of cores that this boundaries support, that is how many different core ID {@link #getCoreFor} might
+     * possibly return.
      *
-     * @return
+     * @return the number of core supported by theses boundaries. This will always be strictly positive (it's at least 1)
+     * and in practice it will be equal to {@link TPC#getNumCores()} for the boundaries of normal keyspace and equal to
+     * 1 for the system keyspace.
      */
-    public int num()
+    public int supportedCores()
     {
-        return boundaries.length;
+        return boundaries.length + 1;
     }
 
     @Override

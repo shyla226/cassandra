@@ -141,6 +141,8 @@ public class Memtable implements Comparable<Memtable>
 
     // The boundaries for the keyspace as they were calculated when the memtable is created.
     // The boundaries will be NONE for system keyspaces or if StorageService is not yet initialized.
+    // The fact this is fixed for the duration of the memtable lifetime, guarantees we'll always pick the same core
+    // for the a given key, even if we race with the StorageService initialization or with topology changes.
     private final TPCBoundaries boundaries;
 
     // We index the memtable by PartitionPosition only for the purpose of being able
@@ -182,31 +184,34 @@ public class Memtable implements Comparable<Memtable>
 
     // ONLY to be used for testing, to create a mock Memtable
     @VisibleForTesting
-    public Memtable(TableMetadata metadata, TPCBoundaries boundaries)
+    public Memtable(TableMetadata metadata)
     {
         this.initialComparator = metadata.comparator;
         this.cfs = null;
         this.allocator = null;
         this.columnsCollector = new ColumnsCollector(metadata.regularAndStaticColumns());
-        this.boundaries = boundaries;
+        this.boundaries = TPCBoundaries.NONE;
         this.partitions = generatePartitionMaps();
     }
 
     private List<TreeMap<PartitionPosition, AtomicBTreePartition>> generatePartitionMaps()
     {
-        int capacity = boundaries.num() + 1; // there are num_boundaries+1 cores
-        ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(capacity);
-        for (int i = 0; i < capacity; i++)
+        int splits = boundaries.supportedCores();
+
+        if (splits == 1)
+            return Collections.singletonList(new TreeMap<>());
+
+        ArrayList<TreeMap<PartitionPosition, AtomicBTreePartition>> partitionMapContainer = new ArrayList<>(splits);
+        for (int i = 0; i < splits; i++)
             partitionMapContainer.add(new TreeMap<>());
         return partitionMapContainer;
     }
 
-    private Map<PartitionPosition, AtomicBTreePartition> getPartitionMapFor(DecoratedKey key)
+    private int getCoreFor(DecoratedKey key)
     {
         int coreId = TPC.getCoreForKey(boundaries, key);
-        assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id: " + Integer.toString(coreId);
-
-        return partitions.get(coreId);
+        assert coreId >= 0 && coreId < partitions.size() : "Received invalid core id : " + coreId;
+        return coreId;
     }
 
     public MemtableAllocator getAllocator()
@@ -320,8 +325,10 @@ public class Memtable implements Comparable<Memtable>
         final DecoratedKey key = update.partitionKey();
         final AtomicLong initialSize = new AtomicLong(0);
 
-        return Single.fromCallable(() -> {
-                        Map<PartitionPosition, AtomicBTreePartition> partitionMap = getPartitionMapFor(key);
+        final int coreId = getCoreFor(key);
+
+        return Single.defer(() -> {
+                        Map<PartitionPosition, AtomicBTreePartition> partitionMap = partitions.get(coreId);
                         AtomicBTreePartition previous = partitionMap.get(key);
 
                         if (logger.isTraceEnabled())
@@ -342,9 +349,8 @@ public class Memtable implements Comparable<Memtable>
                            partitionMap.put(cloneKey, empty);
                            previous = empty;
                         }
-                        return previous;
-                   }).flatMap(previous -> previous.addAllWithSizeDelta(update, opGroup, indexer))
-                     .map(p -> {
+                        return previous.addAllWithSizeDelta(update, opGroup, indexer);
+                   }).map(p -> {
                        updateIfMin(minTimestamp, p.right.stats().minTimestamp);
                        updateIfMin(minLocalDeletionTime, p.right.stats().minLocalDeletionTime);
                        liveDataSize.addAndGet(initialSize.get() + p.left[0]);
@@ -353,7 +359,7 @@ public class Memtable implements Comparable<Memtable>
                        currentOperations.addAndGet(update.operationCount());
 
                        return p.left[1];
-                   }).subscribeOn(TPC.getForKey(boundaries, key));
+                   }).subscribeOn(TPC.getForCore(coreId));
     }
 
     private void updateIfMin(AtomicLong val, long newVal)
@@ -461,7 +467,7 @@ public class Memtable implements Comparable<Memtable>
         return CsFlow.fromIterable(all)
                      .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
                      .flatMap(list -> CsFlow.fromIterable(list))
-                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForKey(boundaries, iterator.partitionKey())));
+                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForCore(getCoreFor(iterator.partitionKey()))));
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
@@ -493,7 +499,7 @@ public class Memtable implements Comparable<Memtable>
 
     public Partition getPartition(DecoratedKey key)
     {
-        return getPartitionMapFor(key).get(key);
+        return partitions.get(getCoreFor(key)).get(key);
     }
 
     public long getMinTimestamp()
@@ -575,7 +581,7 @@ public class Memtable implements Comparable<Memtable>
                 if (BlacklistedDirectories.isUnwritable(flushTableDir))
                     throw new FSWriteError(new IOException("SSTable flush dir has been blacklisted"), flushTableDir.getAbsolutePath());
 
-                // // exclude directory if its total writeSize does not fit to data directory
+                // exclude directory if its total writeSize does not fit to data directory
                 if (flushLocation.getAvailableSpace() < estimatedSize)
                     throw new FSDiskFullWriteError(new IOException("Insufficient disk space to write " + estimatedSize + " bytes"), "");
 
@@ -646,8 +652,6 @@ public class Memtable implements Comparable<Memtable>
                             break;
 
                         AtomicBTreePartition partition = partitionSet.next();
-
-                        //logger.debug("Processing partition {}", partition.partitionKey());
 
                         // Each batchlog partition is a separate entry in the log. And for an entry, we only do 2
                         // operations: 1) we insert the entry and 2) we delete it. Further, BL data is strictly local,

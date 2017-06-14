@@ -20,9 +20,6 @@ package org.apache.cassandra.db;
 
 import java.util.NoSuchElementException;
 
-import org.apache.cassandra.utils.flow.CsFlow;
-import io.reactivex.Observable;
-import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterator;

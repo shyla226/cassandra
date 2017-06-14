@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.statements;
 
 import io.reactivex.Single;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -37,7 +36,7 @@ public class GrantRoleStatement extends RoleManagementStatement
     {
         return Single.fromCallable(() -> {
             DatabaseDescriptor.getRoleManager().grantRole(state.getUser(), role, grantee);
-            return (ResultMessage)(new ResultMessage.Void());
+            return new ResultMessage.Void();
         });
     }
 }

@@ -264,7 +264,12 @@ public class QueryProcessor implements QueryHandler
         return getStatement(queryStr, queryState.getClientState());
     }
 
-    public static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
+    public static UntypedResultSet processBlocking(String query, ConsistencyLevel cl) throws RequestExecutionException
+    {
+        return TPCUtils.blockingGet(process(query, cl));
+    }
+
+    private static Single<UntypedResultSet> process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
         return process(query, cl, Collections.<ByteBuffer>emptyList());
     }
@@ -301,36 +306,29 @@ public class QueryProcessor implements QueryHandler
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
-    public static Single<ParsedStatement.Prepared> prepareInternal(String query) throws RequestValidationException
+    private static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
     {
         ParsedStatement.Prepared existing = internalStatements.get(query);
         if (existing != null)
-            return Single.just(existing);
+            return existing;
 
-        final ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
-        final Scheduler scheduler = prepared.statement.getScheduler();
-        // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing but make sure
-        // that if validate() may block (scheduler != null) then we switch threads by calling subscribeOn
-        Single<ParsedStatement.Prepared> ret = Single.fromCallable(() -> {
-            prepared.statement.validate(internalQueryState().getClientState());
-            internalStatements.putIfAbsent(query, prepared);
-            return prepared;
-        });
-
-        return scheduler == null ? ret : ret.subscribeOn(scheduler);
+        ParsedStatement.Prepared prepared = parseStatement(query, internalQueryState());
+        prepared.statement.validate(internalQueryState().getClientState());
+        internalStatements.putIfAbsent(query, prepared);
+        return prepared;
     }
 
     public static Single<UntypedResultSet> executeInternalAsync(String query, Object... values)
     {
-        Single<? extends ResultMessage> observable = prepareInternal(query)
-                                                     .flatMap(prepared -> prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values)));
+        ParsedStatement.Prepared prepared = prepareInternal(query);
 
-        return observable.map(result -> {
-            if (result instanceof ResultMessage.Rows)
-                return UntypedResultSet.create(((ResultMessage.Rows) result).result);
-            else
-                return UntypedResultSet.EMPTY;
-        });
+        return prepared.statement.executeInternal(internalQueryState(), makeInternalOptions(prepared, values))
+                                 .map(result -> {
+                                     if (result instanceof ResultMessage.Rows)
+                                         return UntypedResultSet.create(((ResultMessage.Rows) result).result);
+                                     else
+                                         return UntypedResultSet.EMPTY;
+                                 });
     }
 
     public static UntypedResultSet executeInternal(String query, Object... values)
@@ -349,9 +347,9 @@ public class QueryProcessor implements QueryHandler
     {
         try
         {
-            ResultMessage result = prepareInternal(query)
-                                   .flatMap(prepared -> prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()))
-                                   .blockingGet();
+            ParsedStatement.Prepared prepared = prepareInternal(query);
+            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime())
+                                                     .blockingGet();
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else
@@ -365,8 +363,7 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet executeInternalWithPaging(String query, int pageSize, Object... values)
     {
-        // currently called only by batchlog manager and repair so we should be OK blocking here
-        ParsedStatement.Prepared prepared = TPCUtils.blockingGet(prepareInternal(query));
+        ParsedStatement.Prepared prepared = prepareInternal(query);
         if (!(prepared.statement instanceof SelectStatement))
             throw new IllegalArgumentException("Only SELECTs can be paged");
 
@@ -407,16 +404,12 @@ public class QueryProcessor implements QueryHandler
      */
     public static Single<UntypedResultSet> executeInternalWithNow(int nowInSec, long queryStartNanoTime, String query, Object... values)
     {
-        Single<? extends ResultMessage> observable = prepareInternal(query).flatMap(prepared -> {
-            assert prepared.statement instanceof SelectStatement;
-            SelectStatement select = (SelectStatement)prepared.statement;
-            return select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime);
-        });
+        ParsedStatement.Prepared prepared = prepareInternal(query);
+        assert prepared.statement instanceof SelectStatement;
+        SelectStatement select = (SelectStatement)prepared.statement;
 
-        return observable.map(result -> {
-            assert result instanceof ResultMessage.Rows;
-            return UntypedResultSet.create(((ResultMessage.Rows) result).result);
-        });
+        return select.executeInternal(internalQueryState(), makeInternalOptions(prepared, values), nowInSec, queryStartNanoTime)
+                     .map(result -> UntypedResultSet.create(result.result));
     }
 
     public static UntypedResultSet resultify(String query, RowIterator partition)

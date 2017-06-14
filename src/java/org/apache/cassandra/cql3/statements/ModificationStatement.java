@@ -618,7 +618,7 @@ public abstract class ModificationStatement implements CQLStatement
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
-    public Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         return getMutations(options, true, queryState.getTimestamp(), queryStartNanoTime)
                .flatMapCompletable(mutations -> {
@@ -636,7 +636,7 @@ public abstract class ModificationStatement implements CQLStatement
                }).andThen(Single.just(new ResultMessage.Void()));
     }
 
-    public Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    private Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         CQL3CasRequest request = makeCasRequest(state, options);
         return casInternal(request,state).map(result -> {

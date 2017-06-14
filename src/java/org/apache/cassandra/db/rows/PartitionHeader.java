@@ -58,6 +58,11 @@ public class PartitionHeader
         this.stats = stats;
     }
 
+    public PartitionHeader with(DeletionTime newPartitionLevelDeletion)
+    {
+        return new PartitionHeader(metadata, partitionKey, newPartitionLevelDeletion, columns, isReverseOrder, stats);
+    }
+
     @Override
     public String toString()
     {
@@ -77,11 +82,6 @@ public class PartitionHeader
             merger.add(0, sources.next());
 
         return merger.merge();
-    }
-
-    public boolean isEmpty()
-    {
-        return partitionLevelDeletion.isLive();
     }
 
     static class Merger

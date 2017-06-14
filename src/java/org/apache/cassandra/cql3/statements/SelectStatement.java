@@ -451,13 +451,13 @@ public class SelectStatement implements CQLStatement
     }
 
     private Single<ResultMessage.Rows> execute(Pager pager,
-                                       QueryOptions options,
-                                       Selectors selectors,
-                                       int pageSize,
-                                       int nowInSec,
-                                       int userLimit,
-                                       AggregationSpecification aggregationSpec,
-                                       long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+                                               QueryOptions options,
+                                               Selectors selectors,
+                                               int pageSize,
+                                               int nowInSec,
+                                               int userLimit,
+                                               AggregationSpecification aggregationSpec,
+                                               long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         if (aggregationSpecFactory != null)
         {

@@ -69,6 +69,11 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
     public void validate(ClientState state) throws RequestValidationException
     {
+
+    }
+
+    public void checkAccess(ClientState state)
+    {
         // a check to ensure the existence of the user isn't being leaked by user existence check.
         state.ensureNotAnonymous();
 
@@ -81,11 +86,6 @@ public class ListPermissionsStatement extends AuthorizationStatement
 
         if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
-   }
-
-    public void checkAccess(ClientState state)
-    {
-        // checked in validate
     }
 
     // TODO: Create a new ResultMessage type (?). Rows will do for now.

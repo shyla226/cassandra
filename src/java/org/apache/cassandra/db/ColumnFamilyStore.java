@@ -1381,11 +1381,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public Completable apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
     {
-        return applyInternal(update, indexer, opGroup, commitLogPosition);
-    }
-
-    Completable applyInternal(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
-    {
         long start = System.nanoTime();
         Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
         return mt.put(update, indexer, opGroup)
