@@ -31,11 +31,10 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.ListenableFuture;
 import org.junit.Assert;
 import org.junit.Ignore;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,9 +42,9 @@ import com.datastax.driver.core.AsyncContinuousPagingResult;
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.ColumnDefinitions;
+import com.datastax.driver.core.ContinuousPagingOptions;
 import com.datastax.driver.core.ContinuousPagingSession;
 import com.datastax.driver.core.NettyOptions;
-import com.datastax.driver.core.ContinuousPagingOptions;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
@@ -57,6 +56,7 @@ import com.datastax.shaded.netty.channel.nio.NioEventLoopGroup;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.transport.ProtocolVersion;
 
+import static org.apache.cassandra.cql3.CQLTester.clusterBuilder;
 import static org.apache.cassandra.cql3.CQLTester.row;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -71,7 +71,7 @@ class ContinuousPagingTestUtils
 
     public static void startup()
     {
-        CQLTester.requireNetwork(false);
+        CQLTester.requireNetwork();
 
         long seed = System.nanoTime();
         logger.info("Using seed {}", seed);
@@ -589,9 +589,9 @@ class ContinuousPagingTestUtils
             this.cancelAfter = builder.cancelAfter;
             this.failAfter = builder.failAfter;
             this.exception = builder.exception;
-            this.cluster = CQLTester.createClientCluster(protocolVersion,
-                                                         String.format("Test cluster %d", clusterNo.incrementAndGet()),
-                                                         new CustomNettyOptions(numClientThreads));
+            this.cluster = clusterBuilder(protocolVersion).withClusterName(String.format("Test cluster %d", clusterNo.incrementAndGet()))
+                                                          .withNettyOptions(new CustomNettyOptions(numClientThreads))
+                                                          .build();
             this.session = cluster.connect();
         }
 

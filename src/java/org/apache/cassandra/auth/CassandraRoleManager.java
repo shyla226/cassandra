@@ -139,9 +139,9 @@ public class CassandraRoleManager implements IRoleManager
 
     public void setup()
     {
-        loadRoleStatement = (SelectStatement) prepare("SELECT * from %s.%s WHERE role = ?",
-                                                      SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                      AuthKeyspace.ROLES);
+        loadRoleStatement = (SelectStatement) QueryProcessor.parseStatement(String.format("SELECT * from %s.%s WHERE role = ?",
+                                                                                          SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                                          AuthKeyspace.ROLES)).prepare().statement;
         scheduleSetupTask(() -> {
             setupDefaultRole();
             return null;
@@ -359,19 +359,6 @@ public class CassandraRoleManager implements IRoleManager
                 }
             }
         }, AuthKeyspace.SUPERUSER_SETUP_DELAY, TimeUnit.MILLISECONDS);
-    }
-
-
-    private CQLStatement prepare(String template, String keyspace, String table)
-    {
-        try
-        {
-            return QueryProcessor.parseStatement(String.format(template, keyspace, table)).prepare().statement;
-        }
-        catch (RequestValidationException e)
-        {
-            throw new AssertionError(e); // not supposed to happen
-        }
     }
 
     /*

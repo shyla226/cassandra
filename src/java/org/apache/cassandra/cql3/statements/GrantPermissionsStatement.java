@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.util.Set;
 
 import io.reactivex.Single;
+import org.apache.cassandra.auth.GrantMode;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -31,15 +32,15 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class GrantPermissionsStatement extends PermissionsManagementStatement
 {
-    public GrantPermissionsStatement(Set<Permission> permissions, IResource resource, RoleName grantee)
+    public GrantPermissionsStatement(Set<Permission> permissions, IResource resource, RoleName grantee, GrantMode grantMode)
     {
-        super(permissions, resource, grantee);
+        super(permissions, resource, grantee, grantMode);
     }
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         return Single.fromCallable(() -> {
-            DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee);
+            DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee, grantMode);
             return new ResultMessage.Void();
         });
     }

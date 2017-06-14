@@ -88,7 +88,6 @@ public class CreateRoleStatement extends AuthenticationStatement
      * Grant all applicable permissions on the newly created role to the user performing the request
      * see also: SchemaAlteringStatement#grantPermissionsToCreator and the overridden implementations
      * of it in subclasses CreateKeyspaceStatement & CreateTableStatement.
-     * @param state
      */
     private void grantPermissionsToCreator(ClientState state)
     {
@@ -104,7 +103,8 @@ public class CreateRoleStatement extends AuthenticationStatement
                 authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                                  authorizer.applicablePermissions(role),
                                  role,
-                                 RoleResource.role(state.getUser().getName()));
+                                 RoleResource.role(state.getUser().getName()),
+                                 GrantMode.GRANT);
             }
             catch (UnsupportedOperationException e)
             {

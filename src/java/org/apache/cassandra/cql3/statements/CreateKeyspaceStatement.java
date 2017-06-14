@@ -123,12 +123,14 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
             authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                              authorizer.applicablePermissions(keyspace),
                              keyspace,
-                             role);
+                             role,
+                             GrantMode.GRANT);
             FunctionResource functions = FunctionResource.keyspace(keyspace());
             authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                              authorizer.applicablePermissions(functions),
                              functions,
-                             role);
+                             role,
+                             GrantMode.GRANT);
         }
         catch (RequestExecutionException e)
         {

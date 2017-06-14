@@ -334,7 +334,8 @@ public class UFAuthTest extends CQLTester
         DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
                                                  ImmutableSet.of(CorePermission.CREATE),
                                                  FunctionResource.keyspace(KEYSPACE),
-                                                 role);
+                                                 role,
+                                                 GrantMode.GRANT);
         String aggDef = String.format(aggregateCql(sFunc, fFunc),
                                       KEYSPACE + ".aggregate_for_permissions_test");
 
@@ -539,7 +540,8 @@ public class UFAuthTest extends CQLTester
             DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
                                                      ImmutableSet.of(CorePermission.EXECUTE),
                                                      functionResource(functionName),
-                                                     role);
+                                                     role,
+                                                     GrantMode.GRANT);
     }
 
     private void revokeExecuteOnFunction(String functionName)
@@ -547,7 +549,8 @@ public class UFAuthTest extends CQLTester
         DatabaseDescriptor.getAuthorizer().revoke(AuthenticatedUser.SYSTEM_USER,
                                                   ImmutableSet.of(CorePermission.EXECUTE),
                                                   functionResource(functionName),
-                                                  role);
+                                                  role,
+                                                  GrantMode.GRANT);
     }
 
     void setupClientState()
@@ -577,7 +580,8 @@ public class UFAuthTest extends CQLTester
         DatabaseDescriptor.getAuthorizer().grant(AuthenticatedUser.SYSTEM_USER,
                                                  ImmutableSet.of(CorePermission.SELECT, CorePermission.MODIFY),
                                                  DataResource.table(KEYSPACE, currentTable()),
-                                                 RoleResource.role(user.getName()));
+                                                 RoleResource.role(user.getName()),
+                                                 GrantMode.GRANT);
     }
 
     private String aggregateCql(String sFunc, String fFunc)
