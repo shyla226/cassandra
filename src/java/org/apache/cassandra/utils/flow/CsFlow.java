@@ -26,7 +26,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -39,7 +38,6 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -104,16 +102,17 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation.
      */
-    private static class ApplyOpSubscription<I, O> extends RequestLoop<I>
+    private static class ApplyOpSubscription<I, O> extends RequestLoop implements CsSubscription, CsSubscriber<I>
     {
         final CsSubscriber<O> subscriber;
+        final CsSubscription source;
         final FlowableOp<I, O> mapper;
 
         public ApplyOpSubscription(CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
-            super(source);
             this.subscriber = subscriber;
             this.mapper = mapper;
+            this.source = source.subscribe(this);
         }
 
         public void onNext(I item)
@@ -131,11 +130,18 @@ public abstract class CsFlow<T>
             subscriber.onComplete();
         }
 
+        public void request()
+        {
+            // Note: This is less efficient than optimal. We'd prefer to only do request loops for additional
+            // requests, not for ones made by our subscriber.
+            requestInLoop(source);
+        }
+
         public void close() throws Exception
         {
             try
             {
-                super.close();
+                source.close();
             }
             finally
             {
@@ -152,7 +158,7 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation that checks the subscriptions are used correctly (e.g. without concurrent requests).
      */
-    private static class CheckedApplyOpSubscription<I, O> implements CsSubscription, CsSubscriber<I>
+    private static class CheckedApplyOpSubscription<I, O> extends DebugRequestLoop implements CsSubscription, CsSubscriber<I>
     {
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
@@ -198,6 +204,7 @@ public abstract class CsFlow<T>
 
         public CheckedApplyOpSubscription(CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
+            super(subscriber);
             this.subscriber = subscriber;
             this.mapper = mapper;
             this.source = source.subscribe(this);
@@ -229,7 +236,7 @@ public abstract class CsFlow<T>
         public void request()
         {
             if (verifyStateTransition(null, State.READY, State.REQUESTED))
-                source.request();
+                requestInLoop(source);
         }
 
         public void close() throws Exception
@@ -514,124 +521,121 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * A utility class to manage the request loop.
-     * <p>
-     * Requests have to be performed in a loop in order to avoid growing
-     * the stack indefinitely because calling {@link CsSubscription#request()} may result
-     * in a recursive call to {@link CsSubscriber#onNext(Object)} or {@link CsSubscriber#onComplete()}.
-     * Whilst we don't need to request anything when onComplete is called, we need to call request()
-     * exactly once when onNext is called.
-     * <p>
-     * In addition to recursions, we also need to handle races between the request loop and onNext, which
-     * could be called from a different thread at any time.
-     * <p>
-     * This is handled with a small state machine that controls whether we are in the loop and whether an
-     * item has been received. The call to request is a no-op if we are already in the loop. Once in the loop,
-     * after calling request we try to exit the loop, but if {@link RequestLoop#onNext(Object)} has been called
-     * recursively or has raced with the request loop, then we fail to exit the loop and continue with the next
-     * request. onNext will try to transition from in_loop_requested to in_loop_ready and if it succeeds then
-     * it is done since the loop is still in place, if it instead has failed then we must be out of the loop and
-     * hence requestLoop() must be called again.
+     * Helper class for implementing requests looping to avoid stack overflows when an operation needs to request
+     * many items from its source. In such cases requests have to be performed in a loop to avoid growing the stack with
+     * a full request... -> onNext... -> chain for each new requested element, which can easily cause stack overflow
+     * if that is not guaranteed to happen only a small number of times for each item generated by the operation.
+     *
+     * The main idea is that if a request was issued in response to onNext which an ongoing request triggered (and thus
+     * control will return to the request loop after the onNext and request chains return), mark it and process
+     * it when control returns to the loop.
+     *
+     * Note that this does not have to be used for _all_ requests served by an operation. It suffices to apply the loop
+     * only for requests that the operation itself makes. By convention the downstream subscriber is also issuing
+     * requests to the operation in a loop.
+     *
+     * This is implemented in two versions, RequestLoop and DebugRequestLoop, where the former assumes everything is
+     * working correctly while the latter verifies that there is no unexpected behaviour.
      */
-    public static abstract class RequestLoop<T> implements CsSubscriber<T>, CsSubscription
+    static class RequestLoop
     {
-        private enum State
+        enum RequestLoopState
         {
             OUT_OF_LOOP,
             IN_LOOP_READY,
             IN_LOOP_REQUESTED
         }
 
-        private final AtomicReference<State> state;
-        private final CsSubscription subscription;
-        private volatile boolean closed;
+        volatile RequestLoopState state = RequestLoopState.OUT_OF_LOOP;
+        static final AtomicReferenceFieldUpdater<RequestLoop, RequestLoopState> stateUpdater =
+            AtomicReferenceFieldUpdater.newUpdater(RequestLoop.class, RequestLoopState.class, "state");
 
-        public RequestLoop(CsFlow<T> source) throws Exception
+        public void requestInLoop(CsSubscription source)
         {
-            this.state = new AtomicReference<>(State.OUT_OF_LOOP);
-            this.subscription = source.subscribe(this);
-        }
+            // See DebugRequestLoop below for a more precise description of the state transitions on which this is built.
 
-        public void request()
-        {
-            // This may be executing concurrently from two threads (this remains while it's trying to loop,
-            // another calls it because of onNext).
-
-            // Requests have to be performed in a loop to avoid growing the stack with a full
-            // request... -> onNext... -> chain for each new element in the group, which can easily cause stack overflow.
-            // So if a request was issued in response to synchronously executed onNext (and thus control
-            // will return to the request loop after the onNext and request chains return), mark it and process
-            // it when control returns to the loop.
-            // When onNext comes asynchronously, the loop has usually completed. If it has, we should process the
-            // next request within this call. If not, the loop is still going in another thread and we can still signal
-            // it to continue (making sure we don't leave while receiving the signal).
-
-            if (closed)
+            if (stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.IN_LOOP_REQUESTED))
+                // Another call (concurrent or in the call chain) has the loop and we successfully told it to continue.
                 return;
 
-            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
-                return;
-
-            if (state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
-                requestLoop();
-        }
-
-        private void requestLoop()
-        {
-            while (!closed)
+            // If the above failed, we must be OUT_OF_LOOP (possibly just concurrently transitioned out of it).
+            // Since there can be no other concurrent access, we can grab the loop now.
+            do
             {
-                // The loop can only be entered in IN_LOOP_READY
-                if (!verifyStateChange(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
-                    return;
-
-                subscription.request();
-
-                // If we didn't receive item, leave
-                if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.OUT_OF_LOOP))
-                    break;
+                state = RequestLoopState.IN_LOOP_READY;
+                source.request();
+                // If we didn't get another request, leave.
             }
+            while (!stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.OUT_OF_LOOP));
+        }
+    }
+
+    static class DebugRequestLoop extends RequestLoop
+    {
+        final CsSubscriber<?> errorRecepient;
+
+        public DebugRequestLoop(CsSubscriber<?> errorRecepient)
+        {
+            super();
+            this.errorRecepient = errorRecepient;
         }
 
-        private boolean verifyStateChange(State from, State to)
+        @Override
+        public void requestInLoop(CsSubscription source)
         {
-            State prev = state.getAndSet(to);
+            if (stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.IN_LOOP_REQUESTED))
+                // Another call (concurrent or in the call chain) has the loop and we successfully told it to continue.
+                return;
+
+            // If the above failed, we must be OUT_OF_LOOP (possibly just concurrently transitioned out of it).
+            // Since there can be no other concurrent access, we can grab the loop now.
+            if (!verifyStateChange(RequestLoopState.OUT_OF_LOOP, RequestLoopState.IN_LOOP_REQUESTED))
+                return;
+
+            // We got the loop.
+            while (true)
+            {
+                // The loop can only be entered with a pending request; from here, make our state as having issued a
+                // request and ready to receive another before performing the request.
+                verifyStateChange(RequestLoopState.IN_LOOP_REQUESTED, RequestLoopState.IN_LOOP_READY);
+
+                source.request();
+
+                // If we didn't get another request, leave.
+                if (stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.OUT_OF_LOOP))
+                    return;
+            }
+
+        }
+
+        private boolean verifyStateChange(RequestLoopState from, RequestLoopState to)
+        {
+            RequestLoopState prev = stateUpdater.getAndSet(this, to);
             if (prev == from)
                 return true;
 
-            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
+            errorRecepient.onError(new AssertionError("Invalid state " + prev));
             return false;
         }
 
-        public void close() throws Exception
-        {
-            if (!closed)
-            {
-                closed = true;
-                FileUtils.closeQuietly(subscription);
-            }
-        }
-
-        public boolean closed()
-        {
-            return closed;
-        }
     }
 
     /**
      * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, BiFunction)},
      * {@link #reduceWith(Supplier, BiFunction)} and {@link #reduceToFuture(Object, BiFunction)}.
      */
-    abstract static private class ReduceSubscriber<T, O> extends RequestLoop<T> implements CsSubscription
+    abstract static private class ReduceSubscriber<T, O> extends RequestLoop implements CsSubscriber<T>, CsSubscription
     {
         final BiFunction<O, T, O> reducer;
         O current;
         private StackTraceElement[] stackTrace;
+        private CsSubscription source;
 
         ReduceSubscriber(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
         {
-            super(source);
             this.reducer = reducer;
             current = seed;
+            this.source = source.subscribe(this);
             stackTrace = maybeGetStackTrace();
         }
 
@@ -648,6 +652,16 @@ public abstract class CsFlow<T>
             }
 
             request();
+        }
+
+        public void request()
+        {
+            requestInLoop(source);
+        }
+
+        public void close() throws Exception
+        {
+            source.close();
         }
 
         public String toString()

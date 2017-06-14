@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
@@ -890,5 +891,25 @@ public class MergeTest
                 }
             };
         }
+    }
+
+    @Test
+    public void testRejectingReducerDoesntOverflowStack() throws Exception
+    {
+        CsFlow<Integer> f1 = CsFlow.fromIterable(() -> IntStream.range(0, 100000).iterator());
+        CsFlow<Integer> f2 = CsFlow.fromIterable(() -> IntStream.range(0, 10000).iterator());
+        CsFlow<Integer> merge = Merge.get(ImmutableList.of(f1, f2), Ordering.natural(), new Reducer<Integer, Integer>()
+        {
+            public void reduce(int idx, Integer current)
+            {
+            }
+
+            public Integer getReduced()
+            {
+                return null;
+            }
+        });
+
+        Assert.assertEquals(0, merge.countBlocking());
     }
 }
