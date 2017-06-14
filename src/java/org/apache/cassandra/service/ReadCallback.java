@@ -193,17 +193,6 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     @Override
     public void onTimeout(InetAddress host)
     {
-        if (Tracing.isTracing())
-        {
-            String gotData = received.get() > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            Tracing.trace("Timed out; received {} of {} responses{}", received, blockfor, gotData);
-        }
-        else if (logger.isDebugEnabled())
-        {
-            String gotData = received.get() > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
-            logger.debug("Timed out; received {} of {} responses{}", received, blockfor, gotData);
-        }
-
         publishSubject.onError(new ReadTimeoutException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent()));
     }
 

@@ -589,8 +589,15 @@ public final class FileUtils
         fsErrorHandler.getAndSet(Optional.ofNullable(handler));
     }
 
+    /**
+     * Lists the physical disk devices the data directories are on.
+     * This only works on Linux.
+     * @throws IOException
+     */
     public static Map<Path, String> getDiskPartitions() throws IOException
     {
+        assert FBUtilities.isLinux;
+
         Map<Path, String> dirToDisk = new TreeMap<>();
         try (BufferedReader bufferedReader =  new BufferedReader(new InputStreamReader(new FileInputStream("/proc/mounts"), "UTF-8")))
         {
@@ -618,8 +625,19 @@ public final class FileUtils
         return dirToDisk;
     }
 
+    /**
+     * Detects if a given device (i.e. sda) is rotational or ssd
+     * @param device the name of the root device "sdb"
+     *
+     * This only works on Linux
+     *
+     * @return true for ssd
+     * @throws IOException
+     */
     public static boolean isSSD(String device) throws IOException
     {
+        assert FBUtilities.isLinux;
+
         try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(String.format("/sys/block/%s/queue/rotational", device)), "UTF-8")))
         {
             String line = bufferedReader.readLine().trim();
@@ -632,9 +650,17 @@ public final class FileUtils
     }
 
 
+    /**
+     * Detects if data directories are all SSDs.
+     * In the case of Linux we check the block device info under /sys
+     *
+     * For non-Linux we use the disk_optimization_strategy in cassandra.yaml
+     *
+     * @return true if data directories are all SSD
+     */
     public static boolean isSSD()
     {
-        boolean isSSD = true;
+        boolean isSSD = DatabaseDescriptor.getDiskOptimizationStrategy() instanceof SsdDiskOptimizationStrategy;
 
         if (FBUtilities.isLinux)
         {
@@ -665,12 +691,11 @@ public final class FileUtils
             catch (IOException e)
             {
                 logger.error("Error determining if disk is SSD", e);
-                isSSD = false;
             }
         }
         else
         {
-            isSSD = false;
+            logger.warn("Unable to detect if disks are SSD. Relying on disk_optimization_strategy in cassandra.yaml");
         }
 
         logger.info("Data directories are SSD: {}", isSSD);

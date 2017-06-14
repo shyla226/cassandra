@@ -97,6 +97,7 @@ public interface Clustering extends ClusteringPrefix
     /**
      * The special cased clustering used by all static rows. It is a special case in the
      * sense that it's always empty, no matter how many clustering columns the table has.
+     * Required for {@link org.apache.cassandra.io.sstable.format.PartitionFlowable}
      */
     public static final Clustering STATIC_CLUSTERING = new BufferClustering(EMPTY_VALUES_ARRAY)
     {
@@ -120,8 +121,9 @@ public interface Clustering extends ClusteringPrefix
     };
 
     /**
-     * The special cased clustering used by all static rows. It is a special case in the
-     * sense that it's always empty, no matter how many clustering columns the table has.
+     * The special cased clustering used by all {@link org.apache.cassandra.db.rows.PartitionHeader}.
+     * It is a special case in the sense that it's always empty, no matter how many clustering columns the table has.
+     * Required for {@link org.apache.cassandra.io.sstable.format.PartitionFlowable}
      */
     public static final Clustering HEADER_CLUSTERING = new BufferClustering(EMPTY_VALUES_ARRAY)
     {

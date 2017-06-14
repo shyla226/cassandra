@@ -27,6 +27,7 @@ public final class ChecksummedRandomAccessReader
     @SuppressWarnings("resource") // The Rebufferer owns both the channel and the validator and handles closing both.
     public static RandomAccessReader open(File file, File crcFile) throws IOException
     {
+        //Since this doesn't go through the chunk cache we avoid directIO since our buffers won't be DMA aligned
         AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, false);
         try
         {

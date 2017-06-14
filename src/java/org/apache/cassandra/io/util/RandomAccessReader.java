@@ -321,7 +321,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     @SuppressWarnings("resource")
     public static RandomAccessReader open(File file)
     {
-        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, true);
+        //Since this doesn't go through the chunk cache we avoid directIO since our buffers won't be DMA aliged
+        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, false);
         try
         {
             ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);

@@ -398,7 +398,7 @@ public class FileHandle extends SharedCloseableImpl
         {
             if (channel == null)
             {
-                channel = new AsynchronousChannelProxy(path, mmapped);
+                channel = new AsynchronousChannelProxy(path, true);
             }
 
             AsynchronousChannelProxy channelCopy = channel.sharedCopy();
@@ -420,7 +420,6 @@ public class FileHandle extends SharedCloseableImpl
                     {
                         if (compressed)
                         {
-
                             regions = MmappedRegions.map(blockingChannel, compressionMetadata);
                             rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata,
                                                                                            regions));

@@ -115,7 +115,7 @@ public class PartitionHeader implements Unfiltered
         String cfs = "";
         if (fullDetails)
             cfs = String.format("table %s.%s", metadata.keyspace, metadata.name);
-        return String.format("partition %skey %s deletion %s", cfs, partitionKey, partitionLevelDeletion);
+        return String.format("partition %s key %s deletion %s", cfs, partitionKey, partitionLevelDeletion);
     }
 
     public boolean isRow()

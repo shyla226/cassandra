@@ -25,19 +25,16 @@ import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
-import java.util.concurrent.ExecutionException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.EpollEventLoop;
+import io.netty.channel.unix.FileDescriptor;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.NativeLibrary;
-import org.apache.cassandra.utils.concurrent.RefCounted;
-import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
-
 
 /**
  * A proxy of a FileChannel that:
@@ -48,22 +45,24 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  *
  * Tested by RandomAccessReaderTest.
  */
-public final class AsynchronousChannelProxy extends SharedCloseableImpl
+public final class AsynchronousChannelProxy extends AbstractChannelProxy<AsynchronousFileChannel>
 {
     private static final Logger logger = LoggerFactory.getLogger(AsynchronousChannelProxy.class);
-    private final String filePath;
-    private final AsynchronousFileChannel channel;
 
-    public static AsynchronousFileChannel openFileChannel(File file, boolean mmapped)
+    private static AsynchronousFileChannel openFileChannel(File file, boolean directIO)
     {
         try
         {
-            if (!TPC.USE_AIO || mmapped)
+            if (!TPC.USE_AIO)
                 return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
 
             EpollEventLoop loop = (EpollEventLoop) TPC.bestTPCScheduler().getExecutor();
 
-            return new AIOEpollFileChannel(file, loop);
+            int flags = FileDescriptor.O_RDONLY;
+            if (directIO && TPC.USE_DIRECT_IO)
+                flags |= FileDescriptor.O_DIRECT;
+
+            return new AIOEpollFileChannel(file, loop, flags);
         }
         catch (IOException e)
         {
@@ -71,81 +70,24 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public AsynchronousChannelProxy(String path, boolean mmapped)
+    public AsynchronousChannelProxy(String path, boolean directIO)
     {
-        this (new File(path), mmapped);
+        this (new File(path), directIO);
     }
 
-    public AsynchronousChannelProxy(File file, boolean mmapped)
+    public AsynchronousChannelProxy(File file, boolean directIO)
     {
-        this(file.getPath(), openFileChannel(file, mmapped));
+        this(file.getPath(), openFileChannel(file, directIO));
     }
 
     public AsynchronousChannelProxy(String filePath, AsynchronousFileChannel channel)
     {
-        super(new Cleanup(filePath, channel));
-
-        this.filePath = filePath;
-        this.channel = channel;
+        super(filePath, channel);
     }
 
     public AsynchronousChannelProxy(AsynchronousChannelProxy copy)
     {
         super(copy);
-
-        this.filePath = copy.filePath;
-        this.channel = copy.channel;
-    }
-
-    private final static class Cleanup implements RefCounted.Tidy
-    {
-        final String filePath;
-        final AsynchronousFileChannel channel;
-
-        Cleanup(String filePath, AsynchronousFileChannel channel)
-        {
-            this.filePath = filePath;
-            this.channel = channel;
-        }
-
-        public String name()
-        {
-            return filePath;
-        }
-
-        public void tidy()
-        {
-            try
-            {
-                channel.close();
-            }
-            catch (IOException e)
-            {
-                throw new FSReadError(e, filePath);
-            }
-        }
-    }
-
-    public AsynchronousChannelProxy sharedCopy()
-    {
-        return new AsynchronousChannelProxy(this);
-    }
-
-    public String filePath()
-    {
-        return filePath;
-    }
-
-    public int readBlocking(ByteBuffer buffer, long position)
-    {
-        try
-        {
-            return channel.read(buffer, position).get();
-        }
-        catch (InterruptedException | ExecutionException e)
-        {
-            throw new FSReadError(e, filePath);
-        }
     }
 
     public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
@@ -160,7 +102,7 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public long size()
+    public long size() throws FSReadError
     {
         try
         {
@@ -179,20 +121,19 @@ public final class AsynchronousChannelProxy extends SharedCloseableImpl
 
     public long transferTo(long position, long count, WritableByteChannel target)
     {
-        try(ChannelProxy cp = new ChannelProxy(new File(filePath)))
+        try (ChannelProxy cp = getBlockingChannel())
         {
             return cp.transferTo(position, count, target);
         }
     }
 
+    public AsynchronousChannelProxy sharedCopy()
+    {
+        return new AsynchronousChannelProxy(this);
+    }
+
     public int getFileDescriptor()
     {
         return NativeLibrary.getfd(channel);
-    }
-
-    @Override
-    public String toString()
-    {
-        return filePath();
     }
 }

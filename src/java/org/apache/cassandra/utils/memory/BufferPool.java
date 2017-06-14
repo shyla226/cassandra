@@ -667,14 +667,6 @@ public class BufferPool
             else
                 MemoryUtil.setAttachment(buffer, this);
 
-            if (buffer != null)
-            {
-                long address = MemoryUtil.getAddress(buffer);
-                long offset = address & (512 -1); // (address % align)
-                if (offset != 0)
-                    logger.info("NOT ALIGNED " + offset);
-            }
-
             return buffer;
         }
 

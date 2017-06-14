@@ -48,6 +48,9 @@ import org.apache.cassandra.utils.flow.CsSubscription;
  * The second item is *ALWAYS* the static row.
  * Followed by all the partition rows.
  *
+ * This is only used to asyncronously create a {@link FlowableUnfilteredPartition}
+ * via the {@link #create(SSTableReader, SSTableReadsListener, DecoratedKey, Slices, ColumnFilter, boolean)} method below
+ *
  * All data fetched through the {@link org.apache.cassandra.cache.ChunkCache}
  * Since we could require data that's not yet in the Cache we catch any
  * {@link NotInCacheException}s and register a retry once the data is fetched
@@ -57,7 +60,7 @@ import org.apache.cassandra.utils.flow.CsSubscription;
  * The state logic is very straight fwd since CsFlow gives us guarantees that
  * request/close will not be called until after a previous call finishes.
  *
- * We only need to track if we are waiting for data since we need to reset the reader state.
+ * We only need to track if we are waiting for data since we need to reset the reader state in that case.
  */
 class PartitionFlowable extends CsFlow<Unfiltered>
 {
@@ -85,6 +88,11 @@ class PartitionFlowable extends CsFlow<Unfiltered>
         this.rc = table.dataFile.mmapped() ? ReaderConstraint.NONE : ReaderConstraint.IN_CACHE_ONLY;
     }
 
+    /**
+     * Creates a FUP from a PartitionFlowable
+     *
+     * This is the only supported accessor of this class.
+     */
     public static CsFlow<FlowableUnfilteredPartition> create(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
         PartitionFlowable flowable = new PartitionFlowable(table, listener, key, slices, selectedColumns, reverse);
@@ -144,7 +152,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             this.helper = new SerializationHelper(table.metadata(), table.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, selectedColumns);
         }
 
-        public void replaceSubscriber(CsSubscriber<Unfiltered> s)
+        private void replaceSubscriber(CsSubscriber<Unfiltered> s)
         {
             this.s = s;
         }
@@ -178,7 +186,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        void perform(Consumer<Boolean> action, boolean isRetry)
+        private void perform(Consumer<Boolean> action, boolean isRetry)
         {
             try
             {
@@ -327,7 +335,7 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             }
         }
 
-        AbstractSSTableIterator maybeInitIterator()
+        private AbstractSSTableIterator maybeInitIterator()
         {
             if (ssTableIterator == null)
             {

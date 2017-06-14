@@ -347,11 +347,6 @@ public class BigTableReader extends SSTableReader
         return key;
     }
 
-    protected AsynchronousChannelProxy getIndexChannel()
-    {
-        return ifile.channel;
-    }
-
     protected FileHandle getIndexFile()
     {
         return ifile;
