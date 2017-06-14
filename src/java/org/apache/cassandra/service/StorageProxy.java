@@ -63,6 +63,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Commit;
+import org.apache.cassandra.service.paxos.CommitCallback;
 import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.tracing.Tracing;
@@ -396,7 +397,7 @@ public class StorageProxy implements StorageProxyMBean
             if (Iterables.size(missingMRC) > 0)
             {
                 Tracing.trace("Repairing replicas that missed the most recent commit");
-                commitPaxosAndWaitAll(mostRecent, missingMRC);
+                commitPaxosAndWaitAll(mostRecent, ImmutableList.copyOf(missingMRC));
             }
 
             return Pair.create(ballot, contentions);
@@ -432,9 +433,16 @@ public class StorageProxy implements StorageProxyMBean
         return false;
     }
 
-    private static void commitPaxosAndWaitAll(Commit proposal, Iterable<InetAddress> endpoints) throws WriteTimeoutException
+    private static void commitPaxosAndWaitAll(Commit proposal, List<InetAddress> endpoints) throws WriteTimeoutException
     {
-        commitPaxos(proposal, WriteEndpoints.withLive(Keyspace.open(proposal.update.metadata().keyspace), endpoints), ConsistencyLevel.ALL, false, System.nanoTime());
+        CommitCallback callback = new CommitCallback(endpoints.size(), ConsistencyLevel.ALL, System.nanoTime());
+        MessagingService.instance().send(Verbs.LWT.COMMIT.newDispatcher(endpoints, proposal), callback);
+        callback.await();
+
+        Map<InetAddress, RequestFailureReason> failureReasons = callback.getFailureReasons();
+
+        if (!failureReasons.isEmpty())
+            throw new WriteFailureException(ConsistencyLevel.ALL, callback.getResponseCount(), endpoints.size(), WriteType.CAS, failureReasons);
     }
 
     private static void commitPaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean shouldHint, long queryStartNanoTime) throws WriteTimeoutException
