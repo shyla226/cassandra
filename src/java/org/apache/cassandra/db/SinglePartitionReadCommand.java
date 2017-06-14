@@ -715,7 +715,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             throw t;
         }
     }
-    
+
     private boolean shouldInclude(SSTableReader sstable)
     {
         // If some static columns are queried, we should always include the sstable: the clustering values stats of the sstable
