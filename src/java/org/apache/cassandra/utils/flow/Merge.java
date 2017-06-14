@@ -23,8 +23,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Ignore;
-
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -125,7 +123,7 @@ public class Merge<In, Out> extends CsFlow<Out>
     // the candidates are stashed back onto the heap and closed when close() is called,
     // Eclipse Warnings cannot work it out and complains in several places
     @SuppressWarnings("resource")
-    static final class ManyToOne<In, Out> implements CsSubscription
+    static final class ManyToOne<In, Out> extends RequestLoop implements CsSubscription
     {
         protected Candidate<In>[] heap;
         private final Reducer<In, Out> reducer;
@@ -282,7 +280,7 @@ public class Merge<In, Out> extends CsFlow<Out>
                 if (item != null)
                     subscriber.onNext(item);    // usually requests
                 else
-                    request();           // reducer rejected its input; get another set
+                    requestInLoop(this); // reducer rejected its input; get another set
             }
         }
 

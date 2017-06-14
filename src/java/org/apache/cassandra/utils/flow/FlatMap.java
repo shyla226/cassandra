@@ -29,7 +29,7 @@ import org.apache.cassandra.utils.Throwables;
  * This is done in depth-first fashion, i.e. one item is requested from the flow, and the result of the conversion
  * is issued to the downstream subscriber completely before requesting the next item.
  */
-class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
+class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubscriber<I>
 {
     public static <I, O> CsFlow<O> flatMap(CsFlow<I> source, Function<I, CsFlow<O>> op)
     {
@@ -178,10 +178,9 @@ class FlatMap<I, O> implements CsSubscription, CsSubscriber<I>
                 subscriber.onError(e);
             }
 
-            FlatMap.this.request();
-            // Recursion by the above call could cause stack overflow on a long sequence of empty mappings.
-            // This is not really expected to happen, but if it ends up being a concern a loop such as the one in
-            // GroupOp.request() will have to be implemented.
+            // We have to request another child; since there is a risk of multiple empty children being returned
+            // and causing stack exhaustion, perform this request in a loop.
+            requestInLoop(FlatMap.this);
         }
 
         public String toString()

@@ -59,6 +59,11 @@ public class PartitionHeader implements Unfiltered
         this.stats = stats;
     }
 
+    public PartitionHeader with(DeletionTime newPartitionLevelDeletion)
+    {
+        return new PartitionHeader(metadata, partitionKey, newPartitionLevelDeletion, columns, isReverseOrder, stats);
+    }
+
     @Override
     public String toString()
     {

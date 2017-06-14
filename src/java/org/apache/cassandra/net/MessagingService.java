@@ -266,6 +266,7 @@ public final class MessagingService implements MessagingServiceMBean
         else
         {
             registerCallback(request, callback);
+            ClientWarn.instance.storeForRequest(request.id());
             updateBackPressureOnSend(request);
             sendRequest(request, callback);
         }
@@ -743,7 +744,7 @@ public final class MessagingService implements MessagingServiceMBean
             state.trace("{} message received from {}", message.verb(), message.from());
 
         message.executor().execute(new MessageDeliveryTask(message),
-                                   ExecutorLocals.create(state));
+                                   ExecutorLocals.create(state, ClientWarn.instance.getForMessage(message.id())));
     }
 
     // Only required by legacy serialization. Can inline in previous call when we get rid of that.

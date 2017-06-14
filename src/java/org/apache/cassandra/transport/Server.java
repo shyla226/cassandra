@@ -22,7 +22,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -53,6 +53,7 @@ import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 public class Server implements CassandraDaemon.Server
 {
@@ -211,9 +212,12 @@ public class Server implements CassandraDaemon.Server
 
     public static class ConnectionTracker implements Connection.Tracker
     {
+        private final static int ON_CLOSE_WAIT_TIMEOUT_SECS = 5;
+
         // TODO: should we be using the GlobalEventExecutor or defining our own?
         public final ChannelGroup allChannels = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
         private final EnumMap<Event.Type, ChannelGroup> groups = new EnumMap<>(Event.Type.class);
+        private final List<CompletableFuture<?>> inFlightRequestsFutures = new ArrayList<>();
 
         public ConnectionTracker()
         {
@@ -224,6 +228,18 @@ public class Server implements CassandraDaemon.Server
         public void addConnection(Channel ch, Connection connection)
         {
             allChannels.add(ch);
+        }
+
+        public void removeConnection(Channel ch, Connection connection)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Removing connection {} from connection tracker", ch);
+            allChannels.remove(ch);
+
+            assert connection instanceof ServerConnection : "Expected connection of type ServerConnection";
+            ServerConnection serverConnection = (ServerConnection)connection;
+
+            inFlightRequestsFutures.add(serverConnection.waitForInFlightRequests());
         }
 
         public void register(Event.Type type, Channel ch)
@@ -238,7 +254,21 @@ public class Server implements CassandraDaemon.Server
 
         public void closeAll()
         {
+            if (logger.isTraceEnabled())
+                logger.trace("Closing all channels");
             allChannels.close().awaitUninterruptibly();
+
+            try
+            {
+                CompletableFuture.allOf(inFlightRequestsFutures.toArray(new CompletableFuture<?>[inFlightRequestsFutures.size()]))
+                                 .get(ON_CLOSE_WAIT_TIMEOUT_SECS, TimeUnit.SECONDS);
+            }
+            catch (Throwable t)
+            {
+                JVMStabilityInspector.inspectThrowable(t);
+                logger.warn("Failed to wait for in-flight requests when closing all connections ({})", t.getMessage());
+            }
+
         }
 
         public int getConnectedClients()

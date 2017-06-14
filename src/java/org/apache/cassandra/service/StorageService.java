@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import javax.annotation.Nullable;
@@ -95,6 +96,7 @@ import org.apache.cassandra.streaming.*;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventType;
 import org.apache.cassandra.utils.progress.jmx.JMXProgressSupport;
@@ -4248,6 +4250,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (daemon != null)
                 shutdownClientServers();
+
             ScheduledExecutors.optionalTasks.shutdown();
             Gossiper.instance.stop();
 
@@ -4257,17 +4260,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // In-progress writes originating here could generate hints to be written, so shut down MessagingService
             // before mutation stage, so we can get all the hints saved before shutting down
             MessagingService.instance().shutdown();
-
-            if (!isFinalShutdown)
-                setMode(Mode.DRAINING, "clearing mutation stage", false);
-            viewMutationStage.shutdown();
-            counterMutationStage.shutdown();
-            mutationStage.shutdown();
-            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
-
-            StorageProxy.instance.verifyNoHintsInProgress();
 
             if (!isFinalShutdown)
                 setMode(Mode.DRAINING, "flushing column families", false);
@@ -4321,6 +4313,30 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                       JVMStabilityInspector.inspectThrowable(t);
                       logger.error("Caught exception while waiting for memtable flushes during shutdown hook", t);
             }).blockingLast(CommitLogPosition.NONE);
+
+            // Now that client requests, messaging service and compactions are shutdown, there shouldn't be any more
+            // mutations so let's wait for any pending mutations and then clear the stages. Note that the compaction
+            // manager can generated mutations, for example because of the view builder or the sstable_activity updates
+            // in the SSTableReader.GlobalTidy, so we do this step quite late, but before shutting down the CL
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "stopping mutations", false);
+
+            List<OpOrder.Barrier> barriers = StreamSupport.stream(Keyspace.all().spliterator(), false)
+                                                          .map(ks -> ks.stopMutations())
+                                                          .collect(Collectors.toList());
+            barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
+
+            if (!isFinalShutdown)
+                setMode(Mode.DRAINING, "clearing mutation stages", false);
+
+            viewMutationStage.shutdown();
+            counterMutationStage.shutdown();
+            mutationStage.shutdown();
+            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+
+            StorageProxy.instance.verifyNoHintsInProgress();
 
             // shutdown hints
             HintsService.instance.shutdownBlocking();

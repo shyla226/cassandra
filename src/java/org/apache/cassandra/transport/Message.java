@@ -584,11 +584,14 @@ public abstract class Message
             if (logger.isTraceEnabled())
                 logger.trace("Received: {}, v={} ON {}", request, connection.getVersion(), Thread.currentThread().getName());
 
-            request.execute(qstate, queryStartNanoTime)
-                   .subscribe(
-                    // onSuccess
-                    response -> {
+            Single<? extends Response> req = request.execute(qstate, queryStartNanoTime);
+            connection.onNewRequest();
 
+            req.subscribe(
+                // onSuccess
+                response -> {
+                    try
+                    {
                         if (!response.sendToClient)
                         {
                             request.getSourceFrame().release();
@@ -604,10 +607,17 @@ public abstract class Message
 
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
                         ClientWarn.instance.resetWarnings();
-                    },
+                    }
+                    finally
+                    {
+                        connection.onRequestCompleted();
+                    }
+                },
 
-                    // onError
-                    t -> {
+                // onError
+                t -> {
+                    try
+                    {
                         if (logger.isTraceEnabled())
                             logger.trace("Responding with error: {}, v={} ON {}", t.getMessage(), connection.getVersion(), Thread.currentThread().getName());
 
@@ -617,6 +627,11 @@ public abstract class Message
                         flush(new FlushItem(ctx, response, request.getSourceFrame()));
                         ClientWarn.instance.resetWarnings();
                     }
+                    finally
+                    {
+                        connection.onRequestCompleted();
+                    }
+                }
             );
         }
 

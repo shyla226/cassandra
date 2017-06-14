@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.IntSupplier;
+import java.util.stream.IntStream;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
@@ -328,4 +329,14 @@ public class FlatMapTest
         }
     }
 
+    @Test
+    public void testFilterOpDoesntOverflowStack() throws Exception
+    {
+        final int size = 100000;
+        final long result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
+                                 .flatMap(x -> CsFlow.<Integer>empty())
+                                 .countBlocking();
+
+        assertEquals(0L, result);
+    }
 }

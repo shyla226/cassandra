@@ -55,7 +55,7 @@ public interface GroupOp<I, O>
         return new GroupFlow();
     }
 
-    static class Subscription<I, O>
+    static class Subscription<I, O> extends CsFlow.RequestLoop
     implements CsSubscriber<I>, CsSubscription
     {
         final CsSubscriber<O> subscriber;
@@ -64,14 +64,6 @@ public interface GroupOp<I, O>
         volatile boolean completeOnNextRequest;
         I first;
         List<I> entries;
-
-        enum State
-        {
-            OUT_OF_LOOP,
-            IN_LOOP_READY,
-            IN_LOOP_REQUESTED
-        }
-        AtomicReference<State> state = new AtomicReference<>(State.OUT_OF_LOOP);
 
         public Subscription(CsSubscriber<O> subscriber, GroupOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
@@ -96,7 +88,7 @@ public interface GroupOp<I, O>
             if (out != null)
                 subscriber.onNext(out);
             else
-                request();
+                requestInLoop(this);
         }
 
         public void onError(Throwable throwable)
@@ -126,44 +118,10 @@ public interface GroupOp<I, O>
 
         public void request()
         {
-            // Requests have to be performed in a loop to avoid growing the stack with a full
-            // request... -> onNext... -> chain for each new element in the group, which can easily cause stack overflow.
-            // So if a request was issued in response to onNext which an ongoing request triggered (and thus control
-            // will return to the request loop after the onNext and request chains return), mark it and process
-            // it when control returns to the loop.
-
-            if (state.compareAndSet(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
-                // Another call (concurrent or in the call chain) has the loop and we successfully told it to continue.
-                return;
-
-            // If the above failed, we must be OUT_OF_LOOP (possibly just concurrently transitioned out of it).
-            // Since there can be no other concurrent access, we can grab the loop now.
-            if (!verifyStateChange(State.OUT_OF_LOOP, State.IN_LOOP_REQUESTED))
-                return;
-
-            // We got the loop.
-            while (true)
-            {
-                verifyStateChange(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY);
-                if (!completeOnNextRequest)
-                    source.request();
-                else
-                    subscriber.onComplete();
-
-                // If we didn't get another request, leave.
-                if (state.compareAndSet(State.IN_LOOP_READY, State.OUT_OF_LOOP))
-                    return;
-            }
-        }
-
-        private boolean verifyStateChange(State from, State to)
-        {
-            State prev = state.getAndSet(to);
-            if (prev == from)
-                return true;
-
-            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
-            return false;
+            if (!completeOnNextRequest)
+                source.request();
+            else
+                subscriber.onComplete();
         }
 
         public void close() throws Exception

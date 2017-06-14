@@ -48,6 +48,12 @@ public class CreateRoleStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
+        // validate login first to avoid leaking role existence to anonymous users.
+        state.ensureNotAnonymous();
+
+        if (!ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
+            throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
+
         super.checkPermission(state, CorePermission.CREATE, RoleResource.root());
         if (opts.getSuperuser().isPresent())
         {
@@ -63,11 +69,6 @@ public class CreateRoleStatement extends AuthenticationStatement
         if (role.getRoleName().isEmpty())
             throw new InvalidRequestException("Role name can't be an empty string");
 
-        // validate login here before checkAccess to avoid leaking role existence to anonymous users.
-        state.ensureNotAnonymous();
-
-        if (!ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
     }
 
     public Single<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException

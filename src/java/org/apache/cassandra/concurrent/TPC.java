@@ -377,21 +377,6 @@ public class TPC
     }
 
     /**
-     * Return the TPC scheduler of the core that is assigned to run operations on the specified boundaries
-     * and partition key, see {@link TPC#perCoreSchedulers}.
-     *
-     * @param boundaries - the keyspace boundaries
-     * @param key - the partition key
-     *
-     * @return the TPC scheduler
-     */
-    @Inline
-    public static TPCScheduler getForKey(TPCBoundaries boundaries, DecoratedKey key)
-    {
-        return getForCore(getCoreForKey(boundaries, key));
-    }
-
-    /**
      * Log the caller thread stack trace in case of exception when running a task.
      */
     private static final class RunnableWithCallerThreadInfo implements Runnable

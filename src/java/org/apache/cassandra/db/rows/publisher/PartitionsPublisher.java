@@ -21,6 +21,7 @@ package org.apache.cassandra.db.rows.publisher;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import javax.annotation.Nullable;
@@ -38,9 +39,12 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.transform.BaseIterator;
 import org.apache.cassandra.db.transform.Stack;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 
 /**
  * A publisher will notify the subscriber when partitions or rows
@@ -179,7 +183,8 @@ public class PartitionsPublisher
     /**
      * The subscription to the outer flowable of partitions.
      */
-    private static final class OuterSubscription extends CsFlow.RequestLoop<FlowableUnfilteredPartition> implements PartitionsSubscription
+    private static final class OuterSubscription extends RequestLoop<FlowableUnfilteredPartition>
+    implements PartitionsSubscription
     {
         /**
          * A stack of transformations to apply to the source before sending downstream
@@ -339,7 +344,7 @@ public class PartitionsPublisher
      * The subscription to the inner flowable of partition items, e.g. unfiltered items.
      * TODO - support rows as well.
     */
-    private final static class InnerSubscription extends CsFlow.RequestLoop<Unfiltered>
+    private final static class InnerSubscription extends RequestLoop<Unfiltered>
     {
         private final OuterSubscription outerSubscription;
         private final PartitionsSubscriber subscriber;
@@ -483,4 +488,107 @@ public class PartitionsPublisher
         }
     }
 
+    /**
+     * A utility class to manage the request loop.
+     * <p>
+     * Requests have to be performed in a loop in order to avoid growing
+     * the stack indefinitely because calling {@link CsSubscription#request()} may result
+     * in a recursive call to {@link CsSubscriber#onNext(Object)} or {@link CsSubscriber#onComplete()}.
+     * Whilst we don't need to request anything when onComplete is called, we need to call request()
+     * exactly once when onNext is called.
+     * <p>
+     * In addition to recursions, we also need to handle races between the request loop and onNext, which
+     * could be called from a different thread at any time.
+     * <p>
+     * This is handled with a small state machine that controls whether we are in the loop and whether an
+     * item has been received. The call to request is a no-op if we are already in the loop. Once in the loop,
+     * after calling request we try to exit the loop, but if {@link RequestLoop#onNext(Object)} has been called
+     * recursively or has raced with the request loop, then we fail to exit the loop and continue with the next
+     * request. onNext will try to transition from in_loop_requested to in_loop_ready and if it succeeds then
+     * it is done since the loop is still in place, if it instead has failed then we must be out of the loop and
+     * hence requestLoop() must be called again.
+     */
+    private static abstract class RequestLoop<T> implements CsSubscriber<T>, CsSubscription
+    {
+        private enum State
+        {
+            OUT_OF_LOOP,
+            IN_LOOP_READY,
+            IN_LOOP_REQUESTED
+        }
+
+        private final AtomicReference<State> state;
+        private final CsSubscription subscription;
+        private volatile boolean closed;
+
+        public RequestLoop(CsFlow<T> source) throws Exception
+        {
+            this.state = new AtomicReference<>(State.OUT_OF_LOOP);
+            this.subscription = source.subscribe(this);
+        }
+
+        public void request()
+        {
+            // This may be executing concurrently from two threads (this remains while it's trying to loop,
+            // another calls it because of onNext).
+
+            // Requests have to be performed in a loop to avoid growing the stack with a full
+            // request... -> onNext... -> chain for each new element in the group, which can easily cause stack overflow.
+            // So if a request was issued in response to synchronously executed onNext (and thus control
+            // will return to the request loop after the onNext and request chains return), mark it and process
+            // it when control returns to the loop.
+            // When onNext comes asynchronously, the loop has usually completed. If it has, we should process the
+            // next request within this call. If not, the loop is still going in another thread and we can still signal
+            // it to continue (making sure we don't leave while receiving the signal).
+
+            if (closed)
+                return;
+
+            if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.IN_LOOP_READY))
+                return;
+
+            if (state.compareAndSet(State.OUT_OF_LOOP, State.IN_LOOP_READY))
+                requestLoop();
+        }
+
+        private void requestLoop()
+        {
+            while (!closed)
+            {
+                // The loop can only be entered in IN_LOOP_REAY
+                if (!verifyStateChange(State.IN_LOOP_READY, State.IN_LOOP_REQUESTED))
+                    return;
+
+                subscription.request();
+
+                // If we didn't receive item, leave
+                if (state.compareAndSet(State.IN_LOOP_REQUESTED, State.OUT_OF_LOOP))
+                    break;
+            }
+        }
+
+        private boolean verifyStateChange(State from, State to)
+        {
+            State prev = state.getAndSet(to);
+            if (prev == from)
+                return true;
+
+            onError(new AssertionError("Invalid state " + prev + " in loop of " + this));
+            return false;
+        }
+
+        public void close() throws Exception
+        {
+            if (!closed)
+            {
+                closed = true;
+                FileUtils.closeQuietly(subscription);
+            }
+        }
+
+        public boolean closed()
+        {
+            return closed;
+        }
+    }
 }

@@ -472,6 +472,6 @@ public class CassandraAuthorizer implements IAuthorizer
 
     private UntypedResultSet process(String query) throws RequestExecutionException
     {
-        return TPCUtils.blockingGet(QueryProcessor.process(query, ConsistencyLevel.LOCAL_ONE));
+        return QueryProcessor.processBlocking(query, ConsistencyLevel.LOCAL_ONE);
     }
 }

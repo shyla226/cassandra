@@ -44,6 +44,10 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
 
     public void validate(ClientState state) throws RequestValidationException
     {
+    }
+
+    public void checkAccess(ClientState state) throws UnauthorizedException
+    {
         // validate login here before checkAccess to avoid leaking user existence to anonymous users.
         state.ensureNotAnonymous();
 
@@ -51,7 +55,6 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
             throw new InvalidRequestException(String.format("Role %s doesn't exist", grantee.getRoleName()));
 
         // if a keyspace is omitted when GRANT/REVOKE ON TABLE <table>, we need to correct the resource.
-        // called both here and in checkAccess(), as in some cases we do not call the latter.
         resource = maybeCorrectResource(resource, state);
 
         // altering permissions on builtin functions is not supported
@@ -63,12 +66,6 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
 
         if (!resource.exists())
             throw new InvalidRequestException(String.format("Resource %s doesn't exist", resource));
-    }
-
-    public void checkAccess(ClientState state) throws UnauthorizedException
-    {
-        // if a keyspace is omitted when GRANT/REVOKE ON TABLE <table>, we need to correct the resource.
-        resource = maybeCorrectResource(resource, state);
 
         // check that the user has AUTHORIZE permission on the resource or its parents, otherwise reject GRANT/REVOKE.
         state.ensureHasPermission(CorePermission.AUTHORIZE, resource);
@@ -76,5 +73,6 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
         // check that the user has [a single permission or all in case of ALL] on the resource or its parents.
         for (Permission p : permissions)
             state.ensureHasPermission(p, resource);
+
     }
 }

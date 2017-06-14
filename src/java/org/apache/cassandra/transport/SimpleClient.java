@@ -276,6 +276,8 @@ public class SimpleClient implements Closeable
     {
         public void addConnection(Channel ch, Connection connection) {}
 
+        public void removeConnection(Channel ch, Connection connection) {}
+
         public boolean isRegistered(Event.Type type, Channel ch)
         {
             return false;

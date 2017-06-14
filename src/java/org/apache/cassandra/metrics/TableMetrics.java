@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Maps;
 
@@ -758,15 +757,14 @@ public class TableMetrics
         {
             CassandraMetricsRegistry.MetricName name = factory.createMetricName(entry.getKey());
             CassandraMetricsRegistry.MetricName alias = aliasFactory.createMetricName(entry.getValue());
-            try
-            {
-                allTableMetrics.get(entry.getKey()).remove(Metrics.getMetrics().get(name.getMetricName()));
+            String metricName = name.getMetricName();
+
+            if (Metrics.getMetrics().containsKey(metricName))
+            {   // not all metrics in the all map have necessarily been created, for example views do not create
+                // "ViewReadTime" or "ViewLockAcquireTime"
+                allTableMetrics.get(entry.getKey()).remove(Metrics.getMetrics().get(metricName));
+                Metrics.remove(name, alias);
             }
-            catch (Throwable t)
-            {
-                logger.warn("Error releasing metric {}", name, t);
-            }
-            Metrics.remove(name, alias);
         }
         readLatency.release();
         writeLatency.release();

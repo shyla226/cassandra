@@ -72,14 +72,14 @@ public class ListRolesStatement extends AuthorizationStatement
 
     public void validate(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
-        state.ensureNotAnonymous();
-
-        if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
-            throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
     }
 
     public void checkAccess(ClientState state) throws InvalidRequestException
     {
+        state.ensureNotAnonymous();
+
+        if ((grantee != null) && !DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
+            throw new InvalidRequestException(String.format("%s doesn't exist", grantee));
     }
 
     public Single<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException

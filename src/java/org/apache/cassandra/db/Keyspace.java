@@ -89,6 +89,9 @@ public class Keyspace
     //Keyspaces in the case of Views (batchlog of view mutations)
     public static final OpOrder writeOrder = TPC.newOpOrder(Keyspace.class);
 
+    // this is set during draining and it indicates that no more mutations should be accepted
+    private volatile OpOrder.Barrier writeBarrier = null;
+
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<TableId, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
     private volatile AbstractReplicationStrategy replicationStrategy;
@@ -481,16 +484,27 @@ public class Keyspace
         }
     }
 
+    /**
+     * Close this keyspace to further mutations, called when draining or shutting down.
+     *
+     * A final write barrier is issued and returned. After this barrier is set, new mutations
+     * will be rejected, see {@link Keyspace#apply(Mutation, boolean, boolean, boolean)}.
+     */
+    public OpOrder.Barrier stopMutations()
+    {
+        assert writeBarrier == null : "Keyspace has already been closed to mutations";
+        writeBarrier = writeOrder.newBarrier();
+        writeBarrier.issue();
+        return writeBarrier;
+    }
+
     public Completable apply(final Mutation mutation, final boolean writeCommitLog)
     {
         return apply(mutation, writeCommitLog, true, true);
     }
 
-    // TODO can probably combine this with applyInternal with the same signature
     /**
-     * If apply is blocking, apply must not be deferred
-     * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
-     * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
+     * Applies the provided mutation.
      *
      * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
      *                       may happen concurrently, depending on the CL Executor type.
@@ -501,121 +515,153 @@ public class Keyspace
      */
     public Completable apply(final Mutation mutation, final boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
     {
-        return applyInternal(mutation, writeCommitLog, updateIndexes, isDroppable);
-    }
-
-    /**
-     * This method appends a row to the global CommitLog, then updates memtables and indexes.
-     *
-     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
-     *                       may happen concurrently, depending on the CL Executor type.
-     * @param writeCommitLog false to disable commitlog append entirely
-     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isDroppable    true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout_in_ms
-     */
-    private Completable applyInternal(final Mutation mutation, final boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
-    {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Testing write failures"));
 
+        if (writeBarrier != null)
+            return failDueToWriteBarrier(mutation);
+
         final boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
+        return requiresViewUpdate ? applyWithViews(mutation, writeCommitLog, updateIndexes, isDroppable)
+                                  : applyNoViews(mutation, writeCommitLog, updateIndexes);
 
-        return maybeAcquireLocksForView(mutation, isDroppable, requiresViewUpdate).flatMapCompletable(locks ->
+    }
 
-              Completable.using(
-                  () -> writeOrder.start(),
+    private Completable applyWithViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean isDroppable)
+    {
+        Single<Semaphore[]> lockAcquisition =  acquireLocksForView(mutation, isDroppable);
+        return lockAcquisition.flatMapCompletable(locks ->
+            Completable.using(writeOrder::start,
+                              opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, true),
+                              opGroup -> {
+                                  opGroup.close();
 
-                  (opGroup) -> (writeCommitLog ? CommitLog.instance.add(mutation) : Single.just(CommitLogPosition.NONE))
-                               .flatMapCompletable(commitLogPosition -> {
+                                  try
+                                  {
+                                      for (Semaphore lock : locks)
+                                          ViewManager.release(lock);
+                                  }
+                                  catch (Throwable t)
+                                  {
+                                      JVMStabilityInspector.inspectThrowable(t);
+                                      logger.error("Fail to release view locks", t);
+                                  }
+                              }
+            )
+        );
+    }
 
-                                   if (logger.isTraceEnabled())
-                                       logger.trace("Got CL position {} for mutation {} (view updates: {})",
-                                                    commitLogPosition, mutation, requiresViewUpdate);
+    private Completable applyNoViews(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
+    {
+        return Completable.using(writeOrder::start,
+                                 opGroup -> applyInternal(opGroup, mutation, writeCommitLog, updateIndexes, false),
+                                 OpOrder.Group::close);
+    }
 
-                                   List<Completable> memtablePutCompletables = new ArrayList<>(mutation.getPartitionUpdates().size());
+    private Completable applyInternal(OpOrder.Group opGroup, Mutation mutation, boolean writeCommitLog, boolean updateIndexes, boolean requiresViewUpdate)
+    {
+        if (writeBarrier != null && !writeBarrier.isAfter(opGroup))
+            return failDueToWriteBarrier(mutation);
 
-                                   for (PartitionUpdate upd : mutation.getPartitionUpdates())
-                                   {
-                                       ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
-                                       if (cfs == null)
-                                       {
-                                           logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
-                                           continue;
-                                       }
+        if (!writeCommitLog)
+            return postCommitLogApply(opGroup, mutation, CommitLogPosition.NONE, updateIndexes, requiresViewUpdate);
 
-                                       // TODO this probably doesn't need to be atomic after TPC
-                                       AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
-
-                                       Completable viewUpdateCompletable = null;
-                                       if (requiresViewUpdate)
-                                       {
-                                           Tracing.trace("Creating materialized view mutations from base table replica");
-
-                                           viewUpdateCompletable = viewManager.forTable(upd.metadata().id)
-                                                                              .pushViewReplicaUpdates(upd, writeCommitLog, baseComplete)
-                                                                              .doOnError(exc ->
-                                                                                         {
-                                                                                             JVMStabilityInspector.inspectThrowable(exc);
-                                                                                             logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s.%s",
-                                                                                                                        upd.metadata().keyspace, upd.metadata().name), exc);
-                                                                                         });
-                                       }
-
-                                       Tracing.trace("Adding to {} memtable", upd.metadata().name);
-                                       UpdateTransaction indexTransaction = updateIndexes
-                                                                            ? cfs.indexManager.newUpdateTransaction(upd, opGroup, FBUtilities.nowInSeconds())
-                                                                            : UpdateTransaction.NO_OP;
-
-                                       CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
-                                       Completable memtableCompletable = cfs.applyInternal(upd, indexTransaction, opGroup, pos);
-                                       if (requiresViewUpdate)
-                                       {
-                                           memtableCompletable = memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
-                                           memtablePutCompletables.add(viewUpdateCompletable);
-                                       }
-                                       memtablePutCompletables.add(memtableCompletable);
-                                   }
-
-                                   // avoid the expensive merge call if there's only 1 observable
-                                   if (memtablePutCompletables.size() == 1)
-                                       return memtablePutCompletables.get(0);
-                                   else
-                                       return Completable.merge(memtablePutCompletables);
-                               }),
-
-                  (opGroup) -> {
-                      opGroup.close();
-
-                      try
-                      {
-                          for (Semaphore lock : locks)
-                              ViewManager.release(lock);
-                      }
-                      catch (Throwable t)
-                      {
-                          JVMStabilityInspector.inspectThrowable(t);
-                          logger.error("Fail to release view locks", t);
-                      }
-                  }
-              ));
+        return CommitLog.instance.add(mutation)
+                                 .flatMapCompletable(position -> postCommitLogApply(opGroup, mutation, position, updateIndexes, requiresViewUpdate));
     }
 
     /**
-     * Acquire the locks necessary to update a view, if needed. If no view update is required simply an array of null locks.
-     * Otherwise keep on trying to acquire locks until we succeed or the timeout expires.
+     * Apply a mutation after it has been added to the commit log.
+     *
+     * @param opGroup the {@link OpOrder.Group} protecting the application. That group must be close once this method
+     *                return in <b>all</b> cases, but doing so is the responsibility of the caller/creator of the group.
+     * @param mutation the mutation to apply.
+     * @param commitLogPosition the position from the commit log addition. This can be {@link CommitLogPosition#NONE} if
+     *                          we are not writing to the commit log for this mutation.
+     * @param updateIndexes {@code false} to disable index updates.
+     * @param requiresViewUpdate whether the mutation has materialized view associated to it that should be applied.
+     * @return
+     */
+    private Completable postCommitLogApply(OpOrder.Group opGroup, Mutation mutation, CommitLogPosition commitLogPosition, boolean updateIndexes, boolean requiresViewUpdate)
+    {
+        if (logger.isTraceEnabled())
+            logger.trace("Got CL position {} for mutation {} (view updates: {})",
+                         commitLogPosition, mutation, requiresViewUpdate);
+
+        List<Completable> memtablePutCompletables = new ArrayList<>(mutation.getPartitionUpdates().size());
+
+        for (PartitionUpdate upd : mutation.getPartitionUpdates())
+        {
+            ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
+            if (cfs == null)
+            {
+                logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
+                continue;
+            }
+
+            // TODO this probably doesn't need to be atomic after TPC
+            AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
+
+            Completable viewUpdateCompletable = null;
+            if (requiresViewUpdate)
+            {
+                Tracing.trace("Creating materialized view mutations from base table replica");
+
+                viewUpdateCompletable = viewManager.forTable(upd.metadata().id)
+                                                   .pushViewReplicaUpdates(upd, commitLogPosition != CommitLogPosition.NONE, baseComplete)
+                                                   .doOnError(exc ->
+                                                              {
+                                                                  JVMStabilityInspector.inspectThrowable(exc);
+                                                                  logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s.%s",
+                                                                                             upd.metadata().keyspace, upd.metadata().name), exc);
+                                                              });
+            }
+
+            Tracing.trace("Adding to {} memtable", upd.metadata().name);
+            UpdateTransaction indexTransaction = updateIndexes
+                                                 ? cfs.indexManager.newUpdateTransaction(upd, opGroup, FBUtilities.nowInSeconds())
+                                                 : UpdateTransaction.NO_OP;
+
+            CommitLogPosition pos = commitLogPosition == CommitLogPosition.NONE ? null : commitLogPosition;
+            Completable memtableCompletable = cfs.apply(upd, indexTransaction, opGroup, pos);
+            if (requiresViewUpdate)
+            {
+                memtableCompletable = memtableCompletable.doOnComplete(() -> baseComplete.set(System.currentTimeMillis()));
+                memtablePutCompletables.add(viewUpdateCompletable);
+            }
+            memtablePutCompletables.add(memtableCompletable);
+        }
+
+        // avoid the expensive merge call if there's only 1 observable
+        if (memtablePutCompletables.size() == 1)
+            return memtablePutCompletables.get(0);
+        else
+            return Completable.merge(memtablePutCompletables);
+    }
+
+    private Completable failDueToWriteBarrier(Mutation mutation)
+    {
+        assert writeBarrier != null : "Expected non null write barrier";
+
+        logger.debug(FBUtilities.Debug.getStackTrace());
+        logger.error("Attempted to apply mutation {} after final write barrier", mutation);
+        return Completable.error(new InternalRequestExecutionException(RequestFailureReason.UNKNOWN, "Keyspace closed to new mutations"));
+    }
+
+    /**
+     * Acquire the locks necessary to update view, assuming the provide mutation does have views associated.
+     * This will keep on trying to acquire them until we succeed or the timeout expires.
      *
      * @param mutation - the mutation to be applied
-     * @param isDroppable - true if this should throw WriteTimeoutException if it does not acquire lock within write_request_timeout_in_ms
-     * @param requiresViewUpdate - true if the mutation involves one or more views
+     * @param isDroppable - {@code true} if this should throw {@link WriteTimeoutException} if it does not acquire lock within
+     *                    write_request_timeout_in_ms. Otherwise, this will try as long as required.
      *
-     * @return a Single of an empty array if no locks are required, or an array containing the locks if a view update is required.
+     * @return a Single of an array containing the locks that have been acquired for updating the views associated to
+     * {@code mutation}. Those locks <b>must</b> be released by the caller on all path.
      */
-    private Single<Semaphore[]> maybeAcquireLocksForView(final Mutation mutation, final boolean isDroppable, final boolean requiresViewUpdate)
+    private Single<Semaphore[]> acquireLocksForView(final Mutation mutation, final boolean isDroppable)
     {
-        final Semaphore[] locks = new Semaphore[mutation.getTableIds().size()];
-        if (!requiresViewUpdate)
-            return Single.just(locks);
-
+        Semaphore[] locks = new Semaphore[mutation.getTableIds().size()];
         return Single.create(source -> acquireLocksForView(source, mutation, locks, isDroppable));
     }
 

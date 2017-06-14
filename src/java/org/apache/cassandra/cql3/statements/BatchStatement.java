@@ -357,10 +357,10 @@ public class BatchStatement implements CQLStatement
 
     public Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long queryStartNanoTime)
     {
-        return execute(queryState, options, false, options.getTimestamp(queryState), queryStartNanoTime);
+        return execute(queryState, options, options.getTimestamp(queryState), queryStartNanoTime);
     }
 
-    private Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, boolean local, long now, long queryStartNanoTime)
+    private Single<? extends ResultMessage> execute(QueryState queryState, BatchQueryOptions options, long now, long queryStartNanoTime)
     {
         if (options.getConsistency() == null)
             return Single.error(new InvalidRequestException("Invalid empty consistency level"));
@@ -368,7 +368,7 @@ public class BatchStatement implements CQLStatement
             return Single.error(new InvalidRequestException("Invalid empty serial consistency level"));
 
         if (!hasConditions)
-            return executeWithoutConditions(getMutations(options, local, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
+            return executeWithoutConditions(getMutations(options, false, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
 
         // Paxos is already slow, so for now, just execute it in a blocking way on a different thread
         return Single.defer(() -> {
@@ -496,10 +496,9 @@ public class BatchStatement implements CQLStatement
 
     public Single<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        if (hasConditions)
-            return executeInternalWithConditions(BatchQueryOptions.withoutPerStatementVariables(options), queryState);
-
-        return executeInternalWithoutCondition(queryState, options, System.nanoTime());
+        return hasConditions
+               ? executeInternalWithConditions(BatchQueryOptions.withoutPerStatementVariables(options), queryState)
+               : executeInternalWithoutCondition(queryState, options, System.nanoTime());
     }
 
     private Single<? extends ResultMessage> executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
@@ -618,12 +617,7 @@ public class BatchStatement implements CQLStatement
 
         public void addAll(TableMetadata table, RegularAndStaticColumns columns)
         {
-            RegularAndStaticColumns.Builder builder = perTableBuilders.get(table.id);
-            if (builder == null)
-            {
-                builder = RegularAndStaticColumns.builder();
-                perTableBuilders.put(table.id, builder);
-            }
+            RegularAndStaticColumns.Builder builder = perTableBuilders.computeIfAbsent(table.id, k -> RegularAndStaticColumns.builder());
             builder.addAll(columns);
         }
 

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.util.List;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
@@ -27,7 +28,7 @@ import static junit.framework.Assert.assertEquals;
 public class OpsTest
 {
     @Test
-    public void testSkippingOp()
+    public void testSkippingOpDoesntOverflowStack()
     {
         final int size = 100000;
         final int result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
@@ -38,7 +39,7 @@ public class OpsTest
     }
 
     @Test
-    public void testFilterOp()
+    public void testFilterOpDoesntOverflowStack()
     {
         final int size = 100000;
         final int result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
@@ -46,5 +47,16 @@ public class OpsTest
                                  .blockingSingle();
 
         assertEquals(size -1, result);
+    }
+
+    @Test
+    public void testGroupOpDoesntOverflowStack()
+    {
+        final int size = 100000;
+        final List<Integer> result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
+                                           .toList()
+                                           .blockingSingle();
+
+        assertEquals(size, result.size());
     }
 }
