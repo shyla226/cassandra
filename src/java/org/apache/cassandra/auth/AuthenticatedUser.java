@@ -18,10 +18,12 @@
 package org.apache.cassandra.auth;
 
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Returned from IAuthenticator#authenticate(), represents an authenticated user everywhere internally.
@@ -99,9 +101,16 @@ public class AuthenticatedUser
         return Roles.getRoles(role);
     }
 
-    public Set<Permission> getPermissions(IResource resource)
+    /**
+     * Returns a cummulated view of all granted, restricted and grantable permissions on
+     * the resource <em>chain</em> of the given resource for this user.
+     */
+    public PermissionSets resourceChainPermissions(IResource resource)
     {
-        return permissionsCache.getPermissions(this, resource);
+        return permissionsCache.getPermissions(Resources.chain(resource)
+                                                        .stream()
+                                                        .map(res -> Pair.create(this, (IResource) res))
+                                                        .collect(Collectors.toList()));
     }
 
     @Override

@@ -26,6 +26,7 @@ import com.google.common.collect.Lists;
 
 import io.reactivex.Single;
 
+import org.apache.cassandra.auth.PermissionSets;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.IRoleManager;
@@ -86,9 +87,11 @@ public class ListRolesStatement extends AuthorizationStatement
     {
         return Single.defer(() -> {
             // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
-            boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
-                                                           .authorize(state.getUser(), RoleResource.root())
-                                                           .contains(CorePermission.DESCRIBE);
+            PermissionSets rootLevelPerms = DatabaseDescriptor.getAuthorizer()
+                                                              .allPermissionSets(state.getUser(), RoleResource.root());
+            boolean hasRootLevelSelect = rootLevelPerms != null &&
+                                         rootLevelPerms.granted.contains(CorePermission.DESCRIBE) &&
+                                         !rootLevelPerms.restricted.contains(CorePermission.DESCRIBE);
             if (hasRootLevelSelect)
             {
                 if (grantee == null)

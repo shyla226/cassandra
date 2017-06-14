@@ -77,7 +77,7 @@ public class Permissions
      * @param permissions the initial permissions to include in the Set
      * @return mutable set of permissions
      */
-    public static Set<Permission> setOf(Permission...permissions)
+    public static Set<Permission> setOf(Permission... permissions)
     {
         return PartitionedEnumSet.of(Permission.class, permissions);
     }
@@ -100,7 +100,17 @@ public class Permissions
      * @param permissions the permissions to include in the Set
      * @return immutable set of permissions
      */
-    public static Set<Permission> immutableSetOf(Permission...permissions)
+    public static Set<Permission> immutableSetOf(Permission... permissions)
+    {
+        return PartitionedEnumSet.immutableSetOf(Permission.class, permissions);
+    }
+
+    /**
+     * Return an immutable set of permissions, backed by PartitionedEnumSet<Permission>
+     * @param permissions the permissions to include in the Set
+     * @return immutable set of permissions
+     */
+    public static Set<Permission> immutableSetOf(Iterable<Permission> permissions)
     {
         return PartitionedEnumSet.immutableSetOf(Permission.class, permissions);
     }

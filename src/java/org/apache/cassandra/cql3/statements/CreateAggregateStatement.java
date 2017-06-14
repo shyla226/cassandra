@@ -184,7 +184,8 @@ public final class CreateAggregateStatement extends SchemaAlteringStatement
             authorizer.grant(AuthenticatedUser.SYSTEM_USER,
                              authorizer.applicablePermissions(resource),
                              resource,
-                             RoleResource.role(state.getClientState().getUser().getName()));
+                             RoleResource.role(state.getClientState().getUser().getName()),
+                             GrantMode.GRANT);
         }
         catch (RequestExecutionException e)
         {

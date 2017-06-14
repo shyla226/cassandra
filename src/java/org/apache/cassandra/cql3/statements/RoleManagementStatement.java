@@ -39,6 +39,19 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
 
     public void checkAccess(ClientState state) throws UnauthorizedException
     {
+        try
+        {
+            super.checkPermission(state, CorePermission.AUTHORIZE, role);
+        }
+        catch (UnauthorizedException noAuthorizePermission)
+        {
+            if (!state.hasGrantOption(CorePermission.AUTHORIZE, role))
+                throw noAuthorizePermission;
+        }
+    }
+
+    public void validate(ClientState state) throws RequestValidationException
+    {
         state.ensureNotAnonymous();
 
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(role))
@@ -46,11 +59,5 @@ public abstract class RoleManagementStatement extends AuthenticationStatement
 
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw new InvalidRequestException(String.format("%s doesn't exist", grantee.getRoleName()));
-        
-        super.checkPermission(state, CorePermission.AUTHORIZE, role);
-    }
-
-    public void validate(ClientState state) throws RequestValidationException
-    {
     }
 }

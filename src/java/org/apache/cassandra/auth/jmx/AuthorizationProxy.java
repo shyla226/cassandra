@@ -19,25 +19,21 @@
 package org.apache.cassandra.auth.jmx;
 
 import java.lang.reflect.*;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.Principal;
+import java.security.*;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import javax.management.MBeanServer;
-import javax.management.MalformedObjectNameException;
-import javax.management.ObjectName;
+import javax.management.*;
 import javax.security.auth.Subject;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.auth.permission.CorePermission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.StorageService;
@@ -471,13 +467,13 @@ public class AuthorizationProxy implements InvocationHandler
         // get all permissions for the specified subject. We'll cache them as it's likely
         // we'll receive multiple lookups for the same subject (but for different resources
         // and permissions) in quick succession
-        return DatabaseDescriptor.getAuthorizer().list(AuthenticatedUser.SYSTEM_USER,
-                                                       DatabaseDescriptor.getAuthorizer().applicablePermissions(JMXResource.root()),
-                                                       null,
-                                                       subject)
-                                                 .stream()
-                                                 .filter(details -> details.resource instanceof JMXResource)
-                                                 .collect(Collectors.toSet());
+        return DatabaseDescriptor.getAuthorizer()
+                                 .list(DatabaseDescriptor.getAuthorizer().applicablePermissions(JMXResource.root()),
+                                       null,
+                                       subject)
+                                 .stream()
+                                 .filter(details -> details.resource instanceof JMXResource)
+                                 .collect(Collectors.toSet());
     }
 
     private static final class JMXPermissionsCache extends AuthCache<RoleResource, Set<PermissionDetails>>

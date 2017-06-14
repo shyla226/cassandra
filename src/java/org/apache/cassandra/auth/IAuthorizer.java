@@ -19,9 +19,7 @@ package org.apache.cassandra.auth;
 
 import java.util.Set;
 
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.*;
 
 /**
  * Primary Cassandra authorization interface.
@@ -38,6 +36,8 @@ public interface IAuthorizer
     }
 
     /**
+     * Return all permissions - granted, restricted and grantables.
+     *
      * Returns a set of permissions of a user on a resource.
      * Since Roles were introduced in version 2.2, Cassandra does not distinguish in any
      * meaningful way between users and roles. A role may or may not have login privileges
@@ -45,11 +45,23 @@ public interface IAuthorizer
      * concept of a user, except to link a client session to role. AuthenticatedUser can be
      * thought of as a manifestation of a role, linked to a specific client connection.
      *
-     * @param user Authenticated user requesting authorization.
-     * @param resource Resource for which the authorization is being requested. @see DataResource.
-     * @return Set of permissions of the user on the resource. Should never return null. Use Permission.NONE instead.
+     * <em>Granted permissions:</em>
+     * The set of <em>effective</em> permissions on a particular resource is the sum of all
+     * granted permissions on the resource-chain inquired ({@link PermissionSets#granted PermissionSets.granted})
+     * <em>minus</em> the sum of all restricted permissions on the resource-chain
+     * ({@link PermissionSets#restricted PermissionSets.restricted}). This means, that negative (restricted)
+     * permissions take precedence even if the negative permissions are placed on resource parents.
+     *
+     * <em>Restricted permissions:</em>
+     * Retrurns a set of negative permissions that a user is denied on a resource.
+     *
+     * <em>Grantable permissions:</em>
+     * Returns a set of permissions that a user can grant to other users on a resource.
+     *
+     * These permissions have no effect on the <em>effective</em> permissions of the user
+     * on a resource.
      */
-    Set<Permission> authorize(AuthenticatedUser user, IResource resource);
+    PermissionSets allPermissionSets(AuthenticatedUser user, IResource resource);
 
     /**
      * Grants a set of permissions on a resource to a role.
@@ -61,12 +73,14 @@ public interface IAuthorizer
      * @param permissions Set of permissions to grant.
      * @param resource Resource on which to grant the permissions.
      * @param grantee Role to which the permissions are to be granted.
+     * @param grantMode whether to grant permissions on the resource, the resource with grant option or
+     *                    only the permission to grant
      *
      * @throws RequestValidationException
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
+    void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee, GrantMode grantMode)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -77,14 +91,15 @@ public interface IAuthorizer
      *
      * @param performer User who revokes the permissions.
      * @param permissions Set of permissions to revoke.
-     * @param revokee Role from which to the permissions are to be revoked.
      * @param resource Resource on which to revoke the permissions.
+     * @param revokee Role from which to the permissions are to be revoked.
+     * @param grantMode what to revoke, the permission on the resource, the permission to grant or both
      *
      * @throws RequestValidationException
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
+    void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode grantMode)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -92,7 +107,6 @@ public interface IAuthorizer
      * This method is optional and may be called internally, so implementations which do
      * not support it should be sure to throw UnsupportedOperationException.
      *
-     * @param performer User who wants to see the permissions.
      * @param permissions Set of Permission values the user is interested in. The result should only include the
      *                    matching ones.
      * @param resource The resource on which permissions are requested. Can be null, in which case permissions on all
@@ -106,7 +120,7 @@ public interface IAuthorizer
      * @throws RequestExecutionException
      * @throws java.lang.UnsupportedOperationException
      */
-    Set<PermissionDetails> list(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
+    Set<PermissionDetails> list(Set<Permission> permissions, IResource resource, RoleResource grantee)
     throws RequestValidationException, RequestExecutionException;
 
     /**

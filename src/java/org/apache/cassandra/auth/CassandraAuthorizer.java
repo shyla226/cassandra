@@ -17,11 +17,14 @@
  */
 package org.apache.cassandra.auth;
 
+import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -30,19 +33,14 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.auth.permission.Permissions;
 import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.statements.BatchStatement;
-import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.service.ClientState;
-
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -59,6 +57,8 @@ public class CassandraAuthorizer implements IAuthorizer
     private static final String ROLE = "role";
     private static final String RESOURCE = "resource";
     private static final String PERMISSIONS = "permissions";
+    private static final String GRANTABLES = "grantables";
+    private static final String RESTRICTED = "restricted";
 
     private SelectStatement authorizeRoleStatement;
 
@@ -66,18 +66,19 @@ public class CassandraAuthorizer implements IAuthorizer
     {
     }
 
-    // Returns every permission on the resource granted to the user either directly
-    // or indirectly via roles granted to the user.
-    public Set<Permission> authorize(AuthenticatedUser user, IResource resource)
+    @Override
+    public PermissionSets allPermissionSets(AuthenticatedUser user, IResource resource)
     {
         if (user.isSuper())
-            return applicablePermissions(resource);
+            // superuser can do everything
+            return PermissionSets.builder()
+                                 .addGranted(applicablePermissions(resource))
+                                 .addGrantables(applicablePermissions(resource))
+                                 .build();
 
-        Set<Permission> permissions = Permissions.setOf();
         try
         {
-            for (RoleResource role: user.getRoles())
-                addPermissionsForRole(permissions, resource, role);
+            return addPermissionsForUser(resource, user);
         }
         catch (RequestValidationException e)
         {
@@ -88,23 +89,18 @@ public class CassandraAuthorizer implements IAuthorizer
             logger.warn("CassandraAuthorizer failed to authorize {} for {}", user, resource);
             throw new RuntimeException(e);
         }
-
-        for (RoleResource role: user.getRoles())
-            addPermissionsForRole(permissions, resource, role);
-
-        return permissions;
     }
 
-    public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
+    public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee, GrantMode grantMode)
     throws RequestValidationException, RequestExecutionException
     {
-        modifyRolePermissions(permissions, resource, grantee, "+");
+        grantRevoke(permissions, resource, grantee, grantMode, "+");
     }
 
-    public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
+    public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee, GrantMode grantMode)
     throws RequestValidationException, RequestExecutionException
     {
-        modifyRolePermissions(permissions, resource, revokee, "-");
+        grantRevoke(permissions, resource, revokee, grantMode, "-");
     }
 
     // Called when deleting a role with DROP ROLE query.
@@ -132,20 +128,27 @@ public class CassandraAuthorizer implements IAuthorizer
     {
         try
         {
+            List<CQLStatement> statements = new ArrayList<>();
+
+            Set<String> roles = new HashSet<>();
+
             UntypedResultSet rows = process(String.format("SELECT role FROM %s.%s WHERE resource = '%s' ALLOW FILTERING",
                                                           SchemaConstants.AUTH_KEYSPACE_NAME,
                                                           AuthKeyspace.ROLE_PERMISSIONS,
                                                           escape(droppedResource.getName())));
-
-            List<CQLStatement> statements = new ArrayList<>();
             for (UntypedResultSet.Row row : rows)
             {
-                statements.add(QueryProcessor.getStatement(String.format("DELETE FROM %s.%s WHERE role = '%s' AND resource = '%s'",
-                                                                         SchemaConstants.AUTH_KEYSPACE_NAME,
-                                                                         AuthKeyspace.ROLE_PERMISSIONS,
-                                                                         escape(row.getString("role")),
-                                                                         escape(droppedResource.getName())),
-                                                           ClientState.forInternalCalls()).statement);
+                roles.add(row.getString("role"));
+            }
+
+            for (String role : roles)
+            {
+                String cql = String.format("DELETE FROM %s.%s WHERE role = '%s' AND resource = '%s'",
+                                           SchemaConstants.AUTH_KEYSPACE_NAME,
+                                           AuthKeyspace.ROLE_PERMISSIONS,
+                                           escape(role),
+                                           escape(droppedResource.getName()));
+                statements.add(QueryProcessor.getStatement(cql, ClientState.forInternalCalls()).statement);
             }
 
             BatchStatement batch = new BatchStatement(0,
@@ -164,89 +167,132 @@ public class CassandraAuthorizer implements IAuthorizer
     }
 
     // Add every permission on the resource granted to the role
-    private void addPermissionsForRole(Set<Permission> permissions, IResource resource, RoleResource role)
+    private PermissionSets addPermissionsForUser(IResource resource, AuthenticatedUser user)
     throws RequestExecutionException, RequestValidationException
     {
+        PermissionSets.Builder permissions = PermissionSets.builder();
+
+        // Query looks like this:
+        //      SELECT permissions, restricted, grantables
+        //        FROM system_auth.role-permissions
+        //       WHERE resource = ? AND role IN ?
+        // Purpose is to fetch permissions for all role with one query and not one query per role.
+
+        ByteBuffer roles = ListSerializer.getInstance(UTF8Serializer.instance)
+                                         .serialize(user.getRoles()
+                                                        .stream()
+                                                        .map(RoleResource::getRoleName)
+                                                        .collect(Collectors.toList()));
+
         QueryOptions options = QueryOptions.forInternalCalls(ConsistencyLevel.LOCAL_ONE,
-                                                             Lists.newArrayList(ByteBufferUtil.bytes(role.getRoleName()),
-                                                                                ByteBufferUtil.bytes(resource.getName())));
+                                                             Lists.newArrayList(ByteBufferUtil.bytes(resource.getName()),
+                                                                                roles));
 
         ResultMessage.Rows rows = TPCUtils.blockingGet(authorizeRoleStatement.execute(QueryState.forInternalCalls(), options, System.nanoTime()));
         UntypedResultSet result = UntypedResultSet.create(rows.result);
 
-        if (!result.isEmpty() && result.one().has(PERMISSIONS))
-        {
-            for (String perm : result.one().getSet(PERMISSIONS, UTF8Type.instance))
-            {
-                permissions.add(Permissions.permission(perm));
-            }
-        }
+        for (UntypedResultSet.Row row : result)
+            allPermissionsFromRow(row, permissions);
+
+        return permissions.build();
     }
 
-    // Adds or removes permissions from a role_permissions table (adds if op is "+", removes if op is "-")
-    private void modifyRolePermissions(Set<Permission> permissions, IResource resource, RoleResource role, String op)
-            throws RequestExecutionException
+    private static void allPermissionsFromRow(UntypedResultSet.Row row, PermissionSets.Builder perms)
     {
-        process(String.format("UPDATE %s.%s SET permissions = permissions %s {%s} WHERE role = '%s' AND resource = '%s'",
+        permissionsFromRow(row, PERMISSIONS, perms::addGranted);
+        permissionsFromRow(row, RESTRICTED, perms::addRestricted);
+        permissionsFromRow(row, GRANTABLES, perms::addGrantable);
+    }
+
+    private static void permissionsFromRow(UntypedResultSet.Row row, String column, Consumer<Permission> perms)
+    {
+        if (!row.has(column))
+            return;
+        row.getSet(column, UTF8Type.instance)
+           .stream()
+           .map(Permissions::permission)
+           .forEach(perms);
+    }
+
+    private void grantRevoke(Set<Permission> permissions, IResource resource, RoleResource role, GrantMode grantMode,
+                             String op)
+    {
+        // Construct a CQL command like the following. The updated columns are variable (depend on grantMode).
+        //
+        //   UPDATE system_auth.role_permissions
+        //      SET permissions = permissions + {<permissions>}
+        //    WHERE role = <role-name>
+        //      AND resource = <resource-name>
+        //
+
+        String column = columnForGrantMode(grantMode);
+
+        String perms = permissions.stream()
+                                  .map(Permission::getFullName)
+                                  .collect(Collectors.joining("','", "'", "'"));
+
+        process(String.format("UPDATE %s.%s SET %s = %s %s { %s } WHERE role = '%s' AND resource = '%s'",
                               SchemaConstants.AUTH_KEYSPACE_NAME,
                               AuthKeyspace.ROLE_PERMISSIONS,
-                              op,
-                              permissions.stream().map(Permission::getFullName).collect(Collectors.joining("','", "'", "'")),
+                              column, column, op, perms,
                               escape(role.getRoleName()),
                               escape(resource.getName())));
     }
 
-    // 'of' can be null - in that case everyone's permissions have been requested. Otherwise only single user's.
-    // If the user requesting 'LIST PERMISSIONS' is not a superuser OR their username doesn't match 'of', we
-    // throw UnauthorizedException. So only a superuser can view everybody's permissions. Regular users are only
-    // allowed to see their own permissions.
-    public Set<PermissionDetails> list(AuthenticatedUser performer,
-                                       Set<Permission> permissions,
+    private static String columnForGrantMode(GrantMode grantMode)
+    {
+        switch (grantMode)
+        {
+            case GRANT:
+                return PERMISSIONS;
+            case RESTRICT:
+                return RESTRICTED;
+            case GRANTABLE:
+                return GRANTABLES;
+            default:
+                throw new AssertionError(); // make compiler happy
+        }
+    }
+
+    public Set<PermissionDetails> list(Set<Permission> permissions,
                                        IResource resource,
                                        RoleResource grantee)
     throws RequestValidationException, RequestExecutionException
     {
-        if (!(performer.isSuper() || performer.isSystem()) && !performer.getRoles().contains(grantee))
-            throw new UnauthorizedException(String.format("You are not authorized to view %s's permissions",
-                                                          grantee == null ? "everyone" : grantee.getRoleName()));
+        // 'grantee' can be null - in that case everyone's permissions have been requested. Otherwise only single user's.
+        Set<RoleResource> roles = grantee != null
+                                  ? DatabaseDescriptor.getRoleManager().getRoles(grantee, true)
+                                  : null;
 
-        if (null == grantee)
-            return listPermissionsForRole(permissions, resource, grantee);
-
-        Set<RoleResource> roles = DatabaseDescriptor.getRoleManager().getRoles(grantee, true);
         Set<PermissionDetails> details = new HashSet<>();
-        for (RoleResource role : roles)
-            details.addAll(listPermissionsForRole(permissions, resource, role));
-
-        return details;
-    }
-
-    private Set<PermissionDetails> listPermissionsForRole(Set<Permission> permissions,
-                                                          IResource resource,
-                                                          RoleResource role)
-    throws RequestExecutionException
-    {
-        Set<PermissionDetails> details = new HashSet<>();
-        for (UntypedResultSet.Row row : process(buildListQuery(resource, role)))
+        // If it exists, try the legacy user permissions table first. This is to handle the case
+        // where the cluster is being upgraded and so is running with mixed versions of the perms table
+        for (UntypedResultSet.Row row : process(buildListQuery(resource, roles)))
         {
-            if (row.has(PERMISSIONS))
+            PermissionSets.Builder permsBuilder = PermissionSets.builder();
+            allPermissionsFromRow(row, permsBuilder);
+            PermissionSets perms = permsBuilder.build();
+
+            String rowRole = row.getString(ROLE);
+            IResource rowResource = Resources.fromName(row.getString(RESOURCE));
+
+            for (Permission p : perms.allContainedPermissions())
             {
-                for (String p : row.getSet(PERMISSIONS, UTF8Type.instance))
+                if (permissions.contains(p))
                 {
-                    Permission permission = Permissions.permission(p);
-                    if (permissions.contains(permission))
-                        details.add(new PermissionDetails(row.getString(ROLE),
-                                                          Resources.fromName(row.getString(RESOURCE)),
-                                                          permission));
+                    details.add(new PermissionDetails(rowRole,
+                                                      rowResource,
+                                                      p,
+                                                      perms.grantModesFor(p)));
                 }
             }
         }
         return details;
     }
 
-    private String buildListQuery(IResource resource, RoleResource grantee)
+    private String buildListQuery(IResource resource, Set<RoleResource> roles)
     {
-        List<String> vars = Lists.newArrayList(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLE_PERMISSIONS);
+        List<String> vars = new ArrayList<>();
         List<String> conditions = new ArrayList<>();
 
         if (resource != null)
@@ -255,18 +301,23 @@ public class CassandraAuthorizer implements IAuthorizer
             vars.add(escape(resource.getName()));
         }
 
-        if (grantee != null)
+        boolean hasRoles = roles != null && !roles.isEmpty();
+        if (hasRoles)
         {
-            conditions.add(ROLE + " = '%s'");
-            vars.add(escape(grantee.getRoleName()));
+            conditions.add("%s IN (" + StringUtils.repeat(", '%s'", roles.size()).substring(2) + ')');
+            vars.add(ROLE);
+            vars.addAll(roles.stream()
+                             .map(r -> escape(r.getRoleName()))
+                             .collect(Collectors.toList()));
         }
 
-        String query = "SELECT " + ROLE + ", resource, permissions FROM %s.%s";
+        String query = "SELECT " + ROLE + ", resource, " + PERMISSIONS + ", " + RESTRICTED + ", " + GRANTABLES
+                       + " FROM " +  SchemaConstants.AUTH_KEYSPACE_NAME + '.' + AuthKeyspace.ROLE_PERMISSIONS;
 
         if (!conditions.isEmpty())
             query += " WHERE " + StringUtils.join(conditions, " AND ");
 
-        if (resource != null && grantee == null)
+        if (resource != null && !hasRoles)
             query += " ALLOW FILTERING";
 
         return String.format(query, vars.toArray());
@@ -284,21 +335,21 @@ public class CassandraAuthorizer implements IAuthorizer
 
     public void setup()
     {
-        String query = String.format("SELECT permissions FROM %s.%s WHERE %s = ? AND %s = ?",
-                                     SchemaConstants.AUTH_KEYSPACE_NAME,
-                                     AuthKeyspace.ROLE_PERMISSIONS,
-                                     ROLE,
-                                     RESOURCE);
-        authorizeRoleStatement = (SelectStatement) QueryProcessor.getStatement(query, ClientState.forInternalCalls()).statement;
+        String cql = String.format("SELECT %s FROM %s.%s WHERE resource = ? AND %s IN ?",
+                                   PERMISSIONS + ", " + RESTRICTED + ", " + GRANTABLES,
+                                   SchemaConstants.AUTH_KEYSPACE_NAME,
+                                   AuthKeyspace.ROLE_PERMISSIONS,
+                                   ROLE);
+        authorizeRoleStatement = (SelectStatement) QueryProcessor.getStatement(cql, ClientState.forInternalCalls()).statement;
     }
 
     // We only worry about one character ('). Make sure it's properly escaped.
-    private String escape(String name)
+    private static String escape(String name)
     {
         return StringUtils.replace(name, "'", "''");
     }
 
-    private UntypedResultSet process(String query) throws RequestExecutionException
+    private static UntypedResultSet process(String query) throws RequestExecutionException
     {
         return QueryProcessor.processBlocking(query, ConsistencyLevel.LOCAL_ONE);
     }
