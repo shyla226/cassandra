@@ -17,10 +17,18 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.rows.Row;
@@ -28,9 +36,12 @@ import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.WrappedRunnable;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class CounterMutationTest
 {
@@ -53,7 +64,6 @@ public class CounterMutationTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1);
         cfs.truncateBlocking();
-        ColumnMetadata cDef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
 
         // Do the initial update (+1)
         addAndCheck(cfs, 1, 1);
@@ -214,5 +224,230 @@ public class CounterMutationTest
                 .build(),
             ConsistencyLevel.ONE).apply();
         Util.assertEmpty(Util.cmd(cfs).includeRow("cc").columns("val", "val2").build());
+    }
+
+    @Test
+    public void testParallelWritersSameKeyWithCache() throws Throwable
+    {
+        testParallelWritersSameKey(true);
+    }
+
+    @Test
+    public void testParallelWritersSameKeyWithoutCache() throws Throwable
+    {
+        testParallelWritersSameKey(false);
+    }
+
+    private void testParallelWritersSameKey(boolean withCache) throws Throwable
+    {
+        final int writers = 25;
+        final int insertsPerWriter = 50;
+        final Map<Integer, Throwable> failedWrites = new ConcurrentHashMap<>();
+
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1);
+        cfs.truncateBlocking();
+
+        CyclicBarrier semaphore = new CyclicBarrier(writers);
+
+        if (!withCache)
+            CacheService.instance.setCounterCacheCapacityInMB(0);
+
+        try
+        {
+            Thread[] threads = new Thread[writers];
+            for (int i = 0; i < writers; i++)
+            {
+                final int writer = i;
+                Thread t = NamedThreadFactory.createThread(new WrappedRunnable()
+                {
+                    public void runMayThrow()
+                    {
+                        try
+                        {
+                            final int writerOffset = writer * insertsPerWriter;
+                            semaphore.await();
+                            for (int i = 0; i < insertsPerWriter; i++)
+                            {
+                                try
+                                {
+                                    Mutation m = new RowUpdateBuilder(cfs.metadata(), writerOffset + i, "key1")
+                                                 .clustering("cc")
+                                                 .add("val", 1L)
+                                                 .build(); // + 1
+                                    new CounterMutation(m, ConsistencyLevel.ONE).apply();
+                                }
+                                catch (Throwable t)
+                                {
+                                    failedWrites.put(i + writerOffset, t);
+                                }
+                            }
+                        }
+                        catch (Throwable e)
+                        {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                });
+                t.start();
+                threads[i] = t;
+            }
+
+            for (int i = 0; i < writers; i++)
+                threads[i].join();
+
+            assertTrue(failedWrites.toString(), failedWrites.isEmpty());
+
+            ColumnMetadata cDef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
+            Row row = Util.getOnlyRow(Util.cmd(cfs).includeRow("cc").columns("val").build());
+            assertEquals(writers * insertsPerWriter, CounterContext.instance().total(row.getCell(cDef).value()));
+        }
+        finally
+        {
+            CacheService.instance.setCounterCacheCapacityInMB(DatabaseDescriptor.getCounterCacheSizeInMB());
+        }
+    }
+
+    @Test
+    public void testParallelWritersDifferentKeysWithCache() throws Throwable
+    {
+        testParallelWritersDifferentKeys(true);
+    }
+
+    @Test
+    public void testParallelWritersDifferentKeysWithoutCache() throws Throwable
+    {
+        testParallelWritersDifferentKeys(false);
+    }
+
+
+    private void testParallelWritersDifferentKeys(boolean withCache) throws Throwable
+    {
+        final int writers = 100;
+        final int insertsPerWriter = 200;
+        final Map<Integer, Throwable> failedWrites = new ConcurrentHashMap<>();
+
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1);
+        cfs.truncateBlocking();
+
+        CyclicBarrier semaphore = new CyclicBarrier(writers);
+
+        if (!withCache)
+            CacheService.instance.setCounterCacheCapacityInMB(0);
+
+        try
+        {
+            Thread[] threads = new Thread[writers];
+            for (int i = 0; i < writers; i++)
+            {
+                final int writer = i;
+                Thread t = NamedThreadFactory.createThread(new WrappedRunnable()
+                {
+                    public void runMayThrow()
+                    {
+                        try
+                        {
+                            final int writerOffset = writer * insertsPerWriter;
+                            semaphore.await();
+                            for (int i = 0; i < insertsPerWriter; i++)
+                            {
+                                try
+                                {
+                                    Mutation m = new RowUpdateBuilder(cfs.metadata(), i, "key_" + Integer.toString(writer))
+                                                 .clustering("cc")
+                                                 .add("val", 1L)
+                                                 .build(); // + 1
+                                    new CounterMutation(m, ConsistencyLevel.ONE).apply();
+                                }
+                                catch (Throwable t)
+                                {
+                                    failedWrites.put(i + writerOffset, t);
+                                }
+                            }
+                        }
+                        catch (Throwable e)
+                        {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                });
+                t.start();
+                threads[i] = t;
+            }
+
+            for (int i = 0; i < writers; i++)
+                threads[i].join();
+
+            assertTrue(failedWrites.toString(), failedWrites.isEmpty());
+
+            ColumnMetadata cDef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
+
+            for (int i = 0; i < writers; i++)
+            {
+                Row row = Util.getOnlyRow(Util.cmd(cfs, "key_" + Integer.toString(i)).includeRow("cc").columns("val").build());
+                assertEquals(insertsPerWriter, CounterContext.instance().total(row.getCell(cDef).value()));
+            }
+        }
+        finally
+        {
+            CacheService.instance.setCounterCacheCapacityInMB(DatabaseDescriptor.getCounterCacheSizeInMB());
+        }
+    }
+
+    @Test
+    public void testParallelWritesWithTimeouts() throws Throwable
+    {
+        final int writers = 100;
+        final ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1);
+        cfs.truncateBlocking();
+
+        final CyclicBarrier semaphore = new CyclicBarrier(writers);
+        final List<Throwable> failedWrites = new ArrayList<>(writers - 1);
+
+        long defaultTimeout = DatabaseDescriptor.getCounterWriteRpcTimeout();
+        DatabaseDescriptor.setCounterWriteRpcTimeout(0);
+        try
+        {
+            Thread[] threads = new Thread[writers];
+            for (int i = 0; i < writers; i++)
+            {
+                Thread t = NamedThreadFactory.createThread(new WrappedRunnable()
+                {
+                    public void runMayThrow()
+                    {
+                    try
+                    {
+                        semaphore.await();
+                        Mutation m = new RowUpdateBuilder(cfs.metadata(), 5, "key1")
+                                     .clustering("cc")
+                                     .add("val", 1L)
+                                     .build(); // + 1
+                        new CounterMutation(m, ConsistencyLevel.ONE).apply();
+                    }
+                    catch (Throwable t)
+                    {
+                        failedWrites.add(t);
+                    }
+                    }
+                });
+                t.start();
+                threads[i] = t;
+            }
+
+            for (int i = 0; i < writers; i++)
+                threads[i].join();
+
+            // most of writers should have failed since the wait timeout was zero
+            assertTrue(String.format("At most one writer should have succeeded but %d failed", failedWrites.size()),
+                       (failedWrites.size() > writers / 3) && (failedWrites.size() < writers));
+
+            ColumnMetadata cDef = cfs.metadata().getColumn(ByteBufferUtil.bytes("val"));
+            Row row = Util.getOnlyRow(Util.cmd(cfs).includeRow("cc").columns("val").build());
+            assertTrue("At leat one writer should have succeeded but the counter value is less than one",
+                       CounterContext.instance().total(row.getCell(cDef).value()) >= 1);
+        }
+        finally
+        {
+            DatabaseDescriptor.setCounterWriteRpcTimeout(defaultTimeout);
+        }
     }
 }

@@ -35,9 +35,16 @@ import java.util.stream.Stream;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
+import io.reactivex.CompletableSource;
+import io.reactivex.Single;
+import io.reactivex.SingleObserver;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
@@ -494,6 +501,19 @@ public abstract class CsFlow<T>
     }
 
     /**
+     * Map each element of the flow into CompletableSources, subscribe to them and
+     * wait until the upstream and all CompletableSources complete.
+     *
+     * @param mapper the function that receives each source value and transforms them into CompletableSources.
+     *
+     * @return the new Completable instance
+     * */
+    public Completable flatMapCompletable(Function<? super T, ? extends CompletableSource> mapper)
+    {
+        return FlatMapCompletable.flatMap(this, mapper);
+    }
+
+    /**
      * Converts and iterable to a flow. If the iterator is closeable, also closes it with the subscription.
      *
      * onNext() is called synchronously with the next item from the iterator for each request().
@@ -656,8 +676,8 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, BiFunction)},
-     * {@link #reduceWith(Supplier, BiFunction)} and {@link #reduceToFuture(Object, BiFunction)}.
+     * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, ReduceFunction)},
+     * {@link #reduceWith(Supplier, ReduceFunction)} and {@link #reduceToFuture(Object, ReduceFunction)}.
      */
     abstract static private class ReduceSubscriber<T, O> extends RequestLoop implements CsSubscriber<T>, CsSubscription
     {
@@ -829,6 +849,248 @@ public abstract class CsFlow<T>
 
         s.request();
         return result;
+    }
+
+    /**
+     * An abstract subscriber used by the reduce operators for rx java. It implements the Disposable
+     * interface of rx java, and stops requesting once disposed.
+     */
+    private static abstract class DisposableReduceSubscriber<T> extends RequestLoop implements CsSubscriber<T>, Disposable
+    {
+        private final CsSubscription source;
+        private volatile boolean isDisposed;
+
+        DisposableReduceSubscriber(CsFlow<T> source) throws Exception
+        {
+            this.source = source.subscribe(this);
+            this.isDisposed = false;
+        }
+
+        public void request()
+        {
+            if (!isDisposed())
+                requestInLoop(source);
+            else
+                close(null);
+        }
+
+        public void onComplete()
+        {
+            close(null);
+        }
+
+        public final void onError(Throwable t)
+        {
+            onErrorInternal(source.addSubscriberChainFromSource(t));
+        }
+
+        protected void onErrorInternal(Throwable t)
+        {
+            close(t);
+        }
+
+        public void close(Throwable t)
+        {
+            try
+            {
+                source.close();
+            }
+            catch (Throwable e)
+            {
+                t = Throwables.merge(t, e);
+            }
+
+            if (!isDisposed())
+                onTerminate(t);
+        }
+
+        public abstract void onTerminate(Throwable t);
+
+        public void dispose()
+        {
+            isDisposed = true;
+        }
+
+        public boolean isDisposed()
+        {
+            return isDisposed;
+        }
+    }
+
+    /**
+     * Returns a Flowable that applies a specified accumulator function to the first item emitted by a source
+     * Publisher and a specified seed value, then feeds the result of that function along with the second item
+     * emitted by a Publisher into the same function, and so on until all items have been emitted by the
+     * source Publisher, emitting the final result from the final call to your function as its sole item.
+     *
+     * @param seed the initial seed
+     * @param reducer the function processing each item
+     * @param <R> the type of the output item
+     *
+     * @return a single of the final output item
+     */
+    public <R> Single<R> reduce(R seed, ReduceFunction<R, T> reducer)
+    {
+        class ReduceToSingleSubscriber extends DisposableReduceSubscriber<T>
+        {
+            private final ReduceFunction<R, T> reducer;
+            private final SingleObserver<? super R> observer;
+            private R value;
+
+            ReduceToSingleSubscriber(CsFlow<T> source,
+                                     R seed,
+                                     ReduceFunction<R, T> reducer,
+                                     SingleObserver<? super R> observer) throws Exception
+            {
+                super(source);
+
+                this.reducer = reducer;
+                this.observer = observer;
+                this.value = seed;
+            }
+
+            public void onNext(T item)
+            {
+                try
+                {
+                    value = reducer.apply(value, item);
+                }
+                catch (Throwable t)
+                {
+                    onError(t);
+                    return;
+                }
+
+                request();
+            }
+
+            public String toString()
+            {
+               return formatTrace("reduceToSingle", reducer);
+            }
+
+            public void onTerminate(Throwable t)
+            {
+                if (t != null)
+                    observer.onError(t);
+                else
+                    observer.onSuccess(value);
+            }
+        }
+
+        class ReduceToSingle extends Single<R>
+        {
+            private final R seed;
+            private final ReduceFunction<R, T> reducer;
+            private final CsFlow<T> source;
+
+            ReduceToSingle(R seed, ReduceFunction<R, T> reducer, CsFlow<T> source)
+            {
+                this.seed = seed;
+                this.reducer = reducer;
+                this.source = source;
+            }
+
+            protected void subscribeActual(SingleObserver<? super R> observer)
+            {
+                try
+                {
+                    ReduceToSingleSubscriber s = new ReduceToSingleSubscriber(source, seed, reducer, observer);
+                    observer.onSubscribe(s);
+                    s.request();
+                }
+                catch (Throwable t)
+                {
+                    JVMStabilityInspector.inspectThrowable(t);
+                    observer.onError(t);
+                }
+            }
+        }
+
+        return new ReduceToSingle(seed, reducer, this);
+    }
+
+    /**
+     * Reduce the flow, returning a completable that will fire when the entire flow has been consumed or an error
+     * has occurred.
+     *
+     * @param consumer Called each time an item is available
+     *
+     * @return a Completable that will complete when the flow has been consumed.
+     */
+    public Completable reduce(Consumer<T> consumer)
+    {
+        class ReduceToCompletableSubscriber extends DisposableReduceSubscriber<T>
+        {
+            private final Consumer<T> consumer;
+            private final CompletableObserver observer;
+
+            ReduceToCompletableSubscriber(CsFlow<T> source,
+                                          Consumer<T> consumer,
+                                          CompletableObserver observer) throws Exception
+            {
+                super(source);
+                this.consumer = consumer;
+                this.observer = observer;
+            }
+
+            public void onNext(T item)
+            {
+                try
+                {
+                   consumer.accept(item);
+                }
+                catch (Throwable t)
+                {
+                    onError(t);
+                    return;
+                }
+
+                request();
+            }
+
+            public String toString()
+            {
+                return formatTrace("reduceToCompletable", consumer);
+            }
+
+            public void onTerminate(Throwable t)
+            {
+                if (t != null)
+                    observer.onError(t);
+                else
+                    observer.onComplete();
+            }
+        }
+
+        class ReduceToCompletable extends Completable
+        {
+            private final Consumer<T> consumer;
+            private final CsFlow<T> source;
+
+            ReduceToCompletable(Consumer<T> consumer, CsFlow<T> source)
+            {
+                this.consumer = consumer;
+                this.source = source;
+            }
+
+            protected void subscribeActual(CompletableObserver observer)
+            {
+                try
+                {
+                    ReduceToCompletableSubscriber s = new ReduceToCompletableSubscriber(source, consumer, observer);
+                    observer.onSubscribe(s);
+                    s.request();
+                }
+                catch (Throwable t)
+                {
+                    JVMStabilityInspector.inspectThrowable(t);
+                    observer.onError(t);
+                }
+            }
+        }
+
+        return new ReduceToCompletable(consumer, this);
     }
 
     /**

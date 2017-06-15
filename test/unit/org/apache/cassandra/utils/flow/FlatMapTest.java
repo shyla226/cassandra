@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -31,7 +32,10 @@ import java.util.stream.IntStream;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
+import io.reactivex.CompletableObserver;
+
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class FlatMapTest
 {
@@ -83,6 +87,36 @@ public class FlatMapTest
             default:
                 return fl;
         }
+    }
+
+    @Test
+    public void testFlatMapCompletable() throws Exception
+    {
+        // Test with a mix of:
+        // - immediate flowables
+        // - delayed response flowables
+        // - immediate response on another thread flowables
+
+        for (int typeSeed = 1; typeSeed < 10; ++typeSeed)
+        {
+            Random rand = new Random(typeSeed);
+            for (int seed = 3; seed < 155; seed += 8)
+            {
+                List<Integer> immValues = makeListWithCompletable(() -> 0, seed);
+                System.out.println("Sequence length: " + immValues.size());
+                List<Integer> oneValues = makeListWithCompletable(rand::nextInt, seed);
+                assertEquals(immValues, oneValues);
+            }
+        }
+    }
+
+    List<Integer> makeListWithCompletable(IntSupplier typeRand, int seed)
+    {
+        List<Integer> ret = new ArrayList<>();
+        CsFlow<Integer> fl = make(typeRand, seed);
+        fl.flatMapCompletable(i -> { ret.add(i); return CompletableObserver::onComplete; })
+          .blockingAwait();
+        return ret;
     }
 
     CsFlow<Integer> make(IntSupplier typeRand, int seed)

@@ -19,8 +19,9 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
@@ -32,6 +33,8 @@ import com.google.common.util.concurrent.Striped;
 import io.reactivex.Completable;
 import io.reactivex.Scheduler;
 import io.reactivex.Single;
+import io.reactivex.SingleEmitter;
+import io.reactivex.SingleSource;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.Scheduleable;
@@ -57,8 +60,21 @@ public class CounterMutation implements IMutation, Scheduleable
 {
     public static final Versioned<WriteVersion, Serializer<CounterMutation>> serializers = WriteVersion.versioned(CounterMutationSerializer::new);
 
-    // TODO with TPC, we could use a separate (smaller) set of locks per core/thread to minimize contention
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentCounterWriters() * 1024);
+    /**
+     *   These are the striped locks that are shared by all threads that perform counter mutations. Locks are
+     *   taken by metadata id, partition and clustering keys, and the counter column name,
+     *   see {@link CounterMutation#getCounterLockKeys()}.
+     *   <p>
+     *   We use semaphores rather than locks because the same thread may have several counter mutations
+     *   ongoing at the same time in an asynchronous fashion. So reentrant locks would not protect against
+     *   the same thread starting a new counter mutation before finishing a previous one on the same counter.
+     *   <p>
+     *   If we were sure that at any given time a partition key is handled by only a TPC thread, then we
+     *   could make LOCKS smaller and thread local. However, there are cases when this is currently
+     *   not true, such us before StorageService is initialized or when the topology changes. We may
+     *   be able to improve on this in APOLLO-694, which will deal with topology changes.
+     */
+    private static final Striped<Semaphore> LOCKS = Striped.semaphore(TPC.getNumCores() * 1024, 1);
 
     private final Mutation mutation;
     private final ConsistencyLevel consistency;
@@ -125,59 +141,33 @@ public class CounterMutation implements IMutation, Scheduleable
 
     private Single<Mutation> applyCounterMutation(long startTime)
     {
-        Scheduler scheduler = getScheduler();
+        final Scheduler scheduler = getScheduler();
 
-        return Single.defer(() ->
-                            {
-                                Keyspace keyspace = Keyspace.open(getKeyspaceName());
-                                if ((System.nanoTime() - startTime) > TimeUnit.MILLISECONDS.toNanos(getTimeout()))
-                                    return Single.error(new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace)));
+        return acquireLocks(startTime).flatMap(locks -> Single.using(() -> locks,
+                                                                     this::applyCounterMutationInternal,
+                                                                     this::releaseLocks))
+                                      .subscribeOn(scheduler);
+    }
 
-                                Mutation result = new Mutation(getKeyspaceName(), key());
-                                List<Lock> locks = new ArrayList<>();
-                                Tracing.trace("Acquiring counter locks");
-                                try
-                                {
-                                    boolean success = tryGrabCounterLocks(locks);
-                                    if (!success)
-                                    {
-                                        Tracing.trace("Failed to acquire counter locks, scheduling retry");
-                                        // TODO (Sylvain): shouldn't we use 'scheduler' below?
-                                        // (Stefania) We had similar code for the materialized views and it
-                                        // caused a stack overflow if the locks didn't become available
-                                        // quickly enough. We need to change this and introduce a method that
-                                        // reschedules itself directly if the locks are not available, similar to
-                                        // Keyspace.acquireLocksForView() so that no stack overflow occurs, then
-                                        // we can use directly the same scheduler. Also, the locks should
-                                        // be semaphores just in case the same thread receives multiple counter
-                                        // mutations and it interleaves them, locks are re-entrant and would not
-                                        // protect us against this case.
-                                        return Single.defer(() -> this.applyCounterMutation(startTime))
-                                                     .subscribeOn(TPC.bestTPCScheduler());
-                                    }
-
-                                    // TODO this will need to become async to handle disk reads
-                                    for (PartitionUpdate upd : getPartitionUpdates())
-                                        result.add(processModifications(upd));
-
-                                    Completable completable = result.applyAsync();
-                                    completable = completable.doFinally(() -> {
-                                        scheduler.scheduleDirect(() ->
-                                                                 {
-                                                                     for (Lock lock : locks)
-                                                                         lock.unlock();
-                                                                 });
-                                    });
-                                    return completable.toSingleDefault(result);
-                                }
-                                // failsafe lock release
-                                catch (Throwable t)
-                                {
-                                    for (Lock lock : locks)
-                                        lock.unlock();
-                                    throw t;
-                                }
-                            }).subscribeOn(scheduler);
+    /**
+     * Helper method for {@link #applyCounterMutation(long)}. Performs the actual work with the locks
+     * available.
+     *
+     * @param locks - the locks, we don't use them at the moment. They are accepted as a parameter
+     *              to allow using a method reference in the calling site.
+     *
+     * @return a single that will complete when the mutation is applied
+     */
+    private SingleSource<Mutation> applyCounterMutationInternal(List<Semaphore> locks)
+    {
+        final Mutation result = new Mutation(getKeyspaceName(), key());
+        Completable ret = Completable.merge(getPartitionUpdates()
+                                            .stream()
+                                            .map(this::processModifications)
+                                            .map(single -> single.flatMapCompletable(upd -> Completable.fromRunnable(() -> result.add(upd))))
+                                            .collect(Collectors.toList()));
+        return ret.andThen(result.applyAsync())
+                  .toSingleDefault(result);
     }
 
     public void apply()
@@ -191,24 +181,66 @@ public class CounterMutation implements IMutation, Scheduleable
     }
 
     /**
-     * @param locks a list that will be populated with acquired locks, if all acquisitions are successful
-     * @return true if lock acquisition was successful, false otherwise
+     * Acquire locks asynchronously and publish them when they are available.
+     * @return a single that will publish the locks when they are aquired
      */
-    private boolean tryGrabCounterLocks(List<Lock> locks)
+    private Single<List<Semaphore>> acquireLocks(long startTime)
     {
-        for (Lock lock : LOCKS.bulkGet(getCounterLockKeys()))
+        List<Semaphore> locks = new ArrayList<>();
+        return Single.create(source -> acquireLocks(source, locks, startTime));
+    }
+
+    /**
+     * Helper method for acquireLocks(). Acquires the locks and publishes them if successful, otherwise
+     * retryed again after a small delay.
+     *
+     * @param startTime the time at which the operation started, we give up after a timeout
+     * @param source the subsriber to the single that will receive the locks
+     * @param locks a list that will be populated with acquired locks, if all acquisitions are successful
+     */
+    private void acquireLocks(final SingleEmitter<List<Semaphore>> source, List<Semaphore> locks, long startTime)
+    {
+        assert TPC.isTPCThread() : "Only TPC threads can acquire locks for counter mutations";
+
+        Tracing.trace("Acquiring counter locks");
+        for (Semaphore lock : LOCKS.bulkGet(getCounterLockKeys()))
         {
-            if (!lock.tryLock())
+            if (!lock.tryAcquire())
             {
-                // we failed to acquire a lock, so unlock everything we've acquired and give up
-                for (Lock toUnlock: locks)
-                    toUnlock.unlock();
-                locks.clear();
-                return false;
+                // we failed to acquire a semaphore permit, so unlock everything we've acquired so far
+                releaseLocks(locks);
+
+                long timeout = getTimeout();
+                if ((System.nanoTime() - startTime) > TimeUnit.MILLISECONDS.toNanos(timeout))
+                {
+                    Tracing.trace("Failed to acquire locks for counter mutation for longer than {} millis, giving up", timeout);
+                    Keyspace keyspace = Keyspace.open(getKeyspaceName());
+                    source.onError(new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(keyspace)));
+                }
+                else
+                {
+                    Tracing.trace("Failed to acquire counter locks, scheduling retry");
+                    // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
+                    // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
+                    mutation.getScheduler().scheduleDirect(() -> acquireLocks(source, locks, startTime), 1, TimeUnit.MICROSECONDS);
+                }
+                return;
             }
             locks.add(lock);
         }
-        return true;
+
+        source.onSuccess(locks);
+    }
+
+    private void releaseLocks(List<Semaphore> locks)
+    {
+        for (Semaphore lock : locks)
+        {
+            assert lock.availablePermits() == 0 : "Attempted to release a lock that was not acquired: " + lock.availablePermits();
+            lock.release();
+        }
+
+        locks.clear();
     }
 
     /**
@@ -239,7 +271,7 @@ public class CounterMutation implements IMutation, Scheduleable
         }));
     }
 
-    private PartitionUpdate processModifications(PartitionUpdate changes)
+    private Single<PartitionUpdate> processModifications(PartitionUpdate changes)
     {
         ColumnFamilyStore cfs = Keyspace.open(getKeyspaceName()).getColumnFamilyStore(changes.metadata().id);
 
@@ -250,18 +282,16 @@ public class CounterMutation implements IMutation, Scheduleable
             Tracing.trace("Fetching {} counter values from cache", marks.size());
             updateWithCurrentValuesFromCache(marks, cfs);
             if (marks.isEmpty())
-                return changes;
+                return Single.just(changes);
         }
 
         Tracing.trace("Reading {} counter values from the CF", marks.size());
-        // TODO this will need to become async to handle disk reads
-        updateWithCurrentValuesFromCFS(marks, cfs);
-
-        // What's remain is new counters
-        for (PartitionUpdate.CounterMark mark : marks)
-            updateWithCurrentValue(mark, ClockAndCount.BLANK, cfs);
-
-        return changes;
+        return updateWithCurrentValuesFromCFS(marks, cfs).andThen(Single.fromCallable(() -> {
+            // What's remain is new counters
+            for (PartitionUpdate.CounterMark mark : marks)
+                updateWithCurrentValue(mark, ClockAndCount.BLANK, cfs);
+            return changes;
+        }));
     }
 
     private void updateWithCurrentValue(PartitionUpdate.CounterMark mark, ClockAndCount currentValue, ColumnFamilyStore cfs)
@@ -292,7 +322,7 @@ public class CounterMutation implements IMutation, Scheduleable
     }
 
     // Reads the missing current values from the CFS.
-    private void updateWithCurrentValuesFromCFS(List<PartitionUpdate.CounterMark> marks, ColumnFamilyStore cfs)
+    private Completable updateWithCurrentValuesFromCFS(List<PartitionUpdate.CounterMark> marks, ColumnFamilyStore cfs)
     {
         ColumnFilter.Builder builder = ColumnFilter.selectionBuilder();
         BTreeSet.Builder<Clustering> names = BTreeSet.builder(cfs.metadata().comparator);
@@ -310,20 +340,17 @@ public class CounterMutation implements IMutation, Scheduleable
         ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(names.build(), false);
         SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(cfs.metadata(), nowInSec, key(), builder.build(), filter);
         PeekingIterator<PartitionUpdate.CounterMark> markIter = Iterators.peekingIterator(marks.iterator());
-        // TODO queryMemtableAndDisk will become async, need to update how counters writes work based on that
-        try (ReadExecutionController controller = cmd.executionController();
-             RowIterator partition = UnfilteredRowIterators.filter(FlowablePartitions.toIterator(cmd.deferredQuery(cfs, controller).blockingSingle()), nowInSec))
-        {
-            updateForRow(markIter, partition.staticRow(), cfs);
 
-            while (partition.hasNext())
-            {
-                if (!markIter.hasNext())
-                    return;
+        return Completable.using(() -> cmd.executionController(),
+                                 controller -> cmd.deferredQuery(cfs, controller)
+                                                  .flatMapCompletable(p -> {
+                                                      FlowablePartition partition = FlowablePartitions.filter(p, nowInSec);
+                                                      updateForRow(markIter, partition.staticRow, cfs);
 
-                updateForRow(markIter, partition.next(), cfs);
-            }
-        }
+                                                      return partition.content.takeWhile((row) -> markIter.hasNext())
+                                                                              .reduce(row -> updateForRow(markIter, row, cfs));
+                                        }),
+                                 controller -> controller.close());
     }
 
     private int compare(Clustering c1, Clustering c2, ColumnFamilyStore cfs)
