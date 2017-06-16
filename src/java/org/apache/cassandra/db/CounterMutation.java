@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
@@ -125,6 +126,32 @@ public class CounterMutation implements IMutation
             for (Lock lock : locks)
                 lock.unlock();
         }
+    }
+
+    /**
+     * A wrapper of {@link #applyCounterMutation()} that catches any exceptions
+     * so that they can be returned in a future. The sole purpose of this method
+     * is to catch exceptions so that they can be reported consistently by
+     * {@link org.apache.cassandra.service.StorageProxy#applyCounterMutationOnLeader(CounterMutation, String, long)},
+     * see APOLLO-576.
+     *
+     * @return a future already completed with the counter mutation or completed exceptionally in case of an error.
+     */
+    public CompletableFuture<Mutation> applyFuture()
+    {
+        CompletableFuture<Mutation> ret = new CompletableFuture<>();
+
+        try
+        {
+            Mutation mutation = applyCounterMutation();
+            ret.complete(mutation);
+        }
+        catch (Throwable t)
+        {
+            ret.completeExceptionally(t);
+        }
+
+        return ret;
     }
 
     public void apply()

@@ -1111,25 +1111,25 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     // Must be called on a replica of the mutation. This replica becomes the leader of this mutation.
-    public static WriteHandler applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
+    public static CompletableFuture<Void> applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        Mutation result = cm.applyCounterMutation();
+        return cm.applyFuture().thenCompose(result -> {
+           WriteEndpoints endpoints = WriteEndpoints.compute(result);
+           WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
+                                              .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
+                                              .hintOnTimeout(result)
+                                              .build();
 
-        WriteEndpoints endpoints = WriteEndpoints.compute(result);
-        WriteHandler handler = WriteHandler.builder(endpoints, cm.consistency(), WriteType.COUNTER, queryStartNanoTime)
-                                           .withIdealConsistencyLevel(DatabaseDescriptor.getIdealConsistencyLevel())
-                                           .hintOnTimeout(result)
-                                           .build();
+           // We already wrote locally
+           handler.onLocalResponse();
 
-        // We already wrote locally
-        handler.onLocalResponse();
+           WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost();
+           if (!remainingEndpoints.isEmpty())
+               sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
 
-        WriteEndpoints remainingEndpoints = handler.endpoints().withoutLocalhost();
-        if (!remainingEndpoints.isEmpty())
-            sendToHintedEndpoints(result, remainingEndpoints, handler, localDataCenter, Verbs.WRITES.WRITE);
-
-        return handler;
+           return handler;
+       });
     }
 
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)

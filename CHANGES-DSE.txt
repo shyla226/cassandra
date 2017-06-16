@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Better exception handling for counter mutations (APOLLO-576)
  * When "repairing" Paxos commits, only block on nodes being repaired (APOLLO-761)
  * MigrationManager should use toDebugString() when logging TableMetadata (APOLLO-739)
  * Fix LWT asserts for immutable TableMetadata (APOLLO-728)
