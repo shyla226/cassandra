@@ -39,9 +39,10 @@ import static org.apache.cassandra.net.ProtocolVersion.oss;
  */
 public enum MessagingVersion
 {
-    OSS_30 (oss(10), ReadVersion.OSS_30, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
-    OSS_40 (oss(11), ReadVersion.OSS_40, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
-    DSE_60 (dse(1), ReadVersion.DSE_60, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.DSE_60, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30);
+    OSS_30   (oss(10), ReadVersion.OSS_30, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
+    OSS_3014 (oss(11), ReadVersion.OSS_3014, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
+    OSS_40   (oss(12), ReadVersion.OSS_40, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.OSS_30, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30),
+    DSE_60   (dse(1), ReadVersion.DSE_60, WriteVersion.OSS_30, LWTVersion.OSS_30, HintsVersion.OSS_30, OperationsVersion.DSE_60, GossipVersion.OSS_30, RepairVersion.OSS_30, SchemaVersion.OSS_30);
 
     private final ProtocolVersion protocolVersion;
     private final EnumMap<Verbs.Group, Version<?>> groupVersions;

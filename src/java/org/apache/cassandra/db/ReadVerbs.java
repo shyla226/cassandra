@@ -39,10 +39,11 @@ public class ReadVerbs extends VerbGroup<ReadVerbs.ReadVersion>
 
     public enum ReadVersion implements Version<ReadVersion>
     {
-        OSS_30(EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),
-        OSS_40(EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),  // Changes the meaning of isFetchAll in ColumnFilter
-        DSE_60(EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30);  // Uses the encodingVersion ordinal when writing digest versions
-                                                                                     // rather than the whole messaging version.
+        OSS_30   (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),
+        OSS_3014 (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),  // Contains changes to ColumnFilter from CASSANDRA-13004
+        OSS_40   (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30),  // Changes the meaning of isFetchAll in ColumnFilter
+        DSE_60   (EncodingVersion.OSS_30, BoundsVersion.OSS_30, DigestVersion.OSS_30);  // Uses the encodingVersion ordinal when writing digest versions
+                                                                                        // rather than the whole messaging version.
 
         public final EncodingVersion encodingVersion;
         public final BoundsVersion boundsVersion;
