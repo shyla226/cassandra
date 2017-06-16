@@ -64,7 +64,6 @@ public class EventLoopBasedScheduler<E extends EventLoop> extends Scheduler impl
     @Override
     public Disposable scheduleDirect(Runnable run, long delay, TimeUnit unit)
     {
-        //TODO - shouldn't the worker be disposed?
         return createWorker().scheduleDirect(run, delay, unit);
     }
 

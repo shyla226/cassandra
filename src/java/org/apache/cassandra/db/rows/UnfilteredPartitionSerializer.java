@@ -30,11 +30,13 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
 /**
- * Serialize/Deserialize an unfiltered row iterator.
+ * Serialize/Deserialize an unfiltered partition.
  *
  * The serialization is composed of a header, follows by the rows and range tombstones of the iterator serialized
  * until we read the end of the partition (see UnfilteredSerializer for details). The header itself
@@ -65,9 +67,9 @@ import org.apache.cassandra.utils.versioning.Versioned;
  * range tombstones are not written using this class, but rather by
  * {@link org.apache.cassandra.io.sstable.format.trieindex.PartitionWriter}.
  */
-public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVersion>
+public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVersion>
 {
-    protected static final Logger logger = LoggerFactory.getLogger(UnfilteredRowIteratorSerializer.class);
+    protected static final Logger logger = LoggerFactory.getLogger(UnfilteredPartitionSerializer.class);
 
     private static final int IS_EMPTY               = 0x01;
     private static final int IS_REVERSED            = 0x02;
@@ -75,20 +77,20 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
     private static final int HAS_STATIC_ROW         = 0x08;
     private static final int HAS_ROW_ESTIMATE       = 0x10;
 
-    public static final Versioned<EncodingVersion, UnfilteredRowIteratorSerializer> serializers = EncodingVersion.versioned(UnfilteredRowIteratorSerializer::new);
+    public static final Versioned<EncodingVersion, UnfilteredPartitionSerializer> serializers = EncodingVersion.versioned(UnfilteredPartitionSerializer::new);
 
     private final UnfilteredSerializer unfilteredSerializer;
 
-    private UnfilteredRowIteratorSerializer(EncodingVersion version)
+    private UnfilteredPartitionSerializer(EncodingVersion version)
     {
         super(version);
         this.unfilteredSerializer = UnfilteredSerializer.serializers.get(version);
     }
 
     // Should only be used for the on-wire format.
-    public CsFlow<Void> serialize(FlowableUnfilteredPartition iterator, ColumnFilter selection, DataOutputPlus out) throws IOException
+    public CsFlow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out) throws IOException
     {
-        return serialize(iterator, selection, out, -1);
+        return serialize(partition, selection, out, -1);
     }
 
     public CsFlow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
@@ -139,7 +141,7 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
     }
 
     // Should only be used for the on-wire format.
-    public void serializeBeginningOfPartition(PartitionTrait partition,
+    private void serializeBeginningOfPartition(PartitionTrait partition,
                                               SerializationHeader header,
                                               ColumnFilter selection,
                                               DataOutputPlus out,
@@ -185,12 +187,12 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
             out.writeUnsignedVInt(rowEstimate);
     }
 
-    public void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out) throws IOException
+    private void serialize(Unfiltered unfiltered, SerializationHeader header, DataOutputPlus out) throws IOException
     {
         unfilteredSerializer.serialize(unfiltered, header, out);
     }
 
-    public void serializeEndOfPartition(DataOutputPlus out) throws IOException
+    private void serializeEndOfPartition(DataOutputPlus out) throws IOException
     {
         unfilteredSerializer.writeEndOfPartition(out);
     }
@@ -261,7 +263,7 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
         return new Header(header, key, isReversed, false, partitionDeletion, staticRow, rowEstimate);
     }
 
-    public UnfilteredRowIterator deserialize(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header) throws IOException
+    public UnfilteredRowIterator deserializeToIt(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header) throws IOException
     {
         if (header.isEmpty)
             return EmptyIterators.unfilteredRow(metadata, header.key, header.isReversed);
@@ -287,9 +289,111 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
         };
     }
 
-    public UnfilteredRowIterator deserialize(DataInputPlus in, TableMetadata metadata, ColumnFilter selection, SerializationHelper.Flag flag) throws IOException
+    private class DeserializePartitionSubscription implements CsSubscription
     {
-        return deserialize(in, metadata, flag, deserializeHeader(metadata, selection, in, flag));
+        private final Row.Builder builder;
+        private final SerializationHelper helper;
+        private final SerializationHeader sHeader;
+        private final DataInputPlus in;
+        private final CsSubscriber<Unfiltered> subscriber;
+        private volatile boolean completed;
+
+        private DeserializePartitionSubscription(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header, CsSubscriber<Unfiltered> subscriber)
+        {
+            this.builder = BTreeRow.sortedBuilder();
+            this.in = in;
+            this.subscriber = subscriber;
+            this.helper = new SerializationHelper(metadata, version, flag);
+            this.sHeader = header.sHeader;
+        }
+
+        public void request()
+        {
+            try
+            {
+                if (completed)
+                {
+                    subscriber.onError(new IllegalStateException( "Request should not be called after closing"));
+                    return;
+                }
+
+                Unfiltered unfiltered = unfilteredSerializer.deserialize(in, sHeader, helper, builder);
+                if (unfiltered == null)
+                {
+                    completed = true;
+                    subscriber.onComplete();
+                }
+                else
+                {
+                    subscriber.onNext(unfiltered);
+                }
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+            }
+        }
+
+        public void close() throws Exception
+        {
+            if (completed)
+                return;
+
+            // skip all unfiltered that were not used, otherwise the next partition won't decode correctly
+            Unfiltered unfiltered;
+            do
+            {
+                unfiltered = unfilteredSerializer.deserialize(in, sHeader, helper, builder);
+            }
+            while (unfiltered != null);
+
+            completed = true;
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return CsFlow.wrapException(throwable, this);
+        }
+
+        @Override
+        public String toString()
+        {
+            return CsFlow.formatTrace("deserialize-partition", subscriber);
+        }
+    }
+
+    private FlowableUnfilteredPartition deserializeToFlow(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header)
+    {
+        if (header.isEmpty)
+            return FlowablePartitions.empty(metadata, header.key, header.isReversed);
+
+        CsFlow<Unfiltered> content = new CsFlow<Unfiltered>()
+        {
+            private CsSubscriber<Unfiltered> subscriber;
+
+            public CsSubscription subscribe(CsSubscriber<Unfiltered> subscriber) throws Exception
+            {
+                // we don't own the buffer behind DataInputPlus and so we must enforce a single subscriber
+                assert this.subscriber == null : "Expected only one subscriber";
+                this.subscriber = subscriber;
+
+                return new DeserializePartitionSubscription(in, metadata, flag, header, subscriber);
+            }
+        };
+
+        return new FlowableUnfilteredPartition(new PartitionHeader(metadata,
+                                                                   header.key,
+                                                                   header.partitionDeletion,
+                                                                   header.sHeader.columns(),
+                                                                   header.isReversed,
+                                                                   header.sHeader.stats()),
+                                               header.staticRow,
+                                               content);
+    }
+
+    public FlowableUnfilteredPartition deserializeToFlow(DataInputPlus in, TableMetadata metadata, ColumnFilter selection, SerializationHelper.Flag flag) throws IOException
+    {
+        return deserializeToFlow(in, metadata, flag, deserializeHeader(metadata, selection, in, flag));
     }
 
     public static class Header

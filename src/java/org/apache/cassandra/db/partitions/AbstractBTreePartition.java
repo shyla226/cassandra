@@ -159,6 +159,22 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         };
     }
 
+    /**
+     * Convert this Btree partition into a {@link FlowableUnfilteredPartition}.
+     *
+     * @return a flowable unfiltered partition
+     */
+    public FlowableUnfilteredPartition unfilteredPartition()
+    {
+        return unfilteredPartition(ColumnFilter.selection(columns()), Slices.ALL, false);
+    }
+
+    //TODO - we should implement the content flow directly, without the iterator
+    public FlowableUnfilteredPartition unfilteredPartition(ColumnFilter selection, Slices slices, boolean reversed)
+    {
+        return FlowablePartitions.fromIterator(unfilteredIterator(holder(), selection, slices, reversed), null);
+    }
+
     public UnfilteredRowIterator unfilteredIterator()
     {
         return unfilteredIterator(ColumnFilter.selection(columns()), Slices.ALL, false);
@@ -368,6 +384,28 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         EncodingStats stats = buildEncodingStats ? EncodingStats.Collector.collect(staticRow, BTree.iterator(tree), deletion)
                                                  : EncodingStats.NO_STATS;
         return new Holder(columns, tree, deletion, staticRow, stats);
+    }
+
+    protected static CsFlow<Holder> build(FlowablePartition partition, DeletionInfo deletion, boolean buildEncodingStats, int initialRowCapacity)
+    {
+        TableMetadata metadata = partition.metadata();
+        RegularAndStaticColumns columns = partition.columns();
+        boolean reversed = partition.isReverseOrder();
+
+        return partition.content
+               .reduce(BTree.builder(metadata.comparator, initialRowCapacity).auto(false),
+                       BTree.Builder::add)
+               .map(builder ->
+                    {
+                        if (reversed)
+                            builder.reverse();
+
+                        Row staticRow = partition.staticRow();
+                        Object[] tree = builder.build();
+                        EncodingStats stats = buildEncodingStats ? EncodingStats.Collector.collect(staticRow, BTree.iterator(tree), deletion)
+                                                                 : EncodingStats.NO_STATS;
+                        return new Holder(columns, tree, deletion, staticRow, stats);
+                    });
     }
 
     @Override

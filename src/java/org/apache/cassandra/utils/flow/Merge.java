@@ -556,6 +556,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             else
                 reducer.reduce(idx, item);
             item = null;
+            error = null;
         }
 
         public void close() throws Exception

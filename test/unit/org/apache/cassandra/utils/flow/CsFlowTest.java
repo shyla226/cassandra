@@ -27,6 +27,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
@@ -38,7 +39,7 @@ public class CsFlowTest
     @BeforeClass
     public static void init() throws Exception
     {
-        LineNumberInference.init();
+        DatabaseDescriptor.daemonInitialization();
     }
 
     CsFlow.MappingOp<Integer, Integer> inc = (i) -> i + 1;

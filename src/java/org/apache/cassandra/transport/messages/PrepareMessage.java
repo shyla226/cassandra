@@ -72,7 +72,7 @@ public class PrepareMessage extends Message.Request
                                       response.setTracingId(state.getPreparedTracingSession());
                                       return response;
                                   })
-                             .doFinally(Tracing.instance::stopSession);
+                              .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
         }
         catch (Exception e)
         {

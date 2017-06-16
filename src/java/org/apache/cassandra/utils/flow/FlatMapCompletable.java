@@ -227,6 +227,8 @@ class FlatMapCompletable<I> extends CsFlow.RequestLoop implements CsSubscriber<I
             if (!verify(current == this, throwable))
                 return;
 
+            current = null;
+
             close(throwable);
         }
 

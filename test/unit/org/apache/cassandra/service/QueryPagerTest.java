@@ -30,6 +30,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.*;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -144,7 +145,7 @@ public class QueryPagerTest
         StringBuilder sb = new StringBuilder();
         List<FilteredPartition> partitionList = new ArrayList<>();
         int rows = 0;
-        try (PartitionIterator iterator = pager.fetchPageInternal(toQuery).blockingGet())
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(pager.fetchPageInternal(toQuery)))
         {
             while (iterator.hasNext())
             {
@@ -164,7 +165,7 @@ public class QueryPagerTest
     private static Map<DecoratedKey, List<Row>> fetchPage(QueryPager pager, int pageSize)
     {
         Map<DecoratedKey, List<Row>> ret = new HashMap<>();
-        try (PartitionIterator iterator = pager.fetchPageInternal(pageSize).blockingGet())
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(pager.fetchPageInternal(pageSize)))
         {
             while (iterator.hasNext())
             {
@@ -602,7 +603,7 @@ public class QueryPagerTest
 
         for (int i=0; i<5; i++)
         {
-            try (PartitionIterator partitions = pager.fetchPageInternal(1).blockingGet())
+            try (PartitionIterator partitions = FlowablePartitions.toPartitionsFiltered(pager.fetchPageInternal(1)))
             {
                 try (RowIterator partition = partitions.next())
                 {
@@ -622,7 +623,7 @@ public class QueryPagerTest
         }
 
         // After processing the 5 rows there should be no more rows to return
-        try (PartitionIterator partitions = pager.fetchPageInternal(1).blockingGet())
+        try (PartitionIterator partitions = FlowablePartitions.toPartitionsFiltered(pager.fetchPageInternal(1)))
         {
             assertFalse(partitions.hasNext());
         }

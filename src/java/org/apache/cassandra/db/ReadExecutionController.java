@@ -139,12 +139,12 @@ public class ReadExecutionController implements AutoCloseable
         if (closed)
             return; // this should be idempotent
 
-        Throwable fail = Throwables.perform((Throwable)null,
-                                            () -> {if (baseOp != null) baseOp.close();},
-                                            () -> {if (indexController != null) indexController.close();},
-                                            () -> {if (writeOp != null) writeOp.close();});
         closed = true;
 
+        Throwable fail = null;
+        fail = Throwables.closeNonNull(fail, baseOp);
+        fail = Throwables.closeNonNull(fail, indexController);
+        fail = Throwables.closeNonNull(fail, writeOp);
         if (fail != null)
         {
             JVMStabilityInspector.inspectThrowable(fail);

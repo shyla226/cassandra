@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service.pager;
 
-import io.reactivex.Single;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -25,15 +24,13 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 {
@@ -74,130 +71,156 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         this.limits = command.limits();
         this.remaining = limits.count();
         this.remainingInPartition = limits.perPartitionCount();
+
+        if (logger.isTraceEnabled())
+            logger.trace("{} - created with {}/{}/{}", hashCode(), limits, remaining, remainingInPartition);
     }
 
-    @SuppressWarnings("resource")
-    public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
+    public CsFlow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
     {
         return innerFetch(pageSize, (pageCommand) -> pageCommand.execute(consistency, clientState, queryStartNanoTime, forContinuousPaging));
     }
 
-    @SuppressWarnings("resource")
-    public Single<PartitionIterator> fetchPageInternal(int pageSize)
+    public CsFlow<FlowablePartition> fetchPageInternal(int pageSize)
     {
         return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal());
     }
 
-    @SuppressWarnings("resource")
-    public Single<UnfilteredPartitionIterator> fetchPageUnfiltered(int pageSize, TableMetadata metadata)
+    public CsFlow<FlowableUnfilteredPartition> fetchPageUnfiltered(int pageSize, TableMetadata metadata)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
-            return Single.just(EmptyIterators.unfilteredPartition(metadata));
+            return CsFlow.empty();
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
-        internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        Single<UnfilteredPartitionIterator> iter = Single.fromCallable(() -> FlowablePartitions.toPartitions(pageCommand.executeLocally(), metadata));
-        return iter.map(it -> Transformation.apply(it, internalPager));
+        internalPager = new UnfilteredPager(limits.forPaging(toFetch), command.nowInSec());
+        return ((UnfilteredPager)internalPager).apply(pageCommand.executeLocally());
     }
 
-    private Single<PartitionIterator> innerFetch(int pageSize, Function<ReadCommand, Single<PartitionIterator>> itSupplier)
+    private CsFlow<FlowablePartition> innerFetch(int pageSize, Function<ReadCommand, CsFlow<FlowablePartition>> dataSupplier)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
-            return Single.just(EmptyIterators.partition());
+            return CsFlow.empty();
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
-        internalPager = new RowPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        Single<PartitionIterator> iter = itSupplier.apply(pageCommand);
-        return iter.map(it -> Transformation.apply(it, internalPager));
+        internalPager = new RowPager(limits.forPaging(toFetch), command.nowInSec());
+        return ((RowPager)internalPager).apply(dataSupplier.apply(pageCommand));
     }
 
     private class UnfilteredPager extends Pager<Unfiltered>
     {
-        private UnfilteredPager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        private UnfilteredPager(DataLimits pageLimits, int nowInSec)
         {
-            super(pageLimits, pageCommand, nowInSec);
+            super(pageLimits, nowInSec);
         }
 
-        protected BaseRowIterator<Unfiltered> apply(BaseRowIterator<Unfiltered> partition)
+        CsFlow<FlowableUnfilteredPartition> apply(CsFlow<FlowableUnfilteredPartition> source)
         {
-            return Transformation.apply(Transformation.apply((UnfilteredRowIterator) partition,
-                                                             counter.asTransformation()),
-                                        this);
+            return source.flatMap(partition ->{
+                // If this is the first partition of this page, this could be the continuation of a partition we've started
+                // on the previous page. In which case, we could have the problem that the partition has no more "regular"
+                // rows (but the page size is such we didn't knew before) but it does have a static row. We should then skip
+                // the partition as returning it would means to the upper layer that the partition has "only" static columns,
+                // which is not the case (and we know the static results have been sent on the previous page).
+                if (internalPager.isFirstPartition)
+                {
+                    internalPager.isFirstPartition = false;
+                    if (isPreviouslyReturnedPartition(partition.header.partitionKey))
+                        return partition.content.skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
+                }
+
+                return CsFlow.just(applyToPartition(partition));
+
+            }).doOnClose(this::onClose);
+        }
+
+        private FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToPartition {}",
+                             AbstractQueryPager.this.hashCode(),
+                             ByteBufferUtil.bytesToHex(partition.header.partitionKey.getKey()));
+
+            currentKey = partition.header.partitionKey;
+            applyToStatic(partition.staticRow);
+
+            return DataLimits.truncateUnfiltered(counter,
+                                                 partition.mapContent(unfiltered -> unfiltered instanceof Row
+                                                                                 ? applyToRow((Row)unfiltered)
+                                                                                 : unfiltered));
+
         }
     }
 
     private class RowPager extends Pager<Row>
     {
 
-        private RowPager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        private RowPager(DataLimits pageLimits, int nowInSec)
         {
-            super(pageLimits, pageCommand, nowInSec);
+            super(pageLimits, nowInSec);
         }
 
-        protected BaseRowIterator<Row> apply(BaseRowIterator<Row> partition)
+        CsFlow<FlowablePartition> apply(CsFlow<FlowablePartition> source)
         {
-            return Transformation.apply(Transformation.apply((RowIterator) partition,
-                                                             counter.asTransformation()),
-                                        this);
+            return source.flatMap(partition ->{
+                // If this is the first partition of this page, this could be the continuation of a partition we've started
+                // on the previous page. In which case, we could have the problem that the partition has no more "regular"
+                // rows (but the page size is such we didn't knew before) but it does have a static row. We should then skip
+                // the partition as returning it would means to the upper layer that the partition has "only" static columns,
+                // which is not the case (and we know the static results have been sent on the previous page).
+                if (internalPager.isFirstPartition)
+                {
+                    internalPager.isFirstPartition = false;
+                    if (isPreviouslyReturnedPartition(partition.header.partitionKey))
+                        return partition.content.skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
+                }
+
+                return CsFlow.just(applyToPartition(partition));
+
+            }).doOnClose(this::onClose);
+        }
+
+        private FlowablePartition applyToPartition(FlowablePartition partition)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToPartition {}",
+                             AbstractQueryPager.this.hashCode(),
+                             ByteBufferUtil.bytesToHex(partition.header.partitionKey.getKey()));
+
+            currentKey = partition.header.partitionKey;
+            applyToStatic(partition.staticRow);
+
+            return DataLimits.truncateFiltered(counter, partition.mapContent(this::applyToRow));
+
         }
     }
-
     /**
      * A transformation to keep track of the lastRow that was iterated and to determine
      * when a page is available. If fetching only a single page, it also stops the iteration after 1 page.
      */
-    private abstract class Pager<T extends Unfiltered> extends Transformation<BaseRowIterator<T>>
+    private class Pager<T extends Unfiltered>
     {
-        private final DataLimits pageLimits;
+        protected final DataLimits pageLimits;
         protected final DataLimits.Counter counter;
-        private final ReadCommand pageCommand;
-        private DecoratedKey currentKey;
-        private Row lastRow;
-        private boolean isFirstPartition = true;
+        protected DecoratedKey currentKey;
+        protected Row lastRow;
+        protected boolean isFirstPartition = true;
 
-        private Pager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
+        protected Pager(DataLimits pageLimits, int nowInSec)
         {
             this.counter = pageLimits.newCounter(nowInSec, true, command.selectsFullPartition());
             this.pageLimits = pageLimits;
-            this.pageCommand = pageCommand;
         }
 
-        @Override
-        public BaseRowIterator<T> applyToPartition(BaseRowIterator<T> partition)
-        {
-            currentKey = partition.partitionKey();
-
-            // If this is the first partition of this page, this could be the continuation of a partition we've started
-            // on the previous page. In which case, we could have the problem that the partition has no more "regular"
-            // rows (but the page size is such we didn't knew before) but it does have a static row. We should then skip
-            // the partition as returning it would means to the upper layer that the partition has "only" static columns,
-            // which is not the case (and we know the static results have been sent on the previous page).
-            if (isFirstPartition)
-            {
-                isFirstPartition = false;
-                if (isPreviouslyReturnedPartition(currentKey) && !partition.hasNext())
-                {
-                    partition.close();
-                    return null;
-                }
-            }
-
-            return apply(partition);
-        }
-
-        protected abstract BaseRowIterator<T> apply(BaseRowIterator<T> partition);
-
-        @Override
-        public void onClose()
+        protected void onClose()
         {
             if (logger.isTraceEnabled())
-                logger.trace("{} - closing with {}/{}", AbstractQueryPager.this.hashCode(), lastKey, lastRow);
+                logger.trace("{} - onClose called with {}/{}", AbstractQueryPager.this.hashCode(), lastKey, lastRow);
 
             // In some case like GROUP BY a counter need to know when the processing is completed.
             counter.endOfIteration();
@@ -239,8 +262,11 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             }
         }
 
-        public Row applyToStatic(Row row)
+        protected Row applyToStatic(Row row)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToStaticRow {}", AbstractQueryPager.this.hashCode(), !row.isEmpty());
+
             if (!row.isEmpty())
             {
                 remainingInPartition = limits.perPartitionCount();
@@ -250,14 +276,19 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             return row;
         }
 
-        @Override
-        public Row applyToRow(Row row)
+        protected Row applyToRow(Row row)
         {
+            if (logger.isTraceEnabled())
+                logger.trace("{} - applyToRow {}",
+                             AbstractQueryPager.this.hashCode(),
+                             row.clustering() == null ? "null" : row.clustering().toBinaryString());
+
             if (!currentKey.equals(lastKey))
             {
                 remainingInPartition = limits.perPartitionCount();
                 lastKey = currentKey;
             }
+
             lastRow = row;
             return row;
         }

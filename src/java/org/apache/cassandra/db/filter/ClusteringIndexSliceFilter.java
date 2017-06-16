@@ -27,7 +27,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.Partition;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -86,29 +85,31 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         return !reversed && slices.size() == 1 && !slices.hasLowerBound();
     }
 
-    // Given another iterator, only return the rows that match this filter
-    public UnfilteredRowIterator filterNotIndexed(final ColumnFilter columnFilter, UnfilteredRowIterator iterator)
+    private Row filterNotIndexedStaticRow(ColumnFilter columnFilter, TableMetadata metadata, Row row)
+    {
+        return columnFilter.fetchedColumns().statics.isEmpty() ? Rows.EMPTY_STATIC_ROW : row.filter(columnFilter, metadata);
+    }
+
+    private Unfiltered filterNotIndexedRow(ColumnFilter columnFilter, TableMetadata metadata, Slices.InOrderTester tester, Unfiltered unfiltered)
+    {
+        if (unfiltered instanceof Row)
+        {
+            Row row = (Row)unfiltered;
+            return tester.includes(row.clustering()) ? row.filter(columnFilter, metadata) : null;
+        }
+
+        return unfiltered;
+    }
+
+    public FlowableUnfilteredPartition filterNotIndexed(ColumnFilter columnFilter, FlowableUnfilteredPartition partition)
     {
         final Slices.InOrderTester tester = slices.inOrderTester(reversed);
-
-        // Note that we don't filter markers because that's a bit trickier (we don't know in advance until when
-        // the range extend) and it's harmless to leave them.
-        class FilterNotIndexed extends Transformation
-        {
-            @Override
-            public Row applyToRow(Row row)
-            {
-                return tester.includes(row.clustering()) ? row.filter(columnFilter, iterator.metadata()) : null;
-            }
-
-            @Override
-            public Row applyToStatic(Row row)
-            {
-                return columnFilter.fetchedColumns().statics.isEmpty() ? Rows.EMPTY_STATIC_ROW : row.filter(columnFilter, iterator.metadata());
-            }
-        }
-        return Transformation.apply(iterator, new FilterNotIndexed());
+        return new FlowableUnfilteredPartition(partition.header,
+                                               filterNotIndexedStaticRow(columnFilter, partition.metadata(), partition.staticRow),
+                                               partition.content.skippingMap(row -> filterNotIndexedRow(columnFilter, partition.metadata(), tester, row)));
     }
+
+
 
     public Slices getSlices(TableMetadata metadata)
     {
@@ -118,6 +119,11 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
     public UnfilteredRowIterator getUnfilteredRowIterator(ColumnFilter columnFilter, Partition partition)
     {
         return partition.unfilteredIterator(columnFilter, slices, reversed);
+    }
+
+    public FlowableUnfilteredPartition getFlowableUnfilteredPartition(ColumnFilter columnFilter, Partition partition)
+    {
+        return partition.unfilteredPartition(columnFilter, slices, reversed);
     }
 
     public boolean shouldInclude(SSTableReader sstable)

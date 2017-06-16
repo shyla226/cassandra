@@ -348,7 +348,7 @@ public class HintTest
     {
         ReadCommand cmd = Util.cmd(cfs(table), key).build();
 
-        try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
+        try (PartitionIterator iterator = cmd.executeInternalForTests())
         {
             assertFalse(iterator.hasNext());
         }

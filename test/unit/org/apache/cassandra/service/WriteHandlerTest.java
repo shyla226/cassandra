@@ -112,6 +112,7 @@ public class WriteHandlerTest
     public void resetCounters()
     {
         ks.metric.writeFailedIdealCL.dec(ks.metric.writeFailedIdealCL.getCount());
+        ks.metric.idealCLWriteLatency.totalLatency.dec(ks.metric.idealCLWriteLatency.totalLatency.getCount());
     }
 
     /**

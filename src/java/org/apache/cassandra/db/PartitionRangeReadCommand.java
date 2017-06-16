@@ -24,7 +24,6 @@ import java.util.Optional;
 
 import com.google.common.collect.Iterables;
 
-import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCScheduler;
@@ -34,6 +33,7 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.BaseRowIterator;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.transform.Transformation;
@@ -193,7 +193,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    public Single<PartitionIterator> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+    public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
     {
         return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime, forContinuousPaging);
     }
@@ -239,7 +239,7 @@ public class PartitionRangeReadCommand extends ReadCommand
             return CsFlow.empty();
 
         // TODO: open and close when subscribed -- make sure no resource allocated on create
-        return FlowablePartitions.mergePartitions(iterators, nowInSec());
+        return FlowablePartitions.mergePartitions(iterators, nowInSec(), null);
     }
 
     /**
@@ -264,6 +264,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
+    // TODO - this used to be called by queryStorage() do we need to re-instate it?
     private UnfilteredPartitionIterator checkCacheFilter(UnfilteredPartitionIterator iter, final ColumnFamilyStore cfs)
     {
         class CacheFilter extends Transformation
@@ -310,9 +311,9 @@ public class PartitionRangeReadCommand extends ReadCommand
             sb.append(dataRange.toCQLString(metadata()));
     }
 
-    public PartitionIterator withLimitsAndPostReconciliation(PartitionIterator iterator)
+    public CsFlow<FlowablePartition> withLimitsAndPostReconciliation(CsFlow<FlowablePartition> partitions)
     {
-        return limits().filter(postReconciliationProcessing(iterator), nowInSec(), selectsFullPartition());
+        return limits().truncateFiltered(postReconciliationProcessing(partitions), nowInSec(), selectsFullPartition());
     }
 
     /**
@@ -321,11 +322,11 @@ public class PartitionRangeReadCommand extends ReadCommand
      *
      * See CASSANDRA-8717 for why this exists.
      */
-    public PartitionIterator postReconciliationProcessing(PartitionIterator result)
+    public CsFlow<FlowablePartition> postReconciliationProcessing(CsFlow<FlowablePartition> partitions)
     {
         ColumnFamilyStore cfs = Keyspace.open(metadata().keyspace).getColumnFamilyStore(metadata().name);
         Index index = getIndex(cfs);
-        return index == null ? result : index.postProcessorFor(this).apply(result, this);
+        return index == null ? partitions : index.postProcessorFor(this).apply(partitions, this);
     }
 
     public boolean queriesOnlyLocalData()

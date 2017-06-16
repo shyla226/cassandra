@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -147,7 +148,7 @@ public class SinglePartitionSliceCommandTest
         ReadResponse.serializers.get(version).serialize(response, out);
         in = new DataInputBuffer(out.buffer(), true);
         dst = ReadResponse.serializers.get(version).deserialize(in);
-        try (UnfilteredPartitionIterator pi = dst.makeIterator(cmd))
+        try (UnfilteredPartitionIterator pi = FlowablePartitions.toPartitions(dst.data(cmd), cmd.metadata()))
         {
             checkForS(pi);
         }
@@ -161,7 +162,7 @@ public class SinglePartitionSliceCommandTest
         ReadResponse.serializers.get(version).serialize(response, out);
         in = new DataInputBuffer(out.buffer(), true);
         dst = ReadResponse.serializers.get(version).deserialize(in);
-        try (UnfilteredPartitionIterator pi = dst.makeIterator(cmd))
+        try (UnfilteredPartitionIterator pi = FlowablePartitions.toPartitions(dst.data(cmd), cmd.metadata()))
         {
             checkForS(pi);
         }

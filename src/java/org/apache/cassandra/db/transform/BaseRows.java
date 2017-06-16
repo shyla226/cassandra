@@ -101,7 +101,6 @@ implements BaseRowIterator<R>
     @Override
     public void add(Transformation transformation)
     {
-        transformation.attachTo(this);
         super.add(transformation);
 
         // transform any existing data
@@ -124,13 +123,12 @@ implements BaseRowIterator<R>
     @Override
     public final boolean hasNext()
     {
-        Stop stop = this.stop;
         while (this.next == null)
         {
             Transformation[] fs = stack;
             int len = length;
 
-            while (!stop.isSignalled && !stopChild.isSignalled && input.hasNext())
+            while (input.hasNext())
             {
                 Unfiltered next = input.next();
 
@@ -156,7 +154,7 @@ implements BaseRowIterator<R>
                 }
             }
 
-            if (stop.isSignalled || stopChild.isSignalled || !hasMoreContents())
+            if (!hasMoreContents())
                 return false;
         }
         return true;

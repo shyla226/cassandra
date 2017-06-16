@@ -841,9 +841,11 @@ class ContinuousPagingTestUtils
                 if (checkNumberOfRowsInPage && pageUnit == ContinuousPagingOptions.PageUnit.ROWS && numRows > 0)
                 {
                     int totRows = maxRows > 0 ? maxRows : rows.length;
-                    assertEquals(String.format("Unexpected number of rows in current page: page size %d, total expected rows %d, received pages so far %d",
-                                               pageSize, totRows, numPagesReceived),
-                                 Math.min(pageSize, totRows - numRowsReceived), numRows);
+                    int expectedNumRows = Math.min(pageSize, totRows - numRowsReceived);
+                    assertEquals(String.format("Unexpected number of rows %d in current page, was expecting %d\n" +
+                                               "(page size %d, total expected rows %d, received pages so far %d)",
+                                               numRows, expectedNumRows, pageSize, totRows, numPagesReceived),
+                                 expectedNumRows, numRows);
                 }
 
                 if (checkRows)

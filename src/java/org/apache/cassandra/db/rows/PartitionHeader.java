@@ -1,6 +1,6 @@
 package org.apache.cassandra.db.rows;
 
-import java.util.Iterator;
+import java.util.List;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators.MergeListener;
@@ -58,6 +58,11 @@ public class PartitionHeader
         this.stats = stats;
     }
 
+    public static PartitionHeader empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
+    {
+        return new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS);
+    }
+
     public PartitionHeader with(DeletionTime newPartitionLevelDeletion)
     {
         return new PartitionHeader(metadata, partitionKey, newPartitionLevelDeletion, columns, isReverseOrder, stats);
@@ -70,16 +75,17 @@ public class PartitionHeader
         return String.format("partition key %s deletion %s %s", partitionKey, partitionLevelDeletion, cfs);
     }
 
-    public PartitionHeader mergeWith(Iterator<PartitionHeader> sources)
+    public static PartitionHeader merge(List<PartitionHeader> sources, MergeListener listener)
     {
-        if (!sources.hasNext())
-            return this;
+        assert !sources.isEmpty() : "Expected at least one header to merge";
+        if (sources.size() == 1 && listener == null)
+            return sources.get(0);
 
-        Merger merger = new Merger(0, metadata, partitionKey, isReverseOrder, null);
-        merger.add(0, this);
+        PartitionHeader first = sources.get(0);
+        Merger merger = new Merger(sources.size(), first.metadata, first.partitionKey, first.isReverseOrder, listener);
 
-        while (sources.hasNext())
-            merger.add(0, sources.next());
+        for (int i = 0; i < sources.size(); i++)
+            merger.add(i, sources.get(i));
 
         return merger.merge();
     }
@@ -141,12 +147,6 @@ public class PartitionHeader
                 delTimeVersions = new DeletionTime[size];
         }
 
-        public Merger(int size, int idx, PartitionHeader header, MergeListener listener)
-        {
-            this(size, header.metadata, header.partitionKey, header.isReverseOrder, listener);
-            add(idx, header);
-        }
-
 
         public void add(int idx, PartitionHeader source)
         {
@@ -169,7 +169,6 @@ public class PartitionHeader
             }
 
         }
-
 
         public PartitionHeader merge()
         {

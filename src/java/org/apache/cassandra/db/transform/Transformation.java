@@ -37,10 +37,6 @@ import org.apache.cassandra.db.rows.*;
  */
 public abstract class Transformation<I extends BaseRowIterator<?>>
 {
-    // internal methods for StoppableTransformation only
-    void attachTo(BasePartitions partitions) { }
-    void attachTo(BaseRows rows) { }
-
     /**
      * Run on the close of any (logical) partitions iterator this function was applied to
      *

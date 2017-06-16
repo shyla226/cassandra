@@ -114,20 +114,20 @@ public interface ClusteringIndexFilter
     public boolean selects(Clustering clustering);
 
     /**
-     * Returns an iterator that only returns the rows of the provided iterator that this filter selects.
+     * Returns a flowable partition that only returns the rows of the provided partition that this filter selects.
      * <p>
      * This method is the "dumb" counterpart to {@link #getSlices(TableMetadata)} in that it has no way to quickly get
      * to what is actually selected, so it simply iterate over it all and filters out what shouldn't be returned. This should
      * be avoided in general.
-     * Another difference with {@link #getSlices(TableMetadata)} is that this method also filter the queried
+     * Another difference with {@link #getSlices(TableMetadata)} is that this method also filters the queried
      * columns in the returned result, while the former assumes that the provided iterator has already done it.
      *
      * @param columnFilter the columns to include in the rows of the result iterator.
-     * @param iterator the iterator for which we should filter rows.
+     * @param partition the partition for which we should filter rows.
      *
-     * @return an iterator that only returns the rows (or rather Unfilted) from {@code iterator} that are selected by this filter.
+     * @return a partition that only returns the rows (or rather Unfiltered) from {@code partition} that are selected by this filter.
      */
-    public UnfilteredRowIterator filterNotIndexed(ColumnFilter columnFilter, UnfilteredRowIterator iterator);
+    public FlowableUnfilteredPartition filterNotIndexed(ColumnFilter columnFilter, FlowableUnfilteredPartition partition);
 
     public Slices getSlices(TableMetadata metadata);
 
@@ -140,6 +140,16 @@ public interface ClusteringIndexFilter
      * @return a unfiltered row iterator returning those rows (or rather Unfiltered) from {@code partition} that are selected by this filter.
      */
     public UnfilteredRowIterator getUnfilteredRowIterator(ColumnFilter columnFilter, Partition partition);
+
+    /**
+     * Given a partition, returns flowable partition for the rows of this partition that are selected by this filter.
+     *
+     * @param columnFilter the columns to include in the rows of the result partition.
+     * @param partition the partition containing the rows to filter.
+     *
+     * @return a unfiltered flowable partition returning those rows (or rather Unfiltered) from {@code partition} that are selected by this filter.
+     */
+    public FlowableUnfilteredPartition getFlowableUnfilteredPartition(ColumnFilter columnFilter, Partition partition);
 
     /**
      * Whether the provided sstable may contain data that is selected by this filter (based on the sstable metadata).

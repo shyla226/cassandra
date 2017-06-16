@@ -72,9 +72,11 @@ public class MigrationManager
      */
     private static void maybeScheduleSchemaPull(final UUID theirVersion, final InetAddress endpoint)
     {
-        if ((Schema.instance.getVersion() != null && Schema.instance.getVersion().equals(theirVersion)) || !shouldPullSchemaFrom(endpoint))
+        UUID ourVersion = Schema.instance.getVersion();
+        if ((ourVersion != null && Schema.instance.getVersion().equals(theirVersion)) || !shouldPullSchemaFrom(endpoint))
         {
-            logger.debug("Not pulling schema because versions match or shouldPullSchemaFrom returned false");
+            logger.debug("Not pulling schema from {} because versions match ({}/{}), or shouldPullSchemaFrom returned false",
+                         endpoint, ourVersion, theirVersion);
             return;
         }
 

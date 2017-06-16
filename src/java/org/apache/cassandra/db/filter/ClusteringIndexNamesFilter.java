@@ -25,7 +25,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -33,6 +32,9 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 
 /**
  * A filter selecting rows given their clustering value.
@@ -105,26 +107,27 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         return false;
     }
 
-    // Given another iterator, only return the rows that match this filter
-    public UnfilteredRowIterator filterNotIndexed(ColumnFilter columnFilter, UnfilteredRowIterator iterator)
+    private Row filterNotIndexedStaticRow(ColumnFilter columnFilter, TableMetadata metadata, Row row)
     {
-        // Note that we don't filter markers because that's a bit trickier (we don't know in advance until when
-        // the range extend) and it's harmless to left them.
-        class FilterNotIndexed extends Transformation
-        {
-            @Override
-            public Row applyToStatic(Row row)
-            {
-                return columnFilter.fetchedColumns().statics.isEmpty() ? null : row.filter(columnFilter, iterator.metadata());
-            }
+        return columnFilter.fetchedColumns().statics.isEmpty() ? Rows.EMPTY_STATIC_ROW : row.filter(columnFilter, metadata);
+    }
 
-            @Override
-            public Row applyToRow(Row row)
-            {
-                return clusterings.contains(row.clustering()) ? row.filter(columnFilter, iterator.metadata()) : null;
-            }
+    private Unfiltered filterNotIndexedRow(ColumnFilter columnFilter, TableMetadata metadata, Unfiltered unfiltered)
+    {
+        if (unfiltered instanceof Row)
+        {
+            Row row = (Row)unfiltered;
+            return clusterings.contains(row.clustering()) ? row.filter(columnFilter, metadata) : null;
         }
-        return Transformation.apply(iterator, new FilterNotIndexed());
+
+        return unfiltered;
+    }
+
+    public FlowableUnfilteredPartition filterNotIndexed(ColumnFilter columnFilter, FlowableUnfilteredPartition partition)
+    {
+        return new FlowableUnfilteredPartition(partition.header,
+                                               filterNotIndexedStaticRow(columnFilter, partition.metadata(), partition.staticRow),
+                                               partition.content.skippingMap(row -> filterNotIndexedRow(columnFilter, partition.metadata(), row)));
     }
 
     public Slices getSlices(TableMetadata metadata)
@@ -159,6 +162,51 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
                 return endOfData();
             }
         };
+    }
+
+    public FlowableUnfilteredPartition getFlowableUnfilteredPartition(ColumnFilter columnFilter, Partition partition)
+    {
+        final SearchIterator<Clustering, Row> searcher = partition.searchIterator(columnFilter, reversed);
+        return new FlowableUnfilteredPartition(new PartitionHeader(partition.metadata(),
+                                                                   partition.partitionKey(),
+                                                                   partition.partitionLevelDeletion(),
+                                                                   columnFilter.fetchedColumns(),
+                                                                   reversed,
+                                                                   partition.stats()),
+                                               searcher.next(Clustering.STATIC_CLUSTERING),
+                                               new CsFlow<Unfiltered>() {
+                                                   final Iterator<Clustering> clusteringIter = clusteringsInQueryOrder.iterator();
+                                                   public CsSubscription subscribe(CsSubscriber<Unfiltered> subscriber) throws Exception
+                                                   {
+                                                       return new CsSubscription()
+                                                       {
+                                                           public void request()
+                                                           {
+                                                               while (clusteringIter.hasNext())
+                                                               {
+                                                                   Row row = searcher.next(clusteringIter.next());
+                                                                   if (row != null)
+                                                                   {
+                                                                       subscriber.onNext(row);
+                                                                       return;
+                                                                   }
+                                                               }
+
+                                                               subscriber.onComplete();
+                                                           }
+
+                                                           public void close() throws Exception
+                                                           {
+
+                                                           }
+
+                                                           public Throwable addSubscriberChainFromSource(Throwable throwable)
+                                                           {
+                                                               return CsFlow.wrapException(throwable, this);
+                                                           }
+                                                       };
+                                                   }
+                                               });
     }
 
     public boolean shouldInclude(SSTableReader sstable)

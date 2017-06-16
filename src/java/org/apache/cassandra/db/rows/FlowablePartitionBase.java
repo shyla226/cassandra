@@ -49,9 +49,6 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      */
     public final CsFlow<T> content;
 
-    /** Signalled by a stopping transformation when it wants to stop */
-    public BaseIterator.Stop stop = new BaseIterator.Stop();
-
     public FlowablePartitionBase(PartitionHeader header,
                                  Row staticRow,
                                  CsFlow<T> content)
@@ -60,6 +57,34 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
         this.staticRow = staticRow;
         this.content = content;
     }
+
+    /**
+     * Return a new partition with the specified header and static row, but the same content.
+     *
+     * @param header - the new header
+     * @param staticRow - the new static row
+     *
+     * @return a new partition with the specified header and static row, but the same content.
+     */
+    public abstract FlowablePartitionBase<T> withHeader(PartitionHeader header, Row staticRow);
+
+    /**
+     * Return a new partition with the same header but different content.
+     *
+     * @param content the new content
+     *
+     * @return the partition with the new content
+     */
+    public abstract FlowablePartitionBase<T> withContent(CsFlow<T> content);
+
+    /**
+     * Apply the mapper to the partition content
+     *
+     * @param mappingOp the content mapper
+     *
+     * @return a new identical partition with the content mapped
+     */
+    public abstract FlowablePartitionBase<T> mapContent(CsFlow.MappingOp<T, T> mappingOp);
 
     /**
      * Only to be called on requested but unused partitions (e.g. when aborting).

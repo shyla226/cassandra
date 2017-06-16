@@ -1152,9 +1152,9 @@ public abstract class CQLTester
                                               "(using protocol version %s)",
                                               i, j, meta.getName(j), type,
                                               codec.format(codec.deserialize(expected.get(j),driverVersion)),
-                                              expected.size(),
+                                              expected.get(j) == null ? 0 : expected.get(j).capacity(),
                                               codec.format(codec.deserialize(actual.get(j), driverVersion)),
-                                              actual.size(),
+                                              actual.get(j) == null ? 0 : actual.get(j).capacity(),
                                               protocolVersion));
             }
         }

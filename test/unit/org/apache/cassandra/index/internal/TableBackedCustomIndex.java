@@ -6,8 +6,8 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -17,6 +17,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -150,9 +151,9 @@ public class TableBackedCustomIndex implements Index
 
     public long getEstimatedResultRows() { throw new UnsupportedOperationException(); }
 
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command)
+    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand command)
     {
-        return (partitionIterator, rowFilter) -> partitionIterator;
+        return (partitions, rowFilter) -> partitions;
     }
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter) { return filter; }

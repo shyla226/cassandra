@@ -31,20 +31,21 @@ import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
-import org.apache.cassandra.utils.LineNumberInference;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertTrue;
 import static org.hibernate.validator.internal.util.Contracts.assertNotNull;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
 
 public class OpsTest
 {
     @BeforeClass
     public static void init() throws Exception
     {
-        LineNumberInference.init();
+        DatabaseDescriptor.daemonInitialization();
     }
 
     @Test
@@ -307,4 +308,80 @@ public class OpsTest
         assertEquals("TestException", error.get().getMessage());
         assertFalse(completed.get());
     }
+
+    // test that doOnClose and doOnError execute as expected
+    @Test
+    public void testDoOnOperations() throws Exception
+    {
+        final AtomicReference<Throwable> error = new AtomicReference<>(null);
+        final AtomicBoolean closed = new AtomicBoolean(false);
+
+        CsFlow.fromIterable(() -> IntStream.range(0, 10).iterator())
+              .doOnClose(() -> assertTrue(closed.compareAndSet(false, true)))
+              .doOnError(e -> assertTrue(error.compareAndSet(null, e))).countBlocking();
+
+        assertTrue(closed.get());
+        assertNull(error.get());
+
+        closed.set(false);
+
+        try
+        {
+            CsFlow.fromIterable(() -> IntStream.range(0, 10).iterator())
+                  .map(i ->
+                       {
+                           if (i == 5) throw new RuntimeException("Test ex");
+                           return i;
+                       })
+                  .doOnClose(() -> assertTrue(closed.compareAndSet(false, true)))
+                  .doOnError(e -> assertTrue(error.compareAndSet(null, e))).countBlocking();
+
+            fail("Exception expected");
+        }
+        catch (Throwable t)
+        {
+            assertEquals("Test ex", t.getMessage());  // expected
+        }
+
+        assertTrue(closed.get());
+        assertNotNull(error.get());
+    }
+
+    // Test that we can replace the first exception with the second one by using onErrorResumeNext
+    @Test
+    public void testOnErrorResumeNext() throws Exception
+    {
+        final RuntimeException ex1 = new RuntimeException("Initial error");
+        final RuntimeException ex2 = new RuntimeException("On error resumed");
+
+        final AtomicReference<Throwable> error = new AtomicReference<>(null);
+        final AtomicBoolean completed = new AtomicBoolean(false);
+
+        final CsSubscription subscription = CsFlow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                                  .onErrorResumeNext(e -> CsFlow.error(ex2)).subscribe(new CsSubscriber<Integer>()
+        {
+            public void onNext(Integer item)
+            {
+                throw ex1;
+            }
+
+            public void onComplete()
+            {
+                completed.set(true);
+            }
+
+            public void onError(Throwable t)
+            {
+                error.set(t);
+            }
+        });
+
+        subscription.request();
+
+        assertFalse(completed.get());
+        assertNotNull(error.get());
+        assertEquals(ex2.getMessage(), error.get().getMessage());
+    }
+
+
 }

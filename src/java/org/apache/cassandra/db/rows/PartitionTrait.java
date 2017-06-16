@@ -34,7 +34,7 @@ import org.apache.cassandra.schema.TableMetadata;
  * We need it for as long as we need to live with the dual iterator / async publishers paradigm,
  * it avoids duplicating code for serializing iterators or async publishers, see
  * {@link UnfilteredRowIterators#digestPartition(PartitionTrait, MessageDigest, DigestVersion)} or
- * {@link UnfilteredRowIteratorSerializer#serializeBeginningOfPartition(PartitionTrait, SerializationHeader, ColumnFilter, DataOutputPlus, int)}.
+ * {@link UnfilteredPartitionSerializer#serializeBeginningOfPartition(PartitionTrait, SerializationHeader, ColumnFilter, DataOutputPlus, int, boolean)}.
  */
 public interface PartitionTrait
 {

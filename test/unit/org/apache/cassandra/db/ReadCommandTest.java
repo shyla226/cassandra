@@ -41,20 +41,19 @@ import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionsSerializer;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.SerializationHelper;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.Version;
 
 import static org.junit.Assert.*;
@@ -119,7 +118,7 @@ public class ReadCommandTest
 
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
-        try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
             PartitionIterators.consume(iterator);
             fail("The command should have been aborted");
@@ -160,7 +159,7 @@ public class ReadCommandTest
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
         readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
-        try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
             PartitionIterators.consume(iterator);
             fail("The command should have been aborted");
@@ -201,7 +200,7 @@ public class ReadCommandTest
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
         readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
-        try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
+        try (PartitionIterator iterator = FlowablePartitions.toPartitionsFiltered(readCommand.executeInternal(monitor)))
         {
             PartitionIterators.consume(iterator);
             fail("The command should have been aborted");
@@ -278,51 +277,33 @@ public class ReadCommandTest
 
             ReadQuery query = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-            try (UnfilteredPartitionIterator iter = query.executeForTests();
-                 DataOutputBuffer buffer = new DataOutputBuffer())
-            {
-                UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(iter, columnFilter, buffer);
-                buffers.add(buffer.buffer());
-            }
+            CsFlow<FlowableUnfilteredPartition> partitions = FlowablePartitions.skipEmptyPartitions(query.executeLocally());
+            UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
+            buffers.addAll(serializer.serialize(partitions, columnFilter).toList().blockingSingle());
         }
 
         // deserialize, merge and check the results are all there
-        List<UnfilteredPartitionIterator> iterators = new ArrayList<>();
+        List<CsFlow<FlowableUnfilteredPartition>> partitions = new ArrayList<>();
 
+        UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
         for (ByteBuffer buffer : buffers)
         {
-            try (DataInputBuffer in = new DataInputBuffer(buffer, true))
-            {
-                iterators.add(UnfilteredPartitionIterators.serializerForIntraNode(version).deserialize(in,
-                                                                                                       cfs.metadata(),
-                                                                                                       columnFilter,
-                                                                                                       SerializationHelper.Flag.LOCAL));
-            }
+            partitions.add(serializer.deserialize(buffer,
+                                                  cfs.metadata(),
+                                                  columnFilter,
+                                                  SerializationHelper.Flag.LOCAL));
         }
 
-        try (PartitionIterator partitionIterator = UnfilteredPartitionIterators.mergeAndFilter(iterators,
-                                                                                               nowInSeconds,
-                                                                                               new UnfilteredPartitionIterators.MergeListener()
-                                                                                               {
-                                                                                                   public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
-                                                                                                   {
-                                                                                                       return null;
-                                                                                                   }
+        CsFlow<FlowablePartition> merged = FlowablePartitions.mergeAndFilter(partitions,
+                                                                             nowInSeconds,
+                                                                             FlowablePartitions.MergeListener.NONE);
 
-                                                                                                   public void close()
-                                                                                                   {
 
-                                                                                                   }
+        int i = 0;
+        int numPartitions = 0;
 
-                                                                                                   public boolean callOnTrivialMerge()
-                                                                                                   {
-                                                                                                       return false;
-                                                                                                   }
-                                                                                               }))
+        try(PartitionIterator partitionIterator = FlowablePartitions.toPartitionsFiltered(merged))
         {
-
-            int i = 0;
-            int numPartitions = 0;
             while (partitionIterator.hasNext())
             {
                 numPartitions++;

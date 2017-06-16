@@ -18,13 +18,11 @@
 package org.apache.cassandra.db.rows;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +43,6 @@ import org.apache.cassandra.utils.flow.Threads;
 
 /**
  * Partition manipulation functions.
- *
  */
 public class FlowablePartitions
 {
@@ -159,15 +156,6 @@ public class FlowablePartitions
         }
     }
 
-
-    public static class EmptyFlowableUnfilteredPartition extends FlowableUnfilteredPartition
-    {
-        public EmptyFlowableUnfilteredPartition(PartitionHeader header)
-        {
-            super(header, Rows.EMPTY_STATIC_ROW, CsFlow.empty());
-        }
-    }
-
     public static FlowableUnfilteredPartition fromIterator(UnfilteredRowIterator iter, Scheduler callOn)
     {
         CsFlow<Unfiltered> data = CsFlow.fromIterable(() -> iter);
@@ -179,26 +167,47 @@ public class FlowablePartitions
                                                data);
     }
 
-    public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
+    public static FlowablePartition fromIterator(RowIterator iter, Scheduler callOn)
     {
-        return new EmptyFlowableUnfilteredPartition(new PartitionHeader(metadata, partitionKey, DeletionTime.LIVE, RegularAndStaticColumns.NONE, reversed, EncodingStats.NO_STATS));
+        CsFlow<Row> data = CsFlow.fromIterable(() -> iter);
+        if (callOn != null)
+            data = data.lift(Threads.requestOn(callOn));
+
+        Row staticRow = iter.staticRow();
+        return new FlowablePartition(new PartitionHeader(iter.metadata(), iter.partitionKey(), DeletionTime.LIVE, iter.columns(), iter.isReverseOrder(), EncodingStats.NO_STATS),
+                                     staticRow,
+                                     data);
     }
 
-    public static FlowableUnfilteredPartition merge(List<FlowableUnfilteredPartition> flowables, int nowInSec)
+    public static FlowableUnfilteredPartition empty(TableMetadata metadata, DecoratedKey partitionKey, boolean reversed)
+    {
+        return new FlowableUnfilteredPartition(PartitionHeader.empty(metadata, partitionKey, reversed),
+                                               Rows.EMPTY_STATIC_ROW,
+                                               CsFlow.empty());
+    }
+
+    public static FlowableUnfilteredPartition merge(List<FlowableUnfilteredPartition> flowables, int nowInSec, UnfilteredRowIterators.MergeListener listener)
     {
         // Note: we can't trust flowables to not change after we are called. Defensive copying needed for anything
         // that is passed on to asynchronous processing.
         assert !flowables.isEmpty();
         FlowableUnfilteredPartition first = flowables.get(0);
-        if (flowables.size() == 1)
+        if (flowables.size() == 1 && listener == null)
             return first;
 
-        PartitionHeader header = first.header.mergeWith(flowables.stream().skip(1).map(x -> x.header).iterator());
-        MergeReducer reducer = new MergeReducer(flowables.size(), nowInSec, header, null);
+        List<PartitionHeader> headers = new ArrayList<>(flowables.size());
+        List<CsFlow<Unfiltered>> contents = new ArrayList<>(flowables.size());
+        for (FlowableUnfilteredPartition flowable : flowables)
+        {
+            headers.add(flowable.header);
+            contents.add(flowable.content);
+        }
+        PartitionHeader header = PartitionHeader.merge(headers, listener);
+        MergeReducer reducer = new MergeReducer(flowables.size(), nowInSec, header, listener);
 
         Row staticRow;
         if (!header.columns.statics.isEmpty())
-            staticRow = mergeStaticRows(flowables, header.partitionLevelDeletion, header.columns.statics, nowInSec);
+            staticRow = mergeStaticRows(flowables, header, nowInSec, listener);
         else
             staticRow = Rows.EMPTY_STATIC_ROW;
 
@@ -206,66 +215,142 @@ public class FlowablePartitions
         if (header.isReverseOrder)
             comparator = comparator.reversed();
 
-        return new FlowableUnfilteredPartition(
-                header,
-                staticRow,
-                CsFlow.merge(ImmutableList.copyOf(Lists.transform(flowables, x -> x.content)),
-                             comparator,
-                             reducer));
+
+        CsFlow<Unfiltered> content = CsFlow.merge(contents,
+                                                  comparator,
+                                                  reducer);
+        if (listener != null)
+            content = content.doOnClose(listener::close);
+
+        return new FlowableUnfilteredPartition(header,
+                                               staticRow,
+                                               content);
     }
 
-    public static Row mergeStaticRows(List<FlowableUnfilteredPartition> sources, DeletionTime activeDeletion, Columns columns, int nowInSec)
+    public static Row mergeStaticRows(List<FlowableUnfilteredPartition> sources,
+                                      PartitionHeader header,
+                                      int nowInSec,
+                                      UnfilteredRowIterators.MergeListener listener)
     {
-        Row.Merger rowMerger = new Row.Merger(sources.size(), nowInSec, columns.size(), columns.hasComplex());
-        int i = 0;
+        Columns columns = header.columns.statics;
+        if (columns.isEmpty())
+            return Rows.EMPTY_STATIC_ROW;
+
+        boolean hasStatic = false;
         for (FlowableUnfilteredPartition source : sources)
-            rowMerger.add(i++, source.staticRow);
-        Row merged = rowMerger.merge(activeDeletion);
+            hasStatic |= !source.staticRow.isEmpty();
+        if (!hasStatic)
+            return Rows.EMPTY_STATIC_ROW;
+
+        Row.Merger merger = new Row.Merger(sources.size(), nowInSec, columns.size(), columns.hasComplex());
+        for (int i = 0; i < sources.size(); i++)
+            merger.add(i, sources.get(i).staticRow);
+
+        Row merged = merger.merge(header.partitionLevelDeletion);
 
         if (merged == null)
-            return Rows.EMPTY_STATIC_ROW;
-        else
-            return merged;
+            merged = Rows.EMPTY_STATIC_ROW;
+
+        if (listener != null)
+            listener.onMergedRows(merged, merger.mergedRows());
+
+        return merged;
     }
 
     private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = Comparator.comparing(x -> x.header.partitionKey);
 
-    public static CsFlow<FlowableUnfilteredPartition> mergePartitions(final List<CsFlow<FlowableUnfilteredPartition>> sources, final int nowInSec)
+    public static CsFlow<FlowableUnfilteredPartition> mergePartitions(final List<CsFlow<FlowableUnfilteredPartition>> sources,
+                                                                      final int nowInSec,
+                                                                      final MergeListener listener)
     {
         assert !sources.isEmpty();
-        if (sources.size() == 1)
+        if (sources.size() == 1 && listener == null)
             return sources.get(0);
 
-        return CsFlow.merge(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        CsFlow<FlowableUnfilteredPartition> merge = CsFlow.merge(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
-            private final List<FlowableUnfilteredPartition> toMerge = new ArrayList<>(sources.size());
+            private final FlowableUnfilteredPartition[] toMerge = new FlowableUnfilteredPartition[sources.size()];
+            private PartitionHeader header;
 
             public void reduce(int idx, FlowableUnfilteredPartition current)
             {
-                toMerge.add(current);
+                header = current.header;
+                toMerge[idx] = current;
             }
 
             public FlowableUnfilteredPartition getReduced()
             {
-                return FlowablePartitions.merge(toMerge, nowInSec);
+                UnfilteredRowIterators.MergeListener rowListener = listener == null ? null : listener.getRowMergeListener(header.partitionKey, toMerge);
+
+                FlowableUnfilteredPartition nonEmptyPartition = null;
+                int nonEmptyPartitions = 0;
+
+                for (int i = 0, length = toMerge.length; i < length; i++)
+                {
+                    FlowableUnfilteredPartition element = toMerge[i];
+                    if (element == null)
+                    {
+                        toMerge[i] = FlowablePartitions.empty(header.metadata, header.partitionKey, header.isReverseOrder);
+                    }
+                    else
+                    {
+                        nonEmptyPartitions++;
+                        nonEmptyPartition = element;
+                    }
+                }
+
+                return nonEmptyPartitions == 1 && rowListener == null
+                       ? nonEmptyPartition
+                       : FlowablePartitions.merge(Arrays.asList(toMerge), nowInSec, rowListener);
             }
 
             public void onKeyChange()
             {
-                toMerge.clear();
+                Arrays.fill(toMerge, null);
             }
 
             public boolean trivialReduceIsTrivial()
             {
-                return true;
+                return listener == null;
             }
         });
+
+        if (listener != null)
+            merge = merge.doOnClose(listener::close);
+        return merge;
+    }
+
+    /**
+     * An interface to implement to be notified of merge events.
+     */
+    public interface MergeListener
+    {
+        public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, FlowableUnfilteredPartition[] versions);
+
+        public default void close() { }
+
+        public static final MergeListener NONE = new MergeListener()
+        {
+            public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, FlowableUnfilteredPartition[] versions)
+            {
+                return null;
+            }
+        };
     }
 
     public static CsFlow<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
     {
         CsFlow<FlowableUnfilteredPartition> flow = CsFlow.fromIterable(() -> iter)
                                                          .map(i -> fromIterator(i, scheduler));
+        if (scheduler != null)
+            flow = flow.lift(Threads.requestOn(scheduler));
+        return flow;
+    }
+
+    public static CsFlow<FlowablePartition> fromPartitions(PartitionIterator iter, Scheduler scheduler)
+    {
+        CsFlow<FlowablePartition> flow = CsFlow.fromIterable(() -> iter)
+                                               .map(i -> fromIterator(i, scheduler));
         if (scheduler != null)
             flow = flow.lift(Threads.requestOn(scheduler));
         return flow;
@@ -338,22 +423,31 @@ public class FlowablePartitions
         }
     }
 
+    private static Row filterStaticRow(Row row, int nowInSec)
+    {
+        if (row == null || row.isEmpty())
+            return Rows.EMPTY_STATIC_ROW;
+
+        row = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        return row == null ? Rows.EMPTY_STATIC_ROW : row;
+    }
+
     public static FlowablePartition filter(FlowableUnfilteredPartition data, int nowInSec)
     {
         Row staticRow = data.staticRow.purge(DeletionPurger.PURGE_ALL, nowInSec);
         CsFlow<Row> content = filteredContent(data, nowInSec);
 
         return new FlowablePartition(data.header,
-                                     staticRow,
+                                     filterStaticRow(staticRow, nowInSec),
                                      content);
     }
 
     public static CsFlow<FlowablePartition> filterAndSkipEmpty(FlowableUnfilteredPartition data, int nowInSec)
     {
-        Row staticRow = data.staticRow.purge(DeletionPurger.PURGE_ALL, nowInSec);
+        Row staticRow = filterStaticRow(data.staticRow, nowInSec);
         CsFlow<Row> content = filteredContent(data, nowInSec);
 
-        if (staticRow != null && !staticRow.isEmpty())
+        if (!staticRow.isEmpty())
             return CsFlow.just(new FlowablePartition(data.header,
                                                      staticRow,
                                                      content));
@@ -388,5 +482,17 @@ public class FlowablePartitions
                 partition.staticRow().isEmpty() && partition.partitionLevelDeletion().isLive() ?
                         partition.content.skipMapEmpty(content -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, content)) :
                         CsFlow.just(partition));
+    }
+    
+    public static CsFlow<FlowablePartition> mergeAndFilter(List<CsFlow<FlowableUnfilteredPartition>> results,
+                                                           int nowInSec,
+                                                           MergeListener listener)
+    {
+        return filterAndSkipEmpty(mergePartitions(results, nowInSec, listener), nowInSec);
+    }
+
+    public static CsFlow<Row> allRows(CsFlow<FlowablePartition> data)
+    {
+        return data.flatMap(partition -> partition.content);
     }
 }

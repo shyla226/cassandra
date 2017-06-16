@@ -41,8 +41,19 @@ public interface CsSubscription extends AutoCloseable
 
     /**
      * Propagates error to the root / source in order to collect subscriber chain during the exception creation.
-     *
-     * This method is required for deubgging purposes only.
+     * <p>
+     * This method is required for debugging purposes only. If the subscription owns a source subscription, simply
+     * implement this method by calling {@link #addSubscriberChainFromSource(Throwable)} on the source subscription.
+     * Otherwise, if the flow is a source, call {@link CsFlow#wrapException(Throwable, Object)} passing the error and
+     * this as the second parameter (so the subscription itself is the second parameter).
+     * <p>
+     * {@link CsFlow#wrapException(Throwable, Object)} will add a {@link org.apache.cassandra.utils.flow.CsFlow.CsFlowException},
+     * as a suppressed exception to the original error. {@link org.apache.cassandra.utils.flow.CsFlow.CsFlowException} relies
+     * on calling {@link Object#toString()} on the subscription in order to create a chain of subscribers. If all subscriptions
+     * in the chain call {@link CsFlow#formatTrace(String, Object, CsSubscriber)} in their toString implementations, where the second
+     * parameter is a mapping operation, typically a lambda, if available, and the subscriber is the actual subscriber.
+     * The second parameter (the tag) will output the line number of the associated lambda (see {@link org.apache.cassandra.utils.LineNumberInference}),
+     * whilst the subscriber recursively calls toString(), which in turn recurses to its own subscribers and so on.
      */
     Throwable addSubscriberChainFromSource(Throwable throwable);
 }

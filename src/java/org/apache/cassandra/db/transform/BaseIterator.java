@@ -36,37 +36,17 @@ public abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends
     I input;
     V next;
 
-    // We require two stop signals for correctness, since the `stop` reference of the base iterator can "leak"
-    // into the transformations stack. Using a single `stop` signal may result into the inconsistent state,
-    // since stopping transformation would stop only the child iterator.
-
-    // Signals that the base iterator has been signalled to stop. Applies at the end of the current next().
-    Stop stop;
-    // Signals that the current child iterator has been signalled to stop.
-    Stop stopChild;
-
-    public static class Stop
-    {
-        // TODO: consider moving "next" into here, so that a stop() when signalled outside of a function call (e.g. in attach)
-        // can take effect immediately; this doesn't seem to be necessary at the moment, but it might cause least surprise in future
-        public boolean isSignalled;
-    }
-
     // responsibility for initialising next lies with the subclass
     BaseIterator(BaseIterator<? extends V, ? extends I, ?> copyFrom)
     {
         super(copyFrom);
         this.input = copyFrom.input;
         this.next = copyFrom.next;
-        this.stop = copyFrom.stop;
-        this.stopChild = copyFrom.stopChild;
     }
 
     BaseIterator(I input)
     {
         this.input = input;
-        this.stop = new Stop();
-        this.stopChild = this.stop;
     }
 
     /**
@@ -147,7 +127,6 @@ public abstract class BaseIterator<V, I extends Iterator<? extends V>, O extends
                 BaseIterator abstr = (BaseIterator) newContents;
                 prefix = abstr;
                 input = (I) abstr.input;
-                stopChild = abstr.stop;
                 next = apply((V)abstr.next, holder.length); // must apply all remaining functions to the next, if any
             }
 

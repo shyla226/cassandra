@@ -30,10 +30,6 @@ import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.db.transform.BasePartitions;
-import org.apache.cassandra.db.transform.BaseRows;
-import org.apache.cassandra.db.transform.StoppingTransformation;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
@@ -62,22 +58,6 @@ public abstract class DataLimits
         public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData)
         {
             return false;
-        }
-
-        @Override
-        public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter,
-                                                  int nowInSec,
-                                                  boolean countPartitionsWithOnlyStaticData)
-        {
-            return iter;
-        }
-
-        @Override
-        public UnfilteredRowIterator filter(UnfilteredRowIterator iter,
-                                            int nowInSec,
-                                            boolean countPartitionsWithOnlyStaticData)
-        {
-            return iter;
         }
     };
 
@@ -183,25 +163,6 @@ public abstract class DataLimits
      */
     public abstract DataLimits withoutState();
 
-    public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter,
-                                              int nowInSec,
-                                              boolean countPartitionsWithOnlyStaticData)
-    {
-        return Transformation.apply(iter, this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData).asTransformation());
-    }
-
-    public UnfilteredRowIterator filter(UnfilteredRowIterator iter,
-                                        int nowInSec,
-                                        boolean countPartitionsWithOnlyStaticData)
-    {
-        return Transformation.apply(iter, this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData).asTransformation());
-    }
-
-    public PartitionIterator filter(PartitionIterator iter, int nowInSec, boolean countPartitionsWithOnlyStaticData)
-    {
-        return Transformation.apply(iter, this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData).asTransformation());
-    }
-
     /**
      * Estimate the number of results that a full scan of the provided cfs would yield.
      */
@@ -220,7 +181,8 @@ public abstract class DataLimits
 
         abstract void newPartition(DecoratedKey partitionKey, Row staticRow);
         abstract Row newRow(Row row);           // Can return null, in which case row should not be returned.
-        abstract Row newStaticRow(Row row);     // Can return null, in which case row should not be returned.
+        abstract Row newStaticRow(Row row);     // Can return EMPTY_STATIC_ROW, in which case row should not be returned.
+
         abstract void endOfPartition();
         public abstract void endOfIteration();
 
@@ -249,121 +211,133 @@ public abstract class DataLimits
          */
         public abstract int rowCountedInCurrentPartition();
 
-        abstract boolean isDone();
+        public abstract boolean isDone();
         public abstract boolean isDoneForPartition();
 
         protected boolean isLive(Row row)
         {
             return assumeLiveData || row.hasLiveData(nowInSec);
         }
-
-        public Transformation<BaseRowIterator<?>> asTransformation()
-        {
-            return new Transform(this, true);
-        }
-
-        public Transformation<BaseRowIterator<?>> asCountOnlyTransformation()
-        {
-            return new Transform(this, false);
-        }
     }
 
-    private static FlowableUnfilteredPartition filter(Counter counter, FlowableUnfilteredPartition partition)
+    /**
+     * Count the number of rows in the partitions. Note that unlike the truncate methods, the flow is not interrupted
+     * when the counter is done.
+     *
+     * @param partitions - the partitions to count
+     * @param counter - the counter that will receive the notifications
+     *
+     * @return the same flow but with the counter operations applied
+     */
+    public static CsFlow<FlowableUnfilteredPartition> countUnfiltered(CsFlow<FlowableUnfilteredPartition> partitions, Counter counter)
+    {
+        return partitions.doOnClose(counter::endOfIteration)
+                         .map(partition -> countUnfiltered(counter, partition));
+    }
+
+    public static FlowableUnfilteredPartition countUnfiltered(Counter counter, FlowableUnfilteredPartition partition)
     {
         counter.newPartition(partition.partitionKey(), partition.staticRow);
 
-        CsFlow<Unfiltered> content = partition.content.takeUntilAndDoOnClose(counter::isDoneForPartition,
-                                                                             counter::endOfPartition)
-                                                      .skippingMap(unfiltered ->
-                                                                   unfiltered instanceof Row ?
-                                                                           counter.newRow((Row) unfiltered) :
-                                                                           unfiltered);
+        CsFlow<Unfiltered> content = partition.content
+                                              .doOnClose(counter::endOfPartition)
+                                              .map(unfiltered ->
+                                                   {
+                                                       if (unfiltered instanceof Row)
+                                                           counter.newRow((Row) unfiltered);
+                                                       return unfiltered;
+                                                   });
+
+        counter.newStaticRow(partition.staticRow);
+        return new FlowableUnfilteredPartition(partition.header,
+                                               partition.staticRow,
+                                               content);
+    }
+
+    /**
+     * Count the number of rows in the partitions and stop the flow once the counter is done.
+     *
+     * @param partitions - the partitions to count
+     * @param nowInSec - the current time in seconds
+     * @param countPartitionsWithOnlyStaticData if {@code true} the partitions with only static data should be counted
+     * as 1 valid row.
+     *
+     * @return the truncated flow
+     */
+    public CsFlow<FlowableUnfilteredPartition> truncateUnfiltered(CsFlow<FlowableUnfilteredPartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    {
+        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
+        return truncateUnfiltered(partitions, counter);
+    }
+
+    public static CsFlow<FlowableUnfilteredPartition> truncateUnfiltered(CsFlow<FlowableUnfilteredPartition> partitions, Counter counter)
+    {
+        return partitions.takeUntilAndDoOnClose(counter::isDone,
+                                                counter::endOfIteration)
+                         .map(partition -> truncateUnfiltered(counter, partition));
+    }
+
+    public FlowableUnfilteredPartition truncateUnfiltered(FlowableUnfilteredPartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    {
+        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
+        return truncateUnfiltered(counter, partition);
+    }
+
+    public static FlowableUnfilteredPartition truncateUnfiltered(Counter counter, FlowableUnfilteredPartition partition)
+    {
+        counter.newPartition(partition.partitionKey(), partition.staticRow);
+
+        CsFlow<Unfiltered> content = partition.content
+                                              .takeUntilAndDoOnClose(counter::isDoneForPartition,
+                                                                     counter::endOfPartition)
+                                              .skippingMap(unfiltered ->
+                                                       unfiltered instanceof Row
+                                                               ? counter.newRow((Row) unfiltered)
+                                                               : unfiltered);
         return new FlowableUnfilteredPartition(partition.header,
                                                counter.newStaticRow(partition.staticRow),
                                                content);
     }
 
-    public CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    /**
+     * Count the number of rows in the partitions and stop the flow once the counter is done.
+     *
+     * @param partitions - the partitions to count
+     * @param nowInSec - the current time in seconds
+     * @param countPartitionsWithOnlyStaticData if {@code true} the partitions with only static data should be counted
+     * as 1 valid row.
+     *
+     * @return the truncated flow
+     */
+    public CsFlow<FlowablePartition> truncateFiltered(CsFlow<FlowablePartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
     {
-        Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
-        return partitions.takeUntilAndDoOnClose(counter::isDone,
-                                                counter::endOfIteration)
-                         .skippingMap(partition -> filter(counter, partition));
+        Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData);
+        return truncateFiltered(partitions, counter);
     }
 
-    public static class Transform extends StoppingTransformation<BaseRowIterator<?>>
+    public static CsFlow<FlowablePartition> truncateFiltered(CsFlow<FlowablePartition> partitions, Counter counter)
     {
-        private final Counter counter;
+        return partitions.takeUntilAndDoOnClose(counter::isDone,
+                                                counter::endOfIteration)
+                         .map(partition -> truncateFiltered(counter, partition));
+    }
 
-        // false means we do not propagate our stop signals onto the iterator, we only count
-        private final boolean enforceLimits;
+    public FlowablePartition truncateFiltered(FlowablePartition partition, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    {
+        Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData);
+        return truncateFiltered(counter, partition);
+    }
 
-        protected Transform(Counter counter, boolean enforceLimits)
-        {
-            this.counter = counter;
-            this.enforceLimits = enforceLimits;
-        }
+    public static FlowablePartition truncateFiltered(Counter counter, FlowablePartition partition)
+    {
+        counter.newPartition(partition.partitionKey(), partition.staticRow);
 
-        @Override
-        protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
-        {
-            if (partition == null)
-                return null;
-
-            return partition instanceof UnfilteredRowIterator ? Transformation.apply((UnfilteredRowIterator) partition, this)
-                                                              : Transformation.apply((RowIterator) partition, this);
-        }
-
-        @Override
-        public Row applyToStatic(Row row)
-        {
-            return counter.newStaticRow(row);
-        }
-
-        @Override
-        protected Row applyToRow(Row row)
-        {
-            row = counter.newRow(row);
-            if (counter.isDoneForPartition())
-                stopInPartition();
-
-            return row;
-        }
-
-        public void onPartitionClose()
-        {
-            super.onPartitionClose();
-            counter.endOfPartition();
-            if (counter.isDone())
-                stop();
-        }
-
-        @Override
-        protected void attachTo(BasePartitions partitions)
-        {
-            if (enforceLimits)
-                super.attachTo(partitions);
-            if (counter.isDone())
-                stop();
-        }
-
-
-        @Override
-        protected void attachTo(BaseRows rows)
-        {
-            if (enforceLimits)
-                super.attachTo(rows);
-            counter.newPartition(rows.partitionKey(), rows.staticRow());
-            if (counter.isDoneForPartition())
-                stopInPartition();
-        }
-
-        @Override
-        public void onClose()
-        {
-            counter.endOfIteration();
-            super.onClose();
-        }
+        CsFlow<Row> content = partition.content.takeUntilAndDoOnClose(counter::isDoneForPartition,
+                                                                      counter::endOfPartition)
+                                               .skippingMap(counter::newRow);
+        return new FlowablePartition(partition.header,
+                                     counter.newStaticRow(partition.staticRow),
+                                     content);
     }
 
     /**
@@ -432,6 +406,7 @@ public abstract class DataLimits
             return new CQLLimits(toFetch, NO_LIMIT, isDistinct);
         }
 
+        @SuppressWarnings("resource") // cacheIter closed by the partition content blocking operation
         public boolean hasEnoughLiveData(CachedPartition cached, int nowInSec, boolean countPartitionsWithOnlyStaticData)
         {
             // We want the number of row that are currently live. Getting that precise number forces
@@ -445,17 +420,14 @@ public abstract class DataLimits
             if (cached.rowCount() < rowLimit)
                 return false;
 
-            // Otherwise, we need to re-count
-
+            // Otherwise, we need to re-count,
+            FlowableUnfilteredPartition cachePart = cached.unfilteredPartition(ColumnFilter.selection(cached.columns()), Slices.ALL, false);
             DataLimits.Counter counter = newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
-            try (UnfilteredRowIterator cacheIter = cached.unfilteredIterator(ColumnFilter.selection(cached.columns()), Slices.ALL, false);
-                 UnfilteredRowIterator iter = Transformation.apply(cacheIter, counter.asTransformation()))
-            {
-                // Consume the iterator until we've counted enough
-                while (iter.hasNext())
-                    iter.next();
-                return counter.isDone();
-            }
+            FlowableUnfilteredPartition partition = DataLimits.truncateUnfiltered(counter, cachePart);
+
+            // Consume the iterator until we've counted enough
+            partition.content.process().blockingSingle(); // will also close cacheIter
+            return counter.isDone();
         }
 
         public Counter newCounter(int nowInSec, boolean assumeLiveData, boolean countPartitionsWithOnlyStaticData)

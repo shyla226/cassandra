@@ -17,14 +17,13 @@
  */
 package org.apache.cassandra.service.pager;
 
-import io.reactivex.Single;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.EmptyIterators;
-import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * Perform a query, paging it by page of a given size.
@@ -49,14 +48,14 @@ public interface QueryPager
 {
     QueryPager EMPTY = new QueryPager()
     {
-        public Single<PartitionIterator> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
+        public CsFlow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
         {
-            return Single.just(EmptyIterators.partition());
+            return CsFlow.empty();
         }
 
-        public Single<PartitionIterator> fetchPageInternal(int pageSize) throws RequestValidationException, RequestExecutionException
+        public CsFlow<FlowablePartition> fetchPageInternal(int pageSize) throws RequestValidationException, RequestExecutionException
         {
-            return Single.just(EmptyIterators.partition());
+            return CsFlow.empty();
         }
 
         public boolean isExhausted()
@@ -89,26 +88,23 @@ public interface QueryPager
      * {@code consistency} is a serial consistency.
      * @param forContinuousPaging this serves the same purpose (and is delegated to) than the similarly
      * named argument to {@link org.apache.cassandra.db.ReadQuery#execute(ConsistencyLevel, ClientState, long, boolean)}.
-     * Most importantly, please not that if this is used
-     * and the query is local, then the returned iterator will hold an {@code ExecutionController} open
-     * until closed, so you must guarantee that iterator is closed on all path (but in general, the
-     * return of this method should always be used in a try-with-resources).
-     * @return the page of result.
+     *
+     * @return he page of result as an asynchronous flow of partitions
      */
-    public Single<PartitionIterator> fetchPage(int pageSize,
-                                       ConsistencyLevel consistency,
-                                       ClientState clientState,
-                                       long queryStartNanoTime,
-                                       boolean forContinuousPaging)
+    public CsFlow<FlowablePartition> fetchPage(int pageSize,
+                                               ConsistencyLevel consistency,
+                                               ClientState clientState,
+                                               long queryStartNanoTime,
+                                               boolean forContinuousPaging)
     throws RequestValidationException, RequestExecutionException;
 
     /**
      * Fetches the next page internally (in other words, this does a local query).
      *
      * @param pageSize the maximum number of elements to return in the next page.
-     * @return the page of result.
+     * @return the page of result as an asynchronous flow of partitions
      */
-    public Single<PartitionIterator> fetchPageInternal(int pageSize)
+    public CsFlow<FlowablePartition> fetchPageInternal(int pageSize)
     throws RequestValidationException, RequestExecutionException;
 
     /**

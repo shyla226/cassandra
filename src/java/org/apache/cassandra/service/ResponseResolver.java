@@ -20,10 +20,12 @@ package org.apache.cassandra.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.concurrent.Accumulator;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public abstract class ResponseResolver
 {
@@ -44,8 +46,9 @@ public abstract class ResponseResolver
         this.responses = new Accumulator<>(maxResponseCount);
     }
 
-    public abstract PartitionIterator getData();
-    public abstract PartitionIterator resolve() throws DigestMismatchException;
+    public abstract CsFlow<FlowablePartition> getData();
+    public abstract CsFlow<FlowablePartition> resolve() throws DigestMismatchException;
+    public abstract Completable completeOnReadRepairAnswersReceived();
 
     /**
      * Compares received responses, potentially triggering a digest mismatch (for a digest resolver) and read-repairs
@@ -57,7 +60,7 @@ public abstract class ResponseResolver
      *
      * @throws DigestMismatchException if it's a digest resolver and the responses don't match.
      */
-    public abstract void compareResponses() throws DigestMismatchException;
+    public abstract Completable compareResponses() throws DigestMismatchException;
 
     public abstract boolean isDataPresent();
 

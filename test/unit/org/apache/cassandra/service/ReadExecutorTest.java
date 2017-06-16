@@ -20,6 +20,7 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
@@ -88,19 +89,25 @@ public class ReadExecutorTest
         assertEquals(0, ks.metric.speculativeInsufficientReplicas.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         AbstractReadExecutor executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime(), true);
-        DatabaseDescriptor.setReadRpcTimeout(1); // we must give a chance to the task scheduled by AbstractReadExecutor.NeverSpeculatingReadExecutor.maybeTryAdditionalReplicas() to run first
         executor.executeAsync().subscribe();
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
         try
         {
-            executor.get().blockingGet();
+            executor.result().blockingSingle();
             fail();
         }
         catch (ReadTimeoutException e)
         {
             //expected
         }
+
+        // when executor.maybeTryAdditionalReplicas() completes, it will have scheduled an event on the command scheduler
+        // to increment the metrics. Schedule another event on the same scheduler and wait for it to complete so we are
+        // sure that the metrics have been updated
+        final CompletableFuture fut = new CompletableFuture();
+        command.getScheduler().scheduleDirect(() -> fut.complete(true));
+        fut.get();
 
         assertEquals(1, cfs.metric.speculativeInsufficientReplicas.getCount());
         assertEquals(1, ks.metric.speculativeInsufficientReplicas.getCount());
@@ -114,7 +121,7 @@ public class ReadExecutorTest
 
         try
         {
-            executor.get().blockingGet();
+            executor.result().blockingSingle();
             fail();
         }
         catch (ReadTimeoutException e)
@@ -154,7 +161,7 @@ public class ReadExecutorTest
 
         try
         {
-            executor.get().blockingGet();
+            executor.result().blockingSingle();
             fail();
         }
         catch (ReadFailureException e)
@@ -181,17 +188,20 @@ public class ReadExecutorTest
         assertEquals(0, ks.metric.speculativeFailedRetries.getCount());
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         AbstractReadExecutor executor = new AbstractReadExecutor.SpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime());
-        DatabaseDescriptor.setReadRpcTimeout(1); // we must give a chance to the task scheduled by AbstractReadExecutor.SpeculatingReadExecutor.maybeTryAdditionalReplicas() to run first
         executor.maybeTryAdditionalReplicas().blockingAwait();
         try
         {
-            executor.get().blockingGet();
+            executor.result().blockingSingle();
             fail();
         }
         catch (ReadTimeoutException e)
         {
             //expected
         }
+
+        // when executor.maybeTryAdditionalReplicas() completes, it will have scheduled an event on the command scheduler
+        // to increment the metrics. Schedule another event on the same scheduler and wait for it to complete so we are
+        // sure that the metrics have been updated
 
         assertEquals(1, cfs.metric.speculativeRetries.getCount());
         assertEquals(1, cfs.metric.speculativeFailedRetries.getCount());

@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.WriteVerbs.WriteVersion;
 import org.apache.cassandra.net.MessagingVersion;
@@ -270,15 +271,13 @@ public class BatchlogManager implements BatchlogManagerMBean
     // TODO make this process everything async?
     private void processBatchlogEntries(UntypedResultSet batches, int pageSize, RateLimiter rateLimiter)
     {
-        int positionInPage = 0;
         ArrayList<ReplayingBatch> unfinishedBatches = new ArrayList<>(pageSize);
 
         Set<InetAddress> hintedNodes = new HashSet<>();
         Set<UUID> replayedBatches = new HashSet<>();
 
         // Sending out batches for replay without waiting for them, so that one stuck batch doesn't affect others
-        for (UntypedResultSet.Row row : batches)
-        {
+        TPCUtils.blockingGet(batches.rows().reduceToRxSingle(0, (positionInPage, row) -> {
             UUID id = row.getUUID("id");
             WriteVersion version = getVersion(row, "version");
             try
@@ -305,9 +304,10 @@ public class BatchlogManager implements BatchlogManagerMBean
                 // We have reached the end of a batch. To avoid keeping more than a page of mutations in memory,
                 // finish processing the page before requesting the next row.
                 finishAndClearBatches(unfinishedBatches, hintedNodes, replayedBatches);
-                positionInPage = 0;
+                return 0;
             }
-        }
+            return positionInPage;
+        }));
 
         finishAndClearBatches(unfinishedBatches, hintedNodes, replayedBatches);
 

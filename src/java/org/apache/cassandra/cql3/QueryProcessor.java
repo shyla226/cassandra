@@ -427,12 +427,9 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet resultify(String query, PartitionIterator partitions)
     {
-        try (PartitionIterator iter = partitions)
-        {
-            SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
-            ResultSet cqlRows = ss.process(iter, FBUtilities.nowInSeconds());
-            return UntypedResultSet.create(cqlRows);
-        }
+        SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
+        ResultSet cqlRows = ss.process(partitions, FBUtilities.nowInSeconds()); // iterator will be closed by ss.process
+        return UntypedResultSet.create(cqlRows);
     }
 
     public Single<ResultMessage.Prepared> prepare(String query,

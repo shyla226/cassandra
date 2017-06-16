@@ -19,13 +19,12 @@ package org.apache.cassandra.db;
 
 import javax.annotation.Nullable;
 
-import io.reactivex.Single;
-
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -60,17 +59,17 @@ public interface ReadQuery extends Monitorable
             return ReadExecutionController.empty();
         }
 
-        public Single<PartitionIterator> execute(ConsistencyLevel consistency,
+        public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency,
                                          ClientState clientState,
                                          long queryStartNanoTime,
                                          boolean forContinuousPaging) throws RequestExecutionException
         {
-            return Single.just(EmptyIterators.partition());
+            return CsFlow.empty();
         }
 
-        public Single<PartitionIterator> executeInternal(Monitor monitor)
+        public CsFlow<FlowablePartition> executeInternal(Monitor monitor)
         {
-            return Single.just(EmptyIterators.partition());
+            return CsFlow.empty();
         }
 
         public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
@@ -159,12 +158,12 @@ public interface ReadQuery extends Monitorable
      * the dynamic snitch, read repair and speculative retries. This flag is also used to record
      * different metrics than for non-continuous queries.
      *
-     * @return the result of the query.
+     * @return the result of the query as as asynchronous flow of {@link FlowablePartition}
      */
-    public Single<PartitionIterator> execute(ConsistencyLevel consistency,
-                                     ClientState clientState,
-                                     long queryStartNanoTime,
-                                     boolean forContinuousPaging) throws RequestExecutionException;
+    public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency,
+                                             ClientState clientState,
+                                             long queryStartNanoTime,
+                                             boolean forContinuousPaging) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries.
@@ -173,9 +172,9 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the query.
      */
-    public Single<PartitionIterator> executeInternal(@Nullable Monitor monitor);
+    public CsFlow<FlowablePartition> executeInternal(@Nullable Monitor monitor);
 
-    public default Single<PartitionIterator> executeInternal()
+    public default CsFlow<FlowablePartition> executeInternal()
     {
         return executeInternal(null);
     }
@@ -285,5 +284,13 @@ public interface ReadQuery extends Monitorable
     default public UnfilteredPartitionIterator executeForTests()
     {
         return FlowablePartitions.toPartitions(FlowablePartitions.skipEmptyPartitions(executeLocally()), metadata());
+    }
+
+    /**
+     * Test-only helper method.
+     */
+    default public PartitionIterator executeInternalForTests()
+    {
+        return FlowablePartitions.toPartitionsFiltered(executeInternal());
     }
 }

@@ -37,7 +37,6 @@ import org.apache.cassandra.cql3.selection.ResultBuilder;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.monitoring.Monitor;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexNotAvailableException;
@@ -271,7 +270,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      *
      * Digest responses calculate the digest in the constructor and close the iterator immediately,
      * whilst data responses may keep it open until the iterator is closed by the final handler, e.g.
-     * {@link org.apache.cassandra.cql3.statements.SelectStatement#processPartition(RowIterator, QueryOptions, ResultBuilder, int)}
+     * {@link org.apache.cassandra.cql3.statements.SelectStatement#processPartition(FlowablePartition, QueryOptions, ResultBuilder, int)}
      *
      * @param partitions - the partitions to be processed in order to create the response
      * @param forLocalDelivery - if the response is to be delivered locally (optimized path)
@@ -383,7 +382,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
                 // processing we do on it).
                 r = updatedFilter.filter(r, cfs.metadata(), nowInSec());
-                return limits().filter(r, nowInSec(), selectsFullPartition());
+                return limits().truncateUnfiltered(r, nowInSec(), selectsFullPartition());
             });
 
         return flow;
@@ -398,12 +397,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
-    public Single<PartitionIterator> executeInternal(Monitor monitor)
+    public CsFlow<FlowablePartition> executeInternal(Monitor monitor)
     {
-        return Single.fromCallable(() ->
-                                   FlowablePartitions.toPartitionsFiltered(
-                                           FlowablePartitions.filterAndSkipEmpty(executeLocally(monitor),
-                                                                                 nowInSec())));
+        return FlowablePartitions.filterAndSkipEmpty(executeLocally(monitor), nowInSec());
     }
 
     public ReadExecutionController executionController()

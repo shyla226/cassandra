@@ -176,7 +176,7 @@ public class KeyspaceTest extends CQLTester
         ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(slices, reversed);
         SinglePartitionReadCommand command = singlePartitionSlice(cfs, key, filter, limit);
 
-        try (PartitionIterator iterator = command.executeInternal().blockingGet())
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             try (RowIterator rowIterator = iterator.next())
             {
@@ -248,7 +248,7 @@ public class KeyspaceTest extends CQLTester
             RegularAndStaticColumns columns = RegularAndStaticColumns.of(cfs.metadata().getColumn(new ColumnIdentifier("c", false)));
             ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(Slices.ALL, false);
             SinglePartitionReadCommand command = singlePartitionSlice(cfs, "0", filter, null);
-            try (PartitionIterator iterator = command.executeInternal().blockingGet())
+            try (PartitionIterator iterator = command.executeInternalForTests())
             {
                 try (RowIterator rowIterator = iterator.next())
                 {
@@ -262,7 +262,7 @@ public class KeyspaceTest extends CQLTester
 
     private static void assertRowsInResult(ColumnFamilyStore cfs, SinglePartitionReadCommand command, int ... columnValues)
     {
-        try (PartitionIterator iterator = command.executeInternal().blockingGet())
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             if (columnValues.length == 0)
             {

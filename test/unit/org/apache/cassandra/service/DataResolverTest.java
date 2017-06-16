@@ -28,7 +28,10 @@ import com.google.common.collect.Sets;
 import org.junit.*;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.net.interceptors.InterceptionContext;
 import org.apache.cassandra.net.interceptors.Interceptor;
 import org.apache.cassandra.schema.TableMetadata;
@@ -63,7 +66,7 @@ public class DataResolverTest
 {
     public static final String KEYSPACE1 = "DataResolverTest";
     public static final String CF_STANDARD = "Standard1";
-    public static final String CF_COLLECTION = "Collection1";
+    private static final String CF_COLLECTION = "Collection1";
 
     // counter to generate the last byte of the respondent's address in a ReadResponse message
     private int addressSuffix = 10;
@@ -137,12 +140,14 @@ public class DataResolverTest
     /**
      * Checks that the provided data resolver has the expected number of repair futures created.
      * This method also "release" those future by faking replica responses to those repair, which is necessary or
-     * every test would timeout when closing the result of resolver.resolve(), since it waits on those futures.
+     * every test would timeout before closing or checking if the partition iterator has still data (since the
+     * underlying csflow delays the final onComplete by waiting on the repair results future).
      */
     private void assertRepairFuture(DataResolver resolver, int expectedRepairs)
     {
         assertEquals(expectedRepairs, resolver.repairResults.outstandingRepairs());
-        resolver.repairResults.releaseUnsafe();
+        while (expectedRepairs-- > 0)
+            resolver.repairResults.onResponse();
     }
 
     @Test
@@ -158,18 +163,19 @@ public class DataResolverTest
                                                                                                        .add("c1", "v2")
                                                                                                        .buildUpdate())));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = FlowablePartitions.toPartitionsFiltered(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "c1");
                 assertColumn(cfm, row, "c1", "v2", 1);
             }
             assertRepairFuture(resolver, 1);
+            assertFalse(data.hasNext());
         }
 
-        assertEquals(1, messageRecorder.sent.size());
+        assertEquals(1, messageRecorder.repairsSent.size());
         // peer 1 just needs to repair with the row from peer 2
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
@@ -191,9 +197,9 @@ public class DataResolverTest
                                                                                                        .add("c2", "v2")
                                                                                                        .buildUpdate())));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "c1", "c2");
@@ -201,9 +207,10 @@ public class DataResolverTest
                 assertColumn(cfm, row, "c2", "v2", 1);
             }
             assertRepairFuture(resolver, 2);
+            assertFalse(data.hasNext());
         }
 
-        assertEquals(2, messageRecorder.sent.size());
+        assertEquals(2, messageRecorder.repairsSent.size());
         // each peer needs to repair with each other's column
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
@@ -228,7 +235,7 @@ public class DataResolverTest
                                                                                                        .add("c2", "v2")
                                                                                                        .buildUpdate())));
 
-        try (PartitionIterator data = resolver.resolve())
+        try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             try (RowIterator rows = data.next())
             {
@@ -244,12 +251,12 @@ public class DataResolverTest
                 assertColumn(cfm, row, "c2", "v2", 1);
 
                 assertFalse(rows.hasNext());
-                assertFalse(data.hasNext());
             }
             assertRepairFuture(resolver, 2);
+            assertFalse(data.hasNext());
         }
 
-        assertEquals(2, messageRecorder.sent.size());
+        assertEquals(2, messageRecorder.repairsSent.size());
         // each peer needs to repair the row from the other
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
@@ -296,7 +303,7 @@ public class DataResolverTest
                                                                                   .add("one", "A")
                                                                                   .buildUpdate());
         resolver.preprocess(readResponseMessage(peer4, iter4));
-        try (PartitionIterator data = resolver.resolve())
+        try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             try (RowIterator rows = data.next())
             {
@@ -315,7 +322,7 @@ public class DataResolverTest
             assertRepairFuture(resolver, 4);
         }
 
-        assertEquals(4, messageRecorder.sent.size());
+        assertEquals(4, messageRecorder.repairsSent.size());
         // peer1 needs the rows from peers 2 and 4
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
@@ -354,18 +361,19 @@ public class DataResolverTest
         InetAddress peer2 = peer();
         resolver.preprocess(readResponseMessage(peer2, EmptyIterators.unfilteredPartition(cfm)));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "c2");
                 assertColumn(cfm, row, "c2", "v2", 1);
             }
             assertRepairFuture(resolver, 1);
+            assertFalse(data.hasNext());
         }
 
-        assertEquals(1, messageRecorder.sent.size());
+        assertEquals(1, messageRecorder.repairsSent.size());
         // peer 2 needs the row from peer 1
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer2);
         assertRepairMetadata(msg);
@@ -380,13 +388,13 @@ public class DataResolverTest
         resolver.preprocess(readResponseMessage(peer(), EmptyIterators.unfilteredPartition(cfm)));
         resolver.preprocess(readResponseMessage(peer(), EmptyIterators.unfilteredPartition(cfm)));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            assertFalse(data.hasNext());
             assertRepairFuture(resolver, 0);
+            assertFalse(data.hasNext());
         }
 
-        assertTrue(messageRecorder.sent.isEmpty());
+        assertTrue(messageRecorder.repairsSent.isEmpty());
     }
 
     @Test
@@ -401,14 +409,14 @@ public class DataResolverTest
         InetAddress peer2 = peer();
         resolver.preprocess(readResponseMessage(peer2, fullPartitionDelete(cfm, dk, 1, nowInSec)));
 
-        try (PartitionIterator data = resolver.resolve())
+        try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
             assertRepairFuture(resolver, 1);
         }
 
         // peer1 should get the deletion from peer2
-        assertEquals(1, messageRecorder.sent.size());
+        assertEquals(1, messageRecorder.repairsSent.size());
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsDeletions(msg, new DeletionTime(1, nowInSec));
@@ -436,19 +444,20 @@ public class DataResolverTest
         InetAddress peer4 = peer();
         resolver.preprocess(readResponseMessage(peer4, fullPartitionDelete(cfm, dk, 2, nowInSec)));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "two");
                 assertColumn(cfm, row, "two", "B", 3);
             }
             assertRepairFuture(resolver, 4);
+            assertFalse(data.hasNext());
         }
 
         // peer 1 needs to get the partition delete from peer 4 and the row from peer 3
-        assertEquals(4, messageRecorder.sent.size());
+        assertEquals(4, messageRecorder.repairsSent.size());
         Request<Mutation, EmptyPayload> msg = getSentMessage(peer1);
         assertRepairMetadata(msg);
         assertRepairContainsDeletions(msg, new DeletionTime(2, nowInSec));
@@ -527,13 +536,13 @@ public class DataResolverTest
         resolver.preprocess(readResponseMessage(peer2, iter2));
 
         // No results, we've only reconciled tombstones.
-        try (PartitionIterator data = resolver.resolve())
+        try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
             assertRepairFuture(resolver, 2);
         }
 
-        assertEquals(2, messageRecorder.sent.size());
+        assertEquals(2, messageRecorder.repairsSent.size());
 
         Request<Mutation, EmptyPayload> msg1 = getSentMessage(peer1);
         assertRepairMetadata(msg1);
@@ -564,9 +573,9 @@ public class DataResolverTest
     public void testRepairRangeTombstoneBoundary() throws UnknownHostException
     {
         testRepairRangeTombstoneBoundary(1, 0, 1);
-        messageRecorder.sent.clear();
+        messageRecorder.repairsSent.clear();
         testRepairRangeTombstoneBoundary(1, 1, 0);
-        messageRecorder.sent.clear();
+        messageRecorder.repairsSent.clear();
         testRepairRangeTombstoneBoundary(1, 1, 1);
     }
 
@@ -599,13 +608,13 @@ public class DataResolverTest
         boolean shouldHaveRepair = timestamp1 != timestamp2 || timestamp1 != timestamp3;
 
         // No results, we've only reconciled tombstones.
-        try (PartitionIterator data = resolver.resolve())
+        try (PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
             assertRepairFuture(resolver, shouldHaveRepair ? 1 : 0);
         }
 
-        assertEquals(shouldHaveRepair? 1 : 0, messageRecorder.sent.size());
+        assertEquals(shouldHaveRepair? 1 : 0, messageRecorder.repairsSent.size());
 
         if (!shouldHaveRepair)
             return;
@@ -683,9 +692,9 @@ public class DataResolverTest
         InetAddress peer2 = peer();
         resolver.preprocess(readResponseMessage(peer2, iter(PartitionUpdate.singleRowUpdate(cfm2, dk, builder.build())), cmd));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "m");
@@ -693,6 +702,7 @@ public class DataResolverTest
                 Assert.assertNotNull(row.getCell(m, CellPath.create(bb(1))));
             }
             assertRepairFuture(resolver, 1);
+            assertFalse(data.hasNext());
         }
 
         Request<Mutation, EmptyPayload> msg;
@@ -707,7 +717,7 @@ public class DataResolverTest
         assertEquals(Collections.singleton(expectedCell), Sets.newHashSet(cd));
         assertEquals(expectedCmplxDelete, cd.complexDeletion());
 
-        Assert.assertNull(messageRecorder.sent.get(peer2));
+        Assert.assertNull(messageRecorder.repairsSent.get(peer2));
     }
 
     @Test
@@ -734,7 +744,7 @@ public class DataResolverTest
         InetAddress peer2 = peer();
         resolver.preprocess(readResponseMessage(peer2, iter(PartitionUpdate.singleRowUpdate(cfm2, dk, builder.build())), cmd));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
             assertFalse(data.hasNext());
             assertRepairFuture(resolver, 1);
@@ -752,7 +762,7 @@ public class DataResolverTest
         assertEquals(Collections.emptySet(), Sets.newHashSet(cd));
         assertEquals(expectedCmplxDelete, cd.complexDeletion());
 
-        Assert.assertNull(messageRecorder.sent.get(peer2));
+        Assert.assertNull(messageRecorder.repairsSent.get(peer2));
     }
 
     @Test
@@ -778,9 +788,9 @@ public class DataResolverTest
         InetAddress peer2 = peer();
         resolver.preprocess(readResponseMessage(peer2, iter(PartitionUpdate.emptyUpdate(cfm2, dk))));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "m");
@@ -788,9 +798,10 @@ public class DataResolverTest
                 assertEquals(Collections.singleton(expectedCell), Sets.newHashSet(cd));
             }
             assertRepairFuture(resolver, 1);
+            assertFalse(data.hasNext());
         }
 
-        Assert.assertNull(messageRecorder.sent.get(peer1));
+        Assert.assertNull(messageRecorder.repairsSent.get(peer1));
 
         Request<Mutation, EmptyPayload> msg;
         msg = getSentMessage(peer2);
@@ -831,9 +842,9 @@ public class DataResolverTest
         InetAddress peer2 = peer();
         resolver.preprocess(readResponseMessage(peer2, iter(PartitionUpdate.singleRowUpdate(cfm2, dk, builder.build())), cmd));
 
-        try(PartitionIterator data = resolver.resolve())
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
         {
-            try (RowIterator rows = Iterators.getOnlyElement(data))
+            try (RowIterator rows = data.next())
             {
                 Row row = Iterators.getOnlyElement(rows);
                 assertColumns(row, "m");
@@ -841,6 +852,7 @@ public class DataResolverTest
                 assertEquals(Collections.singleton(expectedCell), Sets.newHashSet(cd));
             }
             assertRepairFuture(resolver, 1);
+            assertFalse(data.hasNext());
         }
 
         Request<Mutation, EmptyPayload> msg;
@@ -852,7 +864,171 @@ public class DataResolverTest
         assertEquals(Collections.singleton(expectedCell), Sets.newHashSet(cd));
         assertEquals(expectedCmplxDelete, cd.complexDeletion());
 
-        Assert.assertNull(messageRecorder.sent.get(peer2));
+        Assert.assertNull(messageRecorder.repairsSent.get(peer2));
+    }
+
+    // Test 3 hosts sending a different partition each, make sure all partitions are returned and the missing
+    // partitions repairs are sent
+    @Test
+    public void testDifferentPartitionsFromDifferentHosts() throws UnknownHostException
+    {
+        DataResolver resolver = new DataResolver(ks, command, ConsistencyLevel.ALL, 3, System.nanoTime());
+        InetAddress peer1 = peer();
+        InetAddress peer2 = peer();
+        InetAddress peer3 = peer();
+
+        DecoratedKey key1 = Util.dk("key1");
+        DecoratedKey key2 = Util.dk("key2");
+        DecoratedKey key3 = Util.dk("key3");
+
+        Set<DecoratedKey> keys = new HashSet<>(3);
+        keys.add(key1);
+        keys.add(key2);
+        keys.add(key3);
+
+        resolver.preprocess(readResponseMessage(peer1, iter(new RowUpdateBuilder(cfm, nowInSec, 1L, key1).clustering("1")
+                                                                                                       .add("c1", "v1")
+                                                                                                       .buildUpdate())));
+
+        resolver.preprocess(readResponseMessage(peer2, iter(new RowUpdateBuilder(cfm, nowInSec, 1L, key2).clustering("1")
+                                                                                                         .add("c1", "v1")
+                                                                                                         .buildUpdate())));
+
+        resolver.preprocess(readResponseMessage(peer3, iter(new RowUpdateBuilder(cfm, nowInSec, 1L, key3).clustering("1")
+                                                                                                         .add("c1", "v1")
+                                                                                                         .buildUpdate())));
+
+
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
+        {
+            while (data.hasNext())
+            {
+                try (RowIterator rows = data.next())
+                {
+                    assertTrue(rows.partitionKey() + " not found", keys.remove(rows.partitionKey()));
+
+                    Row row = Iterators.getOnlyElement(rows);
+                    assertColumns(row, "c1");
+                    assertColumn(cfm, row, "c1", "v1", 1);
+                }
+                // send missing partition to other 2 hosts
+                assertRepairFuture(resolver, 2);
+            }
+
+            assertTrue("Not all keys were returned", keys.isEmpty());
+        }
+
+        for (InetAddress peer : new InetAddress[] {peer1, peer2, peer3})
+        {
+            List<Request<Mutation, EmptyPayload>> messages = getSentMessages(peer);
+            assertEquals("Each peer should have received two repairs", 2, messages.size());
+            for (Request<Mutation, EmptyPayload> message : messages)
+            {
+                assertRepairContainsNoDeletions(message);
+                assertRepairContainsColumn(message, "1", "c1", "v1", 1);
+            }
+        }
+    }
+
+    // two hosts send data within the limits but the combined response exceeds the limits, check that we only return
+    // data within the overall limits
+    @Test
+    public void testLimitsExceeded() throws UnknownHostException
+    {
+        ReadCommand command = Util.cmd(cfs, dk).withNowInSeconds(nowInSec).withLimit(2).build();
+        DataResolver resolver = new DataResolver(ks, command, ConsistencyLevel.ALL, 2, System.nanoTime());
+
+        InetAddress peer1 = peer();
+        InetAddress peer2 = peer();
+
+        resolver.preprocess(readResponseMessage(peer1, iter(UpdateBuilder.create(cfm, dk).withTimestamp(1L)
+                                                                         .newRow("1").add("c1", "v1")
+                                                                         .newRow("2").add("c1", "v2").build())));
+
+        resolver.preprocess(readResponseMessage(peer2, iter(UpdateBuilder.create(cfm, dk).withTimestamp(1L)
+                                                                         .newRow("2").add("c1", "v2")
+                                                                         .newRow("3").add("c1", "v3").build())));
+
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
+        {
+            while (data.hasNext())
+            {
+                try (RowIterator rowIt = data.next())
+                {
+                    List<Row> rows = new ArrayList<>(2);
+                    while (rowIt.hasNext())
+                        rows.add(rowIt.next());
+
+                    assertEquals(2, rows.size());
+
+                    assertColumns(rows.get(0), "c1");
+                    assertColumns(rows.get(1), "c1");
+
+                    assertColumn(cfm, rows.get(0), "c1", "v1", 1);
+                    assertColumn(cfm, rows.get(1), "c1", "v2", 1);
+                }
+
+                assertRepairFuture(resolver, 1); // clustering 1 sent to peer 2
+            }
+        }
+
+        Request<Mutation, EmptyPayload> message = getSentMessage(peer2);
+        assertRepairContainsColumn(message, "1", "c1", "v1", 1);
+    }
+
+    // two hosts send data within the limits but one host sends a range tombstone that results in a shortfall
+    // of the overall results
+    @Test
+    public void testShortReads() throws UnknownHostException
+    {
+        ReadCommand command = Util.cmd(cfs, dk).withNowInSeconds(nowInSec).withLimit(3).build();
+        DataResolver resolver = new DataResolver(ks, command, ConsistencyLevel.ALL, 2, System.nanoTime());
+
+        InetAddress peer1 = peer();
+        InetAddress peer2 = peer();
+
+        resolver.preprocess(readResponseMessage(peer1, iter(UpdateBuilder.create(cfm, dk).withTimestamp(1L)
+                                                                         .newRow("1").add("c1", "v1")
+                                                                         .newRow("2").add("c1", "v2")
+                                                                         .newRow("3").add("c1", "v3").build())));
+
+        resolver.preprocess(readResponseMessage(peer2, iter(UpdateBuilder.create(cfm, dk).withTimestamp(2L)
+                                                                         .newRow("1").delete()
+                                                                         .newRow("2").delete()
+                                                                         .newRow("3").add("c1", "v3").build())));
+
+        messageRecorder.addShortReadResponse(peer1, readResponseMessage(peer2, iter(UpdateBuilder.create(cfm, dk).withTimestamp(2L)
+                                                                                                 .newRow("4").add("c1", "v4").build())));
+
+        try(PartitionIterator data = toPartitions(resolver.resolve()))
+        {
+            while (data.hasNext())
+            {
+                try (RowIterator rowIt = data.next())
+                {
+                    List<Row> rows = new ArrayList<>(2);
+                    while (rowIt.hasNext())
+                        rows.add(rowIt.next());
+
+                    assertEquals(2, rows.size());
+
+                    assertColumns(rows.get(0), "c1");
+                    assertColumns(rows.get(1), "c1");
+
+                    assertColumn(cfm, rows.get(0), "c1", "v3", 2);
+                    assertColumn(cfm, rows.get(1), "c1", "v4", 2);
+                }
+
+                assertRepairFuture(resolver, 2); // 1 repair each, peer1 gets the deletion and peer2 gets v4
+                assertFalse(data.hasNext());
+            }
+        }
+
+        for (InetAddress peer : new InetAddress[] {peer1, peer2})
+        {
+            List<Request<Mutation, EmptyPayload>> messages = getSentMessages(peer);
+            assertEquals(1, messages.size());
+        }
     }
 
     private InetAddress peer()
@@ -867,10 +1043,20 @@ public class DataResolverTest
         }
     }
 
+    private List<Request<Mutation, EmptyPayload>> getSentMessages(InetAddress target)
+    {
+        List<Request<Mutation, EmptyPayload>> messages = messageRecorder.repairsSent.get(target);
+        assertNotNull(String.format("No repair message was sent to %s", target), messages);
+        assertFalse(String.format("No repair message was sent to %s", target), messages.isEmpty());
+        return messages;
+    }
+
     private Request<Mutation, EmptyPayload> getSentMessage(InetAddress target)
     {
-        Request<Mutation, EmptyPayload> message = messageRecorder.sent.get(target);
-        assertNotNull(String.format("No repair message was sent to %s", target), message);
+        List<Request<Mutation, EmptyPayload>> messages = getSentMessages(target);
+        assertTrue(String.format("More than one message was sent to %s", target), messages.size() == 1);
+        Request<Mutation, EmptyPayload> message = messages.get(0);
+        assertNotNull(String.format("Repair message sent to %s was null", target), message);
         return message;
     }
 
@@ -928,13 +1114,13 @@ public class DataResolverTest
     }
 
 
-    public Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator)
+    private Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator)
     {
         return readResponseMessage(from, partitionIterator, command);
 
     }
 
-    public Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
+    private Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
     {
         final CsFlow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
         return Response.testResponse(from,
@@ -991,15 +1177,55 @@ public class DataResolverTest
 
     private static class MessageRecorder implements Interceptor
     {
-        Map<InetAddress, Request<Mutation, EmptyPayload>> sent = new HashMap<>();
+        Map<InetAddress, List<Request<Mutation, EmptyPayload>>> repairsSent = new HashMap<>();
+        Map<InetAddress, List<Response<ReadResponse>>> shortReadResponses = new HashMap<>();
+
+        public void addShortReadResponse(InetAddress host, Response<ReadResponse> response)
+        {
+            List<Response<ReadResponse>> responses = shortReadResponses.get(host);
+            if (responses == null)
+            {
+                responses = new ArrayList<>(1);
+                shortReadResponses.put(host, responses);
+            }
+
+            responses.add(response);
+        }
 
         @SuppressWarnings("unchecked")
         public <M extends Message<?>> void intercept(M message, InterceptionContext<M> context)
         {
             if (message.isRequest() && context.isSending())
-                sent.put(message.to(), (Request<Mutation, EmptyPayload>)message);
+            {
+                Request request = (Request)message;
+                if (request.verb() == Verbs.WRITES.READ_REPAIR)
+                {
+                    List<Request<Mutation, EmptyPayload>> requests = repairsSent.get(message.to());
+                    if (requests == null)
+                    {
+                        requests = new ArrayList<>(1);
+                        repairsSent.put(message.to(), requests);
+                    }
+                    requests.add((Request<Mutation, EmptyPayload>) message);
+                    context.drop(message);
+                    return;
+                }
+                else if (request.verb() == Verbs.READS.READ)
+                {
+                    List<Response<ReadResponse>> responses = shortReadResponses.get(message.to());
+                    if (responses != null && !responses.isEmpty())
+                    {
+                        context.drop(message);
 
-            context.drop(message);
+                        final Response<ReadResponse> response = responses.remove(0);
+                        StageManager.getStage(Stage.REQUEST_RESPONSE).execute(() -> context.responseCallback().accept(response));
+
+                        return;
+                    }
+                }
+            }
+
+            context.passDown(message);
         }
     }
 
@@ -1028,5 +1254,10 @@ public class DataResolverTest
             }
         };
         return new SingletonUnfilteredPartitionIterator(rowIter);
+    }
+
+    private static PartitionIterator toPartitions(CsFlow<FlowablePartition> source)
+    {
+        return FlowablePartitions.toPartitionsFiltered(source);
     }
 }

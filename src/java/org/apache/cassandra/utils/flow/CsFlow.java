@@ -41,6 +41,9 @@ import java.util.stream.Stream;
 import com.google.common.util.concurrent.Runnables;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.CompletableSource;
@@ -50,6 +53,7 @@ import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
@@ -59,8 +63,10 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
  */
-public abstract class   CsFlow<T>
+public abstract class CsFlow<T>
 {
+    private static final Logger logger = LoggerFactory.getLogger(CsFlow.class);
+
     public final static LineNumberInference LINE_NUMBERS = new LineNumberInference();
 
     /**
@@ -87,7 +93,21 @@ public abstract class   CsFlow<T>
          * complete, throw an error using error, or decide to ignore input and request another.
          * For some usage ideas, see {@link SkippingOp} and {@link StoppingOp} below.
          */
-        abstract void onNext(CsSubscriber<O> subscriber, CsSubscription source, I next);
+        abstract void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next);
+
+        /**
+         * Called on error
+         * */
+        default void onError(Throwable error) throws Exception
+        {
+        }
+
+        /**
+         * Called on complete
+         * */
+        default void onComplete() throws Exception
+        {
+        }
 
         /**
          * Called on close.
@@ -114,24 +134,39 @@ public abstract class   CsFlow<T>
             public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
             {
                 return !DEBUG_ENABLED
-                       ? new ApplyOpSubscription<>(prefix, subscriber, op, source)
-                       : new CheckedApplyOpSubscription<>(prefix, subscriber, op, source);
+                       ? new ApplyOpSubscriptionImpl(prefix, subscriber, op, source)
+                       : new ApplyOpSubscriptionCheckedImpl(prefix, subscriber, op, source);
             }
         }
         return new ApplyFlow();
     }
 
     /**
+     * Extends {@link CsSubscription} with the ability to request an item in a loop, which
+     * is required by {@link FilterOp} and {@link SkippingOp}.
+     *
+     * This is implemented by the "apply" concreate subscriptions, see {@link ApplyOpSubscriptionImpl}
+     * and {@link ApplyOpSubscriptionCheckedImpl}.
+     */
+    private interface ApplyOpSubscription extends CsSubscription
+    {
+        public void requestInLoop();
+    }
+
+    /**
      * Apply implementation.
      */
-    private static class ApplyOpSubscription<I, O> extends RequestLoop implements CsSubscription, CsSubscriber<I>
+    private static class ApplyOpSubscriptionImpl<I, O> extends RequestLoop implements ApplyOpSubscription, CsSubscriber<I>
     {
         final CsSubscriber<O> subscriber;
         final CsSubscription source;
         final FlowableOp<I, O> mapper;
         final String prefix;
 
-        public ApplyOpSubscription(String prefix, CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
+        private ApplyOpSubscriptionImpl(String prefix,
+                                        CsSubscriber<O> subscriber,
+                                        FlowableOp<I, O> mapper,
+                                        CsFlow<I> source) throws Exception
         {
             this.subscriber = subscriber;
             this.mapper = mapper;
@@ -146,18 +181,40 @@ public abstract class   CsFlow<T>
 
         public void onError(Throwable throwable)
         {
+            try
+            {
+                mapper.onError(throwable);
+            }
+            catch (Throwable t)
+            {
+                throwable = Throwables.merge(throwable, t);
+            }
+
             subscriber.onError(throwable);
         }
 
         public void onComplete()
         {
+            try
+            {
+                mapper.onComplete();
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
             subscriber.onComplete();
         }
 
         public void request()
         {
-            // Note: This is less efficient than optimal. We'd prefer to only do request loops for additional
-            // requests, not for ones made by our subscriber.
+            source.request();
+        }
+
+        public void requestInLoop()
+        {
             requestInLoop(source);
         }
 
@@ -187,7 +244,7 @@ public abstract class   CsFlow<T>
     /**
      * Apply implementation that checks the subscriptions are used correctly (e.g. without concurrent requests).
      */
-    private static class CheckedApplyOpSubscription<I, O> extends DebugRequestLoop implements CsSubscription, CsSubscriber<I>
+    private static class ApplyOpSubscriptionCheckedImpl<I, O> extends DebugRequestLoop implements ApplyOpSubscription, CsSubscriber<I>
     {
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
@@ -204,8 +261,8 @@ public abstract class   CsFlow<T>
         }
 
         private volatile State state = State.INITIALIZING;
-        private static final AtomicReferenceFieldUpdater<CheckedApplyOpSubscription, State> stateUpdater =
-            AtomicReferenceFieldUpdater.newUpdater(CheckedApplyOpSubscription.class, State.class, "state");
+        private static final AtomicReferenceFieldUpdater<ApplyOpSubscriptionCheckedImpl, State> stateUpdater =
+            AtomicReferenceFieldUpdater.newUpdater(ApplyOpSubscriptionCheckedImpl.class, State.class, "state");
 
         boolean verifyStateTransition(Throwable existingError, State from, State to)
         {
@@ -232,7 +289,7 @@ public abstract class   CsFlow<T>
                                                        this));
         }
 
-        public CheckedApplyOpSubscription(String prefix, CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
+        private ApplyOpSubscriptionCheckedImpl(String prefix, CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
             super(subscriber);
             this.subscriber = subscriber;
@@ -244,9 +301,6 @@ public abstract class   CsFlow<T>
 
         public void onNext(I item)
         {
-            // TODO: if the mapper skips too many items it may cause a stack overflow,
-            // see Flow/OpsTest. The solution is to use the RequestLoop but we need to
-            // integrate the debug states
             if (verifyStateTransition(null, State.REQUESTED, State.READY))
                 mapper.onNext(subscriber, this, item);
 
@@ -255,16 +309,45 @@ public abstract class   CsFlow<T>
         public void onError(Throwable throwable)
         {
             if (verifyStateTransition(throwable, State.REQUESTED, State.COMPLETED))
+            {
+                try
+                {
+                    mapper.onError(throwable);
+                }
+                catch (Throwable t)
+                {
+                    throwable = Throwables.merge(throwable, t);
+                }
+
                 subscriber.onError(throwable);
+            }
         }
 
         public void onComplete()
         {
             if (verifyStateTransition(null, State.REQUESTED, State.COMPLETED))
-                subscriber.onComplete();
+                return;
+
+            try
+            {
+                mapper.onComplete();
+            }
+            catch (Throwable t)
+            {
+                subscriber.onError(t);
+                return;
+            }
+
+            subscriber.onComplete();
         }
 
         public void request()
+        {
+            if (verifyStateTransition(null, State.READY, State.REQUESTED))
+                source.request();
+        }
+
+        public void requestInLoop()
         {
             if (verifyStateTransition(null, State.READY, State.REQUESTED))
                 requestInLoop(source);
@@ -310,7 +393,7 @@ public abstract class   CsFlow<T>
      */
     public interface MappingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
     {
-        default void onNext(CsSubscriber<O> subscriber, CsSubscription source, I next)
+        default void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -341,7 +424,7 @@ public abstract class   CsFlow<T>
      */
     public interface SkippingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
     {
-        default void onNext(CsSubscriber<O> subscriber, CsSubscription source, I next)
+        default void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -350,7 +433,7 @@ public abstract class   CsFlow<T>
                 if (out != null)
                     subscriber.onNext(out);
                 else
-                    source.request();
+                    source.requestInLoop();
             }
             catch (Throwable t)
             {
@@ -374,7 +457,7 @@ public abstract class   CsFlow<T>
      */
     public interface StoppingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
     {
-        default void onNext(CsSubscriber<O> subscriber, CsSubscription source, I next)
+        default void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -407,7 +490,7 @@ public abstract class   CsFlow<T>
      */
     public interface TakeWhileOp<I> extends Predicate<I>, FlowableOp<I, I>
     {
-        default void onNext(CsSubscriber<I> subscriber, CsSubscription source, I next)
+        default void onNext(CsSubscriber<I> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -540,7 +623,7 @@ public abstract class   CsFlow<T>
      */
     public interface FilterOp<I> extends Predicate<I>, FlowableOp<I, I>
     {
-        default void onNext(CsSubscriber<I> subscriber, CsSubscription source, I next)
+        default void onNext(CsSubscriber<I> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -548,7 +631,7 @@ public abstract class   CsFlow<T>
                 if (test(next))
                     subscriber.onNext(next);
                 else
-                    source.request();
+                    source.requestInLoop();
             }
             catch (Throwable t)
             {
@@ -563,6 +646,53 @@ public abstract class   CsFlow<T>
     public CsFlow<T> filter(FilterOp<T> tester)
     {
         return apply(tester, "filter");
+    }
+
+    /**
+     * Op for applying an operation on error.
+     *
+     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
+     */
+    public interface OnErrorOp<T> extends FlowableOp<T, T>
+    {
+        default void onNext(CsSubscriber<T> subscriber, ApplyOpSubscription source, T next)
+        {
+            subscriber.onNext(next);
+        }
+
+        void onError(Throwable throwable) throws Exception;
+    }
+
+    /**
+     * Apply the operation when the flow errors out. If handler throws, exception will be added as suppressed.
+     */
+    public CsFlow<T> doOnError(OnErrorOp<T> onError)
+    {
+        return apply(onError, "doOnError");
+    }
+
+    /**
+     * Op for applying an operation on completion.
+     *
+     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
+     */
+    public interface OnCompleteOp<T> extends FlowableOp<T, T>
+    {
+        default void onNext(CsSubscriber<T> subscriber, ApplyOpSubscription source, T next)
+        {
+            subscriber.onNext(next);
+        }
+
+        void onComplete() throws Exception;
+    }
+
+    /**
+     * Apply the operation when the flow completes. If handler throws, subscriber's onNext will be called instead
+     * of onComplete.
+     */
+    public CsFlow<T> doOnComplete(OnCompleteOp<T> onComplete)
+    {
+        return apply(onComplete, "doOnComplete");
     }
 
     /**
@@ -583,12 +713,50 @@ public abstract class   CsFlow<T>
 
     public static <T> CsFlow<T> concat(CsFlow<CsFlow<T>> source)
     {
-        return source.flatMap(x -> x);
+        return Concat.concat(source);
     }
 
+    /**
+     * Concatenate the input flows one after another and return a flow of items.
+     * <p>
+     * This is currently implemented with {@link #fromIterable(Iterable)} and {@link #flatMap(FlatMap.FlatMapper)},
+     * to be optimized later.
+     *
+     * @param sources - an iterable of CsFlow<O></O>
+     * @param <T> - the type of the flow items
+     *
+     * @return a concatenated flow of items
+     */
     public static <T> CsFlow<T> concat(Iterable<CsFlow<T>> sources)
     {
-        return concat(fromIterable(sources));
+        return Concat.concat(sources);
+    }
+
+    /**
+     * Concatenate the input flows one after another and return a flow of items.
+     *
+     * @param o - an array of CsFlow<O></O>
+     * @param <O> - the type of the flow items
+     *
+     * @return a concatenated flow of items
+     */
+    public static <O> CsFlow<O> concat(CsFlow<O> ... o)
+    {
+        return Concat.concat(o);
+    }
+
+    /**
+     * Concatenate this flow with any flow produced by the supplier. After this flow has completed,
+     * query the supplier for the next flow and subscribe to it. Continue in this fashion until the
+     * supplier returns null, at which point the entire flow is completed.
+     *
+     * @param supplier - a function that produces a new flow to be concatenated or null when finished
+     * @return a flow that will complete when this and all the flows produced by the supplier have
+     * completed.
+     */
+    public CsFlow<T> concatWith(Supplier<CsFlow<T>> supplier)
+    {
+        return Concat.concatWith(this, supplier);
     }
 
     /**
@@ -619,6 +787,115 @@ public abstract class   CsFlow<T>
             }
         }
         return new IterableToFlow();
+    }
+
+    /**
+     * Return a flow that executes normally except that in case of error it fallbacks to the
+     * flow provided by the next source supplier.
+     *
+     * @param nextSourceSupplier - a function that given an error returns a new flow.
+     *
+     * @return a flow that on error will subscribe to the flow provided by the next source supplier.
+     */
+    public CsFlow<T> onErrorResumeNext(Function<Throwable, CsFlow<T>> nextSourceSupplier)
+    {
+        final CsFlow<T> source = this;
+
+        class OnErrorResultNextSubscriber implements CsSubscriber<T>, CsSubscription
+        {
+            private CsSubscriber subscriber;
+            private CsSubscription subscription;
+            private boolean nextSubscribed = false;
+
+            OnErrorResultNextSubscriber(CsSubscriber<T> subscriber) throws Exception
+            {
+                this.subscriber = subscriber;
+                this.subscription = source.subscribe(this);
+            }
+
+            public void onNext(T item)
+            {
+                subscriber.onNext(item);
+            }
+
+            public void onComplete()
+            {
+                subscriber.onComplete();
+            }
+
+            public void request()
+            {
+                subscription.request();
+            }
+
+            public void close() throws Exception
+            {
+                subscription.close();
+            }
+
+            @Override
+            public String toString()
+            {
+                return formatTrace("onErrorResumeNext", subscriber);
+            }
+
+            @Override
+            public Throwable addSubscriberChainFromSource(Throwable t)
+            {
+                return subscription.addSubscriberChainFromSource(t);
+            }
+
+            public final void onError(Throwable t)
+            {
+                Throwable error = addSubscriberChainFromSource(t);
+
+                if (nextSubscribed)
+                {
+                    subscriber.onError(error);
+                    return;
+                }
+
+                CsSubscription prevSubscription = subscription;
+                try
+                {
+                    CsFlow<T> nextSource = nextSourceSupplier.apply(error);
+                    subscription = nextSource.subscribe(subscriber);
+                    nextSubscribed = true;
+
+                }
+                catch (Exception ex)
+                {
+                    subscriber.onError(Throwables.merge(error, ex));
+                    // Note: close() will take care of closing the original subscription.
+                    return;
+                }
+
+                try
+                {
+                    prevSubscription.close();
+                }
+                catch (Throwable ex)
+                {
+                    logger.debug("Failed to close previous subscription in onErrorResumeNext: {}/{}", ex.getClass(), ex.getMessage());
+                }
+
+                subscription.request();
+            }
+        }
+
+        return new CsFlow<T>()
+        {
+            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            {
+                return new OnErrorResultNextSubscriber(subscriber);
+            }
+        };
+    }
+
+    public CsFlow<T> mapError(Function<Throwable, Throwable> mapper)
+    {
+        // TODO implement directly
+        return onErrorResumeNext(e -> error(mapper.apply(e)));
     }
 
     static class IteratorSubscription<O> implements CsSubscription
@@ -683,7 +960,7 @@ public abstract class   CsFlow<T>
      * This is implemented in two versions, RequestLoop and DebugRequestLoop, where the former assumes everything is
      * working correctly while the latter verifies that there is no unexpected behaviour.
      */
-    static class RequestLoop
+    public static class RequestLoop
     {
         enum RequestLoopState
         {
@@ -797,7 +1074,7 @@ public abstract class   CsFlow<T>
                 return;
             }
 
-            request();
+            requestInLoop(source);
         }
 
         public void request()
@@ -1114,6 +1391,14 @@ public abstract class   CsFlow<T>
         return reduceToRxSingle(null, mapper);
     }
 
+    /**
+     * Maps a CsFlow holding a single value into an Rx Single using the supplied mapper.
+     */
+    public Single<T> mapToRxSingle()
+    {
+        return mapToRxSingle(x -> x);
+    }
+
     // Not fully tested -- this is not meant for long-term use
     public Completable processToRxCompletable(ConsumingOp<T> consumer)
     {
@@ -1249,7 +1534,7 @@ public abstract class   CsFlow<T>
         return process(noOp());
     }
 
-    public <I, O> CsFlow<Void> flatProcess(FlatMap.FlatMapper<T, Void> mapper)
+    public <O> CsFlow<Void> flatProcess(FlatMap.FlatMapper<T, O> mapper)
     {
         return this.flatMap(mapper)
                    .process();
@@ -1429,6 +1714,194 @@ public abstract class   CsFlow<T>
     }
 
     /**
+     * Returns a flow that simply emits an error as soon as the subscriber
+     * requests the first item.
+     *
+     * @param t - the error to emit
+     *
+     * @return a flow that emits the error immediately on request
+     */
+    public static <T> CsFlow<T> error(Throwable t)
+    {
+        return new CsFlow<T>()
+        {
+            public CsSubscription subscribe(CsSubscriber subscriber) throws Exception
+            {
+                return new CsSubscription()
+                {
+
+                    public void request()
+                    {
+                        subscriber.onError(t);
+                    }
+
+                    public void close() throws Exception
+                    {
+                    }
+
+                    public Throwable addSubscriberChainFromSource(Throwable throwable)
+                    {
+                        return CsFlow.wrapException(throwable, this);
+                    }
+
+                    @Override
+                    public String toString()
+                    {
+                        return formatTrace("error", subscriber);
+                    }
+                };
+            }
+        };
+    }
+
+    /**
+     * Return a CsFlow that will subscribe to the completable once the first request is received and,
+     * when the completable completes, it actually subscribes and passes on the first request to the source flow.
+     *
+     * @param completable - the completable to execute first
+     * @param source - the flow that should execute once the completable has completed
+     *
+     * @param <T> - the type of the source items
+     * @return a CsFlow that executes the completable, followed by the source flow
+     */
+    public static <T> CsFlow<T> concat(Completable completable, CsFlow<T> source)
+    {
+        class CompletableCsFlowSubscriber implements CsSubscription
+        {
+            private final CsSubscriber<T> subscriber;
+            private CsSubscription subscription;
+
+            CompletableCsFlowSubscriber(CsSubscriber<T> subscriber)
+            {
+                this.subscriber = subscriber;
+            }
+
+            public void request()
+            {
+                if (subscription != null)
+                    subscription.request();
+                else
+                    completable.subscribe(this::onCompletableSuccess, error -> subscriber.onError(error));
+            }
+
+            private void onCompletableSuccess()
+            {
+                try
+                {
+                    subscription = source.subscribe(subscriber);
+                    subscription.request();
+                }
+                catch (Exception e)
+                {
+                    onError(e);
+                }
+            }
+
+            private void onError(Throwable t)
+            {
+                subscriber.onError(t);
+            }
+
+            public void close() throws Exception
+            {
+                if (subscription != null)
+                    subscription.close();
+            }
+
+            public Throwable addSubscriberChainFromSource(Throwable throwable)
+            {
+                if (subscription != null)
+                    return subscription.addSubscriberChainFromSource(throwable);
+
+                return throwable;
+            }
+
+            @Override
+            public String toString()
+            {
+                return formatTrace("concatCompletableFlow", completable, subscriber);
+            }
+        }
+        return new CsFlow<T>()
+        {
+            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            {
+                return new CompletableCsFlowSubscriber(subscriber);
+            }
+        };
+    }
+
+    /**
+     * Return a CsFlow that will subscribe to the source flow first and then it will delay
+     * the final onComplete() by executing the completable first.
+     *
+     * @param completable - the completable to execute before the final onComplete of the source
+     * @param source - the flow that should execute before the final completable
+     *
+     * @param <T> - the type of the source items
+     * @return a CsFlow that executes the source flow, then the completable
+     */
+    public static <T> CsFlow<T> concat(CsFlow<T> source, Completable completable)
+    {
+        class CsFlowCompletableSubscriber implements CsSubscriber<T>, CsSubscription
+        {
+            private CsSubscriber subscriber;
+            private CsSubscription subscription;
+
+            CsFlowCompletableSubscriber(CsSubscriber<T> subscriber) throws Exception
+            {
+                this.subscriber = subscriber;
+                this.subscription = source.subscribe(this);
+            }
+
+            public void onNext(T item)
+            {
+                subscriber.onNext(item);
+            }
+
+            public void onComplete()
+            {
+                completable.subscribe(() -> subscriber.onComplete(), error -> onError(error));
+            }
+
+            public void request()
+            {
+                subscription.request();
+            }
+
+            public void close() throws Exception
+            {
+                subscription.close();
+            }
+
+            @Override
+            public String toString()
+            {
+                return formatTrace("concatFlowCompletable", completable, subscriber);
+            }
+
+            @Override
+            public Throwable addSubscriberChainFromSource(Throwable t)
+            {
+                return subscription.addSubscriberChainFromSource(t);
+            }
+
+            public final void onError(Throwable t)
+            {
+                subscriber.onError(t);
+            }
+        }
+
+        return new CsFlow<T>()
+        {
+            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            {
+                return new CsFlowCompletableSubscriber(subscriber);
+            }
+        };
+    }
+
+    /**
      * Returns a singleton flow with the given value.
      */
     public static <T> CsFlow<T> just(T value)
@@ -1562,7 +2035,7 @@ public abstract class   CsFlow<T>
     public CsFlow<T> take(long count)
     {
         AtomicLong cc = new AtomicLong(count);
-        return stoppingMap(x -> cc.decrementAndGet() >= 0 ? x : null);
+        return takeUntil(() -> cc.decrementAndGet() < 0);
     }
 
     /**
@@ -1704,6 +2177,52 @@ public abstract class   CsFlow<T>
         }
     }
 
+    /**
+     * Simple interface for extracting the chilren of a tee operation.
+     */
+    public interface Tee<T>
+    {
+        public CsFlow<T> child(int index);
+    }
+
+    /**
+     * Splits the flow into multiple resulting flows which can be independently operated and closed. The same
+     * items, completions and errors are provided to all of the clients.
+     * All resulting flows must be subscribed to and closed.
+     *
+     * The tee implementation (see {@link TeeImpl} executes by waiting for all clients to act before issuing the act
+     * upstream. This means that the use of one client cannot be delayed until the completion of another (as this would
+     * have required caching).
+     *
+     * The typical usage of this operation is to apply a "reduceToFuture" operation to all but one of the resulting
+     * flows. This operation subscribes and initiates requests, but will not actually perform anything until the last
+     * "controlling" flow subscribes and requests. When that happens onNext calls will be issued to all clients, and
+     * any of them can delay (by not requesting) or withdraw from (by closing) futher processing.
+     */
+    public Tee<T> tee(int count) throws Exception
+    {
+        return new TeeImpl<>(this, count);
+    }
+
+    /**
+     * Splits the flow into two resulting flows which can be independently operated and closed. The same
+     * items, completions and errors are provided to both of the clients.
+     * Both resulting flows must be subscribed to and closed.
+     *
+     * The tee implementation (see {@link TeeImpl} executes by waiting for all clients to act before issuing the act
+     * upstream. This means that the use of one client cannot be delayed until the completion of another (as this would
+     * have required caching).
+     *
+     * The typical usage of this operation is to apply a "reduceToFuture" operation to all but one of the resulting
+     * flows. This operation subscribes and initiates requests, but will not actually perform anything until the last
+     * "controlling" flow subscribes and requests. When that happens onNext calls will be issued to all clients, and
+     * any of them can delay (by not requesting) or withdraw from (by closing) futher processing.
+     */
+    public Tee<T> tee() throws Exception
+    {
+        return new TeeImpl<>(this, 2);
+    }
+
     public static StackTraceElement[] maybeGetStackTrace()
     {
         if (CsFlow.DEBUG_ENABLED)
@@ -1713,6 +2232,11 @@ public abstract class   CsFlow<T>
 
     public static Throwable wrapException(Throwable throwable, Object tag)
     {
+        // for well known exceptions that can occur and that are handled downstream,
+        // do not attach the subscriber chain as this would slow things down too much
+        if (throwable instanceof NonWrappableException)
+            return throwable;
+
         // Avoid re-wrapping an exception if it was already added
         for (Throwable t : throwable.getSuppressed())
         {
@@ -1724,6 +2248,17 @@ public abstract class   CsFlow<T>
         LINE_NUMBERS.preloadLambdas();
         throwable.addSuppressed(new CsFlowException(tag.toString()));
         return throwable;
+    }
+
+    /**
+     * An interface to signal to {@link #wrapException(Throwable, Object)}
+     * not to wrap these exceptions with the caller stack trace since these
+     * exceptions may occur regularly and therefore preloading lambdas would
+     * be too slow.
+     */
+    public interface NonWrappableException
+    {
+
     }
 
     private static class CsFlowException extends RuntimeException

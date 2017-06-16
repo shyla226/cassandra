@@ -17,9 +17,6 @@
  */
 package org.apache.cassandra.db.partitions;
 
-import java.io.IOError;
-import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -27,18 +24,12 @@ import io.reactivex.Completable;
 import io.reactivex.Single;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.versioning.VersionDependent;
-import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
 
@@ -47,8 +38,6 @@ import org.apache.cassandra.utils.Reducer;
  */
 public abstract class UnfilteredPartitionIterators
 {
-    private static final Versioned<EncodingVersion, Serializer> serializers = EncodingVersion.versioned(Serializer::new);
-
     private static final Comparator<UnfilteredRowIterator> partitionComparator = Comparator.comparing(BaseRowIterator::partitionKey);
 
     private UnfilteredPartitionIterators() {}
@@ -308,11 +297,6 @@ public abstract class UnfilteredPartitionIterators
         return partitions.flatProcess(partition -> UnfilteredRowIterators.digest(partition, digest, version));
     }
 
-    public static Serializer serializerForIntraNode(EncodingVersion version)
-    {
-        return serializers.get(version);
-    }
-
     /**
      * Wraps the provided iterator so it logs the returned rows/RT for debugging purposes.
      * <p>
@@ -331,123 +315,5 @@ public abstract class UnfilteredPartitionIterators
         return Transformation.apply(iterator, new Logging());
     }
 
-    /**
-     * Serialize each UnfilteredSerializer one after the other, with an initial byte that indicates whether
-     * we're done or not.
-     */
-    public static class Serializer extends VersionDependent<EncodingVersion>
-    {
-        private Serializer(EncodingVersion version)
-        {
-            super(version);
-        }
 
-        public void serialize(UnfilteredPartitionIterator iter, ColumnFilter selection, DataOutputPlus out) throws IOException
-        {
-            // Previously, a boolean indicating if this was for a thrift query.
-            // Unused since 4.0 but kept on wire for compatibility.
-            out.writeBoolean(false);
-            while (iter.hasNext())
-            {
-                out.writeBoolean(true);
-                try (UnfilteredRowIterator partition = iter.next())
-                {
-                    UnfilteredRowIteratorSerializer.serializers.get(version).serialize(partition, selection, out);
-                }
-            }
-            out.writeBoolean(false);
-        }
-
-        @SuppressWarnings("resource") // DataOutputBuffer does not need closing.
-        public CsFlow<ByteBuffer> serialize(CsFlow<FlowableUnfilteredPartition> partitions, ColumnFilter selection)
-        {
-            final DataOutputBuffer out = new DataOutputBuffer();
-            // Previously, a boolean indicating if this was for a thrift query.
-            // Unused since 4.0 but kept on wire for compatibility.
-            try
-            {
-                out.writeBoolean(false);
-            }
-            catch (IOException e)
-            {
-                // Should never happen
-                throw new AssertionError(e);
-            }
-
-            return partitions.flatProcess(partition ->
-                                         {
-                                             out.writeBoolean(true);
-                                             return UnfilteredRowIteratorSerializer.serializers.get(version).serialize(partition, selection, out);
-                                         })
-                             .map(VOID ->
-                                  {
-                                      out.writeBoolean(false);
-                                      return out.trimmedBuffer();
-                                  });
-        }
-
-        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final TableMetadata metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException
-        {
-            // Skip now unused isForThrift boolean
-            in.readBoolean();
-
-            return new AbstractUnfilteredPartitionIterator()
-            {
-                private UnfilteredRowIterator next;
-                private boolean hasNext;
-                private boolean nextReturned = true;
-
-                public TableMetadata metadata()
-                {
-                    return metadata;
-                }
-
-                public boolean hasNext()
-                {
-                    if (!nextReturned)
-                        return hasNext;
-
-                    // We can't answer this until the previously returned iterator has been fully consumed,
-                    // so complain if that's not the case.
-                    if (next != null && next.hasNext())
-                        throw new IllegalStateException("Cannot call hasNext() until the previous iterator has been fully consumed");
-
-                    try
-                    {
-                        hasNext = in.readBoolean();
-                        nextReturned = false;
-                        return hasNext;
-                    }
-                    catch (IOException e)
-                    {
-                        throw new IOError(e);
-                    }
-                }
-
-                public UnfilteredRowIterator next()
-                {
-                    if (nextReturned && !hasNext())
-                        throw new NoSuchElementException();
-
-                    try
-                    {
-                        nextReturned = true;
-                        next = UnfilteredRowIteratorSerializer.serializers.get(version).deserialize(in, metadata, selection, flag);
-                        return next;
-                    }
-                    catch (IOException e)
-                    {
-                        throw new IOError(e);
-                    }
-                }
-
-                @Override
-                public void close()
-                {
-                    if (next != null)
-                        next.close();
-                }
-            };
-        }
-    }
 }

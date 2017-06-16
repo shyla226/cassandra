@@ -98,17 +98,16 @@ public class QueryMessage extends Message.Request
 
                                   return response;
                               })
-                              .doFinally(() -> Tracing.instance.stopSession());
+                              .flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
 
         }
         catch (Exception e)
         {
-            Tracing.instance.stopSession();
-
             JVMStabilityInspector.inspectThrowable(e);
             if (!((e instanceof RequestValidationException) || (e instanceof RequestExecutionException)))
                 logger.error("Unexpected error during query", e);
-            return Single.just(ErrorMessage.fromException(e));
+            return Tracing.instance.stopSessionAsync()
+                                   .toSingleDefault(ErrorMessage.fromException(e));
         }
     }
 

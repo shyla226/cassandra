@@ -31,8 +31,9 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.Stage;
+import io.reactivex.Completable;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.OverloadedException;
@@ -51,7 +52,7 @@ public class TraceStateImpl extends TraceState
     public static int WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS =
       Integer.parseInt(System.getProperty("cassandra.wait_for_tracing_events_timeout_secs", "0"));
 
-    private final Set<Future<?>> pendingFutures = ConcurrentHashMap.newKeySet();
+    private final Set<Future<Void>> pendingFutures = ConcurrentHashMap.newKeySet();
 
     public TraceStateImpl(InetAddress coordinator, UUID sessionId, Tracing.TraceType traceType)
     {
@@ -71,31 +72,35 @@ public class TraceStateImpl extends TraceState
     /**
      * Wait on submitted futures
      */
-    protected void waitForPendingEvents()
+    protected Completable waitForPendingEvents()
     {
         if (WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS <= 0)
-            return;
+            return Completable.complete();
 
-        try
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Waiting for up to {} seconds for {} trace events to complete",
-                             +WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS, pendingFutures.size());
+        CompletableFuture<Void> fut = CompletableFuture.allOf(pendingFutures.toArray(new CompletableFuture<?>[pendingFutures.size()]));
+        return Completable.create(subscriber -> fut.whenComplete((result, error) -> {
+                              if (error != null)
+                                  subscriber.onError(error);
+                              else
+                                  subscriber.onComplete();
+                           }))
+                          .timeout(WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS, TimeUnit.SECONDS)
+                          .onErrorResumeNext(ex -> {
+                              if (ex instanceof TimeoutException)
+                              {
+                                  if (logger.isTraceEnabled())
+                                      logger.trace("Failed to wait for tracing events to complete in {} seconds",
+                                                   WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS);
+                              }
+                              else
+                              {
+                                  JVMStabilityInspector.inspectThrowable(ex);
+                                  logger.error("Got exception whilst waiting for tracing events to complete", ex);
+                              }
 
-            CompletableFuture.allOf(pendingFutures.toArray(new CompletableFuture<?>[pendingFutures.size()]))
-                             .get(WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS, TimeUnit.SECONDS);
-        }
-        catch (TimeoutException ex)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Failed to wait for tracing events to complete in {} seconds",
-                             WAIT_FOR_PENDING_EVENTS_TIMEOUT_SECS);
-        }
-        catch (Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            logger.error("Got exception whilst waiting for tracing events to complete", t);
-        }
+                              // don't pass on exceptions, just log them
+                              return Completable.complete();
+                          });
     }
 
 
@@ -123,6 +128,11 @@ public class TraceStateImpl extends TraceState
         catch (OverloadedException e)
         {
             Tracing.logger.warn("Too many nodes are overloaded to save trace events");
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Could not apply tracing mutation {}", mutation, t);
         }
     }
 

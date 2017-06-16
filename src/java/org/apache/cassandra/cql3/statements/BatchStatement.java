@@ -370,17 +370,7 @@ public class BatchStatement implements CQLStatement
         if (!hasConditions)
             return executeWithoutConditions(getMutations(options, false, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
 
-        // Paxos is already slow, so for now, just execute it in a blocking way on a different thread
-        return Single.defer(() -> {
-            try
-            {
-                return Single.just(executeWithConditions(options, queryState, queryStartNanoTime));
-            }
-            catch (Throwable t)
-            {
-                return Single.error(t);
-            }
-        }).subscribeOn(Schedulers.io());
+        return executeWithConditions(options, queryState, queryStartNanoTime);
     }
 
     private Single<? extends ResultMessage> executeWithoutConditions(Single<Collection<? extends IMutation>> mutationsSingle,
@@ -419,7 +409,7 @@ public class BatchStatement implements CQLStatement
         }
     }
 
-    private ResultMessage executeWithConditions(BatchQueryOptions options, QueryState state, long queryStartNanoTime)
+    private Single<ResultMessage> executeWithConditions(BatchQueryOptions options, QueryState state, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         Pair<CQL3CasRequest, Set<ColumnMetadata>> p = makeCasRequest(options, state);
@@ -429,23 +419,21 @@ public class BatchStatement implements CQLStatement
         String ksName = casRequest.metadata.keyspace;
         String tableName = casRequest.metadata.name;
 
-        try (RowIterator result = StorageProxy.cas(ksName,
-                                                   tableName,
-                                                   casRequest.key,
-                                                   casRequest,
-                                                   options.getSerialConsistency(),
-                                                   options.getConsistency(),
-                                                   state.getClientState(),
-                                                   queryStartNanoTime))
-        {
-
-            return new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName,
-                                                                                  tableName,
-                                                                                  result,
-                                                                                  columnsWithConditions,
-                                                                                  true,
-                                                                                  options.forStatement(0)));
-        }
+        return Single.defer(() -> ModificationStatement.buildCasResultSet(ksName,
+                                                                          tableName,
+                                                                          StorageProxy.cas(ksName,
+                                                                                           tableName,
+                                                                                           casRequest.key,
+                                                                                           casRequest,
+                                                                                           options.getSerialConsistency(),
+                                                                                           options.getConsistency(),
+                                                                                           state.getClientState(),
+                                                                                           queryStartNanoTime),
+                                                                          columnsWithConditions,
+                                                                          true,
+                                                                          options.forStatement(0)))
+                     .subscribeOn(Schedulers.io())
+                     .map(ResultMessage.Rows::new);
     }
 
     private Pair<CQL3CasRequest,Set<ColumnMetadata>> makeCasRequest(BatchQueryOptions options, QueryState state)
@@ -529,21 +517,15 @@ public class BatchStatement implements CQLStatement
         String ksName = request.metadata.keyspace;
         String tableName = request.metadata.name;
 
-        return ModificationStatement.casInternal(request, state).map(result -> {
-            try
-            {
-                return new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName,
-                                                                                      tableName,
-                                                                                      result.orElse(null),
-                                                                                      columnsWithConditions,
-                                                                                      true,
-                                                                                      options.forStatement(0)));
-            }
-            finally
-            {
-                result.ifPresent(RowIterator::close);
-            }
-        });
+        return ModificationStatement.casInternal(request, state)
+                                    .flatMap(result -> ModificationStatement.buildCasResultSet(ksName,
+                                                                                               tableName,
+                                                                                               result,
+                                                                                               columnsWithConditions,
+                                                                                               true,
+                                                                                               options.forStatement(0)))
+                                    .map(ResultMessage.Rows::new);
+
     }
 
     public String toString()

@@ -853,7 +853,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             while (!pager.isExhausted())
             {
                 try (OpOrder.Group writeGroup = Keyspace.writeOrder.start();
-                     UnfilteredPartitionIterator page = pager.fetchPageUnfiltered(pageSize, baseCfs.metadata()).blockingGet())
+                     UnfilteredPartitionIterator page = FlowablePartitions.toPartitions(pager.fetchPageUnfiltered(pageSize, baseCfs.metadata()),
+                                                                                        baseCfs.metadata()))
                 {
                     if (!page.hasNext())
                         break;

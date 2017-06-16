@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.google.common.base.Stopwatch;
 import org.slf4j.helpers.MessageFormatter;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventNotifier;
@@ -109,12 +110,16 @@ public abstract class TraceState implements ProgressEventNotifier
         return elapsed < Integer.MAX_VALUE ? (int) elapsed : Integer.MAX_VALUE;
     }
 
-    public synchronized void stop()
+    public Completable stop()
     {
-        waitForPendingEvents();
-
-        status = Status.STOPPED;
-        notifyAll();
+        return waitForPendingEvents()
+               .doOnComplete(() -> {
+                   synchronized (TraceState.this)
+                   {
+                       status = Status.STOPPED;
+                       notifyAll();
+                   }
+               });
     }
 
     /*
@@ -181,9 +186,10 @@ public abstract class TraceState implements ProgressEventNotifier
 
     protected abstract void traceImpl(String message);
 
-    protected void waitForPendingEvents()
+    protected Completable waitForPendingEvents()
     {
         // if tracing events are asynchronous, then you can use this method to wait for them to complete
+        return Completable.complete();
     }
 
     public boolean acquireReference()
@@ -200,7 +206,6 @@ public abstract class TraceState implements ProgressEventNotifier
 
     public int releaseReference()
     {
-        waitForPendingEvents();
         return references.decrementAndGet();
     }
 }

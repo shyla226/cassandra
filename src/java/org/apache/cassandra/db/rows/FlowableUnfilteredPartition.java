@@ -43,4 +43,24 @@ public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltere
     {
         super(header, staticRow, content);
     }
+
+    @Override
+    public FlowableUnfilteredPartition withHeader(PartitionHeader header, Row staticRow)
+    {
+        return new FlowableUnfilteredPartition(header, staticRow, content);
+    }
+
+    @Override
+    public FlowableUnfilteredPartition withContent(CsFlow<Unfiltered> content)
+    {
+        return new FlowableUnfilteredPartition(header,
+                                               staticRow,
+                                               content);
+    }
+
+    @Override
+    public FlowableUnfilteredPartition mapContent(CsFlow.MappingOp<Unfiltered, Unfiltered> mappingOp)
+    {
+        return withContent(content.map(mappingOp));
+    }
 }

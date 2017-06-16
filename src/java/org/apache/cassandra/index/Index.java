@@ -27,6 +27,7 @@ import java.util.concurrent.Callable;
 import java.util.function.BiFunction;
 
 import io.reactivex.Completable;
+import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -35,7 +36,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -521,11 +521,11 @@ public interface Index
      * transformed in this way but this may change over time as usage is generalized.
      * See CASSANDRA-8717 for further discussion.
      *
-     * The function takes a PartitionIterator of the results from the replicas which has already been collated
-     * and reconciled, along with the command being executed. It returns another PartitionIterator containing the results
+     * The function takes a flow of filtered partitions of the results from the replicas which has already been collated
+     * and reconciled, along with the command being executed. It returns another flow containing the results
      * of the transformation (which may be the same as the input if the transformation is a no-op).
      */
-    public BiFunction<PartitionIterator, ReadCommand, PartitionIterator> postProcessorFor(ReadCommand command);
+    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand command);
 
     /**
      * Factory method for query time search helper.

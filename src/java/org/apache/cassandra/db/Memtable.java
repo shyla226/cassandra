@@ -434,7 +434,7 @@ public class Memtable implements Comparable<Memtable>
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        ArrayList<Pair<Integer, Callable<List<UnfilteredRowIterator>>>> all = new ArrayList<>(partitions.size());
+        ArrayList<Pair<Integer, Callable<List<FlowableUnfilteredPartition>>>> all = new ArrayList<>(partitions.size());
 
         for (int i = 0; i < partitions.size(); i++)
         {
@@ -451,14 +451,14 @@ public class Memtable implements Comparable<Memtable>
                                              ? memtableSubrange.tailMap(keyRange.left, includeStart)
                                              : memtableSubrange.subMap(keyRange.left, includeStart, keyRange.right, includeStop);
 
-                List<UnfilteredRowIterator> ret = new ArrayList<>(trimmedMemtableSubrange.size());
+                List<FlowableUnfilteredPartition> ret = new ArrayList<>(trimmedMemtableSubrange.size());
                 for (Map.Entry<PartitionPosition, AtomicBTreePartition> entry : trimmedMemtableSubrange.entrySet())
                 {
                     PartitionPosition position = entry.getKey();
                     assert position instanceof DecoratedKey;
                     DecoratedKey key = (DecoratedKey)position;
                     ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(key);
-                    ret.add(filter.getUnfilteredRowIterator(columnFilter, entry.getValue()));
+                    ret.add(filter.getFlowableUnfilteredPartition(columnFilter, entry.getValue()));
                 }
                 return ret;
             }));
@@ -466,8 +466,7 @@ public class Memtable implements Comparable<Memtable>
 
         return CsFlow.fromIterable(all)
                      .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
-                     .flatMap(list -> CsFlow.fromIterable(list))
-                     .map(iterator -> FlowablePartitions.fromIterator(iterator, TPC.getForCore(getCoreFor(iterator.partitionKey()))));
+                     .flatMap(list -> CsFlow.fromIterable(list));
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has

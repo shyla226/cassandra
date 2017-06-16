@@ -59,9 +59,9 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.partitions.FilteredPartition;
 import org.apache.cassandra.db.partitions.Partition;
-import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.FlowablePartition;
+import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -82,6 +82,7 @@ import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
@@ -415,32 +416,16 @@ public abstract class ModificationStatement implements CQLStatement
 
         SinglePartitionReadCommand.Group group = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-        Single<PartitionIterator> iterSingle = local
+        CsFlow<FlowablePartition> partitions = local
                                                ? group.executeInternal()
                                                : group.execute(cl, null, queryStartNanoTime, false);
-        return iterSingle.map(iter -> {
-            try
-            {
-                return asMaterializedMap(iter);
-            }
-            finally
-            {
-                iter.close();
-            }
-        });
-    }
 
-    private Map<DecoratedKey, Partition> asMaterializedMap(PartitionIterator iterator)
-    {
-        Map<DecoratedKey, Partition> map = new HashMap<>();
-        while (iterator.hasNext())
-        {
-            try (RowIterator partition = iterator.next())
-            {
-                map.put(partition.partitionKey(), FilteredPartition.create(partition));
-            }
-        }
-        return map;
+        return partitions.flatMap(p -> FilteredPartition.create(p))
+                         .reduceToRxSingle(new HashMap<DecoratedKey, Partition>(),
+                                           (map, partition) -> {
+                                               map.put(partition.partitionKey(), partition);
+                                               return map;
+                                           });
     }
 
     public boolean hasConditions()
@@ -456,17 +441,7 @@ public abstract class ModificationStatement implements CQLStatement
         if (!hasConditions())
             return executeWithoutCondition(queryState, options, queryStartNanoTime);
 
-        // Paxos is already slow, so for now, just execute it in a blocking way on a different thread
-        return Single.defer(() -> {
-            try
-            {
-                return Single.just(executeWithCondition(queryState, options, queryStartNanoTime));
-            }
-            catch (Throwable t)
-            {
-                return Single.error(t);
-            }
-        }).subscribeOn(Schedulers.io());
+        return executeWithCondition(queryState, options, queryStartNanoTime);
     }
 
     private Single<? extends ResultMessage> executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
@@ -492,22 +467,22 @@ public abstract class ModificationStatement implements CQLStatement
         });
     }
 
-    public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public Single<ResultMessage> executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
         CQL3CasRequest request = makeCasRequest(queryState, options);
 
-        try (RowIterator result = StorageProxy.cas(keyspace(),
-                                                   columnFamily(),
-                                                   request.key,
-                                                   request,
-                                                   options.getSerialConsistency(),
-                                                   options.getConsistency(),
-                                                   queryState.getClientState(),
-                                                   queryStartNanoTime))
-        {
-            return new ResultMessage.Rows(buildCasResultSet(result, options));
-        }
+        return Single.defer(() -> buildCasResultSet(StorageProxy.cas(keyspace(),
+                                                                     columnFamily(),
+                                                                     request.key,
+                                                                     request,
+                                                                     options.getSerialConsistency(),
+                                                                     options.getConsistency(),
+                                                                     queryState.getClientState(),
+                                                                     queryStartNanoTime),
+                                                    options))
+                     .subscribeOn(Schedulers.io())
+                     .map(ResultMessage.Rows::new);
     }
 
     private CQL3CasRequest makeCasRequest(QueryState queryState, QueryOptions options)
@@ -539,22 +514,28 @@ public abstract class ModificationStatement implements CQLStatement
         conditions.addConditionsTo(request, clustering, options);
     }
 
-    private ResultSet buildCasResultSet(RowIterator partition, QueryOptions options) throws InvalidRequestException
+    private Single<ResultSet> buildCasResultSet(Optional<RowIterator> partition, QueryOptions options) throws InvalidRequestException
     {
         return buildCasResultSet(keyspace(), columnFamily(), partition, getColumnsWithConditions(), false, options);
     }
 
-    public static ResultSet buildCasResultSet(String ksName, String tableName, RowIterator partition, Iterable<ColumnMetadata> columnsWithConditions, boolean isBatch, QueryOptions options)
+    public static Single<ResultSet> buildCasResultSet(String ksName, String tableName, Optional<RowIterator> partition, Iterable<ColumnMetadata> columnsWithConditions, boolean isBatch, QueryOptions options)
     throws InvalidRequestException
     {
-        boolean success = partition == null;
+        boolean success = !partition.isPresent();
 
         ColumnSpecification spec = new ColumnSpecification(ksName, tableName, CAS_RESULT_COLUMN, BooleanType.instance);
         ResultSet.ResultMetadata metadata = new ResultSet.ResultMetadata(Collections.singletonList(spec));
         List<List<ByteBuffer>> rows = Collections.singletonList(Collections.singletonList(BooleanType.instance.decompose(success)));
 
         ResultSet rs = new ResultSet(metadata, rows);
-        return success ? rs : merge(rs, buildCasFailureResultSet(partition, columnsWithConditions, isBatch, options));
+
+        if (success)
+            return Single.just(rs);
+
+        // partition will be closed by the result building process.
+        return buildCasFailureResultSet(partition.get(), columnsWithConditions, isBatch, options)
+            .map(failure -> merge(rs, failure));
     }
 
     private static ResultSet merge(ResultSet left, ResultSet right)
@@ -580,7 +561,7 @@ public abstract class ModificationStatement implements CQLStatement
         return new ResultSet(new ResultSet.ResultMetadata(specs), rows);
     }
 
-    private static ResultSet buildCasFailureResultSet(RowIterator partition, Iterable<ColumnMetadata> columnsWithConditions, boolean isBatch, QueryOptions options)
+    private static Single<ResultSet> buildCasFailureResultSet(RowIterator partition, Iterable<ColumnMetadata> columnsWithConditions, boolean isBatch, QueryOptions options)
     throws InvalidRequestException
     {
         TableMetadata metadata = partition.metadata();
@@ -603,12 +584,12 @@ public abstract class ModificationStatement implements CQLStatement
 
         }
         ResultSet.Builder builder = ResultSet.makeBuilder(selection.getResultMetadata(), selection.newSelectors(options));
-        SelectStatement.forSelection(metadata, selection).processPartition(partition,
-                                                                           options,
-                                                                           builder,
-                                                                           FBUtilities.nowInSeconds());
-
-        return builder.build();
+        return SelectStatement.forSelection(metadata, selection)
+                              .processPartition(FlowablePartitions.fromIterator(partition, null),
+                                                options,
+                                                builder,
+                                                FBUtilities.nowInSeconds())
+                              .mapToRxSingle(ResultSet.Builder::build);
     }
 
     public Single<? extends ResultMessage> executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
@@ -639,47 +620,32 @@ public abstract class ModificationStatement implements CQLStatement
     private Single<ResultMessage> executeInternalWithCondition(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         CQL3CasRequest request = makeCasRequest(state, options);
-        return casInternal(request,state).map(result -> {
-            try
-            {
-                return new ResultMessage.Rows(buildCasResultSet(result.orElse(null), options));
-            }
-            finally
-            {
-                result.ifPresent(RowIterator::close);
-            }
-        });
+        return casInternal(request, state)
+               .flatMap(result -> buildCasResultSet(result, options))
+               .map(ResultMessage.Rows::new);
     }
 
     static Single<Optional<RowIterator>> casInternal(CQL3CasRequest request, QueryState state)
     {
-        UUID ballot = UUIDGen.getTimeUUIDFromMicros(state.getTimestamp());
+        final UUID ballot = UUIDGen.getTimeUUIDFromMicros(state.getTimestamp());
+        final SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
 
-        SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
-        Single<PartitionIterator> iterSingle = readCommand.executeInternal();
+        return readCommand.executeInternal()
+                          .flatMap(partition -> FilteredPartition.create(partition))
+                          .mapToRxSingle()
+                          .flatMap(current -> {
+                              if (current == null)
+                                  current = FilteredPartition.empty(readCommand);
+                              if (!request.appliesTo(current))
+                                  return Single.just(Optional.of(current.rowIterator()));
 
-        return iterSingle.flatMap(iter -> {
-            FilteredPartition current;
+                              PartitionUpdate updates = request.makeUpdates(current);
+                              updates = TriggerExecutor.instance.execute(updates);
 
-            try
-            {
-                current = FilteredPartition.create(PartitionIterators.getOnlyElement(iter, readCommand));
-            }
-            finally
-            {
-                iter.close();
-            }
-
-            if (!request.appliesTo(current))
-                return Single.just(Optional.of(current.rowIterator()));
-
-            PartitionUpdate updates = request.makeUpdates(current);
-            updates = TriggerExecutor.instance.execute(updates);
-
-            Commit proposal = Commit.newProposal(ballot, updates);
-            return proposal.makeMutation()
-                           .applyAsync()
-                           .andThen(Single.just(Optional.empty()));
+                              Commit proposal = Commit.newProposal(ballot, updates);
+                              return proposal.makeMutation()
+                                             .applyAsync()
+                                             .toSingleDefault(Optional.empty());
         });
     }
 

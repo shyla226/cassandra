@@ -35,6 +35,7 @@ import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.metrics.Timer;
 import org.apache.cassandra.concurrent.JMXConfigurableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -571,7 +572,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
                 // actually was nulled out.
                 Tracing.instance.set(traceState);
                 Tracing.traceRepair(message);
-                Tracing.instance.stopSession();
+                TPCUtils.blockingAwait(Tracing.instance.stopSessionAsync());
             }
 
             executor.shutdown();

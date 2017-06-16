@@ -302,7 +302,7 @@ public class Util
 
     public static void assertEmpty(ReadCommand command)
     {
-        try (PartitionIterator iterator = command.executeInternal().blockingGet())
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             if (iterator.hasNext())
             {
@@ -322,7 +322,7 @@ public class Util
     public static List<FilteredPartition> getAll(ReadCommand command)
     {
         List<FilteredPartition> results = new ArrayList<>();
-        try (PartitionIterator iterator = command.executeInternal().blockingGet())
+        try (PartitionIterator iterator = command.executeInternalForTests())
         {
             while (iterator.hasNext())
             {
@@ -354,7 +354,7 @@ public class Util
 
     public static Row getOnlyRow(ReadCommand cmd)
     {
-        try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
+        try (PartitionIterator iterator = cmd.executeInternalForTests())
         {
             Row row;
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
@@ -388,7 +388,7 @@ public class Util
 
     public static FilteredPartition getOnlyPartition(ReadCommand cmd)
     {
-        try (PartitionIterator iterator = cmd.executeInternal().blockingGet())
+        try (PartitionIterator iterator = cmd.executeInternalForTests())
         {
             FilteredPartition ret;
             assert iterator.hasNext() : "Expecting a single partition but got nothing";

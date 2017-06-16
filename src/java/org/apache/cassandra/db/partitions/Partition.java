@@ -67,4 +67,15 @@ public interface Partition
      * selected by the provided slices.
      */
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter columns, Slices slices, boolean reversed);
+
+    /**
+     * Returns a FlowableUnfilteredPartition over all the rows/RT contained by this partition.
+     */
+    public FlowableUnfilteredPartition unfilteredPartition();
+
+    /**
+     * Returns a FlowableUnfilteredPartition over the rows/RT contained by this partition
+     * selected by the provided slices.
+     */
+    public FlowableUnfilteredPartition unfilteredPartition(ColumnFilter selection, Slices slices, boolean reversed);
 }

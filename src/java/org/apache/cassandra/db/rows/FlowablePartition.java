@@ -37,4 +37,24 @@ public class FlowablePartition extends FlowablePartitionBase<Row>
     {
         super(header, staticRow, content);
     }
+
+    @Override
+    public FlowablePartition withHeader(PartitionHeader header, Row staticRow)
+    {
+        return new FlowablePartition(header, staticRow, content);
+    }
+
+    @Override
+    public FlowablePartition withContent(CsFlow<Row> content)
+    {
+        return new FlowablePartition(header,
+                                     staticRow,
+                                     content);
+    }
+
+    @Override
+    public FlowablePartition mapContent(CsFlow.MappingOp<Row, Row> mappingOp)
+    {
+        return withContent(content.map(mappingOp));
+    }
 }

@@ -54,7 +54,6 @@ implements BasePartitionIterator<R>
 
     public void add(Transformation transformation)
     {
-        transformation.attachTo(this);
         super.add(transformation);
         next = applyOne(next, transformation);
     }
@@ -82,14 +81,12 @@ implements BasePartitionIterator<R>
         BaseRowIterator<?> next = null;
         try
         {
-
-            Stop stop = this.stop;
             while (this.next == null)
             {
                 Transformation[] fs = stack;
                 int len = length;
 
-                while (!stop.isSignalled && input.hasNext())
+                while (input.hasNext())
                 {
                     next = input.next();
                     for (int i = 0 ; next != null & i < len ; i++)
@@ -102,7 +99,7 @@ implements BasePartitionIterator<R>
                     }
                 }
 
-                if (stop.isSignalled || stopChild.isSignalled || !hasMoreContents())
+                if (!hasMoreContents())
                     return false;
             }
             return true;

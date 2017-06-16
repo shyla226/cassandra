@@ -106,12 +106,12 @@ public class ExecuteMessage extends Message.Request
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
             return handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime)
                           .map(response -> {
-                              if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                                  ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
+                                  if (options.skipMetadata() && response instanceof ResultMessage.Rows)
+                                      ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
-                              response.setTracingId(state.getPreparedTracingSession());
-                              return response;
-                          }).doFinally(Tracing.instance::stopSession);
+                                  response.setTracingId(state.getPreparedTracingSession());
+                                  return response;
+                          }).flatMap(response -> Tracing.instance.stopSessionAsync().toSingleDefault(response));
         }
         catch (Exception e)
         {

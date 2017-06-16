@@ -29,12 +29,13 @@ import io.reactivex.Single;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Serializer;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.CsSubscription;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -96,9 +97,9 @@ public abstract class ReadResponse
     public static ReadResponse createRemoteDataResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
         final EncodingVersion version = EncodingVersion.last();
-        return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
-                                           .map(buffer -> new RemoteDataResponse(buffer, version))
-                                           .blockingSingle();
+        return UnfilteredPartitionsSerializer.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
+                                             .map(buffer -> new RemoteDataResponse(buffer, version))
+                                             .blockingSingle();
     }
 
     public static Single<ReadResponse> createDigestResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
@@ -106,17 +107,10 @@ public abstract class ReadResponse
         return makeDigest(partitions, command).map(digest -> new DigestResponse(digest));
     }
 
-    public abstract UnfilteredPartitionIterator makeIterator(ReadCommand command);
-    public abstract ByteBuffer digest(ReadCommand command);
+    public abstract CsFlow<FlowableUnfilteredPartition> data(ReadCommand command);
+    public abstract Single<ByteBuffer> digest(ReadCommand command);
 
     public abstract boolean isDigestResponse();
-
-    protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator, ReadCommand command)
-    {
-        MessageDigest digest = FBUtilities.threadLocalMD5Digest();
-        UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion()).blockingAwait();
-        return ByteBuffer.wrap(digest.digest());
-    }
 
     protected static Single<ByteBuffer> makeDigest(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
@@ -140,69 +134,23 @@ public abstract class ReadResponse
             this.digest = digest;
         }
 
-        public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+        public CsFlow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
             throw new UnsupportedOperationException();
         }
 
-        public ByteBuffer digest(ReadCommand command)
+        public Single<ByteBuffer> digest(ReadCommand command)
         {
             // We assume that the digest is in the proper version, which bug excluded should be true since this is called with
             // ReadCommand.digestVersion() as argument and that's also what we use to produce the digest in the first place.
             // Validating it's the proper digest in this method would require sending back the digest version along with the
-            // digest which would waste bandwith for little gain.
-            return digest;
+            // digest which would waste bandwidth for little gain.
+            return Single.just(digest);
         }
 
         public boolean isDigestResponse()
         {
             return true;
-        }
-    }
-
-    static class InMemoryPartitionsIterator implements UnfilteredPartitionIterator
-    {
-        private final List<ImmutableBTreePartition> partitions;
-        private final ReadCommand command;
-        private int idx;
-
-        InMemoryPartitionsIterator(List<ImmutableBTreePartition> partitions, ReadCommand command)
-        {
-            this(command);
-            this.partitions.addAll(partitions);
-        }
-
-        InMemoryPartitionsIterator(ReadCommand command)
-        {
-            this.partitions = new ArrayList<>();
-            this.command = command;
-            this.idx = 0;
-        }
-
-        public void add(ImmutableBTreePartition partition)
-        {
-            this.partitions.add(partition);
-        }
-
-        public TableMetadata metadata()
-        {
-            return command.metadata();
-        }
-
-        public boolean hasNext()
-        {
-            return idx < partitions.size();
-        }
-
-        public UnfilteredRowIterator next()
-        {
-            // TODO: we know rows don't require any filtering and that we return everything. We ought to be able to optimize this.
-            return partitions.get(idx++).unfilteredIterator(command.columnFilter(), Slices.ALL, command.isReversed());
-        }
-
-        public void close()
-        {
-
         }
     }
 
@@ -228,9 +176,42 @@ public abstract class ReadResponse
                                           .mapToRxSingle(LocalResponse::new);
         }
 
-        public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+        public CsFlow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
-            return new InMemoryPartitionsIterator(partitions, command);
+            return new CsFlow<FlowableUnfilteredPartition>()
+            {
+                private int idx = 0;
+                public CsSubscription subscribe(CsSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+                {
+                    return new CsSubscription()
+                    {
+                        public void request()
+                        {
+                            if (idx < partitions.size())
+                                subscriber.onNext(partitions.get(idx++).unfilteredPartition(command.columnFilter(),
+                                                                                            Slices.ALL,
+                                                                                            command.isReversed()));
+                            else
+                                subscriber.onComplete();
+                        }
+
+                        public void close() throws Exception
+                        {
+                            // no op
+                        }
+
+                        public Throwable addSubscriberChainFromSource(Throwable throwable)
+                        {
+                            return CsFlow.wrapException(throwable, this);
+                        }
+
+                        public String toString()
+                        {
+                            return CsFlow.formatTrace("LocalResponse", subscriber);
+                        }
+                    };
+                }
+            };
         }
 
         public boolean isDigestResponse()
@@ -238,9 +219,9 @@ public abstract class ReadResponse
             return false;
         }
 
-        public ByteBuffer digest(ReadCommand command)
+        public Single<ByteBuffer> digest(ReadCommand command)
         {
-            return makeDigest(makeIterator(command), command);
+            return makeDigest(data(command), command);
         }
     }
 
@@ -257,8 +238,8 @@ public abstract class ReadResponse
 
         private static Single<ReadResponse> build(CsFlow<FlowableUnfilteredPartition> partitions, EncodingVersion version, ReadCommand command)
         {
-            return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
-                                               .mapToRxSingle(buffer -> new LocalDataResponse(buffer, version));
+            return UnfilteredPartitionsSerializer.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
+                                                 .mapToRxSingle(buffer -> new LocalDataResponse(buffer, version));
         }
     }
 
@@ -293,29 +274,19 @@ public abstract class ReadResponse
             this.flag = flag;
         }
 
-        public UnfilteredPartitionIterator makeIterator(ReadCommand command)
+        public CsFlow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
-            try (DataInputBuffer in = new DataInputBuffer(data, true))
-            {
-                // Note that the command parameter shadows the 'command' field and this is intended because
-                // the later can be null (for RemoteDataResponse as those are created in the serializers and
-                // those don't have easy access to the command). This is also why we need the command as parameter here.
-                return UnfilteredPartitionIterators.serializerForIntraNode(version)
-                                                   .deserialize(in, command.metadata(), command.columnFilter(), flag);
-            }
-            catch (IOException e)
-            {
-                // We're deserializing in memory so this shouldn't happen
-                throw new RuntimeException(e);
-            }
+            // Note that the command parameter shadows the 'command' field and this is intended because
+            // the later can be null (for RemoteDataResponse as those are created in the serializers and
+            // those don't have easy access to the command). This is also why we need the command as parameter here.
+            return UnfilteredPartitionsSerializer.serializerForIntraNode(version)
+                                                 .deserialize(data, command.metadata(), command.columnFilter(), flag);
+
         }
 
-        public ByteBuffer digest(ReadCommand command)
+        public Single<ByteBuffer> digest(ReadCommand command)
         {
-            try (UnfilteredPartitionIterator iterator = makeIterator(command))
-            {
-                return makeDigest(iterator, command);
-            }
+            return makeDigest(data(command), command);
         }
 
         public boolean isDigestResponse()

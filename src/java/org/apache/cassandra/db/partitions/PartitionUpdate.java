@@ -793,14 +793,14 @@ public class PartitionUpdate extends AbstractBTreePartition
                 assert !iter.isReverseOrder();
 
                 update.metadata.id.serialize(out);
-                UnfilteredRowIteratorSerializer.serializers.get(version).serialize(iter, null, out, update.rowCount());
+                UnfilteredPartitionSerializer.serializers.get(version).serialize(iter, null, out, update.rowCount());
             }
         }
 
         public PartitionUpdate deserialize(DataInputPlus in, SerializationHelper.Flag flag) throws IOException
         {
             TableMetadata metadata = Schema.instance.getExistingTableMetadata(TableId.deserialize(in));
-            UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializers.get(version).deserializeHeader(metadata, null, in, flag);
+            UnfilteredPartitionSerializer.Header header = UnfilteredPartitionSerializer.serializers.get(version).deserializeHeader(metadata, null, in, flag);
             if (header.isEmpty)
                 return emptyUpdate(metadata, header.key);
 
@@ -811,7 +811,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             BTree.Builder<Row> rows = BTree.builder(metadata.comparator, header.rowEstimate);
             rows.auto(false);
 
-            try (UnfilteredRowIterator partition = UnfilteredRowIteratorSerializer.serializers.get(version).deserialize(in, metadata, flag, header))
+            try (UnfilteredRowIterator partition = UnfilteredPartitionSerializer.serializers.get(version).deserializeToIt(in, metadata, flag, header))
             {
                 while (partition.hasNext())
                 {
@@ -836,7 +836,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             try (UnfilteredRowIterator iter = update.unfilteredIterator())
             {
                 return update.metadata.id.serializedSize()
-                     + UnfilteredRowIteratorSerializer.serializers.get(version).serializedSize(iter, null, update.rowCount());
+                       + UnfilteredPartitionSerializer.serializers.get(version).serializedSize(iter, null, update.rowCount());
             }
         }
     }

@@ -21,6 +21,7 @@
 
 package org.apache.cassandra.tracing;
 
+import io.reactivex.Completable;
 import org.apache.cassandra.utils.FBUtilities;
 
 class ExpiredTraceState extends TraceState
@@ -43,9 +44,9 @@ class ExpiredTraceState extends TraceState
         delegate.traceImpl(message);
     }
 
-    protected void waitForPendingEvents()
+    protected Completable waitForPendingEvents()
     {
-        delegate.waitForPendingEvents();
+        return delegate.waitForPendingEvents();
     }
 
     TraceState getDelegate()
