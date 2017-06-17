@@ -113,6 +113,11 @@ public class Threads
             return createRequestOn(scheduler);
     }
 
+    public static <T> CsFlow<T> deferOnCore(Callable<CsFlow<T>> source, int coreId)
+    {
+        return evaluateOnCore(source, coreId).flatMap(x -> x);
+    }
+
     private static <T> CsFlow.Operator<T, T> createRequestOn(Scheduler scheduler)
     {
         return (source, subscriber) -> new RequestOn(subscriber, scheduler, source);

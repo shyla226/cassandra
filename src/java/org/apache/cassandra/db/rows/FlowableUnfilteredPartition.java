@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
@@ -40,16 +41,25 @@ import org.apache.cassandra.utils.flow.CsFlow;
 public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered>
 {
     public boolean hasData;
+    public final SSTableReader sstable;
 
     public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, CsFlow<Unfiltered> content)
     {
-        this (header, staticRow, content, true); // we don't know if we have data yet
+        this (null, header, staticRow, content, true); // we don't know if we have data yet
+    }
+
+    public FlowableUnfilteredPartition(SSTableReader sstable, PartitionHeader header, Row staticRow, CsFlow<Unfiltered> content, boolean hasData)
+    {
+        super(header, staticRow, content);
+        this.hasData = hasData;
+        this.sstable = sstable;
     }
 
     public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, CsFlow<Unfiltered> content, boolean hasData)
     {
         super(header, staticRow, content);
         this.hasData = hasData;
+        this.sstable = null;
     }
 
     public boolean isEmpty()

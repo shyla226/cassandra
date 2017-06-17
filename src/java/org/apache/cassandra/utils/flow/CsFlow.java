@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -38,6 +39,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -1032,6 +1034,25 @@ public abstract class CsFlow<T>
         return Merge.get(flows, comparator, reducer);
     }
 
+
+    public static <I> CsFlow<List<I>> flatten(List<CsFlow<I>> flows)
+    {
+        return CsFlow.merge(flows, Comparator.comparing((c) -> 0),
+                            new Reducer<I, List<I>>()
+                            {
+                                List<I> list = new ArrayList<>(flows.size());
+
+                                public void reduce(int idx, I current)
+                                {
+                                    list.add(current);
+                                }
+
+                                public List<I> getReduced()
+                                {
+                                    return list;
+                                }
+                            });
+    }
 
     public interface Operator<I, O>
     {

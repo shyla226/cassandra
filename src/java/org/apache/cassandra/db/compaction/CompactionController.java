@@ -245,11 +245,18 @@ public class CompactionController implements AutoCloseable
 
         for (Memtable memtable : memtables)
         {
-            Partition partition = memtable.getPartition(key);
-            if (partition != null)
+            try
             {
-                minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
-                hasTimestamp = true;
+                Partition partition = memtable.getPartition(key).blockingLast(null);
+                if (partition != null)
+                {
+                    minTimestampSeen = Math.min(minTimestampSeen, partition.stats().minTimestamp);
+                    hasTimestamp = true;
+                }
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
             }
         }
 
