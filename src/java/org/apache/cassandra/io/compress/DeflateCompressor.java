@@ -224,6 +224,6 @@ public class DeflateCompressor implements ICompressor
 
     public BufferType preferredBufferType()
     {
-        return TPC.USE_AIO ? BufferType.OFF_HEAP : BufferType.ON_HEAP;
+        return BufferType.ON_HEAP;
     }
 }

@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.Recycler;
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CorruptBlockException;
@@ -84,7 +85,8 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     @Override
     public BufferType preferredBufferType()
     {
-        return metadata.compressor().preferredBufferType();
+        return (metadata.compressor().preferredBufferType() == BufferType.ON_HEAP && TPC.USE_AIO) ?
+               BufferType.OFF_HEAP : metadata.compressor().preferredBufferType();
     }
 
     @Override
@@ -119,22 +121,24 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 this.handle = handle;
             }
 
-            ByteBuffer get(int maxCompressedLength, CompressionMetadata metadata)
+            ByteBuffer get(int maxCompressedLength, CompressionMetadata metadata, BufferType bufferType)
             {
                 int length = Math.min(maxCompressedLength, metadata.compressor().initialCompressedBufferLength(metadata.chunkLength()));
 
-                if (buffer == null || buffer.capacity() < length)
-                    buffer = allocateBuffer(metadata, length);
+                if (buffer == null || buffer.capacity() < length ||
+                    ((buffer.isDirect() && bufferType.equals(BufferType.ON_HEAP) ||
+                      !buffer.isDirect() && bufferType.equals(BufferType.OFF_HEAP))))
+                    buffer = allocateBuffer(bufferType, length);
 
                 return buffer;
             }
 
-            ByteBuffer allocateBuffer(CompressionMetadata metadata, int size)
+            ByteBuffer allocateBuffer(BufferType bufferType, int size)
             {
                 //O_DIRECT requires length to be aligned to page size
                 if ((size & (MemoryUtil.pageSize() - 1)) != 0)
                     size = (size + MemoryUtil.pageSize() - 1) & ~(MemoryUtil.pageSize() - 1);
-                return metadata.compressor().preferredBufferType().allocate(size);
+                return bufferType.allocate(size);
             }
 
             void recycle()
@@ -165,7 +169,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 if (chunk.length <= maxCompressedLength)
                 {
                     scratchInput = compressedHolder.get();
-                    input = scratchInput.get(maxCompressedLength, metadata);
+                    input = scratchInput.get(maxCompressedLength, metadata, preferredBufferType());
                 }
                 else
                 {

@@ -1035,7 +1035,10 @@ public abstract class CsFlow<T>
     }
 
 
-    public static <I> CsFlow<List<I>> flatten(List<CsFlow<I>> flows)
+    /**
+     * Materializes a list of CsFlow<I> into a CsFlow with a single List of I
+     */
+    public static <I> CsFlow<List<I>> zipToList(List<CsFlow<I>> flows)
     {
         return CsFlow.merge(flows, Comparator.comparing((c) -> 0),
                             new Reducer<I, List<I>>()
