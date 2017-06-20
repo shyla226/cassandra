@@ -39,7 +39,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
-import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.utils.LineNumberInference;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.Throwables;
 
@@ -48,6 +49,8 @@ import org.apache.cassandra.utils.Throwables;
  */
 public abstract class CsFlow<T>
 {
+    public final static LineNumberInference LINE_NUMBERS = new LineNumberInference();
+
     /**
      * Create a subscription linking the content of the flow with the given subscriber.
      * The subscriber is expected to call request() on the returned subscription; in response, it will receive an
@@ -60,7 +63,7 @@ public abstract class CsFlow<T>
 
     // Flow manipulation methods and implementations follow
 
-    public static final boolean DEBUG_ENABLED = System.getProperty("cassandra.debugcsflow", "false").equalsIgnoreCase("true");
+    public static final boolean DEBUG_ENABLED = Boolean.getBoolean("cassandra.debugcsflow");
 
     /**
      * Interface for abstracting away the gory details of operations with flowables. Used with {@link #apply}.
@@ -84,18 +87,23 @@ public abstract class CsFlow<T>
 
     public <O> CsFlow<O> apply(FlowableOp<T, O> op)
     {
-        return apply(this, op);
+        return apply(this, "apply", op);
     }
 
-    public static <I, O> CsFlow<O> apply(CsFlow<I> source, FlowableOp<I, O> op)
+    public <O> CsFlow<O> apply(FlowableOp<T, O> op, String prefix)
+    {
+        return apply(this, prefix, op);
+    }
+
+    public static <I, O> CsFlow<O> apply(CsFlow<I> source, String prefix, FlowableOp<I, O> op)
     {
         class ApplyFlow extends CsFlow<O>
         {
             public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
             {
                 return !DEBUG_ENABLED
-                       ? new ApplyOpSubscription<>(subscriber, op, source)
-                       : new CheckedApplyOpSubscription<>(subscriber, op, source);
+                       ? new ApplyOpSubscription<>(prefix, subscriber, op, source)
+                       : new CheckedApplyOpSubscription<>(prefix, subscriber, op, source);
             }
         }
         return new ApplyFlow();
@@ -109,11 +117,13 @@ public abstract class CsFlow<T>
         final CsSubscriber<O> subscriber;
         final CsSubscription source;
         final FlowableOp<I, O> mapper;
+        final String prefix;
 
-        public ApplyOpSubscription(CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
+        public ApplyOpSubscription(String prefix, CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
             this.subscriber = subscriber;
             this.mapper = mapper;
+            this.prefix = prefix;
             this.source = source.subscribe(this);
         }
 
@@ -151,9 +161,14 @@ public abstract class CsFlow<T>
             }
         }
 
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return source.addSubscriberChainFromSource(throwable);
+        }
+
         public String toString()
         {
-            return "apply(" + mapper.toString() + ")\n\tsubscriber " + subscriber;
+            return formatTrace(prefix, mapper, subscriber);
         }
     }
 
@@ -165,6 +180,7 @@ public abstract class CsFlow<T>
         final CsSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
         final CsSubscription source;
+        final String prefix;
 
         enum State
         {
@@ -204,12 +220,13 @@ public abstract class CsFlow<T>
                                                        this));
         }
 
-        public CheckedApplyOpSubscription(CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
+        public CheckedApplyOpSubscription(String prefix, CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
         {
             super(subscriber);
             this.subscriber = subscriber;
             this.mapper = mapper;
             this.source = source.subscribe(this);
+            this.prefix = prefix;
             verifyStateTransition(State.INITIALIZING, State.READY);
         }
 
@@ -256,6 +273,11 @@ public abstract class CsFlow<T>
             }
         }
 
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return source.addSubscriberChainFromSource(throwable);
+        }
+
         @Override
         public void finalize()
         {
@@ -265,7 +287,7 @@ public abstract class CsFlow<T>
 
         public String toString()
         {
-            return "apply(" + mapper.toString() + ")\n\tsubscriber " + subscriber;
+            return formatTrace(prefix, mapper, subscriber);
         }
     }
 
@@ -296,7 +318,7 @@ public abstract class CsFlow<T>
      */
     public <O> CsFlow<O> map(MappingOp<T, O> mapper)
     {
-        return apply(mapper);
+        return apply(mapper, "map");
     }
 
 
@@ -427,7 +449,7 @@ public abstract class CsFlow<T>
      */
     public CsFlow<T> filter(FilterOp<T> tester)
     {
-        return apply(tester);
+        return apply(tester, "filter");
     }
 
     /**
@@ -453,7 +475,7 @@ public abstract class CsFlow<T>
      */
     public CsFlow<T> doOnClose(OnCloseOp onClose)
     {
-        return apply(onClose);
+        return apply(onClose, "doOnClose");
     }
 
     /**
@@ -467,7 +489,7 @@ public abstract class CsFlow<T>
     /**
      * Pass all elements through the given transformation, then concatenate the results together.
      */
-    public <O> CsFlow<O> flatMap(Function<T, CsFlow<O>> op)
+    public <O> CsFlow<O> flatMap(FlatMap.FlatMapper<T, O> op)
     {
         return FlatMap.flatMap(this, op);
     }
@@ -493,6 +515,7 @@ public abstract class CsFlow<T>
     {
         final Iterator<O> iter;
         final CsSubscriber<O> subscriber;
+
         IteratorSubscription(CsSubscriber<O> subscriber, Iterator<O> iter)
         {
             this.iter = iter;
@@ -519,6 +542,17 @@ public abstract class CsFlow<T>
         {
             if (iter instanceof AutoCloseable)
                 ((AutoCloseable) iter).close();
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return wrapException(throwable, this);
+        }
+
+        @Override
+        public String toString()
+        {
+            return formatTrace("iteratorSubscription", subscriber);
         }
     }
 
@@ -638,7 +672,7 @@ public abstract class CsFlow<T>
             this.reducer = reducer;
             current = seed;
             this.source = source.subscribe(this);
-            stackTrace = maybeGetStackTrace();
+            this.stackTrace = maybeGetStackTrace();
         }
 
         public void onNext(T item)
@@ -668,10 +702,27 @@ public abstract class CsFlow<T>
 
         public String toString()
         {
-            return "reduce(" + reducer + ")" + stackTraceString(stackTrace);
+            return formatTrace("reduce", reducer) + "\n" + stackTraceString(stackTrace);
         }
 
-        // onComplete and onError are to be implemented by the concrete use-case.
+        @Override
+        public Throwable addSubscriberChainFromSource(Throwable t)
+        {
+            return source.addSubscriberChainFromSource(t);
+        }
+
+        public final void onError(Throwable t)
+        {
+            onErrorInternal(addSubscriberChainFromSource(t));
+        }
+
+        protected abstract void onErrorInternal(Throwable t);
+
+        // onComplete and onErrorInternal are to be implemented by the concrete use-case.
+    }
+
+    public interface ReduceFunction<ACC, I> extends BiFunction<ACC, I, ACC>
+    {
     }
 
     /**
@@ -683,7 +734,7 @@ public abstract class CsFlow<T>
      * @return The final reduced value.
      * @throws Exception
      */
-    public <O> O reduceBlocking(O seed, BiFunction<O, T, O> reducer) throws Exception
+    public <O> O reduceBlocking(O seed, ReduceFunction<O, T> reducer) throws Exception
     {
         CountDownLatch latch = new CountDownLatch(1);
 
@@ -691,7 +742,7 @@ public abstract class CsFlow<T>
         {
             Throwable error = null;
 
-            ReduceBlockingSubscription(CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
+            ReduceBlockingSubscription(CsFlow<T> source, ReduceFunction<O, T> reducer) throws Exception
             {
                 super(seed, source, reducer);
             }
@@ -701,7 +752,7 @@ public abstract class CsFlow<T>
                 latch.countDown();
             }
 
-            public void onError(Throwable t)
+            public void onErrorInternal(Throwable t)
             {
                 error = t;
                 latch.countDown();
@@ -709,7 +760,6 @@ public abstract class CsFlow<T>
         };
 
         ReduceBlockingSubscription s = new ReduceBlockingSubscription(this, reducer);
-
         s.request();
         Uninterruptibles.awaitUninterruptibly(latch);
         s.close();
@@ -726,13 +776,13 @@ public abstract class CsFlow<T>
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> CompletableFuture<O> reduceToFuture(O seed, BiFunction<O, T, O> reducer)
+    public <O> CompletableFuture<O> reduceToFuture(O seed, ReduceFunction<O, T> reducer)
     {
         CompletableFuture<O> result = new CompletableFuture<>();
 
         class ReduceToFutureSubscription extends ReduceSubscriber<T, O>
         {
-            ReduceToFutureSubscription(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
+            ReduceToFutureSubscription(O seed, CsFlow<T> source, ReduceFunction<O, T> reducer) throws Exception
             {
                 super(seed, source, reducer);
             }
@@ -752,7 +802,7 @@ public abstract class CsFlow<T>
                 result.complete(current);
             }
 
-            public void onError(Throwable t)
+            protected void onErrorInternal(Throwable t)
             {
                 try
                 {
@@ -797,7 +847,7 @@ public abstract class CsFlow<T>
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> CsFlow<O> reduceWith(Supplier<O> seedSupplier, BiFunction<O, T, O> reducer)
+    public <O> CsFlow<O> reduceWith(Supplier<O> seedSupplier, ReduceFunction<O, T> reducer)
     {
         CsFlow<T> self = this;
         return new CsFlow<O>()
@@ -822,9 +872,15 @@ public abstract class CsFlow<T>
                         subscriber.onNext(current); // This should request; if it does we will give it onComplete immediately.
                     }
 
-                    public void onError(Throwable t)
+                    public void onErrorInternal(Throwable t)
                     {
                         subscriber.onError(t);
+                    }
+
+                    @Override
+                    public String toString()
+                    {
+                        return formatTrace("reduceWith", reducer);
                     }
                 };
             }
@@ -879,6 +935,11 @@ public abstract class CsFlow<T>
             source.close();
         }
 
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return source.addSubscriberChainFromSource(throwable);
+        }
+
         public void onNext(T item)
         {
             hadItem = true;
@@ -897,6 +958,12 @@ public abstract class CsFlow<T>
         public void onError(Throwable t)
         {
             subscriber.onError(t);
+        }
+
+        @Override
+        public String toString()
+        {
+            return formatTrace("ifEmpty", subscriber);
         }
     }
 
@@ -970,6 +1037,17 @@ public abstract class CsFlow<T>
                 public void close() throws Exception
                 {
                 }
+
+                public Throwable addSubscriberChainFromSource(Throwable throwable)
+                {
+                    return CsFlow.wrapException(throwable, this);
+                }
+
+                @Override
+                public String toString()
+                {
+                    return formatTrace("empty", subscriber);
+                }
             };
         }
     };
@@ -1021,6 +1099,11 @@ public abstract class CsFlow<T>
 
         public void close() throws Exception
         {
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return throwable;
         }
     }
 
@@ -1140,6 +1223,27 @@ public abstract class CsFlow<T>
         return null;
     }
 
+    public static Throwable wrapException(Throwable throwable, Object tag)
+    {
+        // Avoid re-wrapping an exception if it was already added
+        for (Throwable t : throwable.getSuppressed())
+        {
+            if (t instanceof CsFlowException)
+                return throwable;
+        }
+
+        throwable.addSuppressed(new CsFlowException(tag.toString(), throwable));
+        return throwable;
+    }
+
+    private static class CsFlowException extends RuntimeException
+    {
+        private CsFlowException(Object tag, Throwable t)
+        {
+            super("CsFlow call chain:\n" + tag.toString(), t);
+        }
+    }
+
     public static String stackTraceString(StackTraceElement[] stackTrace)
     {
         if (stackTrace == null)
@@ -1149,8 +1253,34 @@ public abstract class CsFlow<T>
                                                 .skip(4)
                                                 .map(Object::toString)
                                                 .collect(Collectors.joining("\n\tat "))
-                                        + "\n";
+               + "\n";
+    }
+    public static String withLineNumber(Object obj)
+    {
+        LINE_NUMBERS.preloadLambdas();
 
+        LINE_NUMBERS.maybeProcessClass(obj.getClass());
+        Pair<String, Integer> lineNumber = LINE_NUMBERS.getLine(obj.getClass());
+        return obj + "(" + lineNumber.left + ":" + lineNumber.right + ")";
     }
 
+    public static String formatTrace(String prefix)
+    {
+        return String.format("\t%-20s", prefix);
+    }
+
+    public static String formatTrace(String prefix, Object tag)
+    {
+        return String.format("\t%-20s%s", prefix, CsFlow.withLineNumber(tag));
+    }
+
+    public static String formatTrace(String prefix, Object tag, CsSubscriber subscriber)
+    {
+        return String.format("\t%-20s%s\n%s", prefix, CsFlow.withLineNumber(tag), subscriber);
+    }
+
+    public static String formatTrace(String prefix, CsSubscriber subscriber)
+    {
+        return String.format("\t%-20s\n%s", prefix, subscriber);
+    }
 }

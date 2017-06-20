@@ -17,10 +17,6 @@
  */
 package org.apache.cassandra.index.sasi.plan;
 
-import java.util.Iterator;
-
-import io.reactivex.functions.Function;
-import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -35,6 +31,7 @@ import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.FlatMap;
 import org.apache.cassandra.utils.flow.Threads;
 
 public class QueryPlan
@@ -75,14 +72,12 @@ public class QueryPlan
         return new ResultRetriever(analyze(), controller, executionController).getPartitions();
     }
 
-    private static class ResultRetriever implements Function<DecoratedKey, CsFlow<FlowableUnfilteredPartition>>
+    private static class ResultRetriever implements FlatMap.FlatMapper<DecoratedKey, FlowableUnfilteredPartition>
     {
         private final AbstractBounds<PartitionPosition> keyRange;
         private final Operation operationTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
-
-        private Iterator<DecoratedKey> currentKeys = null;
 
         public ResultRetriever(Operation operationTree, QueryController controller, ReadExecutionController executionController)
         {

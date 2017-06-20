@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -178,6 +180,16 @@ public class FlatMapTest
         public void close()
         {
             closed = true;
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return CsFlow.wrapException(throwable, this);
+        }
+
+        public String toString()
+        {
+            return "\tImmediateGenerator " + sub;
         }
 
         public void finalize()

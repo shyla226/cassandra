@@ -127,9 +127,9 @@ public class PartitionsPublisher
      */
     public UnfilteredPartitionIterator toIterator(TableMetadata metadata)
     {
-       IteratorSubscription ret = new IteratorSubscription(metadata);
-       subscribe(ret);
-       return ret;
+        IteratorSubscription ret = new IteratorSubscription(metadata);
+        subscribe(ret);
+        return ret;
     }
 
     /**
@@ -196,7 +196,9 @@ public class PartitionsPublisher
          */
         public volatile BaseIterator.Stop stop;
 
-        /** The upstream source */
+        /**
+         * The upstream source
+         */
         private final PartitionsSource source;
 
         /**
@@ -308,6 +310,9 @@ public class PartitionsPublisher
         public void onError(Throwable error)
         {
             JVMStabilityInspector.inspectThrowable(error);
+
+            error = addSubscriberChainFromSource(error);
+
             logger.debug("Got exception: {}/{}", error.getClass().getName(), error.getMessage());
 
             release();
@@ -337,6 +342,12 @@ public class PartitionsPublisher
 
                 source.close();
             }
+        }
+
+        @Override
+        public String toString()
+        {
+            return CsFlow.formatTrace("outerSubscription");
         }
     }
 
@@ -444,6 +455,8 @@ public class PartitionsPublisher
         public void onError(Throwable error)
         {
             //logger.debug("{} - onError item", outerSubscription.hashCode(), error);
+            error = addSubscriberChainFromSource(error);
+
             outerSubscription.onError(error);
             close();
         }
@@ -485,6 +498,11 @@ public class PartitionsPublisher
 
                 outerSubscription.onInnerSubscriptionClosed();
             }
+        }
+
+        public String toString()
+        {
+            return CsFlow.formatTrace("innerSubscription");
         }
     }
 
@@ -584,6 +602,11 @@ public class PartitionsPublisher
                 closed = true;
                 FileUtils.closeQuietly(subscription);
             }
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable t)
+        {
+            return subscription.addSubscriberChainFromSource(t);
         }
 
         public boolean closed()

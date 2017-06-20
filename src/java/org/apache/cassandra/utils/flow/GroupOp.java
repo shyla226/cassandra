@@ -20,7 +20,6 @@ package org.apache.cassandra.utils.flow;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Operator for grouping elements of a CsFlow. Used with {@link CsFlow#group(GroupOp)}.
@@ -129,9 +128,14 @@ public interface GroupOp<I, O>
             source.close();
         }
 
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return source.addSubscriberChainFromSource(throwable);
+        }
+
         public String toString()
         {
-            return "group(" + mapper + ")\n\tsubscriber " + subscriber;
+            return CsFlow.formatTrace("group", mapper, subscriber);
         }
     }
 }

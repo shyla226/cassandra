@@ -157,6 +157,11 @@ class PartitionFlowable extends CsFlow<Unfiltered>
             this.s = s;
         }
 
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return CsFlow.wrapException(throwable, this);
+        }
+
         @Override
         public void close()
         {

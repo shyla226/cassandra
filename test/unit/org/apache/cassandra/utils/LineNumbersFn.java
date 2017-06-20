@@ -15,17 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.exceptions;
 
-public class InvalidRequestException extends RequestValidationException
+package org.apache.cassandra.utils;
+
+import java.util.function.Function;
+
+public class LineNumbersFn implements Function<Integer, String>, LineNumberInferenceTest.Tag
 {
-    public InvalidRequestException(String msg)
+    public String apply(Integer integer)
     {
-        super(ExceptionCode.INVALID, msg);
-    }
-
-    public InvalidRequestException(String msg, Throwable t)
-    {
-        super(ExceptionCode.INVALID, msg, t);
+        return Integer.toString(integer);
     }
 }

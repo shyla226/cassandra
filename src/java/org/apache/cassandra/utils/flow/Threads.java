@@ -51,6 +51,11 @@ public class Threads
             // Close on the current thread to propagate exceptions
             source.close();
         }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return source.addSubscriberChainFromSource(throwable);
+        }
     }
 
     final static CsFlow.Operator<?, ?> REQUEST_ON_CORE[] = new CsFlow.Operator[TPC.getNumCores()];
@@ -95,6 +100,11 @@ public class Threads
         public void close() throws Exception
         {
             source.close();
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return source.addSubscriberChainFromSource(throwable);
         }
     }
 
@@ -179,6 +189,16 @@ public class Threads
 
         public void close()
         {
+        }
+
+        public Throwable addSubscriberChainFromSource(Throwable throwable)
+        {
+            return CsFlow.wrapException(throwable, this);
+        }
+
+        public String toString()
+        {
+            return "\tevaluateOn " + coreId + "\n" + subscriber;
         }
     }
 

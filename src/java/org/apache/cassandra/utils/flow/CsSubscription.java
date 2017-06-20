@@ -38,4 +38,11 @@ public interface CsSubscription extends AutoCloseable
      * This call implies that all resources held by any outstanding item are no longer in use.
      */
     void close() throws Exception;
+
+    /**
+     * Propagates error to the root / source in order to collect subscriber chain during the exception creation.
+     *
+     * This method is required for deubgging purposes only.
+     */
+    Throwable addSubscriberChainFromSource(Throwable throwable);
 }
