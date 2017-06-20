@@ -211,6 +211,7 @@ public class Sequence extends NodeTool.NodeToolCmd
         }
     }
 
+    @SuppressWarnings("resource")
     private void readInput(List<Pair<Runnable, String>> runnables, String in)
     {
         URL inputUrl = NodeTool.class.getClassLoader().getResource(in);
