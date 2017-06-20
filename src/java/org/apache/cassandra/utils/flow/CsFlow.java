@@ -494,6 +494,16 @@ public abstract class CsFlow<T>
         return FlatMap.flatMap(this, op);
     }
 
+    public static <T> CsFlow<T> concat(CsFlow<CsFlow<T>> source)
+    {
+        return source.flatMap(x -> x);
+    }
+
+    public static <T> CsFlow<T> concat(Iterable<CsFlow<T>> sources)
+    {
+        return concat(fromIterable(sources));
+    }
+
     /**
      * Converts and iterable to a flow. If the iterator is closeable, also closes it with the subscription.
      *
