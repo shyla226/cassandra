@@ -19,12 +19,21 @@
 package org.apache.cassandra.io.util;
 
 import java.io.File;
+import java.io.IOError;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousChannelGroup;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
 import java.nio.channels.WritableByteChannel;
+import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,8 +41,10 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.epoll.AIOEpollFileChannel;
 import io.netty.channel.epoll.EpollEventLoop;
 import io.netty.channel.unix.FileDescriptor;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NativeLibrary;
 
 /**
@@ -49,19 +60,27 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
 {
     private static final Logger logger = LoggerFactory.getLogger(AsynchronousChannelProxy.class);
 
-    private static AsynchronousFileChannel openFileChannel(File file, boolean directIO)
+    @SuppressWarnings({"unchecked", "rawtypes"}) // generic array construction
+    private static final FileAttribute<?>[] NO_ATTRIBUTES = new FileAttribute[0];
+    private static final Set<OpenOption> READ_ONLY = Collections.singleton(StandardOpenOption.READ);
+    private static final ExecutorService javaAioGroup;
+    static
+    {
+        if (TPC.USE_AIO || FBUtilities.isWindows)
+            javaAioGroup = Executors.newCachedThreadPool(new NamedThreadFactory("java-aio"));
+        else
+            javaAioGroup = Executors.newFixedThreadPool(32, new NamedThreadFactory("java-aio"));
+    }
+
+    private static AsynchronousFileChannel openFileChannel(File file, boolean javaAIO)
     {
         try
         {
-            if (!TPC.USE_AIO)
-                return AsynchronousFileChannel.open(file.toPath(), StandardOpenOption.READ);
+            if (!TPC.USE_AIO || javaAIO)
+                return AsynchronousFileChannel.open(file.toPath(), READ_ONLY, javaAioGroup, NO_ATTRIBUTES);
 
             EpollEventLoop loop = (EpollEventLoop) TPC.bestTPCScheduler().getExecutor();
-
-            int flags = FileDescriptor.O_RDONLY;
-            if (directIO && TPC.USE_DIRECT_IO)
-                flags |= FileDescriptor.O_DIRECT;
-
+            int flags = FileDescriptor.O_RDONLY | FileDescriptor.O_DIRECT;
             return new AIOEpollFileChannel(file, loop, flags);
         }
         catch (IOException e)
@@ -70,14 +89,19 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
         }
     }
 
-    public AsynchronousChannelProxy(String path, boolean directIO)
+    public AsynchronousChannelProxy(String path)
     {
-        this (new File(path), directIO);
+        this (new File(path), false);
     }
 
-    public AsynchronousChannelProxy(File file, boolean directIO)
+    public AsynchronousChannelProxy(String path, boolean javaAIO)
     {
-        this(file.getPath(), openFileChannel(file, directIO));
+        this (new File(path), javaAIO);
+    }
+
+    public AsynchronousChannelProxy(File file, boolean javaAIO)
+    {
+        this(file.getPath(), openFileChannel(file, javaAIO));
     }
 
     public AsynchronousChannelProxy(String filePath, AsynchronousFileChannel channel)

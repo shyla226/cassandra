@@ -28,7 +28,7 @@ public final class ChecksummedRandomAccessReader
     public static RandomAccessReader open(File file, File crcFile) throws IOException
     {
         //Since this doesn't go through the chunk cache we avoid directIO since our buffers won't be DMA aligned
-        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, false);
+        AsynchronousChannelProxy channel = new AsynchronousChannelProxy(file, true);
         try
         {
             DataIntegrityMetadata.ChecksumValidator validator = new DataIntegrityMetadata.ChecksumValidator(ChecksumType.CRC32,

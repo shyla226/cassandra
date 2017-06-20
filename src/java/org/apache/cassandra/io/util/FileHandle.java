@@ -398,7 +398,7 @@ public class FileHandle extends SharedCloseableImpl
         {
             if (channel == null)
             {
-                channel = new AsynchronousChannelProxy(path, true);
+                channel = new AsynchronousChannelProxy(path);
             }
 
             AsynchronousChannelProxy channelCopy = channel.sharedCopy();
