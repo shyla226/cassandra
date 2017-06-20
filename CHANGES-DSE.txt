@@ -1,4 +1,5 @@
 DSE 5.1.2
+ * Add `nodetool sequence` batch functionality (APOLLO-651)
  * Show correct protocol version in cqlsh (APOLLO-616)
  * null assertion in MemtablePostFlush (APOLLO-708)
 Merged from dse5.0:

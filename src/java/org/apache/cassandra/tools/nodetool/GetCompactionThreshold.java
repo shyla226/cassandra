@@ -22,7 +22,9 @@ import io.airlift.command.Arguments;
 import io.airlift.command.Command;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.tools.NodeProbe;
@@ -37,13 +39,31 @@ public class GetCompactionThreshold extends NodeToolCmd
     @Override
     public void execute(NodeProbe probe)
     {
-        checkArgument(args.size() == 2, "getcompactionthreshold requires ks and cf args");
-        String ks = args.get(0);
-        String cf = args.get(1);
+        if (args.isEmpty())
+        {
+            for (Iterator<Map.Entry<String, ColumnFamilyStoreMBean>> cfProxyIter = probe.getColumnFamilyStoreMBeanProxies(); cfProxyIter.hasNext(); )
+            {
+                Map.Entry<String, ColumnFamilyStoreMBean> entry = cfProxyIter.next();
+                String ks = entry.getKey();
+                ColumnFamilyStoreMBean cfProxy = entry.getValue();
+                String table = cfProxy.getTableName();
+                printInfo(ks, table, cfProxy);
+            }
+        }
+        else
+        {
+            checkArgument(args.size() == 2, "getcompactionthreshold requires ks and cf args");
+            String ks = args.get(0);
+            String cf = args.get(1);
+            ColumnFamilyStoreMBean cfsProxy = probe.getCfsProxy(ks, cf);
+            printInfo(ks, cf, cfsProxy);
+        }
+    }
 
-        ColumnFamilyStoreMBean cfsProxy = probe.getCfsProxy(ks, cf);
-        System.out.println("Current compaction thresholds for " + ks + "/" + cf + ": \n" +
-                " min = " + cfsProxy.getMinimumCompactionThreshold() + ", " +
-                " max = " + cfsProxy.getMaximumCompactionThreshold());
+    private void printInfo(String ks, String cf, ColumnFamilyStoreMBean cfsProxy)
+    {
+        System.out.println("Current compaction thresholds for " + ks + '/' + cf + ": \n" +
+                           " min = " + cfsProxy.getMinimumCompactionThreshold() + ", " +
+                           " max = " + cfsProxy.getMaximumCompactionThreshold());
     }
 }

@@ -18,18 +18,15 @@
 package org.apache.cassandra.tools;
 
 import java.io.*;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.Map.Entry;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Throwables;
-import com.google.common.collect.*;
+import com.google.common.collect.Maps;
 
 import io.airlift.command.*;
-
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.tools.nodetool.*;
 import org.apache.cassandra.utils.FBUtilities;
@@ -40,13 +37,46 @@ import static com.google.common.collect.Lists.newArrayList;
 import static java.lang.Integer.parseInt;
 import static java.lang.String.format;
 import static org.apache.commons.lang3.ArrayUtils.EMPTY_STRING_ARRAY;
-import static org.apache.commons.lang3.StringUtils.*;
+import static org.apache.commons.lang3.StringUtils.EMPTY;
+import static org.apache.commons.lang3.StringUtils.isEmpty;
+import static org.apache.commons.lang3.StringUtils.isNotEmpty;
 
 public class NodeTool
 {
     private static final String HISTORYFILE = "nodetool.history";
 
     public static void main(String... args)
+    {
+        Cli<Runnable> parser = createCli(true);
+
+        int status = 0;
+        try
+        {
+            Runnable parse = parser.parse(args);
+            printHistory(args);
+            parse.run();
+        } catch (IllegalArgumentException |
+                IllegalStateException |
+                ParseArgumentsMissingException |
+                ParseArgumentsUnexpectedException |
+                ParseOptionConversionException |
+                ParseOptionMissingException |
+                ParseOptionMissingValueException |
+                ParseCommandMissingException |
+                ParseCommandUnrecognizedException e)
+        {
+            badUse(e);
+            status = 1;
+        } catch (Throwable throwable)
+        {
+            err(Throwables.getRootCause(throwable));
+            status = 2;
+        }
+
+        System.exit(status);
+    }
+
+    public static Cli<Runnable> createCli(boolean withSequence)
     {
         List<Class<? extends Runnable>> commands = newArrayList(
                 Help.class,
@@ -147,6 +177,9 @@ public class NodeTool
                 ViewBuildStatus.class
         );
 
+        if (withSequence)
+            commands.add(Sequence.class);
+
         Cli.CliBuilder<Runnable> builder = Cli.builder("nodetool");
 
         builder.withDescription("Manage your Cassandra cluster")
@@ -159,33 +192,7 @@ public class NodeTool
                 .withDefaultCommand(Help.class)
                 .withCommand(BootstrapResume.class);
 
-        Cli<Runnable> parser = builder.build();
-
-        int status = 0;
-        try
-        {
-            Runnable parse = parser.parse(args);
-            printHistory(args);
-            parse.run();
-        } catch (IllegalArgumentException |
-                IllegalStateException |
-                ParseArgumentsMissingException |
-                ParseArgumentsUnexpectedException |
-                ParseOptionConversionException |
-                ParseOptionMissingException |
-                ParseOptionMissingValueException |
-                ParseCommandMissingException |
-                ParseCommandUnrecognizedException e)
-        {
-            badUse(e);
-            status = 1;
-        } catch (Throwable throwable)
-        {
-            err(Throwables.getRootCause(throwable));
-            status = 2;
-        }
-
-        System.exit(status);
+        return builder.build();
     }
 
     private static void printHistory(String... args)
@@ -238,6 +245,22 @@ public class NodeTool
 
         @Option(type = OptionType.GLOBAL, name = {"-pwf", "--password-file"}, description = "Path to the JMX password file")
         private String passwordFilePath = EMPTY;
+
+        public void applyGeneralArugments(NodeToolCmd source)
+        {
+            this.host = source.host;
+            this.port = source.port;
+            this.username = source.username;
+            this.password = source.password;
+            this.passwordFilePath = source.passwordFilePath;
+        }
+
+        public void sequenceRun(NodeProbe probe)
+        {
+            execute(probe);
+            if (probe.isFailed())
+                throw new RuntimeException("nodetool failed, check server logs");
+        }
 
         @Override
         public void run()
@@ -375,7 +398,7 @@ public class NodeTool
         EndpointSnitchInfoMBean epSnitchInfo = probe.getEndpointSnitchInfoProxy();
         try
         {
-            for (Entry<String, String> tokenAndEndPoint : tokenToEndpoint.entrySet())
+            for (Map.Entry<String, String> tokenAndEndPoint : tokenToEndpoint.entrySet())
             {
                 String dc = epSnitchInfo.getDatacenter(tokenAndEndPoint.getValue());
                 if (!ownershipByDc.containsKey(dc))

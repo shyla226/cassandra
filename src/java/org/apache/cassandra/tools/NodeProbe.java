@@ -407,9 +407,8 @@ public class NodeProbe implements AutoCloseable
         }
     }
 
-    public Map<Sampler, CompositeData> getPartitionSample(String ks, String cf, int capacity, int duration, int count, List<Sampler> samplers) throws OpenDataException
+    public Map<Sampler, CompositeData> getPartitionSample(String ks, String cf, ColumnFamilyStoreMBean cfsProxy, int capacity, int duration, int count, List<Sampler> samplers) throws OpenDataException
     {
-        ColumnFamilyStoreMBean cfsProxy = getCfsProxy(ks, cf);
         for(Sampler sampler : samplers)
         {
             cfsProxy.beginLocalSampling(sampler.name(), capacity);
@@ -883,6 +882,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.getKeyspaces();
     }
 
+    public Map<String, List<String>> getKeyspacesAndViews()
+    {
+        return ssProxy.getKeyspacesAndViews();
+    }
+
     public List<String> getNonSystemKeyspaces()
     {
         return ssProxy.getNonSystemKeyspaces();
@@ -1213,6 +1217,11 @@ public class NodeProbe implements AutoCloseable
     public void failed()
     {
         this.failed = true;
+    }
+
+    public void clearFailed()
+    {
+        failed = false;
     }
 
     public long getReadRepairAttempted()
