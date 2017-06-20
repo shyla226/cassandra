@@ -4540,6 +4540,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return Collections.unmodifiableList(Schema.instance.getNonLocalStrategyKeyspaces());
     }
 
+    public Map<String,List<String>> getKeyspacesAndViews()
+    {
+        Map<String, List<String>> map = new HashMap<>();
+        for (String ks : Schema.instance.getKeyspaces())
+        {
+            List<String> tables = new ArrayList<>();
+            map.put(ks, tables);
+            for (Iterator<ViewMetadata> viewIter = Schema.instance.getKeyspaceMetadata(ks).views.iterator(); viewIter.hasNext();)
+            {
+                tables.add(viewIter.next().name);
+            }
+        }
+        return map;
+    }
+
     public Map<String, String> getViewBuildStatuses(String keyspace, String view)
     {
         Map<UUID, String> coreViewStatus = SystemDistributedKeyspace.viewStatus(keyspace, view);

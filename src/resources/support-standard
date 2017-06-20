@@ -1,0 +1,38 @@
+# Standard sequence of nodetool commands for DataStax support.
+# execute with:
+#     bin/nodetool sequence -i support-standard
+
+version
+status
+info
+gossipinfo
+tpstats
+netstats
+gcstats
+gettimeout
+failuredetector
+statusbackup
+statusbinary
+statusgossip
+statushandoff
+compactionhistory
+compactionstats
+describecluster
+describering
+getcompactionthreshold
+getcompactionthroughput
+getconcurrentcompactors
+getinterdcstreamthroughput
+getlogginglevels
+getmaxhintwindow
+getstreamthroughput
+gettraceprobability
+listsnapshots
+proxyhistograms
+rangekeysample
+tablehistograms
+tablestats
+viewbuildstatus
+ring
+toppartitions 2000
+sjk hh -n 50 --live

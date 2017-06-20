@@ -57,6 +57,13 @@ public class Sjk extends NodeToolCmd
         }
     }
 
+    public void sequenceRun(NodeProbe probe)
+    {
+        wrapper.prepare(args != null ? args.toArray(new String[0]) : new String[]{"help"});
+        if (!wrapper.run(probe))
+            probe.failed();
+    }
+
     protected void execute(NodeProbe probe)
     {
         if (!wrapper.run(probe))

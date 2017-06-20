@@ -23,16 +23,23 @@ import io.airlift.command.Arguments;
 import io.airlift.command.Command;
 import io.airlift.command.Option;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import javax.management.openmbean.CompositeData;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularDataSupport;
 
+import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
 import org.apache.cassandra.tools.NodeProbe;
@@ -55,11 +62,65 @@ public class TopPartitions extends NodeToolCmd
     @Override
     public void execute(NodeProbe probe)
     {
-        checkArgument(args.size() == 3, "toppartitions requires keyspace, column family name, and duration");
         checkArgument(topCount < size, "TopK count (-k) option must be smaller then the summary capacity (-s)");
+
+        if (args.size() == 1)
+        {
+            topParittionsForAllTables(probe);
+            return;
+        }
+
+        checkArgument(args.size() == 3, "toppartitions requires keyspace, column family name, and duration");
         String keyspace = args.get(0);
         String cfname = args.get(1);
         Integer duration = Integer.valueOf(args.get(2));
+        ColumnFamilyStoreMBean cfProxy = probe.getCfsProxy(keyspace, cfname);
+        System.out.print(topPartitions(probe, cfProxy, keyspace, cfname, duration));
+    }
+
+    private void topParittionsForAllTables(NodeProbe probe)
+    {
+        Integer duration = Integer.valueOf(args.get(0));
+
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        try
+        {
+            List<Future<String>> futures = new ArrayList<>();
+            for (Iterator<Entry<String, ColumnFamilyStoreMBean>> cfProxyIter = probe.getColumnFamilyStoreMBeanProxies(); cfProxyIter.hasNext(); )
+            {
+                Entry<String, ColumnFamilyStoreMBean> entry = cfProxyIter.next();
+                String ks = entry.getKey();
+                ColumnFamilyStoreMBean cfProxy = entry.getValue();
+                String table = cfProxy.getTableName();
+
+                futures.add(executorService.submit(() -> topPartitions(probe, cfProxy, ks, table, duration)));
+            }
+
+            for (Future<String> f : futures)
+            {
+                try
+                {
+                    System.out.print(f.get());
+                }
+                catch (InterruptedException e)
+                {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                catch (ExecutionException e)
+                {
+                    throw new RuntimeException(e.getCause());
+                }
+            }
+        }
+        finally
+        {
+            executorService.shutdown();
+        }
+    }
+
+    private String topPartitions(NodeProbe probe, ColumnFamilyStoreMBean cfProxy, String keyspace, String cfname, Integer duration)
+    {
         // generate the list of samplers
         List<Sampler> targets = Lists.newArrayList();
         for (String s : samplers.split(","))
@@ -76,42 +137,49 @@ public class TopPartitions extends NodeToolCmd
         Map<Sampler, CompositeData> results;
         try
         {
-            results = probe.getPartitionSample(keyspace, cfname, size, duration, topCount, targets);
+            results = probe.getPartitionSample(keyspace, cfname, cfProxy, size, duration, topCount, targets);
         } catch (OpenDataException e)
         {
             throw new RuntimeException(e);
         }
         boolean first = true;
-        for(Entry<Sampler, CompositeData> result : results.entrySet())
+        StringWriter sw = new StringWriter();
+        try (PrintWriter pw =  new PrintWriter(sw))
         {
-            CompositeData sampling = result.getValue();
-            // weird casting for http://bugs.sun.com/view_bug.do?bug_id=6548436
-            List<CompositeData> topk = (List<CompositeData>) (Object) Lists.newArrayList(((TabularDataSupport) sampling.get("partitions")).values());
-            Collections.sort(topk, new Ordering<CompositeData>()
+            pw.println("\nKeyspace/table: " + keyspace + '/' + cfname);
+            for (Entry<Sampler, CompositeData> result : results.entrySet())
             {
-                public int compare(CompositeData left, CompositeData right)
+                CompositeData sampling = result.getValue();
+                // weird casting for http://bugs.sun.com/view_bug.do?bug_id=6548436
+                List<CompositeData> topk = (List<CompositeData>) (Object) Lists.newArrayList(((TabularDataSupport) sampling.get("partitions")).values());
+                topk.sort(new Ordering<CompositeData>()
                 {
-                    return Long.compare((long) right.get("count"), (long) left.get("count"));
+                    public int compare(CompositeData left, CompositeData right)
+                    {
+                        return Long.compare((long) right.get("count"), (long) left.get("count"));
+                    }
+                });
+                if (!first)
+                    pw.println();
+                pw.println(result.getKey().toString() + " Sampler:");
+                pw.printf("  Cardinality: ~%d (%d capacity)%n", sampling.get("cardinality"), size);
+                pw.printf("  Top %d partitions:%n", topCount);
+                if (topk.size() == 0)
+                {
+                    pw.println("\tNothing recorded during sampling period...");
                 }
-            });
-            if(!first)
-                System.out.println();
-            System.out.println(result.getKey().toString()+ " Sampler:");
-            System.out.printf("  Cardinality: ~%d (%d capacity)%n", sampling.get("cardinality"), size);
-            System.out.printf("  Top %d partitions:%n", topCount);
-            if (topk.size() == 0)
-            {
-                System.out.println("\tNothing recorded during sampling period...");
-            } else
-            {
-                int offset = 0;
-                for (CompositeData entry : topk)
-                    offset = Math.max(offset, entry.get("string").toString().length());
-                System.out.printf("\t%-" + offset + "s%10s%10s%n", "Partition", "Count", "+/-");
-                for (CompositeData entry : topk)
-                    System.out.printf("\t%-" + offset + "s%10d%10d%n", entry.get("string").toString(), entry.get("count"), entry.get("error"));
+                else
+                {
+                    int offset = 0;
+                    for (CompositeData entry : topk)
+                        offset = Math.max(offset, entry.get("string").toString().length());
+                    pw.printf("\t%-" + offset + "s%10s%10s%n", "Partition", "Count", "+/-");
+                    for (CompositeData entry : topk)
+                        pw.printf("\t%-" + offset + "s%10d%10d%n", entry.get("string").toString(), entry.get("count"), entry.get("error"));
+                }
+                first = false;
             }
-            first = false;
         }
+        return sw.toString();
     }
 }
