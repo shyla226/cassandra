@@ -755,7 +755,7 @@ public class CommitLogTest
     }
 
     public void testOutOfOrderFlushRecovery(BiConsumer<ColumnFamilyStore, Memtable> flushAction, boolean performCompaction)
-            throws ExecutionException, InterruptedException, IOException
+            throws Exception
     {
         CommitLog.instance.resetUnsafe(true);
 
@@ -816,25 +816,25 @@ public class CommitLogTest
     };
 
     @Test
-    public void testOutOfOrderFlushRecovery() throws ExecutionException, InterruptedException, IOException
+    public void testOutOfOrderFlushRecovery() throws Exception
     {
         testOutOfOrderFlushRecovery(flush, false);
     }
 
     @Test
-    public void testOutOfOrderLogDiscard() throws ExecutionException, InterruptedException, IOException
+    public void testOutOfOrderLogDiscard() throws Exception
     {
         testOutOfOrderFlushRecovery(recycleSegments, false);
     }
 
     @Test
-    public void testOutOfOrderFlushRecoveryWithCompaction() throws ExecutionException, InterruptedException, IOException
+    public void testOutOfOrderFlushRecoveryWithCompaction() throws Exception
     {
         testOutOfOrderFlushRecovery(flush, true);
     }
 
     @Test
-    public void testOutOfOrderLogDiscardWithCompaction() throws ExecutionException, InterruptedException, IOException
+    public void testOutOfOrderLogDiscardWithCompaction() throws Exception
     {
         testOutOfOrderFlushRecovery(recycleSegments, true);
     }

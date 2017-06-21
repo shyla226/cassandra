@@ -1169,7 +1169,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 try
                 {
                     // flush the memtable
-                    flushRunnables = memtable.flushRunnables(txn);
+                    flushRunnables = memtable.createFlushRunnables(txn);
 
                     for (int i = 0; i < flushRunnables.size(); i++)
                         futures.add(perDiskflushExecutors[i].submit(flushRunnables.get(i)));
