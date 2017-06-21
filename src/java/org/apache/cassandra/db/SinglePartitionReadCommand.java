@@ -76,8 +76,6 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
-    private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
-
     private SinglePartitionReadCommand(DigestVersion digestVersion,
                                        TableMetadata metadata,
                                        int nowInSec,
@@ -360,6 +358,10 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
+        // Check reuse. This is too early (another deferred may have not started yet), but gives better error info.
+        // We'll check again in queryMemtableAndDisk.
+        assert this.cfs == null : "Read commands cannot be reused.";
+
         metricsCollector = new SSTableReadMetricsCollector();
 
         return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController)
@@ -504,6 +506,11 @@ public class SinglePartitionReadCommand extends ReadCommand
         return deferredQuery(cfs, executionController);
     }
 
+    // Mutable query state.
+    ColumnFamilyStore cfs;
+    SSTableReadMetricsCollector metricsCollector = null;
+    private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
+
     /**
      * Queries both memtable and sstables to fetch the result of this query.
      * <p>
@@ -522,31 +529,12 @@ public class SinglePartitionReadCommand extends ReadCommand
     private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDisk(ColumnFamilyStore cfs,
                                                                      ReadExecutionController executionController)
     {
-        assert executionController != null && executionController.validForReadOn(cfs);
-        Tracing.trace("Executing single-partition query on {}", cfs.name);
         assert this.cfs == null : "Read commands cannot be reused.";
+        assert executionController != null && executionController.validForReadOn(cfs);
+
+        Tracing.trace("Executing single-partition query on {}", cfs.name);
         this.cfs = cfs;
 
-        return queryMemtableAndDiskInternal();
-    }
-
-    @Override
-    protected int oldestUnrepairedTombstone()
-    {
-        return oldestUnrepairedTombstone;
-    }
-
-    long mostRecentPartitionTombstone = Long.MIN_VALUE;
-    long minTimestamp = Long.MAX_VALUE;
-    SSTableReadMetricsCollector metricsCollector = null;
-    int allTableCount = 0;
-    int includedDueToTombstones = 0;
-    int nonIntersectingSSTables = 0;
-    ColumnFamilyStore cfs;
-
-    @SuppressWarnings("resource")
-    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
-    {
          /*
          * We have 2 main strategies:
          *   1) We query memtables and sstables simultaneously. This is our most generic strategy and the one we use
@@ -560,7 +548,26 @@ public class SinglePartitionReadCommand extends ReadCommand
          */
         if (clusteringIndexFilter().kind() == ClusteringIndexFilter.Kind.NAMES && !queriesMulticellType(cfs.metadata()))
             return queryMemtableAndSSTablesInTimestampOrder((ClusteringIndexNamesFilter) clusteringIndexFilter());
+        else
+            return queryMemtableAndDiskInternal();
+    }
 
+    @Override
+    protected int oldestUnrepairedTombstone()
+    {
+        return oldestUnrepairedTombstone;
+    }
+
+    // Mutable query state as used by queryMemtableAndDiskInternal
+    long mostRecentPartitionTombstone = Long.MIN_VALUE;
+    long minTimestamp = Long.MAX_VALUE;
+    int allTableCount = 0;
+    int includedDueToTombstones = 0;
+    int nonIntersectingSSTables = 0;
+
+    @SuppressWarnings("resource")
+    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
+    {
         // We now build a flow of FlowableUnfilteredPartition sourced from three separate lists:
         // - memtables
         // - sstables that contain sliced data, but only newer than the most recent partition tombstone
@@ -730,7 +737,7 @@ public class SinglePartitionReadCommand extends ReadCommand
         return false;
     }
 
-
+    // Mutable query state used by queryMemtableAndSSTablesInTimestampOrder
     ClusteringIndexNamesFilter namesFilter = null;
     int sstablesIterated = 0;
     boolean onlyUnrepaired = true;
@@ -810,53 +817,37 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     private CsFlow<Void> processSSTableInTimeOrder(SSTableReader sstable)
     {
-        if (shouldInclude(sstable))
+        if (!shouldInclude(sstable))
         {
-            ++sstablesIterated;
-            return makeFlowable(sstable, namesFilter)
-                   .flatMap(fup ->
-                            {
-                                Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
-
-                                if (sstable.isRepaired())
-                                    onlyUnrepaired = false;
-
-                                //TODO: replace with CsFlow.create when implemented.
-                                return fup.content.toList()
-                                                  .map(u ->
-                                                       {
-                                                           addTimeOrdered(ImmutableBTreePartition.create(fup, u)
-                                                                                                 .unfilteredIterator(columnFilter(),
-                                                                                                          Slices.ALL,
-                                                                                                          namesFilter.isReversed()),
-                                                                          namesFilter, sstable.isRepaired());
-                                                           return null;
-                                                       });
-                            });
-        }
-        else
-        {
-            // This mean that nothing queried by the filter can be in the sstable. One exception is the top-level partition deletion
-            // however: if it is set, it impacts everything and must be included. Getting that top-level partition deletion costs us
-            // some seek in general however (unless the partition is indexed and is in the key cache), so we first check if the sstable
-            // has any tombstone at all as a shortcut.
+            // This means that nothing queried by the filter can be in the sstable, but tombstones can still span over
+            // queried data. We can completely skip a table that doesn't have any tombstones, though.
             if (!sstable.mayHaveTombstones())
-                return CsFlow.empty(); // no tombstone at all, we can skip that sstable
+                return CsFlow.empty();
 
-            ++sstablesIterated;
-
-            // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-            return makeFlowable(sstable, namesFilter)
-                   .map(fup ->
-                   {
-                       if (!fup.header.partitionLevelDeletion.isLive())
-                       {
-                           addTimeOrdered(UnfilteredRowIterators.noRowsIterator(fup.header.metadata, fup.header.partitionKey, fup.staticRow, fup.header.partitionLevelDeletion, namesFilter.isReversed()),
-                                          namesFilter, sstable.isRepaired());
-                       }
-                       return null;
-                   });
+            ++includedDueToTombstones;
         }
+
+        ++sstablesIterated;
+        return makeFlowable(sstable, namesFilter)
+               .flatMap(fup ->
+                        {
+                            Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
+
+                            if (sstable.isRepaired())
+                                onlyUnrepaired = false;
+
+                            //TODO: replace with CsFlow.create when implemented.
+                            return fup.content.toList()
+                                              .map(u ->
+                                                   {
+                                                       addTimeOrdered(ImmutableBTreePartition.create(fup, u)
+                                                                                             .unfilteredIterator(columnFilter(),
+                                                                                                      Slices.ALL,
+                                                                                                      namesFilter.isReversed()),
+                                                                      namesFilter, sstable.isRepaired());
+                                                       return null;
+                                                   });
+                        });
     }
 
     private FlowableUnfilteredPartition outputTimeOrderedResult(ColumnFamilyStore cfs)

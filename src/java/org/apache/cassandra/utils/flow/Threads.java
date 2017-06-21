@@ -198,7 +198,7 @@ public class Threads
 
         public String toString()
         {
-            return "\tevaluateOn " + coreId + "\n" + subscriber;
+            return CsFlow.formatTrace("evaluateOn " + coreId, source, subscriber);
         }
     }
 

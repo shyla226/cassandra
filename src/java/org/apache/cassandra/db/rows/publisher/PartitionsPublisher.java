@@ -309,9 +309,9 @@ public class PartitionsPublisher
         @Override
         public void onError(Throwable error)
         {
-            JVMStabilityInspector.inspectThrowable(error);
-
             error = addSubscriberChainFromSource(error);
+
+            JVMStabilityInspector.inspectThrowable(error);
 
             logger.debug("Got exception: {}/{}", error.getClass().getName(), error.getMessage());
 

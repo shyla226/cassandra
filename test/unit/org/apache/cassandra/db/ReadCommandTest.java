@@ -159,6 +159,7 @@ public class ReadCommandTest
 
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
+        readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
         try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
         {
             PartitionIterators.consume(iterator);
@@ -199,6 +200,7 @@ public class ReadCommandTest
 
         Monitor monitor = Monitor.createAndStart(readCommand, ApproximateTime.currentTimeMillis(), 0, false);
 
+        readCommand = readCommand.withUpdatedLimit(readCommand.limits());   // duplicate command as they are not reusable
         try (PartitionIterator iterator = readCommand.executeInternal(monitor).blockingGet())
         {
             PartitionIterators.consume(iterator);
