@@ -1466,15 +1466,15 @@ public abstract class CsFlow<T>
                 return throwable;
         }
 
-        throwable.addSuppressed(new CsFlowException(tag.toString(), throwable));
+        throwable.addSuppressed(new CsFlowException(tag.toString()));
         return throwable;
     }
 
     private static class CsFlowException extends RuntimeException
     {
-        private CsFlowException(Object tag, Throwable t)
+        private CsFlowException(Object tag)
         {
-            super("CsFlow call chain:\n" + tag.toString(), t);
+            super("CsFlow call chain:\n" + tag.toString());
         }
     }
 
