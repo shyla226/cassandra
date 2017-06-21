@@ -76,6 +76,27 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
+
+    // Mutable query state.
+    private ColumnFamilyStore cfs;
+    private SSTableReadMetricsCollector metricsCollector;
+    private int oldestUnrepairedTombstone;
+
+
+    // Mutable query state as used by queryMemtableAndDiskInternal
+    private long mostRecentPartitionTombstone;
+    private long minTimestamp;
+    private int allTableCount;
+    private int includedDueToTombstones;
+    private int nonIntersectingSSTables;
+
+    // Mutable query state used by queryMemtableAndSSTablesInTimestampOrder
+    private ClusteringIndexNamesFilter namesFilter;
+    private int sstablesIterated;
+    private boolean onlyUnrepaired;
+    private ImmutableBTreePartition timeOrderedResult;
+
+
     private SinglePartitionReadCommand(DigestVersion digestVersion,
                                        TableMetadata metadata,
                                        int nowInSec,
@@ -89,7 +110,27 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
+        resetMutableState();
     }
+
+    private void resetMutableState()
+    {
+        metricsCollector = null;
+        cfs = null;
+        oldestUnrepairedTombstone = Integer.MAX_VALUE;
+
+        mostRecentPartitionTombstone = Long.MIN_VALUE;
+        minTimestamp = Long.MAX_VALUE;
+        allTableCount = 0;
+        includedDueToTombstones = 0;
+        nonIntersectingSSTables = 0;
+
+        namesFilter = null;
+        sstablesIterated = 0;
+        onlyUnrepaired = true;
+        timeOrderedResult = null;
+    }
+
 
     /**
      * Creates a new read command on a single partition.
@@ -350,6 +391,11 @@ public class SinglePartitionReadCommand extends ReadCommand
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
     public CsFlow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
+        //Resets our mutable state for short reads
+        //Since this object can be re-used
+        if (this.cfs != null)
+            resetMutableState();
+
         if (cfs.isRowCacheEnabled())
             return getThroughCache(cfs, executionController);       // tpc TODO: Not tested!
         else
@@ -358,16 +404,16 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        // Check reuse. This is too early (another deferred may have not started yet), but gives better error info.
-        // We'll check again in queryMemtableAndDisk.
-        assert this.cfs == null : "Read commands cannot be reused.";
+        //Resets our mutable state for short reads
+        //Since this object can be re-used
+        if (this.cfs != null)
+            resetMutableState();
 
         metricsCollector = new SSTableReadMetricsCollector();
 
         return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController)
                                          .doOnClose(() -> updateMetrics(cfs.metric)),
                                    TPC.getCoreForKey(cfs.keyspace, partitionKey));
-
     }
 
     private void updateMetrics(TableMetrics metrics)
@@ -506,11 +552,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         return deferredQuery(cfs, executionController);
     }
 
-    // Mutable query state.
-    ColumnFamilyStore cfs;
-    SSTableReadMetricsCollector metricsCollector = null;
-    private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
-
     /**
      * Queries both memtable and sstables to fetch the result of this query.
      * <p>
@@ -529,7 +570,6 @@ public class SinglePartitionReadCommand extends ReadCommand
     private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDisk(ColumnFamilyStore cfs,
                                                                      ReadExecutionController executionController)
     {
-        assert this.cfs == null : "Read commands cannot be reused.";
         assert executionController != null && executionController.validForReadOn(cfs);
 
         Tracing.trace("Executing single-partition query on {}", cfs.name);
@@ -557,13 +597,6 @@ public class SinglePartitionReadCommand extends ReadCommand
     {
         return oldestUnrepairedTombstone;
     }
-
-    // Mutable query state as used by queryMemtableAndDiskInternal
-    long mostRecentPartitionTombstone = Long.MIN_VALUE;
-    long minTimestamp = Long.MAX_VALUE;
-    int allTableCount = 0;
-    int includedDueToTombstones = 0;
-    int nonIntersectingSSTables = 0;
 
     @SuppressWarnings("resource")
     private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
@@ -736,12 +769,6 @@ public class SinglePartitionReadCommand extends ReadCommand
         }
         return false;
     }
-
-    // Mutable query state used by queryMemtableAndSSTablesInTimestampOrder
-    ClusteringIndexNamesFilter namesFilter = null;
-    int sstablesIterated = 0;
-    boolean onlyUnrepaired = true;
-    ImmutableBTreePartition timeOrderedResult = null;
 
     /**
      * Do a read by querying the memtable(s) first, and then each relevant sstables sequentially by order of the sstable
