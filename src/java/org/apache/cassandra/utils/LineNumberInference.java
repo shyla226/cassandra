@@ -33,6 +33,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.Maps;
@@ -61,18 +62,25 @@ import org.objectweb.asm.Opcodes;
  */
 public final class LineNumberInference
 {
+    public static final Pair<String, Integer> UNKNOWN_SOURCE = Pair.create("unknown", -1);
+
     private static final Logger logger = LoggerFactory.getLogger(LineNumberInference.class);
     private static final Pattern DOT = Pattern.compile(".", Pattern.LITERAL);
     private static final Pattern SLASH = Pattern.compile("/", Pattern.LITERAL);
     private static final String INIT = "<init>";
-    private static final Pair<String, Integer> UNKNOWN_SOURCE = Pair.create("unknown", -1);
     private static final Pattern LAMBDA_PATTERN = Pattern.compile("(.*)\\$\\$(Lambda)\\$(\\d+)/(\\d+)");
+    private static final String DUMP_CLASSES = "jdk.internal.lambda.dumpProxyClasses";
+    private final static String tmpDir = Files.createTempDir().getAbsolutePath();
 
+    static
+    {
+        System.setProperty(DUMP_CLASSES, tmpDir);
+    }
 
-    public final static String tmpDir;
-    static {
-        tmpDir = Files.createTempDir().getAbsolutePath();
-        System.setProperty("jdk.internal.lambda.dumpProxyClasses", tmpDir);
+    // Initialisation is already done in the static context; method is no-op and shouold be used for referencing the class
+    public static void init()
+    {
+        // no-op
     }
 
     private final BiMap<String, Pair<String, String>> mappings;
@@ -87,8 +95,6 @@ public final class LineNumberInference
     private final Lock readLock;
     private final Lock writeLock;
 
-    private volatile long lastModified;
-
     public LineNumberInference()
     {
         this((x) -> true);
@@ -98,6 +104,7 @@ public final class LineNumberInference
      * Constructor allowing filtering of the classes for which the preloading has to be done. Used to reduce
      * the runtime memory footprint of stack trace inference.
      */
+    @VisibleForTesting
     public LineNumberInference(Predicate<Class> matcher)
     {
         this.matcher = matcher;
@@ -106,7 +113,6 @@ public final class LineNumberInference
         lines = Maps.newHashMap();
         processedFiles = new HashSet<>();
         processedProxyClasses = new HashSet<>();
-        lastModified = Long.MIN_VALUE;
         lock = new ReentrantReadWriteLock();
         readLock = lock.readLock();
         writeLock = lock.writeLock();
@@ -118,38 +124,33 @@ public final class LineNumberInference
     public void preloadLambdas()
     {
         File dirFile = new File(tmpDir);
-        long newLastModified = dirFile.lastModified();
 
-        if (newLastModified > lastModified)
+        writeLock.lock();
+        try
         {
-            writeLock.lock();
-            try
+            for (File file : FileUtils.listFiles(dirFile, new String[]{ "class" }, true))
             {
-                lastModified = newLastModified;
-                for (File file : FileUtils.listFiles(dirFile, new String[]{ "class" }, true))
-                {
-                    if (processedProxyClasses.contains(file.getAbsolutePath()))
-                        continue;
+                if (processedProxyClasses.contains(file.getAbsolutePath()))
+                    continue;
 
-                    try (InputStream in = new FileInputStream(file))
-                    {
-                        new ClassReader(in).accept(new FileMappingVisitor(), ClassReader.EXPAND_FRAMES);
-                        processedProxyClasses.add(file.getAbsolutePath());
-                    }
-                    catch (IOException e)
-                    {
-                        logger.warn("Failed to preload lambdas: rich stack traces for flows will be disabled", e);
-                    }
+                try (InputStream in = new FileInputStream(file))
+                {
+                    new ClassReader(in).accept(new FileMappingVisitor(), ClassReader.EXPAND_FRAMES);
+                    processedProxyClasses.add(file.getAbsolutePath());
+                }
+                catch (IOException e)
+                {
+                    logger.warn("Failed to preload lambdas: rich stack traces for flows will be disabled. ", e); // Check `dumpProxyClasses` property precedence: it has to be set before lambda loads
                 }
             }
-            catch (Throwable e)
-            {
-                logger.warn("Couldn't load the list of lambdas for rich stack traces.", e);
-            }
-            finally
-            {
-                writeLock.unlock();
-            }
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Couldn't load the list of lambdas for rich stack traces.", e);
+        }
+        finally
+        {
+            writeLock.unlock();
         }
     }
 
@@ -390,7 +391,9 @@ public final class LineNumberInference
                     // lambda proxies are calling the generated private static method
                     if (Opcodes.INVOKESTATIC == opcode || (Opcodes.INVOKESPECIAL == opcode && !methodRef.equals(INIT)))
                     {
-                        mappings.put(currentLambda, Pair.create(path, methodRef));
+                        Pair<String, String> pair = Pair.create(path, methodRef);
+                        if (!inverseMappings.containsKey(pair))
+                            mappings.put(currentLambda, pair);
                     }
                 }
             };

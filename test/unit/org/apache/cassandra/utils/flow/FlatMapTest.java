@@ -30,15 +30,23 @@ import java.util.function.IntSupplier;
 import java.util.stream.IntStream;
 
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.CompletableObserver;
+import org.apache.cassandra.utils.LineNumberInference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class FlatMapTest
 {
+    @BeforeClass
+    public static void init() throws Exception
+    {
+        LineNumberInference.init();
+    }
+
     @Test
     public void testFlatMap() throws Exception
     {

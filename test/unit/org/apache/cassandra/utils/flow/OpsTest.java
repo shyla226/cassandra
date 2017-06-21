@@ -24,12 +24,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.SingleObserver;
 import io.reactivex.disposables.Disposable;
+import org.apache.cassandra.utils.LineNumberInference;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertTrue;
@@ -39,6 +41,12 @@ import static org.junit.Assert.assertNull;
 
 public class OpsTest
 {
+    @BeforeClass
+    public static void init() throws Exception
+    {
+        LineNumberInference.init();
+    }
+
     @Test
     public void testSkippingOpDoesntOverflowStack()
     {
