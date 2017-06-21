@@ -1466,6 +1466,8 @@ public abstract class CsFlow<T>
                 return throwable;
         }
 
+        // Load lambdas before calling `toString` on the object
+        LINE_NUMBERS.preloadLambdas();
         throwable.addSuppressed(new CsFlowException(tag.toString()));
         return throwable;
     }
@@ -1491,8 +1493,6 @@ public abstract class CsFlow<T>
     }
     public static String withLineNumber(Object obj)
     {
-        LINE_NUMBERS.preloadLambdas();
-
         LINE_NUMBERS.maybeProcessClass(obj.getClass());
         Pair<String, Integer> lineNumber = LINE_NUMBERS.getLine(obj.getClass());
         return obj + "(" + lineNumber.left + ":" + lineNumber.right + ")";
