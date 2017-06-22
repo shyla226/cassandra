@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.io.sstable.format;
 
-import java.io.IOException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 
@@ -26,23 +25,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.PartitionHeader;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
@@ -78,7 +71,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
     final boolean reverse;
     final ReaderConstraint rc;
     final SerializationHelper helper;
-    final Slices slices;
+    Slices slices;
 
     volatile RowIndexEntry indexEntry = null;
     volatile FileDataInput dfile = null;
@@ -168,8 +161,6 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
     class PartitionReader extends Base<FlowableUnfilteredPartition>
     {
         boolean issued = false;
-        PartitionHeader header = null;
-        Row staticRow = null;
 
         PartitionReader(CsSubscriber<FlowableUnfilteredPartition> subscriber)
         {
@@ -195,58 +186,23 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
                     return;
                 }
             }
+            else
+                assert isRetry;
 
             if (dfile == null)
                 dfile = table.getFileDataInput(indexEntry.position, rc);
 
-            // TODO: We should not have to do the header + staticRow reading ourselves.
-            // Currently we have to do this to avoid SSTableReader.iterator
-            // may leave open resources on NotInCacheException.
-            if (header == null)
-            {
-                DeletionTime partitionLevelDeletion;
-                if (indexEntry.isIndexed())
-                {
-                    partitionLevelDeletion = indexEntry.deletionTime();
-                    filePos = indexEntry.position;
-                }
-                else
-                {
-                    ByteBufferUtil.skipShortLength(dfile); // Skip partition key
-                    partitionLevelDeletion = DeletionTime.serializer.deserialize(dfile);
-                    filePos = dfile.getFilePointer();
-                }
-
-                header = new PartitionHeader(table.metadata(),
-                                             key,
-                                             partitionLevelDeletion,
-                                             selectedColumns.fetchedColumns(),
-                                             reverse,
-                                             table.stats());
-            }
-            assert filePos != -1;
-
-            if (staticRow == null)
-            {
-                if (indexEntry.isIndexed())
-                    staticRow = readStaticRowIndexed();
-                else
-                    staticRow = readStaticRowUnindexed();
-
-                filePos = dfile.getFilePointer();
-            }
-
             // This is the last stage that can fail in-cache read.
             assert ssTableIterator == null;
-            ssTableIterator = table.iterator(dfile,
-                                             key,
-                                             indexEntry,
-                                             slices,
-                                             selectedColumns,
-                                             reverse,
-                                             header.partitionLevelDeletion,
-                                             staticRow);
+            ssTableIterator = (AbstractSSTableIterator) table.iterator(dfile, key, indexEntry, slices, selectedColumns, reverse);
             filePos = dfile.getFilePointer();
+
+            PartitionHeader header = new PartitionHeader(ssTableIterator.metadata(),
+                                                         ssTableIterator.partitionKey(),
+                                                         ssTableIterator.partitionLevelDeletion(),
+                                                         ssTableIterator.columns(),
+                                                         ssTableIterator.isReverseOrder(),
+                                                         ssTableIterator.stats());
 
             CsFlow<Unfiltered> content = new CsFlow<Unfiltered>()
             {
@@ -257,44 +213,6 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
             };
             issued = true;
             subscriber.onNext(new FlowableUnfilteredPartition(header, ssTableIterator.staticRow(), content));
-        }
-
-        private Row readStaticRowIndexed() throws IOException
-        {
-            Columns statics = selectedColumns.fetchedColumns().statics;
-
-            if (!statics.isEmpty() && table.header.hasStatic())
-            {
-                // We haven't read partition header
-                ByteBufferUtil.skipShortLength(dfile); // Skip partition key
-                DeletionTime.serializer.skip(dfile); // Skip deletion
-
-                return UnfilteredSerializer.serializers.get(table.descriptor.version.encodingVersion())
-                                                       .deserializeStaticRow(dfile,
-                                                                             table.header,
-                                                                             helper);
-            }
-            return Rows.EMPTY_STATIC_ROW;
-        }
-
-        private Row readStaticRowUnindexed() throws IOException
-        {
-            Columns statics = selectedColumns.fetchedColumns().statics;
-            assert indexEntry != null;
-
-            if (table.header.hasStatic())
-            {
-                // Read and/or go to position after static row.
-                if (statics.isEmpty())
-                    UnfilteredSerializer.serializers.get(table.descriptor.version.encodingVersion())
-                                                    .skipStaticRow(dfile, table.header, helper);
-                else
-                    return UnfilteredSerializer.serializers.get(table.descriptor.version.encodingVersion())
-                                                                .deserializeStaticRow(dfile,
-                                                                                      table.header,
-                                                                                      helper);
-            }
-            return Rows.EMPTY_STATIC_ROW;
         }
 
         public void close() throws Exception
@@ -313,6 +231,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
                 dfile.close();
             }
         }
+
 
         public String toString()
         {

@@ -1031,7 +1031,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener);
     public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
-    public abstract AbstractSSTableIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter columnFilter, boolean reversed, DeletionTime partitionLevelDeletion, Row staticRow);
 
     public abstract PartitionIndexIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException;
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;

@@ -49,18 +49,6 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
     public SSTableReversedIterator(SSTableReader sstable,
                                    FileDataInput file,
                                    DecoratedKey key,
-                                   RowIndexEntry indexEntry,
-                                   Slices slices,
-                                   ColumnFilter columnFilter,
-                                   DeletionTime partitionLevelDeletion,
-                                   Row staticRow)
-    {
-        super(sstable, file, indexEntry, key, slices, columnFilter, partitionLevelDeletion, staticRow);
-    }
-
-    public SSTableReversedIterator(SSTableReader sstable,
-                                   FileDataInput file,
-                                   DecoratedKey key,
                                    BigRowIndexEntry indexEntry,
                                    Slices slices,
                                    ColumnFilter columns)

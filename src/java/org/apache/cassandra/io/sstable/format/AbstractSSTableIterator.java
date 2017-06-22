@@ -56,43 +56,6 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
     protected final Slices slices;
 
-
-    /**
-     * This constructor is used by Async readers
-     */
-    protected AbstractSSTableIterator(SSTableReader sstable,
-                                      FileDataInput file,
-                                      RowIndexEntry indexEntry,
-                                      DecoratedKey key,
-                                      Slices slices,
-                                      ColumnFilter columnFilter,
-                                      DeletionTime partitionLevelDeletion,
-                                      Row staticRow)
-    {
-        this.sstable = sstable;
-        this.metadata = sstable.metadata();
-        this.key = key;
-        this.columns = columnFilter;
-        this.slices = slices;
-        this.helper = new SerializationHelper(metadata, sstable.descriptor.version.encodingVersion(), SerializationHelper.Flag.LOCAL, columnFilter);
-        this.partitionLevelDeletion = partitionLevelDeletion;
-        this.staticRow = staticRow;
-        this.reader = createReader(indexEntry, file, false, Rebufferer.ReaderConstraint.IN_CACHE_ONLY);
-
-        try
-        {
-            if (reader != null && !slices.isEmpty())
-                reader.setForSlice(nextSlice());
-        }
-        catch (IOException e)
-        {
-            sstable.markSuspect();
-            String filePath = file.getPath();
-
-            throw new CorruptSSTableException(e, filePath);
-        }
-    }
-
     @SuppressWarnings("resource") // We need this because the analysis is not able to determine that we do close
                                   // file on every path where we created it.
     protected AbstractSSTableIterator(SSTableReader sstable,
@@ -137,10 +100,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                     ByteBufferUtil.skipShortLength(dataFileInput); // Skip partition key
                     this.partitionLevelDeletion = DeletionTime.serializer.deserialize(dataFileInput);
 
-                    // Note that this needs to be called after file != null and after the partitionDeletion has been set, but before readStaticRow
-                    // (since it uses it) so we can't move that up (but we'll be able to simplify as soon as we drop support for the old file format).
-                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, Rebufferer.ReaderConstraint.NONE);
+                    // Note that this needs to be called after file != null and after the partitionDeletion has been set so we can't move that up.
                     this.staticRow = readStaticRow(sstable, dataFileInput, helper, columns.fetchedColumns().statics);
+                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, Rebufferer.ReaderConstraint.NONE);
                 }
                 else
                 {
