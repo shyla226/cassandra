@@ -199,14 +199,6 @@ class TrieIndexSSTableReader extends SSTableReader
              : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns);
     }
 
-    public AbstractSSTableIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed, DeletionTime partitionLevelDeletion, Row staticRow)
-    {
-        assert indexEntry != null;
-        return reversed
-               ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow)
-               : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, partitionLevelDeletion, staticRow);
-    }
-
     @Override
     public RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc)
     {

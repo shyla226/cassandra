@@ -11,7 +11,7 @@ import org.apache.cassandra.schema.TableMetadata;
  * A header for CsFlow partition containers. Contains partition-level data that isn't expected to change with
  * transformations, to avoid having to copy/repeat it every time a transformation is applied to the partition content.
  */
-public class PartitionHeader implements Unfiltered
+public class PartitionHeader
 {
     /**
      * The metadata for the table this iterator on.
@@ -83,59 +83,6 @@ public class PartitionHeader implements Unfiltered
             merger.add(0, sources.next());
 
         return merger.merge();
-    }
-
-    public ClusteringPrefix clustering()
-    {
-        return Clustering.HEADER_CLUSTERING;
-    }
-
-    public Kind kind()
-    {
-        return Kind.HEADER;
-    }
-
-    public void digest(MessageDigest digest)
-    {
-        // Not used in digest
-    }
-
-    public void validateData(TableMetadata metadata)
-    {
-        // No validation needed
-    }
-
-    public String toString(TableMetadata metadata)
-    {
-        return toString(metadata, false, false);
-    }
-
-    public String toString(TableMetadata metadata, boolean fullDetails)
-    {
-        return toString(metadata, false, fullDetails);
-    }
-
-    public String toString(TableMetadata metadata, boolean includeClusterKeys, boolean fullDetails)
-    {
-        String cfs = "";
-        if (fullDetails)
-            cfs = String.format("table %s.%s", metadata.keyspace, metadata.name);
-        return String.format("partition %s key %s deletion %s", cfs, partitionKey, partitionLevelDeletion);
-    }
-
-    public boolean isRow()
-    {
-        return false;
-    }
-
-    public boolean isRangeTombstoneMarker()
-    {
-        return false;
-    }
-
-    public Unfiltered purge(DeletionPurger purger, int nowInSec)
-    {
-        return null;
     }
 
     public boolean isEmpty()
