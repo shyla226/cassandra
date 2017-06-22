@@ -524,8 +524,6 @@ public final class SchemaKeyspace
                                               .add("id", table.id.asUUID())
                                               .add("flags", TableMetadata.Flag.toStringSet(table.flags));
 
-        addTableParamsToRowBuilder(table.params, rowBuilder);
-
         if (withColumnsAndTriggers)
         {
             for (ColumnMetadata column : table.columns())
@@ -540,6 +538,10 @@ public final class SchemaKeyspace
             for (IndexMetadata index : table.indexes)
                 addIndexToSchemaMutation(table, index, builder);
         }
+
+        //We want table insert last to avoid trying to read
+        //column info before these mutations are fully applied.
+        addTableParamsToRowBuilder(table.params, rowBuilder);
     }
 
     private static void addTableParamsToRowBuilder(TableParams params, Row.SimpleBuilder builder)
