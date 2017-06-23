@@ -339,11 +339,6 @@ public class BigTableReader extends SSTableReader
         return key;
     }
 
-    protected FileHandle getIndexFile()
-    {
-        return ifile;
-    }
-
     public KeyCacheKey getCacheKey(DecoratedKey key)
     {
         return new KeyCacheKey(metadata(), descriptor, key.getKey());

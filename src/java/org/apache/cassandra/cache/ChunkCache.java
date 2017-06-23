@@ -317,6 +317,8 @@ public class ChunkCache
 
                 if (buf != null && (buf = buf.reference()) != null)
                     return buf;
+
+                asyncBuffer = cache.get(key);
             }
 
             metrics.misses.mark();

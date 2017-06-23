@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.rows;
 
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.flow.CsFlow;
 
 /**

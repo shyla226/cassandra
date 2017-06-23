@@ -318,11 +318,6 @@ class TrieIndexSSTableReader extends SSTableReader
         return key;
     }
 
-    protected FileHandle getIndexFile()
-    {
-        return null;
-    }
-
     @Override
     public RowIndexEntry getExactPosition(DecoratedKey dk, Rebufferer.ReaderConstraint rc)
     {

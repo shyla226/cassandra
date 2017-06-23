@@ -1,6 +1,5 @@
 package org.apache.cassandra.db.rows;
 
-import java.security.MessageDigest;
 import java.util.Iterator;
 
 import org.apache.cassandra.db.*;

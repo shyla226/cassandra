@@ -1471,9 +1471,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         return dataFile.channel;
     }
-
-    protected abstract FileHandle getIndexFile();
-
+    
     /**
      * @param component component to get timestamp.
      * @return last modified time for given component. 0 if given component does not exist or IO error occurs.

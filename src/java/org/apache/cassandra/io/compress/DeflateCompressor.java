@@ -18,7 +18,6 @@
 package org.apache.cassandra.io.compress;
 
 import io.netty.util.concurrent.FastThreadLocal;
-import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.schema.CompressionParams;
 
 import java.io.IOException;

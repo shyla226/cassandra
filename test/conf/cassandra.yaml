@@ -36,6 +36,7 @@ server_encryption_options:
     truststore: conf/.truststore
     truststore_password: cassandra
 incremental_backups: true
+file_cache_size_in_mb: 512
 concurrent_compactors: 4
 compaction_throughput_mb_per_sec: 0
 row_cache_class_name: org.apache.cassandra.cache.OHCProvider
