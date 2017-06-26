@@ -1029,8 +1029,18 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public abstract RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc);
     public abstract boolean contains(DecoratedKey key, Rebufferer.ReaderConstraint rc);
 
-    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener);
-    public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract UnfilteredRowIterator iterator(DecoratedKey key,
+                                                   Slices slices,
+                                                   ColumnFilter selectedColumns,
+                                                   boolean reversed,
+                                                   SSTableReadsListener listener);
+    public abstract UnfilteredRowIterator iterator(FileDataInput file,
+                                                   DecoratedKey key,
+                                                   RowIndexEntry indexEntry,
+                                                   Slices slices,
+                                                   ColumnFilter selectedColumns,
+                                                   boolean reversed,
+                                                   Rebufferer.ReaderConstraint readerConstraint);
 
     public abstract PartitionIndexIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException;
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;

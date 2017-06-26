@@ -270,16 +270,22 @@ public class BigTableReader extends SSTableReader
                                           SSTableReadsListener listener)
     {
         BigRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, listener, Rebufferer.ReaderConstraint.NONE);
-        return iterator(null, key, rie, slices, selectedColumns, reversed);
+        return iterator(null, key, rie, slices, selectedColumns, reversed, Rebufferer.ReaderConstraint.NONE);
     }
 
-    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator iterator(FileDataInput file,
+                                          DecoratedKey key,
+                                          RowIndexEntry indexEntry,
+                                          Slices slices,
+                                          ColumnFilter selectedColumns,
+                                          boolean reversed,
+                                          Rebufferer.ReaderConstraint readerConstraint)
     {
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
         return reversed
-             ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns)
-             : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns);
+             ? new SSTableReversedIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, readerConstraint)
+             : new SSTableIterator(this, file, key, (BigRowIndexEntry) indexEntry, slices, selectedColumns, readerConstraint);
     }
 
     /**

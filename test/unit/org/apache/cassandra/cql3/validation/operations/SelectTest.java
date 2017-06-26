@@ -23,11 +23,14 @@ import java.util.UUID;
 import org.junit.Test;
 import org.junit.Assert;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -4781,5 +4784,58 @@ public class SelectTest extends CQLTester
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS KEY 'a' ALLOW FILTERING"), row(0, 0), row(0, 1));
             assertRows(execute("SELECT k, v FROM %s WHERE k = 0 AND m CONTAINS KEY 'c' ALLOW FILTERING"), row(0, 2));
         });
+    }
+
+    String generateString(int length)
+    {
+        String s = "";
+        for (int i = 0; i < length; ++i)
+            s += (char) ('a' + (i % 26));
+        return s;
+    }
+
+    @Test
+    public void testWideIndexingForward() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, d text, PRIMARY KEY (k, c))");
+        int COUNT = 100;
+
+        for (int i = 0; i < COUNT; i++)
+            execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", 1, i, i, generateString(10 << (i % 12)));
+        flush();
+
+        for (int i = 0; i < COUNT; ++i)
+        {
+            Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ?", i));
+            Assert.assertEquals(100 - i, rows.length);
+            invalidateCache();
+        }
+    }
+
+    @Test
+    public void testWideIndexingReversed() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, d text, PRIMARY KEY (k, c))");
+        int COUNT = 100;
+
+        for (int i = 0; i < COUNT; i++)
+            execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", 1, i, i, generateString(10 << (i % 12)));
+        flush();
+
+        for (int i = 0; i < COUNT; ++i)
+        {
+            Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? ORDER BY c DESC", i));
+            Assert.assertEquals(100 - i, rows.length);
+            invalidateCache();
+        }
+    }
+
+    private void invalidateCache()
+    {
+        for (SSTableReader rdr : getCurrentColumnFamilyStore().getLiveSSTables())
+        {
+            for (Component comp : new Component[] { Component.PARTITION_INDEX, Component.ROW_INDEX, Component.DATA })
+                ChunkCache.instance.invalidateFile(rdr.descriptor.filenameFor(comp));
+        }
     }
 }

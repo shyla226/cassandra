@@ -41,17 +41,16 @@ import org.apache.cassandra.utils.flow.CsSubscriber;
 import org.apache.cassandra.utils.flow.CsSubscription;
 
 /**
- * Internal representation of a partition in flowable form.
- * The first item is *ALWAYS* the partition header.
- * The second item is *ALWAYS* the static row.
- * Followed by all the partition rows.
+ * Asynchronous partition reader.
  *
  * This is only used to asyncronously create a {@link FlowableUnfilteredPartition}
- * via the {@link #create(SSTableReader, SSTableReadsListener, DecoratedKey, Slices, ColumnFilter, boolean)} method below
+ * via the {@link #create(SSTableReader, SSTableReadsListener, DecoratedKey, Slices, ColumnFilter, boolean)} method below.
+ * This creates a CsFlow<FlowableUnfilteredPartition> which when requested reads the header and static row of the
+ * partition and constructs a CsFlow<Unfiltered> which can retrieve the partition rows.
  *
- * All data fetched through the {@link org.apache.cassandra.cache.ChunkCache}
- * Since we could require data that's not yet in the Cache we catch any
- * {@link NotInCacheException}s and register a retry once the data is fetched
+ * All reads proceed optimistically, i.e. they first proceed if all data is already in the chunk cache. If this is the
+ * case, the read can complete without delay and the requested data is passed on immediately. Otherwise the read will
+ * trigger a {@link NotInCacheException} which is caught, and a retry is registered once the data is fetched
  * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
  * In order to start from the last finished item.
  *
@@ -194,7 +193,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
 
             // This is the last stage that can fail in-cache read.
             assert ssTableIterator == null;
-            ssTableIterator = (AbstractSSTableIterator) table.iterator(dfile, key, indexEntry, slices, selectedColumns, reverse);
+            ssTableIterator = (AbstractSSTableIterator) table.iterator(dfile, key, indexEntry, slices, selectedColumns, reverse, rc);
             filePos = dfile.getFilePointer();
 
             PartitionHeader header = new PartitionHeader(ssTableIterator.metadata(),

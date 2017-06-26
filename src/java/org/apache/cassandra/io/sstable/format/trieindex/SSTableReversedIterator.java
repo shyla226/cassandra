@@ -48,9 +48,10 @@ class SSTableReversedIterator extends AbstractSSTableIterator
                                    DecoratedKey key,
                                    RowIndexEntry indexEntry,
                                    Slices slices,
-                                   ColumnFilter columns)
+                                   ColumnFilter columns,
+                                   Rebufferer.ReaderConstraint readerConstraint)
     {
-        super(sstable, file, key, indexEntry, slices, columns);
+        super(sstable, file, key, indexEntry, slices, columns, readerConstraint);
     }
 
     protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)

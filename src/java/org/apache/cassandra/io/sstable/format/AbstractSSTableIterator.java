@@ -63,7 +63,8 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                                       DecoratedKey key,
                                       RowIndexEntry indexEntry,
                                       Slices slices,
-                                      ColumnFilter columnFilter)
+                                      ColumnFilter columnFilter,
+                                      Rebufferer.ReaderConstraint readerConstraint)
     {
         this.sstable = sstable;
         this.metadata = sstable.metadata();
@@ -93,7 +94,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                 {
                     // Not indexed (or is reading static), set to the beginning of the partition and read partition level deletion there
                     if (dataFileInput == null)
-                        dataFileInput = sstable.getFileDataInput(indexEntry.position, Rebufferer.ReaderConstraint.NONE);
+                        dataFileInput = sstable.getFileDataInput(indexEntry.position, readerConstraint);
                     else
                         dataFileInput.seek(indexEntry.position);
 
@@ -102,13 +103,13 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
                     // Note that this needs to be called after file != null and after the partitionDeletion has been set so we can't move that up.
                     this.staticRow = readStaticRow(sstable, dataFileInput, helper, columns.fetchedColumns().statics);
-                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, Rebufferer.ReaderConstraint.NONE);
+                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, readerConstraint);
                 }
                 else
                 {
                     this.partitionLevelDeletion = indexEntry.deletionTime();
                     this.staticRow = Rows.EMPTY_STATIC_ROW;
-                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, Rebufferer.ReaderConstraint.NONE);
+                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, readerConstraint);
                 }
 
                 if (!slices.isEmpty())
