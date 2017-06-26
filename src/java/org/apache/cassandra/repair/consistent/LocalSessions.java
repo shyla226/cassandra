@@ -624,6 +624,7 @@ public class LocalSessions
 
         try
         {
+            setStateAndSave(session, FINALIZING);
             setStateAndSave(session, FINALIZE_PROMISED);
 
             /*

@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import javax.annotation.Nullable;
@@ -34,10 +35,18 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
+
 import org.apache.commons.lang3.time.DurationFormatUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
+import org.apache.cassandra.gms.IFailureDetectionEventListener;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.OneWayRequest;
@@ -50,17 +59,19 @@ import org.apache.cassandra.service.ActiveRepairService;
  * there is only one {@code CoordinatorSession} per user repair command, regardless of the number of tables and token
  * ranges involved.
  */
-public class CoordinatorSession extends ConsistentSession
+public class CoordinatorSession extends ConsistentSession implements IEndpointStateChangeSubscriber, IFailureDetectionEventListener
 {
     private static final Logger logger = LoggerFactory.getLogger(CoordinatorSession.class);
 
     private final Map<InetAddress, State> participantStates = new HashMap<>();
     private final SettableFuture<Boolean> prepareFuture = SettableFuture.create();
     private final SettableFuture<Boolean> finalizeProposeFuture = SettableFuture.create();
-
+    
     private volatile long sessionStart = Long.MIN_VALUE;
     private volatile long repairStart = Long.MIN_VALUE;
     private volatile long finalizeStart = Long.MIN_VALUE;
+    
+    private volatile Consumer<CoordinatorSession> onCompleteCallback;
 
     public CoordinatorSession(Builder builder)
     {
@@ -72,7 +83,7 @@ public class CoordinatorSession extends ConsistentSession
     }
 
     public static class Builder extends AbstractBuilder
-    {
+    {   
         public CoordinatorSession build()
         {
             validate();
@@ -85,6 +96,11 @@ public class CoordinatorSession extends ConsistentSession
         return new Builder();
     }
 
+    public void setOnCompleteCallback(Consumer<CoordinatorSession> onCompleteCallback)
+    {
+        this.onCompleteCallback = onCompleteCallback;
+    }
+    
     public void setState(State state)
     {
         logger.trace("Setting coordinator state to {} for repair {}", state, sessionID);
@@ -138,7 +154,6 @@ public class CoordinatorSession extends ConsistentSession
     public ListenableFuture<Boolean> prepare()
     {
         Preconditions.checkArgument(allStates(State.PREPARING));
-
         logger.debug("Beginning prepare phase of incremental repair session {}", sessionID);
         PrepareConsistentRequest message = new PrepareConsistentRequest(sessionID, coordinator, participants);
         for (final InetAddress participant : participants)
@@ -172,12 +187,19 @@ public class CoordinatorSession extends ConsistentSession
 
     public synchronized void setRepairing()
     {
+        Preconditions.checkArgument(allStates(State.PREPARED));
         setAll(State.REPAIRING);
+    }
+    
+    public synchronized void setFinalizing()
+    {
+        Preconditions.checkArgument(allStates(State.REPAIRING));
+        setAll(State.FINALIZING);
     }
 
     public synchronized ListenableFuture<Boolean> finalizePropose()
     {
-        Preconditions.checkArgument(allStates(State.REPAIRING));
+        Preconditions.checkArgument(allStates(State.FINALIZING));
         logger.debug("Proposing finalization of repair session {}", sessionID);
         FinalizePropose message = new FinalizePropose(sessionID);
         for (final InetAddress participant : participants)
@@ -218,6 +240,9 @@ public class CoordinatorSession extends ConsistentSession
             send(Verbs.REPAIR.FINALIZE_COMMIT.newRequest(participant, message));
         setAll(State.FINALIZED);
         logger.info("Incremental repair session {} completed", sessionID);
+        
+        if (onCompleteCallback != null) 
+            onCompleteCallback.accept(this);
     }
 
     public synchronized void fail()
@@ -230,10 +255,9 @@ public class CoordinatorSession extends ConsistentSession
                 send(Verbs.REPAIR.FAILED_SESSION.newRequest(participant, message));
         }
         setAll(State.FAILED);
-
-        String exceptionMsg = String.format("Incremental repair session %s has failed", sessionID);
-        finalizeProposeFuture.setException(new RuntimeException(exceptionMsg));
-        prepareFuture.setException(new RuntimeException(exceptionMsg));
+        
+        if (onCompleteCallback != null) 
+            onCompleteCallback.accept(this);
     }
 
     private static String formatDuration(long then, long now)
@@ -289,13 +313,14 @@ public class CoordinatorSession extends ConsistentSession
                     finalizeStart = System.currentTimeMillis();
                     if (logger.isDebugEnabled())
                     {
-                        logger.debug("Incremental repair {} validation/stream phase completed in {}", sessionID, formatDuration(repairStart, finalizeStart));
+                        logger.debug("Incremental repair {} validation/stream phase failed in {}", sessionID, formatDuration(repairStart, finalizeStart));
 
                     }
-                    return Futures.immediateFailedFuture(new RuntimeException());
+                    return Futures.immediateFailedFuture(new RuntimeException("Incremental repair failed"));
                 }
                 else
                 {
+                    setFinalizing();
                     return finalizePropose();
                 }
             }
@@ -329,7 +354,7 @@ public class CoordinatorSession extends ConsistentSession
             {
                 if (logger.isDebugEnabled())
                 {
-                    logger.debug("Incremental repair {} phase failed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
+                    logger.debug("Incremental repair {} finalization phase failed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
                 }
                 hasFailure.set(true);
                 fail();
@@ -337,5 +362,43 @@ public class CoordinatorSession extends ConsistentSession
         });
 
         return proposeFuture;
+    }
+    
+    public void onJoin(InetAddress endpoint, EndpointState epState) {}
+    public void beforeChange(InetAddress endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue) {}
+    public void onChange(InetAddress endpoint, ApplicationState state, VersionedValue value) {}
+    public void onAlive(InetAddress endpoint, EndpointState state) {}
+    public void onDead(InetAddress endpoint, EndpointState state) {}
+
+    public void onRemove(InetAddress endpoint)
+    {
+        convict(endpoint, Double.MAX_VALUE);
+    }
+
+    public void onRestart(InetAddress endpoint, EndpointState epState)
+    {
+        convict(endpoint, Double.MAX_VALUE);
+    }
+
+    public synchronized void convict(InetAddress endpoint, double phi)
+    {
+        if (!participantStates.keySet().contains(endpoint))
+            return;
+
+        // We want a higher confidence in the failure detection than usual because failing a repair wrongly has a high cost.
+        if (phi < 2 * DatabaseDescriptor.getPhiConvictThreshold())
+            return;
+
+        String error = String.format("[repair #%s] Endpoint %s died, will fail incremental repair session.", sessionID, endpoint);
+        if (getState() == State.PREPARING)
+        {
+            logger.warn(error);
+            prepareFuture.set(false);
+        }
+        else if (getState() == State.FINALIZING)
+        {
+            logger.warn(error);
+            finalizeProposeFuture.set(false);
+        }
     }
 }

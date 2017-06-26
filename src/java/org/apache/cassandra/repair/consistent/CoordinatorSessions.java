@@ -24,8 +24,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizePromise;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
@@ -37,7 +40,21 @@ import org.apache.cassandra.service.ActiveRepairService;
 public class CoordinatorSessions
 {
     private final Map<UUID, CoordinatorSession> sessions = new HashMap<>();
+    private final IFailureDetector failureDetector;
+    private final Gossiper gossiper;
 
+    @VisibleForTesting
+    public CoordinatorSessions()
+    {
+        this(null, null);
+    }
+
+    public CoordinatorSessions(IFailureDetector failureDetector, Gossiper gossiper)
+    {
+        this.failureDetector = failureDetector;
+        this.gossiper = gossiper;
+    }
+    
     protected CoordinatorSession buildSession(CoordinatorSession.Builder builder)
     {
         return new CoordinatorSession(builder);
@@ -56,8 +73,23 @@ public class CoordinatorSessions
         builder.withRepairedAt(prs.repairedAt);
         builder.withRanges(prs.getRanges());
         builder.withParticipants(participants);
-        CoordinatorSession session = buildSession(builder);
+                
+        CoordinatorSession session = buildSession(builder);        
         sessions.put(session.sessionID, session);
+        
+        if (failureDetector != null && gossiper != null)
+        {
+            session.setOnCompleteCallback(s -> {
+                if (failureDetector != null && gossiper != null)
+                {
+                    failureDetector.unregisterFailureDetectionEventListener(s);
+                    gossiper.unregister(s);
+                }
+            });
+            failureDetector.registerFailureDetectionEventListener(session);
+            gossiper.register(session);
+        }
+        
         return session;
     }
 
