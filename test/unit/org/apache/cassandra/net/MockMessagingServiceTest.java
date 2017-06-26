@@ -83,6 +83,11 @@ public class MockMessagingServiceTest
         assertEquals(1, spy.messagesIntercepted);
         assertTrue(msg == request);
 
+        // TODO - this may be flakey because the thread in MatcherResponse at ln 190 may not have executed yet
+        // we should introduce a scheduler and then add an event here on the same scheduler before checking mockedMessageResponses,
+        // for now I am just adding a sleep
+        FBUtilities.sleepQuietly(10);
+
         // and return a mocked response
         assertEquals(1, spy.mockedMessageResponses);
     }
