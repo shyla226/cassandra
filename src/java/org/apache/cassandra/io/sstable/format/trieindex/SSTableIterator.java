@@ -222,6 +222,7 @@ class SSTableIterator extends AbstractSSTableIterator
     private class ForwardIndexedReader extends ForwardReader
     {
         private final RowIndexReader indexReader;
+        Slice currentSlice;
         long basePosition;
 
         private ForwardIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
@@ -242,13 +243,18 @@ class SSTableIterator extends AbstractSSTableIterator
         public void setForSlice(Slice slice) throws IOException
         {
             super.setForSlice(slice);
-            IndexInfo indexInfo = indexReader.separatorFloor(metadata.comparator.asByteComparableSource(slice.start()));
-            assert indexInfo != null;
-            long position = basePosition + indexInfo.offset;
-            if (file == null || position > file.getFilePointer())
+
+            if (currentSlice == null || !slice.equals(currentSlice))
             {
-                openMarker = indexInfo.openDeletion;
-                seekToPosition(position);
+                IndexInfo indexInfo = indexReader.separatorFloor(metadata.comparator.asByteComparableSource(slice.start()));
+                assert indexInfo != null;
+                long position = basePosition + indexInfo.offset;
+                if (file == null || position > file.getFilePointer())
+                {
+                    openMarker = indexInfo.openDeletion;
+                    seekToPosition(position);
+                }
+                currentSlice = slice;
             }
             // Otherwise we are already in the relevant index block, there is no point to go back to its beginning.
         }

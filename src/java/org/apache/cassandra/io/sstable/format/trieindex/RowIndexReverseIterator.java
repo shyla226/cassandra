@@ -29,6 +29,8 @@ import org.apache.cassandra.utils.ByteSource;
  */
 class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterator>
 {
+    private Long currentNode;
+
     public RowIndexReverseIterator(FileHandle file, long root, ByteSource start, ByteSource end, Rebufferer.ReaderConstraint rc)
     {
         super(file.rebuffererFactory().instantiateRebufferer(), root, start, end, true, rc);
@@ -41,10 +43,20 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 
     public IndexInfo nextIndexInfo()
     {
-        long node = nextPayloadedNode();
-        if (node == -1)
-            return null;
-        go(node);
-        return RowIndexReader.readPayload(buf, payloadPosition(), payloadFlags());
+        if (currentNode == null)
+        {
+            currentNode = nextPayloadedNode();
+            if (currentNode == -1)
+            {
+                currentNode = null;
+                return null;
+            }
+        }
+
+        go(currentNode);
+        IndexInfo info = RowIndexReader.readPayload(buf, payloadPosition(), payloadFlags());
+        currentNode = null;
+
+        return info;
     }
 }

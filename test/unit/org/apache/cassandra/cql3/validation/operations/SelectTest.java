@@ -4807,7 +4807,7 @@ public class SelectTest extends CQLTester
         for (int i = 0; i < COUNT; ++i)
         {
             Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ?", i));
-            Assert.assertEquals(100 - i, rows.length);
+            Assert.assertEquals(COUNT - i, rows.length);
             invalidateCache();
         }
     }
@@ -4825,7 +4825,7 @@ public class SelectTest extends CQLTester
         for (int i = 0; i < COUNT; ++i)
         {
             Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? ORDER BY c DESC", i));
-            Assert.assertEquals(100 - i, rows.length);
+            Assert.assertEquals(COUNT - i, rows.length);
             invalidateCache();
         }
     }
