@@ -25,7 +25,6 @@ getcompactionthroughput
 getconcurrentcompactors
 getinterdcstreamthroughput
 getlogginglevels
-getmaxhintwindow
 getstreamthroughput
 gettraceprobability
 listsnapshots
