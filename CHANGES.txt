@@ -1,4 +1,10 @@
+3.0.15
+ * Fix secondary index queries on COMPACT tables (CASSANDRA-13627)
+ * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
+
+
 3.0.14
+ * Ensure int overflow doesn't occur when calculating large partition warning size (CASSANDRA-13172)
  * Ensure consistent view of partition columns between coordinator and replica in ColumnFilter (CASSANDRA-13004)
  * Failed unregistering mbean during drop keyspace (CASSANDRA-13346)
  * nodetool scrub/cleanup/upgradesstables exit code is wrong (CASSANDRA-13542)
@@ -20,6 +26,7 @@
  * Interrupt replaying hints on decommission (CASSANDRA-13308)
  * Fix schema version calculation for rolling upgrades (CASSANDRA-13441)
 Merged from 2.2:
+ * Nodes started with join_ring=False should be able to serve requests when authentication is enabled (CASSANDRA-11381)
  * cqlsh COPY FROM: increment error count only for failures, not for attempts (CASSANDRA-13209)
 
 3.0.13
