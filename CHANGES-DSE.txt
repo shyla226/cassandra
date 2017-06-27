@@ -15,6 +15,7 @@ dse 6.0.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Properly evict pstmts from prepared statements cache (APOLLO-818)
  * Add `nodetool sequence` batch functionality (APOLLO-651)
  * null assertion in MemtablePostFlush (APOLLO-708)
  * Show correct protocol version in cqlsh (APOLLO-616)

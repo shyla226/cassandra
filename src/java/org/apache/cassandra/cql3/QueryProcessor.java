@@ -26,7 +26,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
@@ -55,7 +54,6 @@ import org.apache.cassandra.metrics.CQLMetrics;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
@@ -88,10 +86,13 @@ public class QueryProcessor implements QueryHandler
                              .executor(MoreExecutors.directExecutor())
                              .maximumWeight(capacityToBytes(DatabaseDescriptor.getPreparedStatementsCacheSizeMB()))
                              .weigher(QueryProcessor::measure)
-                             .removalListener((md5Digest, prepared, cause) -> {
-                                 if (cause == RemovalCause.SIZE) {
+                             .removalListener((key, prepared, cause) -> {
+                                 MD5Digest md5Digest = (MD5Digest) key;
+                                 if (cause.wasEvicted())
+                                 {
                                      metrics.preparedStatementsEvicted.inc();
-                                     lastMinuteEvictionsCount.incrementAndGet();                                   
+                                     lastMinuteEvictionsCount.incrementAndGet();
+                                     SystemKeyspace.removePreparedStatement(md5Digest);
                                  }
                              }).build();
 
@@ -152,10 +153,16 @@ public class QueryProcessor implements QueryHandler
         logger.info("Preloaded {} prepared statements", count);
     }
 
+    /**
+     * Clears the prepared statement cache.
+     * @param memoryOnly {@code true} if only the in memory caches must be cleared, {@code false} otherwise.
+     */
     @VisibleForTesting
-    public static void clearPrepraredStatements()
+    public static void clearPreparedStatements(boolean memoryOnly)
     {
-        preparedStatements.invalidateAll();;
+        preparedStatements.invalidateAll();
+        if (!memoryOnly)
+            SystemKeyspace.resetPreparedStatements();
     }
 
     private static QueryState internalQueryState()
