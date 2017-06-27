@@ -52,7 +52,6 @@ import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.thrift.ThriftClientState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.*;
@@ -89,6 +88,7 @@ public class QueryProcessor implements QueryHandler
                              .listener((md5Digest, prepared) -> {
                                  metrics.preparedStatementsEvicted.inc();
                                  lastMinuteEvictionsCount.incrementAndGet();
+                                 SystemKeyspace.removePreparedStatement(md5Digest);
                              }).build();
 
         thriftPreparedStatements = new ConcurrentLinkedHashMap.Builder<Integer, ParsedStatement.Prepared>()
@@ -163,11 +163,17 @@ public class QueryProcessor implements QueryHandler
         logger.info("Preloaded {} prepared statements", count);
     }
 
+    /**
+     * Clears the prepared statement cache.
+     * @param memoryOnly {@code true} if only the in memory caches must be cleared, {@code false} otherwise.
+     */
     @VisibleForTesting
-    public static void clearPrepraredStatements()
+    public static void clearPreparedStatements(boolean memoryOnly)
     {
         preparedStatements.clear();
         thriftPreparedStatements.clear();
+        if (!memoryOnly)
+            SystemKeyspace.resetPreparedStatements();
     }
 
     private static QueryState internalQueryState()
