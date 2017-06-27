@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Use shaded mobility-rpc jar to fix DSE build issues (APOLLO-839)
  * Improve secondary index (re)build failure and concurrency handling (APOLLO-829)
  * Better exception handling for counter mutations (APOLLO-576)
  * When "repairing" Paxos commits, only block on nodes being repaired (APOLLO-761)

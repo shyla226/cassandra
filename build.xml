@@ -460,7 +460,7 @@
           <dependency groupId="com.googlecode.junit-toolbox" artifactId="junit-toolbox" version="2.2" scope="test"/>
           <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk15on" version="1.54" scope="test"/>
           <dependency groupId="org.bouncycastle" artifactId="bcprov-jdk15on" version="1.54" scope="test"/>
-          <dependency groupId="com.googlecode.mobilityrpc" artifactId="mobility-rpc" version="1.2.1" scope="test"/>
+          <dependency groupId="com.googlecode.mobilityrpc" artifactId="mobility-rpc" version="1.2.1" classifier="all" scope="test"/>
           <!-- END of dependencies for the DSE test framework-->
 
           <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli" version="0.5.1"/>
@@ -620,7 +620,7 @@
         <dependency groupId="com.googlecode.junit-toolbox" artifactId="junit-toolbox" version="2.2" scope="test"/>
         <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk15on" version="1.54" scope="test"/>
         <dependency groupId="org.bouncycastle" artifactId="bcprov-jdk15on" version="1.54" scope="test"/>
-        <dependency groupId="com.googlecode.mobilityrpc" artifactId="mobility-rpc" version="1.2.1" scope="test"/>
+        <dependency groupId="com.googlecode.mobilityrpc" artifactId="mobility-rpc" version="1.2.1" classifier="all" scope="test"/>
         <!-- END of dependencies for the DSE test framework-->
       </artifact:pom>
       <!-- this build-deps-pom-sources "artifact" is the same as build-deps-pom but only with those
