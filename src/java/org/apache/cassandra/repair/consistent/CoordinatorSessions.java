@@ -30,7 +30,6 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.repair.messages.FailSession;
-import org.apache.cassandra.repair.messages.FinalizePromise;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
 import org.apache.cassandra.service.ActiveRepairService;
 
@@ -104,15 +103,6 @@ public class CoordinatorSessions
         if (session != null)
         {
             session.handlePrepareResponse(msg.participant, msg.success);
-        }
-    }
-
-    public void handleFinalizePromiseMessage(InetAddress from, FinalizePromise msg)
-    {
-        CoordinatorSession session = getSession(msg.sessionID);
-        if (session != null)
-        {
-            session.handleFinalizePromise(msg.participant, msg.promised);
         }
     }
 

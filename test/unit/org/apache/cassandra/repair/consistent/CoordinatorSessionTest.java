@@ -40,7 +40,6 @@ import org.apache.cassandra.net.OneWayRequest;
 import org.apache.cassandra.repair.RepairSessionResult;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizeCommit;
-import org.apache.cassandra.repair.messages.FinalizePropose;
 import org.apache.cassandra.repair.messages.PrepareConsistentRequest;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.utils.UUIDGen;
@@ -114,18 +113,6 @@ public class CoordinatorSessionTest extends AbstractRepairTest
                 onSetRepairing.run();
             }
             super.setRepairing();
-        }
-        
-        Runnable onSetFinalizing = null;
-        boolean setFinalizingCalled = false;
-        public synchronized void setFinalizing()
-        {
-            setFinalizingCalled = true;
-            if (onSetFinalizing != null)
-            {
-                onSetFinalizing.run();
-            }
-            super.setFinalizing();
         }
 
         Runnable onFinalizeCommit = null;
@@ -263,37 +250,16 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         ArrayList<RepairSessionResult> results = Lists.newArrayList(createResult(coordinator),
                                                                     createResult(coordinator),
                                                                     createResult(coordinator));
-
-        coordinator.sentMessages.clear();
-        repairFuture.set(results);
         
-        // set the setFinalizing callback to verify the correct state when it's called
-        coordinator.onSetFinalizing = () -> Assert.assertEquals(FINALIZING, coordinator.getState());
-        Assert.assertTrue(coordinator.setFinalizingCalled);
-
-        // propose messages should have been sent once all repair sessions completed successfully
-        for (InetAddress participant : PARTICIPANTS)
-        {
-            RepairMessage expected = new FinalizePropose(coordinator.sessionID);
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        // finalize commit messages will be sent once all participants respond with a promize to finalize
         coordinator.sentMessages.clear();
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
-
-        coordinator.handleFinalizePromise(PARTICIPANT1, true);
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
-
-        coordinator.handleFinalizePromise(PARTICIPANT2, true);
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
 
         // set the finalizeCommit callback so we can verify the state when it's called
         Assert.assertFalse(coordinator.finalizeCommitCalled);
-        coordinator.onFinalizeCommit = () -> Assert.assertEquals(FINALIZE_PROMISED, coordinator.getState());
-        coordinator.handleFinalizePromise(PARTICIPANT3, true);
+        coordinator.onFinalizeCommit = () -> Assert.assertEquals(REPAIRING, coordinator.getState());
+        
+        // set the repair future to unblock the commit
+        repairFuture.set(results);
         Assert.assertTrue(coordinator.finalizeCommitCalled);
-
         Assert.assertEquals(ConsistentSession.State.FINALIZED, coordinator.getState());
         for (InetAddress participant : PARTICIPANTS)
         {
@@ -421,9 +387,9 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         Assert.assertTrue(sessionResult.isDone());
         Assert.assertTrue(hasFailures.get());
     }
-
+    
     @Test
-    public void failedPropose()
+    public void failedPrepareDueToDeadNode()
     {
         InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
         AtomicBoolean repairSubmitted = new AtomicBoolean(false);
@@ -439,94 +405,6 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
         Assert.assertTrue(coordinator.sentMessages.isEmpty());
         ListenableFuture sessionResult = coordinator.execute(sessionSupplier, hasFailures);
-
-        for (InetAddress participant : PARTICIPANTS)
-        {
-
-            RepairMessage expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        // participants respond to coordinator, and repair begins once all participants have responded with success
-        Assert.assertEquals(ConsistentSession.State.PREPARING, coordinator.getState());
-
-        coordinator.handlePrepareResponse(PARTICIPANT1, true);
-        Assert.assertEquals(ConsistentSession.State.PREPARING, coordinator.getState());
-
-        coordinator.handlePrepareResponse(PARTICIPANT2, true);
-        Assert.assertEquals(ConsistentSession.State.PREPARING, coordinator.getState());
-
-        // set the setRepairing callback to verify the correct state when it's called
-        Assert.assertFalse(coordinator.setRepairingCalled);
-        coordinator.onSetRepairing = () -> Assert.assertEquals(PREPARED, coordinator.getState());
-        coordinator.handlePrepareResponse(PARTICIPANT3, true);
-        Assert.assertTrue(coordinator.setRepairingCalled);
-        Assert.assertTrue(repairSubmitted.get());
-
-        Assert.assertEquals(ConsistentSession.State.REPAIRING, coordinator.getState());
-
-        ArrayList<RepairSessionResult> results = Lists.newArrayList(createResult(coordinator),
-                                                                    createResult(coordinator),
-                                                                    createResult(coordinator));
-
-        coordinator.sentMessages.clear();
-        repairFuture.set(results);
-
-        // propose messages should have been sent once all repair sessions completed successfully
-        for (InetAddress participant : PARTICIPANTS)
-        {
-            RepairMessage expected = new FinalizePropose(coordinator.sessionID);
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        // finalize commit messages will be sent once all participants respond with a promize to finalize
-        coordinator.sentMessages.clear();
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
-
-        coordinator.handleFinalizePromise(PARTICIPANT1, true);
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
-
-        Assert.assertFalse(coordinator.failCalled);
-        coordinator.handleFinalizePromise(PARTICIPANT2, false);
-        Assert.assertEquals(ConsistentSession.State.FAILED, coordinator.getState());
-        Assert.assertTrue(coordinator.failCalled);
-
-        // additional success messages should be ignored
-        Assert.assertFalse(coordinator.finalizeCommitCalled);
-        coordinator.onFinalizeCommit = Assert::fail;
-        coordinator.handleFinalizePromise(PARTICIPANT3, true);
-        Assert.assertFalse(coordinator.finalizeCommitCalled);
-        Assert.assertEquals(ConsistentSession.State.FAILED, coordinator.getState());
-
-        // failure messages should have been sent to all participants
-        for (InetAddress participant : PARTICIPANTS)
-        {
-            RepairMessage expected = new FailSession(coordinator.sessionID);
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        Assert.assertTrue(sessionResult.isDone());
-        Assert.assertTrue(hasFailures.get());
-    }
-    
-    @Test
-    public void failedPrepareDueToDeadNode()
-    {
-        InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
-        Executor executor = MoreExecutors.directExecutor();
-        AtomicBoolean repairSubmitted = new AtomicBoolean(false);
-        SettableFuture<List<RepairSessionResult>> repairFuture = SettableFuture.create();
-        Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSupplier = () ->
-        {
-            repairSubmitted.set(true);
-            return repairFuture;
-        };
-
-        // coordinator sends prepare requests to create local session and perform anticompaction
-        AtomicBoolean hasFailures = new AtomicBoolean(false);
-        Assert.assertFalse(repairSubmitted.get());
-        Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        ListenableFuture sessionResult = coordinator.execute(executor, sessionSupplier, hasFailures);
         for (InetAddress participant : PARTICIPANTS)
         {
             PrepareConsistentRequest expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
@@ -564,94 +442,5 @@ public class CoordinatorSessionTest extends AbstractRepairTest
         coordinator.handlePrepareResponse(PARTICIPANT3, true);
         Assert.assertFalse(coordinator.setRepairingCalled);
         Assert.assertFalse(repairSubmitted.get());
-    }
-    
-    @Test
-    public void failedProposeDueToDeadNode()
-    {
-        InstrumentedCoordinatorSession coordinator = createInstrumentedSession();
-        Executor executor = MoreExecutors.directExecutor();
-        AtomicBoolean repairSubmitted = new AtomicBoolean(false);
-        SettableFuture<List<RepairSessionResult>> repairFuture = SettableFuture.create();
-        Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSupplier = () ->
-        {
-            repairSubmitted.set(true);
-            return repairFuture;
-        };
-
-        // coordinator sends prepare requests to create local session and perform anticompaction
-        AtomicBoolean hasFailures = new AtomicBoolean(false);
-        Assert.assertFalse(repairSubmitted.get());
-        Assert.assertTrue(coordinator.sentMessages.isEmpty());
-        ListenableFuture sessionResult = coordinator.execute(executor, sessionSupplier, hasFailures);
-
-        for (InetAddress participant : PARTICIPANTS)
-        {
-
-            RepairMessage expected = new PrepareConsistentRequest(coordinator.sessionID, COORDINATOR, new HashSet<>(PARTICIPANTS));
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        // participants respond to coordinator, and repair begins once all participants have responded with success
-        Assert.assertEquals(ConsistentSession.State.PREPARING, coordinator.getState());
-
-        coordinator.handlePrepareResponse(PARTICIPANT1, true);
-        Assert.assertEquals(ConsistentSession.State.PREPARING, coordinator.getState());
-
-        coordinator.handlePrepareResponse(PARTICIPANT2, true);
-        Assert.assertEquals(ConsistentSession.State.PREPARING, coordinator.getState());
-
-        // set the setRepairing callback to verify the correct state when it's called
-        Assert.assertFalse(coordinator.setRepairingCalled);
-        coordinator.onSetRepairing = () -> Assert.assertEquals(PREPARED, coordinator.getState());
-        coordinator.handlePrepareResponse(PARTICIPANT3, true);
-        Assert.assertTrue(coordinator.setRepairingCalled);
-        Assert.assertTrue(repairSubmitted.get());
-
-        Assert.assertEquals(ConsistentSession.State.REPAIRING, coordinator.getState());
-
-        ArrayList<RepairSessionResult> results = Lists.newArrayList(createResult(coordinator),
-                                                                    createResult(coordinator),
-                                                                    createResult(coordinator));
-
-        coordinator.sentMessages.clear();
-        repairFuture.set(results);
-
-        // propose messages should have been sent once all repair sessions completed successfully
-        for (InetAddress participant : PARTICIPANTS)
-        {
-            RepairMessage expected = new FinalizePropose(coordinator.sessionID);
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        // finalize commit messages will be sent once all participants respond with a promize to finalize
-        coordinator.sentMessages.clear();
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
-
-        // participant 1 succeeds
-        coordinator.handleFinalizePromise(PARTICIPANT1, true);
-        Assert.assertEquals(ConsistentSession.State.FINALIZING, coordinator.getState());
-
-        // participant 2 dies
-        coordinator.convict(PARTICIPANT2, Double.MAX_VALUE);
-        
-        // verify the whole session is failed
-        Assert.assertTrue(sessionResult.isDone());
-        Assert.assertTrue(hasFailures.get());
-        
-        // verify the coordinator is failed, the fail method has been called and fail messages have been sent
-        Assert.assertEquals(ConsistentSession.State.FAILED, coordinator.getState());
-        Assert.assertTrue(coordinator.failCalled);
-        for (InetAddress participant : PARTICIPANTS)
-        {
-            FailSession expected = new FailSession(coordinator.sessionID);
-            assertMessageSent(coordinator, participant, expected);
-        }
-
-        // additional success messages should be ignored
-        Assert.assertFalse(coordinator.finalizeCommitCalled);
-        coordinator.onFinalizeCommit = Assert::fail;
-        coordinator.handleFinalizePromise(PARTICIPANT3, true);
-        Assert.assertFalse(coordinator.finalizeCommitCalled);
     }
 }

@@ -74,8 +74,6 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
     public final OneWay<PrepareConsistentRequest> CONSISTENT_REQUEST;
     public final OneWay<PrepareConsistentResponse> CONSISTENT_RESPONSE;
 
-    public final OneWay<FinalizePropose> FINALIZE_PROPOSE;
-    public final OneWay<FinalizePromise> FINALIZE_PROMISE;
     public final OneWay<FinalizeCommit> FINALIZE_COMMIT;
     public final OneWay<FailSession> FAILED_SESSION;
 
@@ -111,10 +109,6 @@ public class RepairVerbs extends VerbGroup<RepairVerbs.RepairVersion>
                                    .handler(ActiveRepairService.instance.consistent.local::handlePrepareMessage);
         CONSISTENT_RESPONSE = helper.oneWay("CONSISTENT_RESPONSE", PrepareConsistentResponse.class)
                                     .handler(ActiveRepairService.instance.consistent.coordinated::handlePrepareResponse);
-        FINALIZE_PROPOSE = helper.oneWay("FINALIZE_PROPOSE", FinalizePropose.class)
-                                 .handler(ActiveRepairService.instance.consistent.local::handleFinalizeProposeMessage);
-        FINALIZE_PROMISE = helper.oneWay("FINALIZE_PROMISE", FinalizePromise.class)
-                                 .handler(ActiveRepairService.instance.consistent.coordinated::handleFinalizePromiseMessage);
         FINALIZE_COMMIT = helper.oneWay("FINALIZE_COMMIT", FinalizeCommit.class)
                                 .handler(ActiveRepairService.instance.consistent.local::handleFinalizeCommitMessage);
         FAILED_SESSION = helper.oneWay("FAILED_SESSION", FailSession.class)

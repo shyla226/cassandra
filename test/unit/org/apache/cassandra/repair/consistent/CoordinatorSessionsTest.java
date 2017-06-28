@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.google.common.collect.Sets;
+
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -34,7 +35,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.repair.messages.FailSession;
-import org.apache.cassandra.repair.messages.FinalizePromise;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -155,31 +155,6 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
         UUID fakeID = UUIDGen.getTimeUUID();
 
         sessions.handlePrepareResponse(null, new PrepareConsistentResponse(fakeID, PARTICIPANT1, true));
-        Assert.assertNull(sessions.getSession(fakeID));
-    }
-
-    @Test
-    public void handlePromiseResponse()
-    {
-        InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
-        UUID sessionID = registerSession();
-
-        InstrumentedCoordinatorSession session = sessions.registerSession(sessionID, PARTICIPANTS);
-        Assert.assertEquals(0, session.finalizePromiseCalls);
-
-        sessions.handleFinalizePromiseMessage(null, new FinalizePromise(sessionID, PARTICIPANT1, true));
-        Assert.assertEquals(1, session.finalizePromiseCalls);
-        Assert.assertEquals(PARTICIPANT1, session.promisePeer);
-        Assert.assertEquals(true, session.promiseSuccess);
-    }
-
-    @Test
-    public void handlePromiseResponseNoSession()
-    {
-        InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
-        UUID fakeID = UUIDGen.getTimeUUID();
-
-        sessions.handleFinalizePromiseMessage(null, new FinalizePromise(fakeID, PARTICIPANT1, true));
         Assert.assertNull(sessions.getSession(fakeID));
     }
 

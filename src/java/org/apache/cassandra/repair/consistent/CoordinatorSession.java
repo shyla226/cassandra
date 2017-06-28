@@ -26,8 +26,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import javax.annotation.Nullable;
-
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.AsyncFunction;
@@ -65,7 +63,6 @@ public class CoordinatorSession extends ConsistentSession implements IEndpointSt
 
     private final Map<InetAddress, State> participantStates = new HashMap<>();
     private final SettableFuture<Boolean> prepareFuture = SettableFuture.create();
-    private final SettableFuture<Boolean> finalizeProposeFuture = SettableFuture.create();
     
     private volatile long sessionStart = Long.MIN_VALUE;
     private volatile long repairStart = Long.MIN_VALUE;
@@ -190,50 +187,10 @@ public class CoordinatorSession extends ConsistentSession implements IEndpointSt
         Preconditions.checkArgument(allStates(State.PREPARED));
         setAll(State.REPAIRING);
     }
-    
-    public synchronized void setFinalizing()
-    {
-        Preconditions.checkArgument(allStates(State.REPAIRING));
-        setAll(State.FINALIZING);
-    }
-
-    public synchronized ListenableFuture<Boolean> finalizePropose()
-    {
-        Preconditions.checkArgument(allStates(State.FINALIZING));
-        logger.debug("Proposing finalization of repair session {}", sessionID);
-        FinalizePropose message = new FinalizePropose(sessionID);
-        for (final InetAddress participant : participants)
-            send(Verbs.REPAIR.FINALIZE_PROPOSE.newRequest(participant, message));
-        return finalizeProposeFuture;
-    }
-
-    public synchronized void handleFinalizePromise(InetAddress participant, boolean success)
-    {
-        if (getState() == State.FAILED)
-        {
-            logger.trace("Incremental repair {} has failed, ignoring finalize promise from {}", sessionID, participant);
-        }
-        else if (!success)
-        {
-            logger.debug("Finalization proposal of session {} rejected by {}. Aborting session", sessionID, participant);
-            fail();
-            finalizeProposeFuture.set(false);
-        }
-        else
-        {
-            logger.trace("Successful finalize promise received from {} for repair session {}", participant, sessionID);
-            setParticipantState(participant, State.FINALIZE_PROMISED);
-            if (getState() == State.FINALIZE_PROMISED)
-            {
-                logger.debug("Finalization proposal for repair session {} accepted by all participants.", sessionID);
-                finalizeProposeFuture.set(true);
-            }
-        }
-    }
 
     public synchronized void finalizeCommit()
     {
-        Preconditions.checkArgument(allStates(State.FINALIZE_PROMISED));
+        Preconditions.checkArgument(allStates(State.REPAIRING));
         logger.debug("Committing finalization of repair session {}", sessionID);
         FinalizeCommit message = new FinalizeCommit(sessionID);
         for (final InetAddress participant : participants)
@@ -278,6 +235,8 @@ public class CoordinatorSession extends ConsistentSession implements IEndpointSt
         logger.info("Beginning coordination of incremental repair session {}", sessionID);
 
         sessionStart = System.currentTimeMillis();
+        
+        // prepare (runs anticompaction)
         ListenableFuture<Boolean> prepareResult = prepare();
 
         // run repair sessions normally
@@ -303,65 +262,43 @@ public class CoordinatorSession extends ConsistentSession implements IEndpointSt
             }
         });
 
-        // mark propose finalization
-        ListenableFuture<Boolean> proposeFuture = Futures.transform(repairSessionResults, new AsyncFunction<List<RepairSessionResult>, Boolean>()
+        // commit repaired data
+        Futures.addCallback(repairSessionResults, new FutureCallback<List<RepairSessionResult>>()
         {
-            public ListenableFuture<Boolean> apply(List<RepairSessionResult> results) throws Exception
+            public void onSuccess(List<RepairSessionResult> result)
             {
-                if (results == null || results.isEmpty() || Iterables.any(results, r -> r == null))
+                finalizeStart = System.currentTimeMillis();
+                if (result == null || result.isEmpty() || Iterables.any(result, r -> r == null))
                 {
-                    finalizeStart = System.currentTimeMillis();
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug("Incremental repair {} validation/stream phase failed in {}", sessionID, formatDuration(repairStart, finalizeStart));
-
-                    }
-                    return Futures.immediateFailedFuture(new RuntimeException("Incremental repair failed"));
+                    onFailure(new RuntimeException("Incremental repair failed"));
                 }
                 else
                 {
-                    setFinalizing();
-                    return finalizePropose();
-                }
-            }
-        });
-
-        // commit repaired data
-        Futures.addCallback(proposeFuture, new FutureCallback<Boolean>()
-        {
-            public void onSuccess(@Nullable Boolean result)
-            {
-                if (result != null && result)
-                {
                     if (logger.isDebugEnabled())
                     {
-                        logger.debug("Incremental repair {} finalization phase completed in {}", sessionID, formatDuration(finalizeStart, System.currentTimeMillis()));
+                        logger.debug("Incremental repair {} validation/stream phase completed in {}", sessionID, formatDuration(repairStart, finalizeStart));
                     }
                     finalizeCommit();
                     if (logger.isDebugEnabled())
                     {
-                        logger.debug("Incremental repair {} phase completed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
+                        logger.debug("Incremental repair {} completed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
                     }
-                }
-                else
-                {
-                    hasFailure.set(true);
-                    fail();
                 }
             }
 
             public void onFailure(Throwable t)
             {
+                finalizeStart = System.currentTimeMillis();
                 if (logger.isDebugEnabled())
                 {
-                    logger.debug("Incremental repair {} finalization phase failed in {}", sessionID, formatDuration(sessionStart, System.currentTimeMillis()));
+                    logger.debug("Incremental repair {} validation/stream phase failed in {}", sessionID, formatDuration(repairStart, finalizeStart));
                 }
                 hasFailure.set(true);
                 fail();
             }
         });
 
-        return proposeFuture;
+        return repairSessionResults;
     }
     
     public void onJoin(InetAddress endpoint, EndpointState epState) {}
@@ -394,11 +331,6 @@ public class CoordinatorSession extends ConsistentSession implements IEndpointSt
         {
             logger.warn(error);
             prepareFuture.set(false);
-        }
-        else if (getState() == State.FINALIZING)
-        {
-            logger.warn(error);
-            finalizeProposeFuture.set(false);
         }
     }
 }

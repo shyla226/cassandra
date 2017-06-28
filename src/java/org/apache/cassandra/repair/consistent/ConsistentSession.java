@@ -35,8 +35,6 @@ import org.apache.cassandra.dht.Token;
 
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizeCommit;
-import org.apache.cassandra.repair.messages.FinalizePromise;
-import org.apache.cassandra.repair.messages.FinalizePropose;
 import org.apache.cassandra.repair.messages.PrepareConsistentRequest;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
 import org.apache.cassandra.repair.messages.PrepareMessage;
@@ -84,23 +82,19 @@ import org.apache.cassandra.tools.nodetool.RepairAdmin;
  *  it begins the {@code Failure} process.
  *
  * <h1>Finalization</h1>
- *  The finalization step finishes the session and promotes the sstables to repaired. The coordinator begins by sending
- *  {@link FinalizePropose} messages to each of the participants. Each participant will set it's state to {@code FINALIZE_PROMISED}
- *  and respond with a {@link FinalizePromise} message. Once the coordinator has received promise messages from all participants,
- *  it will send a {@link FinalizeCommit} message to all of them, ending the coordinator session. When a node receives the
- *  {@code FinalizeCommit} message, it will set it's sessions state to {@code FINALIZED}, completing the {@code LocalSession}.
+ *  The finalization step finishes the session and promotes the sstables to repaired. The coordinator sends a {@link FinalizeCommit} 
+ *  message to all participants, ending the coordinator session. When a node receives the {@code FinalizeCommit} message, 
+ *  it will set its session state to {@code FINALIZED}, completing the {@code LocalSession}.
  *  <p/>
  *
  *  For the sake of simplicity, finalization does not immediately mark pending repair sstables repaired because of potential
  *  conflicts with in progress compactions. The sstables will be marked repaired as part of the normal compaction process.
  *  <p/>
  *
- *  On the coordinator side, see {@link CoordinatorSession#finalizePropose()}, {@link CoordinatorSession#handleFinalizePromise(InetAddress, boolean)},
- *  & {@link CoordinatorSession#finalizeCommit()}
+ *  On the coordinator side, see {@link CoordinatorSession#finalizeCommit()}.
  *  <p/>
  *
- *  On the local session side, see {@link LocalSessions#handleFinalizeProposeMessage(InetAddress, FinalizePropose)}
- *  & {@link LocalSessions#handleFinalizeCommitMessage(InetAddress, FinalizeCommit)}
+ *  On the local session side, see {@link LocalSessions#handleFinalizeCommitMessage(InetAddress, FinalizeCommit)}
  *
  * <h1>Failure</h1>
  *  If there are any failures or problems during the process above, the session will be failed. When a session is failed,
@@ -126,8 +120,7 @@ import org.apache.cassandra.tools.nodetool.RepairAdmin;
  *  {@link StatusResponse} message, notifying the sender of their state. If the sender receives a {@code FAILED} response
  *  from any of the participants, it fails the session locally. If it receives a {@code FINALIZED} response from any of the
  *  participants, it will set it's state to {@code FINALIZED} as well. Since the coordinator won't finalize sessions until
- *  it's received {@code FinalizePromise} messages from <i>all</i> participants, this is safe.
- *
+ *  all repairs have completed, this is safe.
  *
  *  <p/>
  *  If a session is not completed, and hasn't had any activity for over a day, the session is auto-failed.
@@ -146,18 +139,16 @@ public abstract class ConsistentSession
 {
     /**
      * The possible states of a {@code ConsistentSession}. The typical progression is {@link State#PREPARING}, {@link State#PREPARED},
-     * {@link State#REPAIRING}, {@link State#FINALIZING}, {@link State#FINALIZE_PROMISED}, and {@link State#FINALIZED}. With the exception of {@code FINALIZED},
-     * any state can be transitions to {@link State#FAILED}.
+     * {@link State#REPAIRING} and {@link State#FINALIZED}. With the exception of {@code FINALIZED}, any state can be 
+     * transitions to {@link State#FAILED}.
      */
     public enum State
     {
         PREPARING(0),
         PREPARED(1),
         REPAIRING(2),
-        FINALIZING(3),
-        FINALIZE_PROMISED(4),
-        FINALIZED(5),
-        FAILED(6);
+        FINALIZED(3),
+        FAILED(4);
 
         State(int expectedOrdinal)
         {
@@ -167,9 +158,7 @@ public abstract class ConsistentSession
         private static final Map<State, Set<State>> transitions = new EnumMap<State, Set<State>>(State.class) {{
             put(PREPARING, ImmutableSet.of(PREPARED, FAILED));
             put(PREPARED, ImmutableSet.of(REPAIRING, FAILED));
-            put(REPAIRING, ImmutableSet.of(FINALIZING, FAILED));
-            put(FINALIZING, ImmutableSet.of(FINALIZE_PROMISED, FAILED));
-            put(FINALIZE_PROMISED, ImmutableSet.of(FINALIZED, FAILED));
+            put(REPAIRING, ImmutableSet.of(FINALIZED, FAILED));
             put(FINALIZED, ImmutableSet.of());
             put(FAILED, ImmutableSet.of());
         }};

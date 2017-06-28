@@ -154,12 +154,10 @@ public class OSSMessageSerializer implements Message.Serializer
         repairVerbToLegacyCode.put(rm.CLEANUP, 7);
         repairVerbToLegacyCode.put(rm.CONSISTENT_REQUEST, 8);
         repairVerbToLegacyCode.put(rm.CONSISTENT_RESPONSE, 9);
-        repairVerbToLegacyCode.put(rm.FINALIZE_PROPOSE, 10);
-        repairVerbToLegacyCode.put(rm.FINALIZE_PROMISE, 11);
-        repairVerbToLegacyCode.put(rm.FINALIZE_COMMIT, 12);
-        repairVerbToLegacyCode.put(rm.FAILED_SESSION, 13);
-        repairVerbToLegacyCode.put(rm.STATUS_REQUEST, 14);
-        repairVerbToLegacyCode.put(rm.STATUS_RESPONSE, 15);
+        repairVerbToLegacyCode.put(rm.FINALIZE_COMMIT, 10);
+        repairVerbToLegacyCode.put(rm.FAILED_SESSION, 11);
+        repairVerbToLegacyCode.put(rm.STATUS_REQUEST, 12);
+        repairVerbToLegacyCode.put(rm.STATUS_RESPONSE, 13);
     }
 
     private static final String TRACE_HEADER = "TraceSession";

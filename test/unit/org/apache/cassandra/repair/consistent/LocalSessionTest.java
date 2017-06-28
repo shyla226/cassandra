@@ -52,8 +52,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizeCommit;
-import org.apache.cassandra.repair.messages.FinalizePromise;
-import org.apache.cassandra.repair.messages.FinalizePropose;
 import org.apache.cassandra.repair.messages.PrepareConsistentRequest;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
 import org.apache.cassandra.repair.messages.RepairMessage;
@@ -395,64 +393,6 @@ public class LocalSessionTest extends AbstractRepairTest
     }
 
     /**
-     * In the success case, session state should be set to FINALIZE_PROMISED and
-     * persisted, and a FinalizePromise message should be sent back to the coordinator
-     */
-    @Test
-    public void finalizeProposeSuccessCase()
-    {
-        UUID sessionID = registerSession();
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
-        sessions.start();
-
-        // create session and move to preparing
-        LocalSession session = sessions.prepareForTest(sessionID);
-        sessions.maybeSetRepairing(sessionID);
-
-        //
-        Assert.assertEquals(REPAIRING, session.getState());
-
-        // should send a promised message to coordinator and set session state accordingly
-        sessions.sentMessages.clear();
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
-        Assert.assertEquals(FINALIZE_PROMISED, session.getState());
-        Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
-        assertMessagesSent(sessions, COORDINATOR, new FinalizePromise(sessionID, PARTICIPANT1, true));
-    }
-
-    /**
-     * Trying to propose finalization when the session isn't in the repaired
-     * state should fail the session and send a failure message to the proposer
-     */
-    @Test
-    public void finalizeProposeInvalidStateFailure()
-    {
-        UUID sessionID = registerSession();
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
-        sessions.start();
-
-        LocalSession session = sessions.prepareForTest(sessionID);
-        Assert.assertEquals(PREPARED, session.getState());
-
-        // should fail the session and send a failure message to the coordinator
-        sessions.sentMessages.clear();
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
-        Assert.assertEquals(FAILED, session.getState());
-        Assert.assertEquals(session, sessions.loadUnsafe(sessionID));
-        assertMessagesSent(sessions, COORDINATOR, new FailSession(sessionID));
-    }
-
-    @Test
-    public void finalizeProposeNonExistantSessionFailure()
-    {
-        InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
-        UUID fakeID = UUIDGen.getTimeUUID();
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(fakeID));
-        Assert.assertNull(sessions.getSession(fakeID));
-        assertMessagesSent(sessions, COORDINATOR, new FailSession(fakeID));
-    }
-
-    /**
      * Session state should be set to finalized, sstables should be promoted
      * to repaired. No messages should be sent to the coordinator
      */
@@ -466,7 +406,6 @@ public class LocalSessionTest extends AbstractRepairTest
         // create session and move to finalized promised
         sessions.prepareForTest(sessionID);
         sessions.maybeSetRepairing(sessionID);
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
 
         Assert.assertEquals(0, (int) sessions.completedSessions.getOrDefault(sessionID, 0));
         sessions.sentMessages.clear();
@@ -581,9 +520,10 @@ public class LocalSessionTest extends AbstractRepairTest
         UUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
-        LocalSession session = sessions.prepareForTest(sessionID);
-        session.setState(FINALIZE_PROMISED);
-
+        
+        LocalSession session = sessions.prepareForTest(sessionID);    
+        sessions.maybeSetRepairing(sessionID);
+       
         sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, FINALIZED));
         Assert.assertEquals(FINALIZED, session.getState());
     }
@@ -607,8 +547,9 @@ public class LocalSessionTest extends AbstractRepairTest
         UUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
+        
         LocalSession session = sessions.prepareForTest(sessionID);
-        session.setState(FINALIZE_PROMISED);
+        sessions.maybeSetRepairing(sessionID);
 
         sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, FAILED));
         Assert.assertEquals(FAILED, session.getState());
@@ -633,10 +574,11 @@ public class LocalSessionTest extends AbstractRepairTest
         UUID sessionID = registerSession();
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
+        
         LocalSession session = sessions.prepareForTest(sessionID);
-        session.setState(REPAIRING);
+        sessions.maybeSetRepairing(sessionID);
 
-        sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, FINALIZE_PROMISED));
+        sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, REPAIRING));
         Assert.assertEquals(REPAIRING, session.getState());
     }
 
@@ -647,7 +589,7 @@ public class LocalSessionTest extends AbstractRepairTest
         InstrumentedLocalSessions sessions = new InstrumentedLocalSessions();
         sessions.start();
 
-        sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, FINALIZE_PROMISED));
+        sessions.handleStatusResponse(PARTICIPANT1, new StatusResponse(sessionID, FINALIZED));
         Assert.assertNull(sessions.getSession(sessionID));
     }
 
@@ -672,9 +614,6 @@ public class LocalSessionTest extends AbstractRepairTest
         Assert.assertTrue(sessions.isSessionInProgress(sessionID));
 
         session.setState(REPAIRING);
-        Assert.assertTrue(sessions.isSessionInProgress(sessionID));
-
-        session.setState(FINALIZE_PROMISED);
         Assert.assertTrue(sessions.isSessionInProgress(sessionID));
 
         session.setState(FINALIZED);
@@ -714,7 +653,6 @@ public class LocalSessionTest extends AbstractRepairTest
 
         sessions.prepareForTest(sessionID);
         sessions.maybeSetRepairing(sessionID);
-        sessions.handleFinalizeProposeMessage(COORDINATOR, new FinalizePropose(sessionID));
         sessions.handleFinalizeCommitMessage(PARTICIPANT1, new FinalizeCommit(sessionID));
 
         LocalSession session = sessions.getSession(sessionID);
