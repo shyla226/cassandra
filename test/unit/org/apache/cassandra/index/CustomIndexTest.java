@@ -27,8 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import org.apache.cassandra.service.StorageService;
+import com.google.common.collect.Sets;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.QueryValidationException;
@@ -50,6 +49,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -113,7 +113,7 @@ public class CustomIndexTest extends CQLTester
         excluded.reset();
         assertTrue(excluded.rowsInserted.isEmpty());
 
-        indexManager.buildAllIndexesBlocking(getCurrentColumnFamilyStore().getLiveSSTables());
+        indexManager.rebuildIndexesBlocking(Sets.newHashSet(toInclude, toExclude));
 
         assertEquals(3, included.rowsInserted.size());
         assertTrue(excluded.rowsInserted.isEmpty());
