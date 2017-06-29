@@ -22,6 +22,7 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -87,9 +88,9 @@ public class SyncComplete extends RepairMessage<SyncComplete>
         return serializers.get(version);
     }
 
-    public Verb<SyncComplete, ?> verb()
+    public Optional<Verb<SyncComplete, ?>> verb()
     {
-        return Verbs.REPAIR.SYNC_COMPLETE;
+        return Optional.of(Verbs.REPAIR.SYNC_COMPLETE);
     }
 
     public static final Versioned<RepairVersion, MessageSerializer<SyncComplete>> serializers = RepairVersion.versioned(v -> new MessageSerializer<SyncComplete>(v)

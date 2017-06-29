@@ -20,6 +20,7 @@ package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.db.TypeSizes;
@@ -34,7 +35,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class PrepareConsistentResponse extends RepairMessage<PrepareConsistentResponse>
+public class PrepareConsistentResponse extends ConsistentRepairMessage<PrepareConsistentResponse>
 {
     public static Versioned<RepairVersion, MessageSerializer<PrepareConsistentResponse>> serializers = RepairVersion.versioned(v -> new MessageSerializer<PrepareConsistentResponse>(v)
     {
@@ -42,7 +43,7 @@ public class PrepareConsistentResponse extends RepairMessage<PrepareConsistentRe
 
         public void serialize(PrepareConsistentResponse response, DataOutputPlus out) throws IOException
         {
-            UUIDSerializer.serializer.serialize(response.parentSession, out);
+            UUIDSerializer.serializer.serialize(response.sessionID, out);
             ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(response.participant), out);
             out.writeBoolean(response.success);
         }
@@ -56,23 +57,20 @@ public class PrepareConsistentResponse extends RepairMessage<PrepareConsistentRe
 
         public long serializedSize(PrepareConsistentResponse response)
         {
-            long size = UUIDSerializer.serializer.serializedSize(response.parentSession);
+            long size = UUIDSerializer.serializer.serializedSize(response.sessionID);
             size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(response.participant));
             size += TypeSizes.sizeof(response.success);
             return size;
         }
     });
 
-    public final UUID parentSession;
     public final InetAddress participant;
     public final boolean success;
 
-    public PrepareConsistentResponse(UUID parentSession, InetAddress participant, boolean success)
+    public PrepareConsistentResponse(UUID sessionID, InetAddress participant, boolean success)
     {
-        super(null);
-        assert parentSession != null;
+        super(sessionID);
         assert participant != null;
-        this.parentSession = parentSession;
         this.participant = participant;
         this.success = success;
     }
@@ -85,16 +83,25 @@ public class PrepareConsistentResponse extends RepairMessage<PrepareConsistentRe
         PrepareConsistentResponse that = (PrepareConsistentResponse) o;
 
         return success == that.success
-               && parentSession.equals(that.parentSession)
+               && sessionID.equals(that.sessionID)
                && participant.equals(that.participant);
     }
 
     public int hashCode()
     {
-        int result = parentSession.hashCode();
+        int result = sessionID.hashCode();
         result = 31 * result + participant.hashCode();
         result = 31 * result + (success ? 1 : 0);
         return result;
+    }
+
+    public String toString()
+    {
+        return "PrepareConsistentResponse{" +
+               "sessionID=" + sessionID +
+               ", participant=" + participant +
+               ", success=" + success +
+               '}';
     }
 
     public MessageSerializer<PrepareConsistentResponse> serializer(RepairVersion version)
@@ -102,8 +109,8 @@ public class PrepareConsistentResponse extends RepairMessage<PrepareConsistentRe
         return serializers.get(version);
     }
 
-    public Verb<PrepareConsistentResponse, ?> verb()
+    public Optional<Verb<PrepareConsistentResponse, ?>> verb()
     {
-        return Verbs.REPAIR.CONSISTENT_RESPONSE;
+        return Optional.of(Verbs.REPAIR.CONSISTENT_RESPONSE);
     }
 }

@@ -23,6 +23,7 @@ import java.lang.management.ManagementFactory;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.openmbean.OpenDataException;
@@ -30,8 +31,11 @@ import javax.management.openmbean.TabularData;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -174,7 +178,7 @@ public class CompactionManager implements CompactionManagerMBean
     {
         if (cfs.isAutoCompactionDisabled())
         {
-            logger.trace("Autocompaction is disabled");
+            logger.debug("Autocompaction is disabled");
             return Collections.emptyList();
         }
 
@@ -203,9 +207,17 @@ public class CompactionManager implements CompactionManagerMBean
 
     public boolean isCompacting(Iterable<ColumnFamilyStore> cfses)
     {
+        return isCompacting(cfses, Predicates.alwaysTrue());
+    }
+
+    public boolean isCompacting(Iterable<ColumnFamilyStore> cfses, Predicate<SSTableReader> predicate)
+    {
         for (ColumnFamilyStore cfs : cfses)
-            if (!cfs.getTracker().getCompacting().isEmpty())
+        {
+            Set<SSTableReader> compacting = cfs.getTracker().getCompacting();
+            if (compacting.stream().anyMatch(s -> predicate.apply(s)))
                 return true;
+        }
         return false;
     }
 
@@ -2006,47 +2018,99 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     /**
-     * Try to stop all of the compactions for given ColumnFamilies.
+     * Try to stop all of the compactions for given tables.
      *
      * Note that this method does not wait for all compactions to finish; you'll need to loop against
      * isCompacting if you want that behavior.
      *
-     * @param columnFamilies The ColumnFamilies to try to stop compaction upon.
+     * @param tables The tables to try to stop compaction upon.
      * @param interruptValidation true if validation operations for repair should also be interrupted
+     * @return True if any compaction has been interrupted false otherwise.
      *
+     * @deprecated use {@link this#interruptCompactionFor(Iterable, Predicate, Predicate)} or
+     * {@link this#interruptCompactionFor(Iterable)}
      */
-    public void interruptCompactionFor(Iterable<TableMetadata> columnFamilies, boolean interruptValidation)
+    @Deprecated
+    public boolean interruptCompactionFor(Iterable<TableMetadata> tables, boolean interruptValidation)
     {
-        assert columnFamilies != null;
+        return interruptCompactionFor(tables, 
+                                      interruptValidation ? Predicates.alwaysTrue() : OperationType.EXCEPT_VALIDATIONS,
+                                      Predicates.alwaysTrue());
+    }
+
+    public boolean interruptCompactionFor(Iterable<TableMetadata> tables)
+    {
+        return interruptCompactionFor(tables, Predicates.alwaysTrue(), Predicates.alwaysTrue());
+    }
+
+    /**
+     * Try to stop all of the compactions for given tables.
+     *
+     * Note that this method does not wait for all compactions to finish; you'll need to loop against
+     * isCompacting if you want that behavior.
+     *
+     * @param tables The tables to try to stop compaction upon.
+     * @param opPredicate Predicate to define which compaction operation to stop, based on its type.
+     * @param readerPredicate Predicate to define which compaction to stop based on candidate sstables.
+     * @return True if any compaction has been interrupted false otherwise.
+     */
+    public boolean interruptCompactionFor(Iterable<TableMetadata> tables, Predicate<OperationType> opPredicate, Predicate<SSTableReader> readerPredicate)
+    {
+        assert tables != null;
 
         // interrupt in-progress compactions
+        boolean interrupted = false;
         for (Holder compactionHolder : CompactionMetrics.getCompactions())
         {
             CompactionInfo info = compactionHolder.getCompactionInfo();
-            if ((info.getTaskType() == OperationType.VALIDATION) && !interruptValidation)
-                continue;
 
-            if (Iterables.contains(columnFamilies, info.getTableMetadata()))
-                compactionHolder.stop(); // signal compaction to stop
+            if (Iterables.contains(tables, info.getTableMetadata()) && opPredicate.apply(info.getTaskType()))
+            {
+                compactionHolder.stop(readerPredicate); // signal compaction to stop
+                interrupted = true;
+            }
         }
+        return interrupted;
     }
 
-    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, boolean interruptValidation)
+    /**
+     * @deprecated use {@link this#interruptCompactionForCFs(Iterable, Predicate, Predicate)}
+     * or {@link this#interruptCompactionForCFs(Iterable)} instead
+     */
+    @Deprecated
+    public boolean interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, boolean interruptValidation)
+    {
+        return interruptCompactionForCFs(cfss, 
+                                         interruptValidation ? Predicates.alwaysTrue() : OperationType.EXCEPT_VALIDATIONS,
+                                         Predicates.alwaysTrue());
+    }
+
+    public boolean interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss)
+    {
+        return interruptCompactionForCFs(cfss, Predicates.alwaysTrue(), Predicates.alwaysTrue());
+    }
+
+    public boolean interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<OperationType> opPredicate, Predicate<SSTableReader> readerPredicate)
     {
         List<TableMetadata> metadata = new ArrayList<>();
         for (ColumnFamilyStore cfs : cfss)
             metadata.add(cfs.metadata());
 
-        interruptCompactionFor(metadata, interruptValidation);
+        return interruptCompactionFor(metadata, opPredicate, readerPredicate);
     }
 
     public void waitForCessation(Iterable<ColumnFamilyStore> cfss)
     {
+        waitForCessation(cfss, Predicates.alwaysTrue());
+    }
+
+    public void waitForCessation(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> predicate)
+    {
         long start = System.nanoTime();
-        long delay = TimeUnit.MINUTES.toNanos(1);
+        long delay = TimeUnit.MINUTES.toNanos(5);
         while (System.nanoTime() - start < delay)
         {
-            if (CompactionManager.instance.isCompacting(cfss))
+            if (CompactionManager.instance.isCompacting(cfss, predicate))
                 Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
             else
                 break;

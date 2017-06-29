@@ -32,11 +32,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
 import java.util.stream.Collectors;
+
 import javax.management.*;
 import javax.management.openmbean.*;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.*;
+import com.google.common.base.Function;
+import com.google.common.base.Joiner;
+import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
@@ -44,6 +48,7 @@ import com.google.common.util.concurrent.*;
 import io.reactivex.Completable;
 import io.reactivex.Single;
 import io.reactivex.subjects.BehaviorSubject;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -2282,7 +2287,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
         };
 
-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true);
+        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true);
         logger.info("Truncate of {}.{} is complete", keyspace.getName(), name);
     }
 
@@ -2300,7 +2305,25 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
     }
 
+    /**
+     * @deprecated use {@link this#runWithCompactionsDisabled(Callable, Predicate, Predicate, boolean)}
+     * or {@link this#runWithCompactionsDisabled(Callable, boolean)} instead
+     */
+    @Deprecated
     public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews)
+    {
+        return runWithCompactionsDisabled(callable, 
+                                          interruptValidation ? Predicates.<OperationType>alwaysTrue() : OperationType.EXCEPT_VALIDATIONS,
+                                          Predicates.<SSTableReader>alwaysTrue(),
+                                          interruptViews);
+    }
+
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptViews)
+    {
+        return runWithCompactionsDisabled(callable, Predicates.<OperationType>alwaysTrue(), Predicates.<SSTableReader>alwaysTrue(), interruptViews);
+    }
+
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<OperationType> opPredicate, Predicate<SSTableReader> readerPredicate, boolean interruptViews)
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
@@ -2317,19 +2340,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             try
             {
                 // interrupt in-progress compactions
-                CompactionManager.instance.interruptCompactionForCFs(selfWithAuxiliaryCfs, interruptValidation);
-                CompactionManager.instance.waitForCessation(selfWithAuxiliaryCfs);
-
-                // doublecheck that we finished, instead of timing out
-                for (ColumnFamilyStore cfs : selfWithAuxiliaryCfs)
+                if (CompactionManager.instance.interruptCompactionForCFs(selfWithAuxiliaryCfs, opPredicate, readerPredicate))
                 {
-                    if (!cfs.getTracker().getCompacting().isEmpty())
+                    CompactionManager.instance.waitForCessation(selfWithAuxiliaryCfs, readerPredicate);
+
+                    // doublecheck that we finished, instead of timing out
+                    for (ColumnFamilyStore cfs : selfWithAuxiliaryCfs)
                     {
-                        logger.warn("Unable to cancel in-progress compactions for {}.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.", metadata.name);
-                        return null;
+                        if (CompactionManager.instance.isCompacting(ImmutableList.of(cfs), readerPredicate))
+                        {
+                            logger.warn("Unable to cancel in-progress compactions for {}.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.", metadata.name);
+                            return null;
+                        }
                     }
+                    logger.trace("Compactions successfully cancelled");
                 }
-                logger.trace("Compactions successfully cancelled");
 
                 // run our task
                 try
@@ -2772,6 +2797,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                        int mutated = getCompactionStrategyManager().mutateRepaired(repairedSSTables, ActiveRepairService.UNREPAIRED_SSTABLE, null);
                                        logger.debug("Marked {} sstables from table {}.{} as unrepaired.", mutated, keyspace.getName(), name);
                                    return mutated;
-                                   }, true, true);
+                                   }, true);
     }
 }

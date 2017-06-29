@@ -29,7 +29,6 @@ import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IFailureDetector;
-import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
 import org.apache.cassandra.service.ActiveRepairService;
 
@@ -53,7 +52,7 @@ public class CoordinatorSessions
         this.failureDetector = failureDetector;
         this.gossiper = gossiper;
     }
-    
+
     protected CoordinatorSession buildSession(CoordinatorSession.Builder builder)
     {
         return new CoordinatorSession(builder);
@@ -72,10 +71,10 @@ public class CoordinatorSessions
         builder.withRepairedAt(prs.repairedAt);
         builder.withRanges(prs.getRanges());
         builder.withParticipants(participants);
-                
-        CoordinatorSession session = buildSession(builder);        
+
+        CoordinatorSession session = buildSession(builder);
         sessions.put(session.sessionID, session);
-        
+
         if (failureDetector != null && gossiper != null)
         {
             session.setOnCompleteCallback(s -> {
@@ -88,7 +87,7 @@ public class CoordinatorSessions
             failureDetector.registerFailureDetectionEventListener(session);
             gossiper.register(session);
         }
-        
+
         return session;
     }
 
@@ -99,19 +98,10 @@ public class CoordinatorSessions
 
     public void handlePrepareResponse(InetAddress from, PrepareConsistentResponse msg)
     {
-        CoordinatorSession session = getSession(msg.parentSession);
-        if (session != null)
-        {
-            session.handlePrepareResponse(msg.participant, msg.success);
-        }
-    }
-
-    public void handleFailSessionMessage(FailSession msg)
-    {
         CoordinatorSession session = getSession(msg.sessionID);
         if (session != null)
         {
-            session.fail();
+            session.handlePrepareResponse(msg.participant, msg.success);
         }
     }
 }

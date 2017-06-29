@@ -300,4 +300,46 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
         prm.addSSTable(sstable);
         Assert.assertTrue(prm.hasDataForSession(repairID));
     }
+
+    @Test
+    public void getRepairFinishedTask()
+    {
+        PendingRepairManager prm = csm.getPendingRepairManagers().get(0);
+
+        // create 2 sessions:
+
+        UUID repairID1 = registerSession(cfs, true, true);
+        LocalSessionAccessor.prepareUnsafe(repairID1, COORDINATOR, PARTICIPANTS);
+        SSTableReader sstable = makeSSTable(true);
+        mutateRepaired(sstable, repairID1);
+        prm.addSSTable(sstable);
+
+        UUID repairID2 = registerSession(cfs, true, true);
+        LocalSessionAccessor.prepareUnsafe(repairID2, COORDINATOR, PARTICIPANTS);
+        sstable = makeSSTable(true);
+        mutateRepaired(sstable, repairID2);
+        prm.addSSTable(sstable);
+
+        Assert.assertEquals(2, prm.getSessions().size());
+
+        // finalize first session:
+
+        LocalSessionAccessor.finalizeUnsafe(repairID1);
+
+        Runnable task1 = prm.getRepairFinishedTask(repairID1);
+        Runnable task2 = prm.getRepairFinishedTask(repairID2);
+        Assert.assertNotNull(task1);
+        // task for second session is null as it is not finalized
+        Assert.assertNull(task2);
+
+        // finalize second session:
+
+        LocalSessionAccessor.finalizeUnsafe(repairID2);
+
+        // task for second session is now not null
+        task2 = prm.getRepairFinishedTask(repairID2);
+        Assert.assertNotNull(task2);
+        // different tasks for different sessions
+        Assert.assertNotSame(task1, task2);
+    }
 }

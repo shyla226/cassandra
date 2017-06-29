@@ -18,6 +18,7 @@
 package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
+import java.util.Optional;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -93,8 +94,8 @@ public class ValidationRequest extends RepairMessage<ValidationRequest>
         return serializers.get(version);
     }
 
-    public Verb<ValidationRequest, ?> verb()
+    public Optional<Verb<ValidationRequest, ?>> verb()
     {
-        return Verbs.REPAIR.VALIDATION_REQUEST;
+        return Optional.of(Verbs.REPAIR.VALIDATION_REQUEST);
     }
 }

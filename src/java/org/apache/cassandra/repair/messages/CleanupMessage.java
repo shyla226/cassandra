@@ -19,6 +19,7 @@ package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -83,8 +84,8 @@ public class CleanupMessage extends RepairMessage<CleanupMessage>
         return serializers.get(version);
     }
 
-    public Verb<CleanupMessage, ?> verb()
+    public Optional<Verb<CleanupMessage, ?>> verb()
     {
-        return Verbs.REPAIR.CLEANUP;
+        return Optional.of(Verbs.REPAIR.CLEANUP);
     }
 }

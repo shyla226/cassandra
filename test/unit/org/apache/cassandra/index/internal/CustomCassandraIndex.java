@@ -620,7 +620,7 @@ public class CustomCassandraIndex implements Index
     {
         // interrupt in-progress compactions
         Collection<ColumnFamilyStore> cfss = Collections.singleton(indexCfs);
-        CompactionManager.instance.interruptCompactionForCFs(cfss, true);
+        CompactionManager.instance.interruptCompactionForCFs(cfss);
         CompactionManager.instance.waitForCessation(cfss);
         indexCfs.keyspace.writeOrder.awaitNewBarrier();
         indexCfs.forceBlockingFlush();

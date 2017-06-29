@@ -199,7 +199,9 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
     public void start()
     {
         consistent.local.start();
-        ScheduledExecutors.optionalTasks.scheduleAtFixedRate(consistent.local::cleanup, 0,
+        logger.debug("Scheduling consistent repair cleanup with interval: {}", LocalSessions.CLEANUP_INTERVAL);
+        ScheduledExecutors.optionalTasks.scheduleAtFixedRate(consistent.local::cleanup,
+                                                             LocalSessions.CLEANUP_INTERVAL,
                                                              LocalSessions.CLEANUP_INTERVAL,
                                                              TimeUnit.SECONDS);
     }
@@ -458,7 +460,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         return parentRepairSession;
     }
 
-    private void failRepair(UUID parentRepairSession, String errorMsg) {
+    private void failRepair(UUID parentRepairSession, String errorMsg)
+    {
         removeParentRepairSession(parentRepairSession);
         throw new RuntimeException(errorMsg);
     }
@@ -487,23 +490,32 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         return session;
     }
 
+    public boolean hasParentRepairSession(UUID parentSessionId)
+    {
+        return parentRepairSessions.containsKey(parentSessionId);
+    }
+
     /**
      * called when the repair session is done - either failed or anticompaction has completed
      *
      * clears out any snapshots created by this repair
      *
      * @param parentSessionId
-     * @return
      */
-    public synchronized ParentRepairSession removeParentRepairSession(UUID parentSessionId)
+    public synchronized void removeParentRepairSession(UUID parentSessionId)
     {
-        String snapshotName = parentSessionId.toString();
-        for (ColumnFamilyStore cfs : getParentRepairSession(parentSessionId).columnFamilyStores.values())
+        if (parentRepairSessions.containsKey(parentSessionId))
         {
-            if (cfs.snapshotExists(snapshotName))
-                cfs.clearSnapshot(snapshotName);
+            String snapshotName = parentSessionId.toString();
+            for (ColumnFamilyStore cfs : getParentRepairSession(parentSessionId).columnFamilyStores.values())
+            {
+                if (cfs.snapshotExists(snapshotName))
+                {
+                    cfs.clearSnapshot(snapshotName);
+                }
+            }
+            parentRepairSessions.remove(parentSessionId);
         }
-        return parentRepairSessions.remove(parentSessionId);
     }
 
     private boolean isConsistent(UUID sessionID)

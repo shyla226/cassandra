@@ -50,97 +50,125 @@ import org.apache.cassandra.tools.nodetool.RepairAdmin;
  * Base class for consistent Local and Coordinator sessions
  *
  * <p/>
+ *
  * There are 4 stages to a consistent incremental repair.
  *
  * <h1>Repair prepare</h1>
+ *
  *  First, the normal {@link ActiveRepairService#prepareForRepair(UUID, InetAddress, Set, RepairOption, List)} stuff
  *  happens, which sends out {@link PrepareMessage} and creates a {@link ActiveRepairService.ParentRepairSession}
  *  on the coordinator and each of the neighbors.
  *
  * <h1>Consistent prepare</h1>
+ *
  *  The consistent prepare step promotes the parent repair session to a consistent session, and isolates the sstables
  *  being repaired other sstables. First, the coordinator sends a {@link PrepareConsistentRequest} message to each repair
  *  participant (including itself). When received, the node creates a {@link LocalSession} instance, sets it's state to
- *  {@code PREPARING}, persists it, and begins a {@link PendingAntiCompaction} task. When the pending anti compaction
+ *  {@code PREPARING}, persists it, and tries to resolve any previously pending (non finalized nor completed) sessions:
+ *  this means each node tries to complete the session based on local and remote state, and if successful, it runs
+ *  a synchronous ad-hoc compaction task to mark the sstables either repaired or not based on the completion state;
+ *  this is to ensure no concurrent repairs are run over the same sstables, and to ensure the new repair takes into
+ *  account the latest results from previous repairs (in terms of repaired or unrepaired data);
+ *  see {@link LocalSessionsResolver}.
+ *
+ *  <p/>
+ *
+ *  If resolution succeeds, the node begins a {@link PendingAntiCompaction} task. When the pending anti compaction
  *  completes, the session state is set to {@code PREPARED}, and a {@link PrepareConsistentResponse} is sent to the
- *  coordinator indicating success or failure. If the pending anti-compaction fails, the local session state is set
- *  to {@code FAILED}.
+ *  coordinator indicating success or failure. If resolution or anti-compaction fail, the local session state is set
+ *  to {@code FAILED} and a negative response sent to the coordinator, which will abort the whole repair session
+ *  (see {@link LocalSessions#handlePrepareMessage(InetAddress, PrepareConsistentRequest)}.
+ *
  *  <p/>
- *  (see {@link LocalSessions#handlePrepareMessage(InetAddress, PrepareConsistentRequest)}
- *  <p/>
- *  Once the coordinator recieves positive {@code PrepareConsistentResponse} messages from all the participants, the
- *  coordinator begins the normal repair process.
- *  <p/>
- *  (see {@link CoordinatorSession#handlePrepareResponse(InetAddress, boolean)}
+ *
+ *  Once the coordinator receives positive {@code PrepareConsistentResponse} messages from all the participants, the
+ *  coordinator begins the normal repair process (see {@link CoordinatorSession#handlePrepareResponse(InetAddress, boolean)}.
  *
  * <h1>Repair</h1>
+ *
  *  The coordinator runs the normal data repair process against the sstables segregated in the previous step. When a
- *  node recieves a {@link ValidationRequest}, it sets it's local session state to {@code REPAIRING}.
+ *  node receives a {@link ValidationRequest}, it sets it's local session state to {@code REPAIRING}.
+ *
  *  <p/>
  *
  *  If all of the RepairSessions complete successfully, the coordinator begins the {@code Finalization} process. Otherwise,
  *  it begins the {@code Failure} process.
  *
  * <h1>Finalization</h1>
- *  The finalization step finishes the session and promotes the sstables to repaired. The coordinator sends a {@link FinalizeCommit} 
- *  message to all participants, ending the coordinator session. When a node receives the {@code FinalizeCommit} message, 
- *  it will set its session state to {@code FINALIZED}, completing the {@code LocalSession}.
+ *
+ *  The finalization step finishes the session and promotes the sstables to repaired. The coordinator sends a {@link FinalizeCommit}
+ *  message to all participants, ending the coordinator session. When a node receives the {@code FinalizeCommit} message,
+ *  it will set its session state to {@code FINALIZED}, completing the {@code LocalSession}. Please note the coordinator
+ *  will wait for an ack from all participants before ending the session; if any participant fails or doesn't answer,
+ *  the coordinator will fail the session and return an error to the user: this is to ensure the repair will be retried
+ *  and all nodes will have the same repaired state for the same sstable ranges. Please note the cost of retrying
+ *  the whole repair in case of a commit failure is trivial: unless all nodes failed to commit, at least one node
+ *  will have finalized the session, so the session will be resolved as finalized on all nodes, the sstables promoted as
+ *  repaired and there will be no further sstables to repair.
+ *
  *  <p/>
  *
- *  For the sake of simplicity, finalization does not immediately mark pending repair sstables repaired because of potential
- *  conflicts with in progress compactions. The sstables will be marked repaired as part of the normal compaction process.
+ *  Finalization immediately marks pending repair sstables as repaired after first stopping any ongoing compactions
+ *  over pending sstables only (this is the same process mentioned above for session resolution).
+ *
  *  <p/>
  *
  *  On the coordinator side, see {@link CoordinatorSession#finalizeCommit()}.
+ *
  *  <p/>
  *
  *  On the local session side, see {@link LocalSessions#handleFinalizeCommitMessage(InetAddress, FinalizeCommit)}
  *
  * <h1>Failure</h1>
+ *
  *  If there are any failures or problems during the process above, the session will be failed. When a session is failed,
  *  the coordinator will send {@link FailSession} messages to each of the participants. In some cases (basically those not
  *  including Validation and Sync) errors are reported back to the coordinator by the local session, at which point, it
  *  will send {@code FailSession} messages out.
- *  <p/>
- *  Just as with finalization, sstables aren't immediately moved back to unrepaired, but will be demoted as part of the
- *  normal compaction process.
  *
  *  <p/>
+ *
+ *  Just as with finalization, sstables are immediately moved back to unrepaired using the same process.
+ *
+ *  <p/>
+ *
  *  See {@link LocalSessions#failSession(UUID, boolean)} and {@link CoordinatorSession#fail()}
  *
  * <h1>Failure Recovery & Session Cleanup</h1>
+ *
  *  There are a few scenarios where sessions can get stuck. If a node fails mid session, or it misses a {@code FailSession}
- *  or {@code FinalizeCommit} message, it will never finish. To address this, there is a cleanup task that runs every
- *  10 minutes that attempts to complete idle sessions.
+ *  or {@code FinalizeCommit} message, it will never finish. To address this, the first and most important mechanism
+ *  is the session resolution algorithm which runs prior to each consistent repair and tries to resolve each pending
+ *  session based on local and remote states (see {@link LocalSessionResolver}).
  *
  *  <p/>
- *  If a session is not completed (not {@code FINALIZED} or {@code FAILED}) and there's been no activity on the session for
+ *
+ *  There also is a cleanup task that runs every 10 minutes and attempts to complete pending sessions as follows:
+ *  <ul>
+ *  <li>If a session is not completed (not {@code FINALIZED} or {@code FAILED}) and there's been no activity on the session for
  *  over an hour, the cleanup task will attempt to finish the session by learning the session state of the other participants.
  *  To do this, it sends a {@link StatusRequest} message to the other session participants. The participants respond with a
  *  {@link StatusResponse} message, notifying the sender of their state. If the sender receives a {@code FAILED} response
  *  from any of the participants, it fails the session locally. If it receives a {@code FINALIZED} response from any of the
  *  participants, it will set it's state to {@code FINALIZED} as well. Since the coordinator won't finalize sessions until
- *  all repairs have completed, this is safe.
+ *  all repairs have completed, this is safe.</li>
+ *  <li>If a session is not completed, and hasn't had any activity for over a day, the session is auto-failed.</li>
+ *  <li>Once a session has been completed for over 2 days, it's deleted.</li>
+ *  </ul>
+ *
+ *  Operators can also manually fail sessions with {@code nodetool repair_admin --cancel}.
  *
  *  <p/>
- *  If a session is not completed, and hasn't had any activity for over a day, the session is auto-failed.
  *
- *  <p/>
- *  Once a session has been completed for over 2 days, it's deleted.
- *
- *  <p/>
- *  Operators can also manually fail sessions with {@code nodetool repair_admin --cancel}
- *
- *  <p/>
- *  See {@link LocalSessions#cleanup()} and {@link RepairAdmin}
- *
+ *  See {@link LocalSessions#cleanup()} and {@link RepairAdmin}.
  */
 public abstract class ConsistentSession
 {
     /**
      * The possible states of a {@code ConsistentSession}. The typical progression is {@link State#PREPARING}, {@link State#PREPARED},
-     * {@link State#REPAIRING} and {@link State#FINALIZED}. With the exception of {@code FINALIZED}, any state can be 
-     * transitions to {@link State#FAILED}.
+     * {@link State#REPAIRING} and {@link State#FINALIZED}. With the exception of {@code FINALIZED}, any state can be
+     * transitions to {@link State#FAILED}. {@link State#UNKNOWN} is only used in status responses in case the session
+     * didn't exist locally.
      */
     public enum State
     {
@@ -148,7 +176,8 @@ public abstract class ConsistentSession
         PREPARED(1),
         REPAIRING(2),
         FINALIZED(3),
-        FAILED(4);
+        FAILED(4),
+        UNKNOWN(5);
 
         State(int expectedOrdinal)
         {
@@ -247,7 +276,8 @@ public abstract class ConsistentSession
                '}';
     }
 
-    abstract static class AbstractBuilder
+    @SuppressWarnings("unchecked")
+    abstract static class AbstractBuilder<T extends AbstractBuilder<T>>
     {
         private State state;
         private UUID sessionID;
@@ -257,44 +287,52 @@ public abstract class ConsistentSession
         private Collection<Range<Token>> ranges;
         private Set<InetAddress> participants;
 
-        void withState(State state)
+        T withState(State state)
         {
             this.state = state;
+            return (T) this;
         }
 
-        void withSessionID(UUID sessionID)
+        T withSessionID(UUID sessionID)
         {
             this.sessionID = sessionID;
+            return (T) this;
         }
 
-        void withCoordinator(InetAddress coordinator)
+        T withCoordinator(InetAddress coordinator)
         {
             this.coordinator = coordinator;
+            return (T) this;
         }
 
-        void withUUIDTableIds(Iterable<UUID> ids)
+        T withUUIDTableIds(Iterable<UUID> ids)
         {
             this.ids = ImmutableSet.copyOf(Iterables.transform(ids, TableId::fromUUID));
+            return (T) this;
         }
 
-        void withTableIds(Set<TableId> ids)
+        T withTableIds(Set<TableId> ids)
         {
             this.ids = ids;
+            return (T) this;
         }
 
-        void withRepairedAt(long repairedAt)
+        T withRepairedAt(long repairedAt)
         {
             this.repairedAt = repairedAt;
+            return (T) this;
         }
 
-        void withRanges(Collection<Range<Token>> ranges)
+        T withRanges(Collection<Range<Token>> ranges)
         {
             this.ranges = ranges;
+            return (T) this;
         }
 
-        void withParticipants(Set<InetAddress> peers)
+        T withParticipants(Set<InetAddress> peers)
         {
             this.participants = peers;
+            return (T) this;
         }
 
         void validate()
@@ -311,6 +349,8 @@ public abstract class ConsistentSession
             Preconditions.checkArgument(!participants.isEmpty());
             Preconditions.checkArgument(participants.contains(coordinator));
         }
+
+        public abstract ConsistentSession build();
     }
 
 

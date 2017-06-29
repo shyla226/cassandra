@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -131,9 +132,9 @@ public class SyncRequest extends RepairMessage<SyncRequest>
         return serializers.get(version);
     }
 
-    public Verb<SyncRequest, ?> verb()
+    public Optional<Verb<SyncRequest, ?>> verb()
     {
-        return Verbs.REPAIR.SYNC_REQUEST;
+        return Optional.of(Verbs.REPAIR.SYNC_REQUEST);
     }
 
     @Override

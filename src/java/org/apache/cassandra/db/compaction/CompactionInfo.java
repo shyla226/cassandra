@@ -22,6 +22,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
+
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 
 /** Implements serializable to allow structured info to be returned via JMX. */
@@ -139,12 +143,22 @@ public final class CompactionInfo implements Serializable
 
         public void stop()
         {
-            stopRequested = true;
+            stop(Predicates.alwaysTrue());
+        }
+        
+        public void stop(Predicate<SSTableReader> predicate)
+        {
+            stopRequested = maybeStop(predicate);
         }
 
         public boolean isStopRequested()
         {
             return stopRequested;
+        }
+
+        protected boolean maybeStop(Predicate<SSTableReader> predicate)
+        {
+            return true;
         }
     }
 }

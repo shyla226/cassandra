@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -137,7 +138,7 @@ class PendingRepairManager
         if (!strategies.containsKey(sessionID) || !strategies.get(sessionID).getSSTables().isEmpty())
             return;
 
-        logger.debug("Removing compaction strategy for pending repair {} on  {}.{}", sessionID, cfs.metadata.keyspace, cfs.metadata.name);
+        logger.debug("Removing compaction strategy for pending repair {} on {}.{}", sessionID, cfs.metadata.keyspace, cfs.metadata.name);
         strategies = ImmutableMap.copyOf(Maps.filterKeys(strategies, k -> !k.equals(sessionID)));
     }
 
@@ -256,6 +257,17 @@ class PendingRepairManager
         long repairedAt = ActiveRepairService.instance.consistent.local.getFinalSessionRepairedAt(sessionID);
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         return txn == null ? null : new RepairFinishedCompactionTask(cfs, txn, sessionID, repairedAt);
+    }
+
+    synchronized Runnable getRepairFinishedTask(UUID sessionID)
+    {
+        if (canCleanup(sessionID) && get(sessionID) != null)
+        {
+            Set<SSTableReader> sstables = get(sessionID).getSSTables();
+            long repairedAt = ActiveRepairService.instance.consistent.local.getFinalSessionRepairedAt(sessionID);
+            return new RepairFinishedTask(cfs, sstables, sessionID, repairedAt);
+        }
+        return null;
     }
 
     synchronized int getNumPendingRepairFinishedTasks()
@@ -412,6 +424,46 @@ class PendingRepairManager
     /**
      * promotes/demotes sstables involved in a consistent repair that has been finalized, or failed
      */
+    class RepairFinishedTask implements Runnable
+    {
+        final ColumnFamilyStore cfs;
+        final Collection<SSTableReader> sstables;
+        final UUID sessionID;
+        final long repairedAt;
+
+        public RepairFinishedTask(ColumnFamilyStore cfs, Collection<SSTableReader> sstables, UUID sessionID, long repairedAt)
+        {
+            this.cfs = cfs;
+            this.sstables = sstables;
+            this.sessionID = sessionID;
+            this.repairedAt = repairedAt;
+        }
+
+        public void run()
+        {
+            boolean completed = false;
+            try
+            {
+                cfs.getCompactionStrategyManager().mutateRepaired(sstables, repairedAt, ActiveRepairService.NO_PENDING_REPAIR);
+                completed = true;
+            }
+            catch (IOException ex)
+            {
+                logger.warn(ex.getMessage(), ex);
+            }
+            finally
+            {
+                // even if we weren't able to rewrite all the sstable metedata, we should still move the ones that were
+                cfs.getTracker().notifySSTableRepairedStatusChanged(sstables);
+
+                if (completed)
+                {
+                    removeSession(sessionID);
+                }
+            }
+        }
+    }
+
     class RepairFinishedCompactionTask extends AbstractCompactionTask
     {
         private final UUID sessionID;
@@ -432,25 +484,16 @@ class PendingRepairManager
 
         protected void runMayThrow() throws Exception
         {
-            boolean completed = false;
             try
             {
-                cfs.getCompactionStrategyManager().mutateRepaired(transaction.originals(), repairedAt, ActiveRepairService.NO_PENDING_REPAIR);
-                completed = true;
+                new RepairFinishedTask(cfs, transaction.originals(), sessionID, repairedAt).run();
             }
             finally
             {
-                // even if we weren't able to rewrite all the sstable metedata, we should still move the ones that were
-                cfs.getTracker().notifySSTableRepairedStatusChanged(transaction.originals());
-
                 // we always abort because mutating metadata isn't guarded by LifecycleTransaction, so this won't roll
                 // anything back. Also, we don't want to obsolete the originals. We're only using it to prevent other
                 // compactions from marking these sstables compacting, and unmarking them when we're done
                 transaction.abort();
-                if (completed)
-                {
-                    removeSession(sessionID);
-                }
             }
         }
 
@@ -465,5 +508,4 @@ class PendingRepairManager
             return transaction.originals().size();
         }
     }
-
 }

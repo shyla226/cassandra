@@ -32,6 +32,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.index.transactions.CompactionTransaction;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 
@@ -261,6 +262,12 @@ public class CompactionIterator extends CompactionInfo.Holder implements Unfilte
     public String toString()
     {
         return this.getCompactionInfo().toString();
+    }
+
+    @Override
+    protected boolean maybeStop(com.google.common.base.Predicate<SSTableReader> predicate)
+    {
+        return controller.getCompacting().stream().anyMatch(s -> predicate.apply(s));
     }
 
     private class Purger extends PurgeFunction

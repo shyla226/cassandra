@@ -19,6 +19,7 @@ package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -85,9 +86,9 @@ public class ValidationComplete extends RepairMessage<ValidationComplete>
         return serializers.get(version);
     }
 
-    public Verb<ValidationComplete, ?> verb()
+    public Optional<Verb<ValidationComplete, ?>> verb()
     {
-        return Verbs.REPAIR.VALIDATION_COMPLETE;
+        return Optional.of(Verbs.REPAIR.VALIDATION_COMPLETE);
     }
 
     public ValidationComplete(RepairJobDesc desc, MerkleTrees trees)

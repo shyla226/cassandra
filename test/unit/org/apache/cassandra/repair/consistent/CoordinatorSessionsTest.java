@@ -34,7 +34,6 @@ import org.apache.cassandra.repair.AbstractRepairTest;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.PrepareConsistentResponse;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -45,10 +44,8 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
     private static TableMetadata cfm;
     private static ColumnFamilyStore cfs;
 
-    // to check CoordinatorSessions is passing the messages to the coordinator session correctly
     private static class InstrumentedCoordinatorSession extends CoordinatorSession
     {
-
         public InstrumentedCoordinatorSession(Builder builder)
         {
             super(builder);
@@ -62,22 +59,8 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
             prepareResponseCalls++;
             preparePeer = participant;
             prepareSuccess = success;
-        }
 
-        int finalizePromiseCalls = 0;
-        InetAddress promisePeer = null;
-        boolean promiseSuccess = false;
-        public synchronized void handleFinalizePromise(InetAddress participant, boolean success)
-        {
-            finalizePromiseCalls++;
-            promisePeer = participant;
-            promiseSuccess = success;
-        }
-
-        int failCalls = 0;
-        public synchronized void fail()
-        {
-            failCalls++;
+            super.handlePrepareResponse(participant, success);
         }
     }
 
@@ -149,35 +132,27 @@ public class CoordinatorSessionsTest extends AbstractRepairTest
     }
 
     @Test
+    public void handlePrepareResponseFailure()
+    {
+        InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
+        UUID sessionID = registerSession();
+
+        InstrumentedCoordinatorSession session = sessions.registerSession(sessionID, PARTICIPANTS);
+        Assert.assertEquals(0, session.prepareResponseCalls);
+
+        sessions.handlePrepareResponse(null, new PrepareConsistentResponse(sessionID, PARTICIPANT1, false));
+        Assert.assertEquals(1, session.prepareResponseCalls);
+        Assert.assertEquals(PARTICIPANT1, session.preparePeer);
+        Assert.assertEquals(false, session.prepareSuccess);
+    }
+
+    @Test
     public void handlePrepareResponseNoSession()
     {
         InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
         UUID fakeID = UUIDGen.getTimeUUID();
 
         sessions.handlePrepareResponse(null, new PrepareConsistentResponse(fakeID, PARTICIPANT1, true));
-        Assert.assertNull(sessions.getSession(fakeID));
-    }
-
-    @Test
-    public void handleFailureMessage()
-    {
-        InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
-        UUID sessionID = registerSession();
-
-        InstrumentedCoordinatorSession session = sessions.registerSession(sessionID, PARTICIPANTS);
-        Assert.assertEquals(0, session.failCalls);
-
-        sessions.handleFailSessionMessage(new FailSession(sessionID));
-        Assert.assertEquals(1, session.failCalls);
-    }
-
-    @Test
-    public void handleFailureMessageNoSession()
-    {
-        InstrumentedCoordinatorSessions sessions = new InstrumentedCoordinatorSessions();
-        UUID fakeID = UUIDGen.getTimeUUID();
-
-        sessions.handleFailSessionMessage(new FailSession(fakeID));
         Assert.assertNull(sessions.getSession(fakeID));
     }
 }

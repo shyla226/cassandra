@@ -19,6 +19,7 @@ package org.apache.cassandra.repair.messages;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -59,9 +60,9 @@ public class SnapshotMessage extends RepairMessage<SnapshotMessage>
         return serializers.get(version);
     }
 
-    public Verb<SnapshotMessage, ?> verb()
+    public Optional<Verb<SnapshotMessage, ?>> verb()
     {
-        return Verbs.REPAIR.SNAPSHOT;
+        return Optional.of(Verbs.REPAIR.SNAPSHOT);
     }
 
     @Override

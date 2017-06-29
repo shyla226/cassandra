@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import com.google.common.base.Predicate;
+
 public enum OperationType
 {
     COMPACTION("Compaction"),
@@ -63,4 +65,7 @@ public enum OperationType
     {
         return type;
     }
+
+    public static final Predicate<OperationType> EXCEPT_VALIDATIONS = o -> o != VALIDATION;
+    public static final Predicate<OperationType> COMPACTIONS_ONLY = o -> o == COMPACTION || o == TOMBSTONE_COMPACTION;
 }

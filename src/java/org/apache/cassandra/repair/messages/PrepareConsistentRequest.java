@@ -21,6 +21,7 @@ package org.apache.cassandra.repair.messages;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -38,7 +39,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.versioning.Versioned;
 
-public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentRequest>
+public class PrepareConsistentRequest extends ConsistentRepairMessage<PrepareConsistentRequest>
 {
     public static Versioned<RepairVersion, MessageSerializer<PrepareConsistentRequest>> serializers = RepairVersion.versioned(v -> new MessageSerializer<PrepareConsistentRequest>(v)
     {
@@ -46,7 +47,7 @@ public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentReq
 
         public void serialize(PrepareConsistentRequest request, DataOutputPlus out) throws IOException
         {
-            UUIDSerializer.serializer.serialize(request.parentSession, out);
+            UUIDSerializer.serializer.serialize(request.sessionID, out);
             ByteBufferUtil.writeWithShortLength(inetSerializer.serialize(request.coordinator), out);
             out.writeInt(request.participants.size());
             for (InetAddress peer : request.participants)
@@ -71,7 +72,7 @@ public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentReq
 
         public long serializedSize(PrepareConsistentRequest request)
         {
-            long size = UUIDSerializer.serializer.serializedSize(request.parentSession);
+            long size = UUIDSerializer.serializer.serializedSize(request.sessionID);
             size += ByteBufferUtil.serializedSizeWithShortLength(inetSerializer.serialize(request.coordinator));
             size += TypeSizes.sizeof(request.participants.size());
             for (InetAddress peer : request.participants)
@@ -80,17 +81,14 @@ public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentReq
         }
     });
 
-    public final UUID parentSession;
     public final InetAddress coordinator;
     public final Set<InetAddress> participants;
 
-    public PrepareConsistentRequest(UUID parentSession, InetAddress coordinator, Set<InetAddress> participants)
+    public PrepareConsistentRequest(UUID sessionID, InetAddress coordinator, Set<InetAddress> participants)
     {
-        super(null);
-        assert parentSession != null;
+        super(sessionID);
         assert coordinator != null;
         assert participants != null && !participants.isEmpty();
-        this.parentSession = parentSession;
         this.coordinator = coordinator;
         this.participants = ImmutableSet.copyOf(participants);
     }
@@ -102,14 +100,14 @@ public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentReq
 
         PrepareConsistentRequest that = (PrepareConsistentRequest) o;
 
-        return parentSession.equals(that.parentSession)
+        return sessionID.equals(that.sessionID)
                && coordinator.equals(that.coordinator)
                && participants.equals(that.participants);
     }
 
     public int hashCode()
     {
-        int result = parentSession.hashCode();
+        int result = sessionID.hashCode();
         result = 31 * result + coordinator.hashCode();
         result = 31 * result + participants.hashCode();
         return result;
@@ -118,7 +116,7 @@ public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentReq
     public String toString()
     {
         return "PrepareConsistentRequest{" +
-               "parentSession=" + parentSession +
+               "sessionID=" + sessionID +
                ", coordinator=" + coordinator +
                ", participants=" + participants +
                '}';
@@ -129,8 +127,8 @@ public class PrepareConsistentRequest extends RepairMessage<PrepareConsistentReq
         return serializers.get(version);
     }
 
-    public Verb<PrepareConsistentRequest, ?> verb()
+    public Optional<Verb<PrepareConsistentRequest, ?>> verb()
     {
-        return Verbs.REPAIR.CONSISTENT_REQUEST;
+        return Optional.of(Verbs.REPAIR.CONSISTENT_REQUEST);
     }
 }
