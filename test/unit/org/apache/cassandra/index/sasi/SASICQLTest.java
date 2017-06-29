@@ -78,4 +78,30 @@ public class SASICQLTest extends CQLTester
             Assert.assertEquals(20, rs.size());
         }
     }
+
+    @Test
+    public void rangeFilteringTest() throws Throwable
+    {
+        createTable("create table %s (id1 text PRIMARY KEY, val1 text, val2 text);");
+
+        createIndex("create custom index on %s(val1) using 'org.apache.cassandra.index.sasi.SASIIndex';");
+        createIndex("create custom index on %s(val2) using 'org.apache.cassandra.index.sasi.SASIIndex';");
+
+        execute("insert into %s(id1, val1, val2) values ('1', 'aaa', 'aaa');");
+        execute("insert into %s(id1, val1, val2) values ('2', 'bbb', 'bbb');");
+        execute("insert into %s(id1, val1, val2) values ('3', 'ccc', 'ccc');");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("select * from %s where val1 < 'bbb' AND val2 = 'aaa' ALLOW FILTERING;"),
+                       row("1", "aaa", "aaa"));
+            assertRows(execute("select * from %s where val1 <= 'bbb' AND val2 = 'bbb' ALLOW FILTERING;"),
+                       row("2", "bbb", "bbb"));
+            assertRows(execute("select * from %s where val1 >= 'aaa' AND val1 <= 'bbb' AND val2 = 'bbb' ALLOW FILTERING;"),
+                       row("2", "bbb", "bbb"));
+            assertRows(execute("select * from %s where val1 >= 'aaa' AND val1 <= 'bbb' AND val2 = 'bbb' ALLOW FILTERING;"),
+                       row("2", "bbb", "bbb"));
+            assertRows(execute("select * from %s where val1 >= 'aaa' AND val2 = 'ccc' ALLOW FILTERING;"),
+                       row("3", "ccc", "ccc"));
+        });
+    }
 }
