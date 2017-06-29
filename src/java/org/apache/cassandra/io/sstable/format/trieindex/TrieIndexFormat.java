@@ -135,8 +135,12 @@ public class TrieIndexFormat implements SSTableFormat
                  FileHandle dFile = dBuilder.complete();
                  FileHandle riFile = riBuilder.complete())
             {
-                return new PartitionIterator(index, partitioner, riFile, dFile,
-                                             partitioner.getMinimumToken().minKeyBound(), 0, partitioner.getMaximumToken().maxKeyBound(), 0, Rebufferer.ReaderConstraint.NONE);
+                return new PartitionIterator(index.sharedCopy(),
+                                             partitioner,
+                                             riFile.sharedCopy(),
+                                             dFile.sharedCopy(),
+                                             Rebufferer.ReaderConstraint.NONE)
+                       .closeHandles();
             }
             catch (IOException e)
             {

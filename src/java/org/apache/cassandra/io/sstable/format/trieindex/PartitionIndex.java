@@ -317,9 +317,15 @@ public class PartitionIndex implements Closeable
      */
     public static class IndexPosIterator extends ValueIterator<IndexPosIterator>
     {
-        protected IndexPosIterator(PartitionIndex summary, Rebufferer.ReaderConstraint rc)
+        /**
+         * @param index PartitionIndex to use for the iteration.
+         *
+         * Note: For performance reasons this class does not keep a reference of the index. Caller must ensure a
+         * reference is held for the lifetime of this object.
+         */
+        protected IndexPosIterator(PartitionIndex index, Rebufferer.ReaderConstraint rc)
         {
-            super(summary.instantiateRebufferer(), summary.root, rc);
+            super(index.instantiateRebufferer(), index.root, rc);
         }
 
         protected IndexPosIterator(PartitionIndex summary, PartitionPosition start, PartitionPosition end, Rebufferer.ReaderConstraint rc)

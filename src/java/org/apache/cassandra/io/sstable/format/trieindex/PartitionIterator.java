@@ -19,6 +19,9 @@ package org.apache.cassandra.io.sstable.format.trieindex;
 
 import java.io.IOException;
 
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
+
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
@@ -28,6 +31,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
 class PartitionIterator extends PartitionIndex.IndexPosIterator implements PartitionIndexIterator
 {
@@ -39,17 +43,25 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     RowIndexEntry nextEntry;
     final FileHandle dataFile;
     final FileHandle rowIndexFile;
+    final PartitionIndex partitionIndex;
     final IPartitioner partitioner;
+    boolean closeHandles = false;
 
+    /**
+     * Note: For performance reasons this class does not request a reference of the files it uses.
+     * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
+     * See {@link org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
+     */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile,
                       PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight, Rebufferer.ReaderConstraint rc) throws IOException
     {
         super(partitionIndex, left, right, rc);
+        this.partitionIndex = partitionIndex;
         this.partitioner = partitioner;
         this.limit = right;
         this.exclusiveLimit = exclusiveRight;
-        this.rowIndexFile = rowIndexFile.sharedCopy();
-        this.dataFile = dataFile.sharedCopy();
+        this.rowIndexFile = rowIndexFile;
+        this.dataFile = dataFile;
         readNext();
         // first value can be off
         if (nextKey != null && !(nextKey.compareTo(left) > inclusiveLeft))
@@ -57,23 +69,45 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         advance();
     }
 
+    /**
+     * Note: For performance reasons this class does not request a reference of the files it uses.
+     * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
+     * See {@link org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat.ReaderFactory#keyIterator(org.apache.cassandra.io.sstable.Descriptor, org.apache.cassandra.schema.TableMetadata)}
+     */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile, Rebufferer.ReaderConstraint rc) throws IOException
     {
         super(partitionIndex, rc);
+        this.partitionIndex = partitionIndex;
         this.partitioner = partitioner;
         this.limit = null;
         this.exclusiveLimit = 0;
-        this.rowIndexFile = rowIndexFile.sharedCopy();
-        this.dataFile = dataFile.sharedCopy();
+        this.rowIndexFile = rowIndexFile;
+        this.dataFile = dataFile;
         readNext();
         advance();
     }
 
+    public PartitionIterator closeHandles()
+    {
+        this.closeHandles = true;
+        return this;
+    }
+
     public void close()
     {
-        super.close();
-        dataFile.close();
-        rowIndexFile.close();
+        try
+        {
+            if (closeHandles)
+                FBUtilities.closeAll(ImmutableList.of(partitionIndex, dataFile, rowIndexFile));
+        }
+        catch (Exception e)
+        {
+            Throwables.propagate(e);
+        }
+        finally
+        {
+            super.close();
+        }
     }
 
     public DecoratedKey key()

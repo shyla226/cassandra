@@ -104,7 +104,7 @@ public abstract class ToolsTester
                                     .filter(threadName -> optional.stream().anyMatch(pattern -> pattern.matcher(threadName).matches()))
                                     .collect(Collectors.toSet());
 
-        if (!current.isEmpty())
+        if (!remain.isEmpty())
             System.err.println("Unexpected thread names: " + remain);
         if (!notPresent.isEmpty())
             System.err.println("Mandatory thread missing: " + notPresent);
