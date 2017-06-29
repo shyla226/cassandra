@@ -22,7 +22,10 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.FileSystems;
+import java.nio.file.PathMatcher;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -32,13 +35,13 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
-import org.apache.commons.io.FileUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,6 +77,7 @@ public final class LineNumberInference
 
     static
     {
+        logger.debug("Saving class files to {}", tmpDir);
         System.setProperty(DUMP_CLASSES, tmpDir);
     }
 
@@ -128,7 +132,13 @@ public final class LineNumberInference
         writeLock.lock();
         try
         {
-            for (File file : FileUtils.listFiles(dirFile, new String[]{ "class" }, true))
+            final PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**.class");
+
+            Collection<File> files = java.nio.file.Files.find(dirFile.toPath(), 999, (path, attributes) -> matcher.matches(path))
+                                                        .map(path -> path.toFile())
+                                                        .collect(Collectors.toList());
+
+            for (File file : files)
             {
                 if (processedProxyClasses.contains(file.getAbsolutePath()))
                     continue;

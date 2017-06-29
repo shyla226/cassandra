@@ -21,8 +21,6 @@ package org.apache.cassandra.utils.flow;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
 
 import com.google.common.collect.Ordering;
 import org.junit.Assert;

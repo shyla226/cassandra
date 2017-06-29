@@ -50,7 +50,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.TPC;
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.TableMetadata;
@@ -84,6 +83,8 @@ public class CassandraDaemon
     private static final Logger logger;
     static
     {
+        LineNumberInference.init();
+
         // Need to register metrics before instrumented appender is created(first access to LoggerFactory).
         SharedMetricRegistries.getOrCreate("logback-metrics").addListener(new MetricRegistryListener.Base()
         {
