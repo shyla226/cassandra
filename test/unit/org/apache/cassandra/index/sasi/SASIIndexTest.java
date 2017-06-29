@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sasi;
 
+import java.io.File;
 import java.io.FileWriter;
 import java.io.Writer;
 import java.nio.ByteBuffer;
@@ -37,6 +38,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.sstable.CQLSSTableWriter;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -85,7 +87,8 @@ public class SASIIndexTest
 {
     private static final IPartitioner PARTITIONER;
 
-    static {
+    static
+    {
         System.setProperty("cassandra.config", "cassandra-murmur.yaml");
         PARTITIONER = Murmur3Partitioner.instance;
     }
@@ -2324,6 +2327,60 @@ public class SASIIndexTest
 
         index.switchMemtable();
         Assert.assertEquals(index.searchMemtable(expression).getCount(), 0);
+    }
+
+    @Test
+    public void testMultipleIndexes() throws Exception
+    {
+        String tableName = "test_multiple_indexes";
+
+        File tempDir = com.google.common.io.Files.createTempDir();
+        File dataDir = new File(tempDir.getAbsolutePath() + File.separator + KS_NAME + File.separator + tableName);
+        assert dataDir.mkdirs();
+
+        String schema = "CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);";
+        String insertQuery = "INSERT INTO %s.%s (k, v) VALUES (?, ?);";
+
+        try (CQLSSTableWriter writer = CQLSSTableWriter.builder()
+                                                       .inDirectory(dataDir)
+                                                       .forTable(String.format(schema, "cql_sstable_writer", tableName))
+                                                       .using(String.format(insertQuery, "cql_sstable_writer", tableName))
+                                                       .build())
+        {
+            writer.addRow(0, "Null");
+            writer.addRow(1, "Eins");
+            writer.addRow(2, "Zwei");
+            writer.addRow(3, "Drei");
+            writer.addRow(4, "Vier");
+        }
+
+        QueryProcessor.executeOnceInternal(String.format(schema, KS_NAME, tableName));
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex' " +
+                                                         "WITH OPTIONS = { 'mode' : 'CONTAINS', " +
+                                                         "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.NonTokenizingAnalyzer', " +
+                                                         "'case_sensitive': 'false' };",
+                                                         KS_NAME, tableName));
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'",
+                                                         KS_NAME, tableName));
+
+        ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(tableName);
+        for (File file : dataDir.listFiles())
+            com.google.common.io.Files.copy(file, new File(cfs.getDirectories().getDirectoryForNewSSTables().getAbsolutePath() + File.separator + file.getName()));
+
+        cfs.loadNewSSTables();
+
+        UntypedResultSet results;
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s;", KS_NAME, tableName));
+        Assert.assertNotNull(results);
+        Assert.assertEquals(5, results.size());
+
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%ei%%';", KS_NAME, tableName));
+        Assert.assertNotNull(results);
+        Assert.assertEquals(3, results.size());
+
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Zwei';", KS_NAME, tableName));
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
     }
 
     private static ColumnFamilyStore loadData(Map<String, Pair<String, Integer>> data, boolean forceFlush)

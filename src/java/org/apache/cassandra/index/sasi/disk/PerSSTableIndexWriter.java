@@ -19,8 +19,9 @@ package org.apache.cassandra.index.sasi.disk;
 
 import java.io.File;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
@@ -45,6 +46,9 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Objects;
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
 
@@ -82,7 +86,7 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     private final AbstractType<?> keyValidator;
 
     @VisibleForTesting
-    protected final Map<ColumnMetadata, Index> indexes;
+    protected final Multimap<ColumnMetadata, Index> indexes;
 
     private DecoratedKey currentKey;
     private long currentKeyPosition;
@@ -91,13 +95,13 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     public PerSSTableIndexWriter(AbstractType<?> keyValidator,
                                  Descriptor descriptor,
                                  OperationType source,
-                                 Map<ColumnMetadata, ColumnIndex> supportedIndexes)
+                                 Multimap<ColumnMetadata, ColumnIndex> supportedIndexes)
     {
         this.keyValidator = keyValidator;
         this.descriptor = descriptor;
         this.source = source;
-        this.indexes = new HashMap<>();
-        for (Map.Entry<ColumnMetadata, ColumnIndex> entry : supportedIndexes.entrySet())
+        this.indexes = HashMultimap.create();
+        for (Map.Entry<ColumnMetadata, ColumnIndex> entry : supportedIndexes.entries())
             indexes.put(entry.getKey(), newIndex(entry.getValue()));
     }
 
@@ -117,14 +121,13 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
 
         Row row = (Row) unfiltered;
 
-        indexes.forEach((column, index) -> {
-            ByteBuffer value = ColumnIndex.getValueOf(column, row, nowInSec);
+        indexes.entries().forEach((entry) -> {
+            ByteBuffer value = ColumnIndex.getValueOf(entry.getKey(), row, nowInSec);
+
             if (value == null)
                 return;
 
-            if (index == null)
-                throw new IllegalArgumentException("No index exists for column " + column.name.toString());
-
+            Index index = entry.getValue();
             index.add(value.duplicate(), currentKey, currentKeyPosition);
         });
     }
@@ -151,9 +154,10 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
         }
     }
 
-    public Index getIndex(ColumnMetadata columnDef)
+    @VisibleForTesting
+    public List<Index> getIndexes(ColumnMetadata columnMetadata)
     {
-        return indexes.get(columnDef);
+        return new ArrayList<>(indexes.get(columnMetadata));
     }
 
     public Descriptor getDescriptor()
@@ -164,7 +168,7 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     @VisibleForTesting
     protected Index newIndex(ColumnIndex columnIndex)
     {
-        return new Index(columnIndex);
+        return new Index(columnIndex, descriptor);
     }
 
     @VisibleForTesting
@@ -175,6 +179,7 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
 
         private final ColumnIndex columnIndex;
         private final AbstractAnalyzer analyzer;
+        private final Descriptor descriptor;
         private final long maxMemorySize;
 
         @VisibleForTesting
@@ -183,9 +188,10 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
 
         private OnDiskIndexBuilder currentBuilder;
 
-        public Index(ColumnIndex columnIndex)
+        private Index(ColumnIndex columnIndex, Descriptor descriptor)
         {
             this.columnIndex = columnIndex;
+            this.descriptor = descriptor;
             this.outputFile = descriptor.filenameFor(columnIndex.getComponent());
             this.analyzer = columnIndex.getAnalyzer();
             this.segments = new HashSet<>();
@@ -354,6 +360,25 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
         public String filename(boolean isFinal)
         {
             return outputFile + (isFinal ? "" : "_" + segmentNumber++);
+        }
+
+        public boolean equals(Object obj)
+        {
+            if (obj == this)
+                return true;
+
+            if (!(obj instanceof Index))
+                return false;
+
+            Index other = (Index) obj;
+
+            return Objects.equal(columnIndex, other.columnIndex) &&
+                   Objects.equal(descriptor, other.descriptor);
+        }
+
+        public int hashCode()
+        {
+            return Objects.hashCode(columnIndex, descriptor);
         }
     }
 
