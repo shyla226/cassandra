@@ -17,18 +17,16 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.AsynchronousChannelProxy;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
@@ -88,6 +86,76 @@ public class AsyncReadTest extends CQLTester
                 j = COUNT;
             Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? and c < ? ORDER BY c DESC", i, j));
             Assert.assertEquals("Lookup between " + i + " and " + j + " count " + COUNT, j - i, rows.length);
+        }
+    }
+
+    @Test
+    public void testWideIndexForwardIn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, d text, PRIMARY KEY (k, c, v))");
+        int COUNT = rand.nextInt(BASE_COUNT / 10) + BASE_COUNT;
+        int MULT = 5;
+
+        for (int i = 0; i < COUNT; i++)
+        {
+            for (int j = 0; j < MULT; ++j)
+                execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", i % 3, i, j, generateString(100 << j));
+        }
+
+        flush();
+
+        interceptCache();
+        for (int rep = 0; rep < REPS; ++rep)
+        {
+            int sz = rand.nextInt(BASE_COUNT / 50);
+            int[] arr = new int[sz];
+            for (int i = 0; i < sz; ++i)
+            {
+                arr[i] = rand.nextInt(COUNT);
+            }
+            arr = Arrays.stream(arr).distinct().toArray();
+
+            String s = Arrays.stream(arr).mapToObj(Integer::toString).collect(Collectors.joining(","));
+            for (int i = 0; i < 3; ++i)
+            {
+                int ii = i;
+                Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c IN (" + s + ")", i));
+                Assert.assertEquals("k = " + i + " IN " + s + " count " + COUNT, MULT * Arrays.stream(arr).filter(x -> x % 3 == ii).count(), rows.length);
+            }
+        }
+    }
+
+    @Test
+    public void testWideIndexReversedIn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, d text, PRIMARY KEY (k, c, v))");
+        int COUNT = rand.nextInt(BASE_COUNT / 10) + BASE_COUNT;
+        int MULT = 5;
+
+        for (int i = 0; i < COUNT; i++)
+            for (int j = 0; j < MULT; ++j)
+                execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", i % 3, i, j, generateString(100 << j));
+
+        flush();
+
+        interceptCache();
+        for (int rep = 0; rep < REPS; ++rep)
+        {
+            int sz = rand.nextInt(BASE_COUNT / 50);
+            int[] arr = new int[sz];
+            for (int i = 0; i < sz; ++i)
+            {
+                arr[i] = rand.nextInt(COUNT);
+            }
+            arr = Arrays.stream(arr).distinct().toArray();
+
+            String s = Arrays.stream(arr).mapToObj(Integer::toString).collect(Collectors.joining(","));
+            for (int i = 0; i < 3; ++i)
+            {
+                int ii = i;
+                Object[][] rows = getRows(execute("SELECT v FROM %s WHERE k = ? and c IN (" + s + ") ORDER BY c DESC", i));
+                Assert.assertEquals("k = " + i + " IN " + s + " count " + COUNT, MULT * Arrays.stream(arr).filter(x -> x % 3 == ii).count(), rows.length);
+            }
         }
     }
 
@@ -231,7 +299,7 @@ public class AsyncReadTest extends CQLTester
 
         public BufferHolder rebuffer(long position, ReaderConstraint constraint)
         {
-            if (constraint == ReaderConstraint.IN_CACHE_ONLY && rand.nextDouble() > 0.7)
+            if (constraint == ReaderConstraint.IN_CACHE_ONLY && rand.nextDouble() > 0.75)
             {
                 CompletableFuture<ChunkCache.Buffer> buf = new CompletableFuture<ChunkCache.Buffer>();
                 buf.complete(null); // mark ready, so that reload starts immediately
