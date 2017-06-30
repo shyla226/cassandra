@@ -48,7 +48,7 @@ import org.apache.cassandra.utils.flow.CsSubscription;
  * This creates a CsFlow<FlowableUnfilteredPartition> which when requested reads the header and static row of the
  * partition and constructs a CsFlow<Unfiltered> which can retrieve the partition rows.
  *
- * All reads proceed optimistically, i.e. they first proceed if all data is already in the chunk cache. If this is the
+ * All reads proceed optimistically, i.e. they first proceed as if all data is already in the chunk cache. If this is the
  * case, the read can complete without delay and the requested data is passed on immediately. Otherwise the read will
  * trigger a {@link NotInCacheException} which is caught, and a retry is registered once the data is fetched
  * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
@@ -59,9 +59,9 @@ import org.apache.cassandra.utils.flow.CsSubscription;
  *
  * We only need to track if we are waiting for data since we need to reset the reader state in that case.
  */
-class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
+class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
 {
-    private static final Logger logger = LoggerFactory.getLogger(PartitionFlowable.class);
+    private static final Logger logger = LoggerFactory.getLogger(AsyncPartitionReader.class);
 
     final SSTableReadsListener listener;
     final DecoratedKey key;
@@ -77,7 +77,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
     volatile AbstractSSTableIterator ssTableIterator = null;
     volatile long filePos = -1;
 
-    private PartitionFlowable(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
+    private AsyncPartitionReader(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
         this.table = table;
         this.listener = listener;
@@ -90,13 +90,13 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
     }
 
     /**
-     * Creates a FUP from a PartitionFlowable
+     * Creates a FUP from a AsyncPartitionReader
      *
      * This is the only supported accessor of this class.
      */
     public static CsFlow<FlowableUnfilteredPartition> create(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
-        return new PartitionFlowable(table, listener, key, slices, selectedColumns, reverse);
+        return new AsyncPartitionReader(table, listener, key, slices, selectedColumns, reverse);
     }
 
     public CsSubscription subscribe(CsSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
@@ -119,7 +119,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
             this.subscriber = s;
         }
 
-        private void perform(boolean isRetry)
+        private void readWithRetry(boolean isRetry)
         {
             try
             {
@@ -128,7 +128,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
             catch (NotInCacheException e)
             {
                 // Retry the request once data is in the cache
-                e.accept(() -> perform(true),
+                e.accept(() -> readWithRetry(true),
                          (t) ->
                          {
                              // Calling completeExceptionally() wraps the original exception into a CompletionException even
@@ -148,7 +148,7 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
 
         public void request()
         {
-            perform(false);
+            readWithRetry(false);
         }
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
@@ -166,6 +166,9 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
             super(subscriber);
         }
 
+        /**
+         * This method must be async-read-safe.
+         */
         void performRead(boolean isRetry) throws Exception
         {
             if (issued)
@@ -190,6 +193,8 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
 
             if (dfile == null)
                 dfile = table.getFileDataInput(indexEntry.position, rc);
+            else
+                assert isRetry;
 
             // This is the last stage that can fail in-cache read.
             assert ssTableIterator == null;
@@ -249,6 +254,9 @@ class PartitionFlowable extends CsFlow<FlowableUnfilteredPartition>
             super(s);
         }
 
+        /**
+         * This method must be async-read-safe.
+         */
         void performRead(boolean isRetry)
         {
             try

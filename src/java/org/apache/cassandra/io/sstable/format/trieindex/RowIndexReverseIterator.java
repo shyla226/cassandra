@@ -29,7 +29,7 @@ import org.apache.cassandra.utils.ByteSource;
  */
 class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterator>
 {
-    private Long currentNode;
+    private long currentNode = -1;
 
     public RowIndexReverseIterator(FileHandle file, long root, ByteSource start, ByteSource end, Rebufferer.ReaderConstraint rc)
     {
@@ -41,22 +41,24 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
         this(file, ((TrieIndexEntry) entry).indexTrieRoot, ByteSource.empty(), end, rc);
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     public IndexInfo nextIndexInfo()
     {
-        if (currentNode == null)
+        // The IndexInfo read below may trigger a NotInCacheException. To be able to resume from that
+        // without missing positions, we save and reuse the unreturned position.
+        if (currentNode == -1)
         {
             currentNode = nextPayloadedNode();
             if (currentNode == -1)
-            {
-                currentNode = null;
                 return null;
-            }
         }
 
         go(currentNode);
         IndexInfo info = RowIndexReader.readPayload(buf, payloadPosition(), payloadFlags());
-        currentNode = null;
 
+        currentNode = -1;
         return info;
     }
 }

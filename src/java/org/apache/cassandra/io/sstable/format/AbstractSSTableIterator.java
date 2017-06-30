@@ -233,6 +233,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         return sstable.stats();
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     public boolean hasNext()
     {
         while (true)
@@ -250,6 +253,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         }
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     public Unfiltered next()
     {
         assert reader != null;
