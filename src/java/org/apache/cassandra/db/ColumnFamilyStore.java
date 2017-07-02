@@ -399,7 +399,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         crcCheckChance = new DefaultValue<>(metadata.params.crcCheckChance);
         indexManager = new SecondaryIndexManager(this);
         viewManager = keyspace.viewManager.forTable(metadata);
-        metric = new TableMetrics(this);
         fileIndexGenerator.set(generation);
         sampleLatencyNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getReadRpcTimeout() / 2);
 
@@ -411,13 +410,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             initialMemtable = new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), this);
         data = new Tracker(initialMemtable, loadSSTables);
 
-        // scan for sstables corresponding to this cf and load them
-        if (data.loadsstables)
-        {
-            Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
-            data.addInitialSSTables(sstables);
-        }
+        metric = new TableMetrics(this);
 
         /**
          * When creating a CFS offline we change the default logic needed by CASSANDRA-8671
@@ -439,6 +432,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             logger.warn("Disabling compaction strategy by setting compaction thresholds to 0 is deprecated, set the compaction option 'enabled' to 'false' instead.");
             this.compactionStrategyManager.disable();
+        }
+
+        // scan for sstables corresponding to this cf and load them
+        if (data.loadsstables)
+        {
+            Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
+            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+            data.addInitialSSTables(sstables);
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes

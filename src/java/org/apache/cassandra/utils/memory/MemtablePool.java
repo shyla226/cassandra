@@ -218,7 +218,7 @@ public abstract class MemtablePool
 
         public Timer.Context blockedTimerContext()
         {
-            return blockedOnAllocating.time();
+            return blockedOnAllocating.timer();
         }
     }
 

@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Metered;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.ScheduledReporter;
 
 /**
  * A meter metric which measures mean throughput and one-, five-, and fifteen-minute
@@ -34,9 +36,12 @@ import com.codahale.metrics.Metered;
  * counter after every tick that is used to calculate the uncounted delta
  * in the next call to {@link EWMA#tick(long)}.
  *
+ * This class needs to extend {@link com.codahale.metrics.Meter} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getMeters()} (used by {@link ScheduledReporter}).
+ *
  * @see EWMA
  */
-public class Meter implements Metered
+public class Meter extends com.codahale.metrics.Meter implements Metered
 {
     private static final long TICK_INTERVAL = TimeUnit.SECONDS.toNanos(5);
 
