@@ -24,7 +24,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 
-public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator> implements Function<FlowableUnfilteredPartition, FlowableUnfilteredPartition>
+public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator>
 {
     private final DeletionPurger purger;
     private final int nowInSec;
@@ -69,27 +69,6 @@ public abstract class PurgeFunction extends Transformation<UnfilteredRowIterator
         }
 
         return purged;
-    }
-
-    @Override
-    public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
-    {
-        onNewPartition(partition.header.partitionKey);
-
-        FlowableUnfilteredPartition ret = Transformation.apply(partition, this);
-        if (ret.isEmpty())
-        {
-            onEmptyPartitionPostPurge(partition.header.partitionKey);
-            return null;
-        }
-
-        return ret;
-    }
-
-    @Override
-    public FlowableUnfilteredPartition apply(FlowableUnfilteredPartition partition)
-    {
-        return applyToPartition(partition);
     }
 
     @Override

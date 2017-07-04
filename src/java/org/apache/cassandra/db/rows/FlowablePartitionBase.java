@@ -19,14 +19,18 @@ package org.apache.cassandra.db.rows;
 
 import com.google.common.base.Throwables;
 
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.transform.BaseIterator;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.CsSubscriber;
 
 /**
  * Base class for the CsFlow versions of partitions.
  */
-public abstract class FlowablePartitionBase<T>
+public abstract class FlowablePartitionBase<T> implements PartitionTrait
 {
     /**
      * The header contains information about the partition: key, metadata etc.
@@ -69,14 +73,17 @@ public abstract class FlowablePartitionBase<T>
             {
                 public void onNext(T item)
                 {
+                    throw new AssertionError(); // We haven't requested, this should not be called.
                 }
 
                 public void onComplete()
                 {
+                    throw new AssertionError(); // We haven't requested, this should not be called.
                 }
 
                 public void onError(Throwable t)
                 {
+                    throw new AssertionError(); // We haven't requested, this should not be called.
                 }
             }).close();
         }
@@ -84,5 +91,40 @@ public abstract class FlowablePartitionBase<T>
         {
             throw Throwables.propagate(e);
         }
+    }
+
+    public TableMetadata metadata()
+    {
+        return header.metadata;
+    }
+
+    public boolean isReverseOrder()
+    {
+        return header.isReverseOrder;
+    }
+
+    public RegularAndStaticColumns columns()
+    {
+        return header.columns;
+    }
+
+    public DecoratedKey partitionKey()
+    {
+        return header.partitionKey;
+    }
+
+    public Row staticRow()
+    {
+        return staticRow;
+    }
+
+    public DeletionTime partitionLevelDeletion()
+    {
+        return header.partitionLevelDeletion;
+    }
+
+    public EncodingStats stats()
+    {
+        return header.stats;
     }
 }

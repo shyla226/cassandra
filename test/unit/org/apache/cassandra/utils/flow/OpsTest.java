@@ -87,7 +87,7 @@ public class OpsTest
         final int size = 1000;
 
         CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduce(result::addAndGet)
+              .processToRxCompletable(result::addAndGet)
               .blockingAwait();
 
         assertEquals((size-1) * size / 2, result.get()); // n(a1 + an) / 2
@@ -102,7 +102,7 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
         CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduce(result::addAndGet)
+              .processToRxCompletable(result::addAndGet)
               .subscribe(new CompletableObserver()
               {
                   public void onSubscribe(Disposable d)
@@ -134,7 +134,7 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
         CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduce(i -> {throw new RuntimeException("TestException");})
+              .processToRxCompletable(i -> {throw new RuntimeException("TestException");})
               .subscribe(new CompletableObserver()
               {
                   public void onSubscribe(Disposable d)
@@ -162,7 +162,7 @@ public class OpsTest
     {
         final int size = 1000;
         final int result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-                                 .reduce(0, (r, i) -> r + i)
+                                 .reduceToRxSingle(0, (r, i) -> r + i)
                                  .blockingGet();
 
         assertEquals((size-1) * size / 2, result); // n(a1 + an) / 2
@@ -176,7 +176,7 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
         CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduce(0, (r, i) -> r + i)
+              .reduceToRxSingle(0, (r, i) -> r + i)
               .subscribe(new SingleObserver<Integer>()
               {
                   public void onSubscribe(Disposable d)
@@ -208,7 +208,7 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
         CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduce(0, (r, i) -> { throw new RuntimeException("TestException"); })
+              .reduceToRxSingle(0, (r, i) -> { throw new RuntimeException("TestException"); })
               .subscribe(new SingleObserver<Integer>()
               {
                   public void onSubscribe(Disposable d)

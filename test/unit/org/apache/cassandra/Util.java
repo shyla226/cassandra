@@ -316,7 +316,7 @@ public class Util
 
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
     {
-        return ImmutableBTreePartition.create(command.executeLocally()).blockingGet();
+        return ImmutableBTreePartition.create(command.executeLocally()).toList().blockingSingle();
     }
 
     public static List<FilteredPartition> getAll(ReadCommand command)
@@ -451,8 +451,7 @@ public class Util
     {
         try
         {
-            return FlowablePartitions.filter(partitions, nowInSec)
-                                     .flatMap(Util::nonEmptyKeys)
+            return FlowablePartitions.filterAndSkipEmpty(partitions, nowInSec)
                                      .countBlocking();
         }
         catch (Exception e)

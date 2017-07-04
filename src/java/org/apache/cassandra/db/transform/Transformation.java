@@ -26,10 +26,6 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
 
 /**
  * We have a single common superclass for all Transformations to make implementation efficient.
@@ -42,7 +38,6 @@ import org.apache.cassandra.utils.flow.CsSubscription;
 public abstract class Transformation<I extends BaseRowIterator<?>>
 {
     // internal methods for StoppableTransformation only
-    public void attachTo(PartitionsPublisher publisher) { }
     void attachTo(BasePartitions partitions) { }
     void attachTo(BaseRows rows) { }
 
@@ -70,15 +65,6 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
     protected I applyToPartition(I partition)
     {
         return partition;
-    }
-
-    /**
-     * Applied to any partition we encounter in a partitions iterator.
-     * Normally includes a transformation of the partition through Transformation.apply(partition, this).
-     */
-    public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
-    {
-        return Transformation.apply(partition, this);
     }
 
     /**
@@ -143,47 +129,6 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
             return applyToMarker((RangeTombstoneMarker) item);
     }
 
-    // FlowableOp interpretation of transformation
-    public void onNextUnfiltered(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered item)
-    {
-        Unfiltered next;
-        try
-        {
-            next = applyToUnfiltered(item);
-        }
-        catch (Throwable t)
-        {
-            subscriber.onError(t);
-            return;
-        }
-
-        if (next != null)
-            subscriber.onNext(next);
-        else
-            source.request();
-    }
-
-    // FlowableOp interpretation of transformation
-    public void onNextPartition(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition item)
-    {
-        FlowableUnfilteredPartition next;
-        try
-        {
-            next = applyToPartition(item);
-        }
-        catch (Throwable t)
-        {
-            subscriber.onError(t);
-            return;
-        }
-
-        if (next != null)
-            subscriber.onNext(next);
-        else
-            source.request();
-    }
-
-
     //******************************************************
     //          Static Application Methods
     //******************************************************
@@ -240,85 +185,5 @@ public abstract class Transformation<I extends BaseRowIterator<?>>
     {
         to.add(add);
         return to;
-    }
-
-    static class FlowableRowOp implements CsFlow.FlowableOp<Unfiltered, Unfiltered>
-    {
-        final Transformation transformation;
-
-        FlowableRowOp(Transformation transformation)
-        {
-            this.transformation = transformation;
-        }
-
-        public void onNext(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered next)
-        {
-            transformation.onNextUnfiltered(subscriber, source, next);
-        }
-
-        public void close()
-        {
-            transformation.onPartitionClose();
-        }
-    }
-
-    public static FlowableUnfilteredPartition apply(FlowableUnfilteredPartition src, Transformation transformation)
-    {
-        CsFlow<Unfiltered> content = src.content; // src.content.apply(new FlowableRowOp(transformation));
-        FlowableUnfilteredPartition ret = new FlowableUnfilteredPartition(apply(src.header, transformation),
-                                                                          transformation.applyToStatic(src.staticRow),
-                                                                          content,
-                                                                          src.hasData);
-
-        if (transformation instanceof StoppingTransformation)
-        {
-            StoppingTransformation s = (StoppingTransformation) transformation;
-            s.stopInPartition = ret.stop;
-        }
-
-        return ret;
-    }
-
-    static class FlowablePartitionOp implements CsFlow.FlowableOp<FlowableUnfilteredPartition,FlowableUnfilteredPartition>
-    {
-        final Transformation transformation;
-
-        FlowablePartitionOp(Transformation transformation)
-        {
-            this.transformation = transformation;
-        }
-
-        public void onNext(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition next)
-        {
-            transformation.onNextPartition(subscriber, source, next);
-        }
-
-        public void close()
-        {
-            transformation.onClose();
-        }
-    }
-
-    public static CsFlow<FlowableUnfilteredPartition> apply(CsFlow<FlowableUnfilteredPartition> src, Transformation transformation)
-    {
-        CsFlow<FlowableUnfilteredPartition> content = src.apply(new FlowablePartitionOp(transformation));
-
-        if (transformation instanceof StoppingTransformation)
-        {
-            StoppingTransformation s = (StoppingTransformation) transformation;
-            s.stop = new BaseIterator.Stop();
-        }
-
-        return content;
-    }
-
-    private static PartitionHeader apply(PartitionHeader header, Transformation transformation)
-    {
-        DecoratedKey key = transformation.applyToPartitionKey(header.partitionKey);
-        RegularAndStaticColumns columns = transformation.applyToPartitionColumns(header.columns);
-        DeletionTime dt = transformation.applyToDeletion(header.partitionLevelDeletion);
-        if (dt != header.partitionLevelDeletion || columns != header.columns || key != header.partitionKey)
-            return new PartitionHeader(header.metadata, key, dt, columns, header.isReverseOrder, header.stats);
-        return header;
     }
 }

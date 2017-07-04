@@ -29,8 +29,6 @@ import io.reactivex.Single;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
-import org.apache.cassandra.db.rows.publisher.ReduceCallbacks;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
@@ -38,6 +36,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.MergeIterator;
@@ -297,11 +296,16 @@ public abstract class UnfilteredPartitionIterators
           });
     }
 
-    public static Single<MessageDigest> digest(PartitionsPublisher partitions, MessageDigest digest, DigestVersion version)
+    /**
+     * Digests the the provided partition flow.
+     *
+     * @param partitions the partitions to digest.
+     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param version the version to use when producing the digest.
+     */
+    public static CsFlow<Void> digest(CsFlow<FlowableUnfilteredPartition> partitions, MessageDigest digest, DigestVersion version)
     {
-        return partitions.reduce(ReduceCallbacks.create(digest,
-                                                        (s, partition) -> UnfilteredRowIterators.digestPartition(partition, digest, version),
-                                                        (s, unfiltered) -> UnfilteredRowIterators.digestUnfiltered(unfiltered, digest)));
+        return partitions.flatProcess(partition -> UnfilteredRowIterators.digest(partition, digest, version));
     }
 
     public static Serializer serializerForIntraNode(EncodingVersion version)
@@ -354,41 +358,32 @@ public abstract class UnfilteredPartitionIterators
             out.writeBoolean(false);
         }
 
-        public Single<ByteBuffer> serialize(PartitionsPublisher partitions, ColumnFilter selection)
+        @SuppressWarnings("resource") // DataOutputBuffer does not need closing.
+        public CsFlow<ByteBuffer> serialize(CsFlow<FlowableUnfilteredPartition> partitions, ColumnFilter selection)
         {
-            return partitions.reduce(new ReduceCallbacks<DataOutputBuffer, SerializationHeader>(
-            () -> {
-                final DataOutputBuffer out = new DataOutputBuffer();
-                // Previously, a boolean indicating if this was for a thrift query.
-                // Unused since 4.0 but kept on wire for compatibility.
+            final DataOutputBuffer out = new DataOutputBuffer();
+            // Previously, a boolean indicating if this was for a thrift query.
+            // Unused since 4.0 but kept on wire for compatibility.
+            try
+            {
                 out.writeBoolean(false);
-                return out;
-            },
-            (out, partition) -> {
-                out.writeBoolean(true); // next partition
-                SerializationHeader header = new SerializationHeader(false,
-                                                                     partition.metadata(),
-                                                                     partition.columns(),
-                                                                     partition.stats());
-                UnfilteredRowIteratorSerializer.serializers.get(version)
-                                                           .serializeBeginningOfPartition(partition, header, selection, out, -1);
-                return header;
-            },
-            (out, header, unfiltered) -> {
-                UnfilteredRowIteratorSerializer.serializers.get(version).serialize(unfiltered, header, out);
-                return header;
-            },
-            (out, header, partition) -> {
-                if (!partition.isEmpty())
-                    UnfilteredRowIteratorSerializer.serializers.get(version).serializeEndOfPartition(out);
-                return out;
             }
-            )).map(out -> {
-                out.writeBoolean(false); // no more partitions
-                ByteBuffer ret = out.buffer();
-                out.close();
-                return ret;
-            });
+            catch (IOException e)
+            {
+                // Should never happen
+                throw new AssertionError(e);
+            }
+
+            return partitions.flatProcess(partition ->
+                                         {
+                                             out.writeBoolean(true);
+                                             return UnfilteredRowIteratorSerializer.serializers.get(version).serialize(partition, selection, out);
+                                         })
+                             .map(VOID ->
+                                  {
+                                      out.writeBoolean(false);
+                                      return out.trimmedBuffer();
+                                  });
         }
 
         public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final TableMetadata metadata, final ColumnFilter selection, final SerializationHelper.Flag flag) throws IOException

@@ -20,9 +20,9 @@ package org.apache.cassandra.db.monitoring;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public class Monitor
 {
@@ -232,28 +232,31 @@ public class Monitor
             abort();
     }
 
-    public Transformation withMonitoring()
+    public CsFlow<FlowableUnfilteredPartition> withMonitoring(CsFlow<FlowableUnfilteredPartition> partitions)
     {
-        return new CheckForAbort();
-    }
-
-    private class CheckForAbort extends Transformation
-    {
-        @Override
-        public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
-        {
-            check();
-            return Transformation.apply(partition, this);
-        }
-
-        @Override
-        protected Row applyToRow(Row row)
+        CsFlow.MappingOp<Unfiltered, Unfiltered> checkForAbort = unfiltered ->
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);
 
             check();
-            return row;
-        }
+            return unfiltered;
+        };
+
+        return partitions.map(partition ->
+                              {
+                                  try
+                                  {
+                                      check();
+                                      return new FlowableUnfilteredPartition(partition.header,
+                                                                             partition.staticRow,
+                                                                             partition.content.map(checkForAbort));
+                                  }
+                                  catch (Throwable t)
+                                  {
+                                      partition.unused();
+                                      throw t;
+                                  }
+                              });
     }
 }

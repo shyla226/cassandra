@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
@@ -390,7 +389,7 @@ public final class SchemaKeyspace
     private static void convertSchemaToMutations(Map<DecoratedKey, Mutation> mutationMap, String schemaTableName)
     {
         ReadCommand cmd = getReadCommandForTableSchema(schemaTableName);
-        try (UnfilteredPartitionIterator iter = cmd.executeLocally().toIterator(cmd.metadata()))
+        try (UnfilteredPartitionIterator iter = FlowablePartitions.toPartitions(cmd.executeLocally(), cmd.metadata()))
         {
             while (iter.hasNext())
             {

@@ -40,7 +40,6 @@ import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.partitions.*;
@@ -49,6 +48,7 @@ import org.apache.cassandra.net.*;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.apache.cassandra.Util.assertClustering;
 import static org.apache.cassandra.Util.assertColumn;
@@ -936,8 +936,7 @@ public class DataResolverTest
 
     public Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
     {
-        final PartitionsPublisher partitions = PartitionsPublisher.create(cmd,
-                                                                          controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
+        final CsFlow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
         return Response.testResponse(from,
                                      FBUtilities.getBroadcastAddress(),
                                      Verbs.READS.READ,

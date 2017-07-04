@@ -39,23 +39,8 @@ import org.apache.cassandra.utils.flow.CsFlow;
  */
 public class FlowableUnfilteredPartition extends FlowablePartitionBase<Unfiltered>
 {
-    public boolean hasData;
-
     public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, CsFlow<Unfiltered> content)
     {
-        this (header, staticRow, content, true); // we don't know if we have data yet
-    }
-
-    public FlowableUnfilteredPartition(PartitionHeader header, Row staticRow, CsFlow<Unfiltered> content, boolean hasData)
-    {
         super(header, staticRow, content);
-        this.hasData = hasData;
-    }
-
-    public boolean isEmpty()
-    {
-        return header.partitionLevelDeletion.isLive()
-               && staticRow.isEmpty()
-               && !hasData;
     }
 }

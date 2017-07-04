@@ -348,7 +348,7 @@ public class CounterMutation implements IMutation, Scheduleable
                                                       updateForRow(markIter, partition.staticRow, cfs);
 
                                                       return partition.content.takeWhile((row) -> markIter.hasNext())
-                                                                              .reduce(row -> updateForRow(markIter, row, cfs));
+                                                                              .processToRxCompletable(row -> updateForRow(markIter, row, cfs));
                                         }),
                                  controller -> controller.close());
     }

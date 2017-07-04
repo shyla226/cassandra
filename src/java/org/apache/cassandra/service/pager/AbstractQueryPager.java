@@ -99,7 +99,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
         internalPager = new UnfilteredPager(limits.forPaging(toFetch), pageCommand, command.nowInSec());
-        Single<UnfilteredPartitionIterator> iter = pageCommand.executeLocally().toDelayedIterator(metadata);
+        Single<UnfilteredPartitionIterator> iter = Single.fromCallable(() -> FlowablePartitions.toPartitions(pageCommand.executeLocally(), metadata));
         return iter.map(it -> Transformation.apply(it, internalPager));
     }
 
@@ -126,7 +126,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         protected BaseRowIterator<Unfiltered> apply(BaseRowIterator<Unfiltered> partition)
         {
-            return Transformation.apply(counter.applyTo((UnfilteredRowIterator) partition), this);
+            return Transformation.apply(Transformation.apply((UnfilteredRowIterator) partition,
+                                                             counter.asTransformation()),
+                                        this);
         }
     }
 
@@ -140,7 +142,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         protected BaseRowIterator<Row> apply(BaseRowIterator<Row> partition)
         {
-            return Transformation.apply(counter.applyTo((RowIterator) partition), this);
+            return Transformation.apply(Transformation.apply((RowIterator) partition,
+                                                             counter.asTransformation()),
+                                        this);
         }
     }
 
@@ -196,7 +200,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                 logger.trace("{} - closing with {}/{}", AbstractQueryPager.this.hashCode(), lastKey, lastRow);
 
             // In some case like GROUP BY a counter need to know when the processing is completed.
-            counter.onClose();
+            counter.endOfIteration();
 
             recordLast(lastKey, lastRow);
 

@@ -212,4 +212,9 @@ public class Threads
             }
         };
     }
+
+    public static <T> CsFlow<T> deferOnCore(Callable<CsFlow<T>> source, int coreId)
+    {
+        return evaluateOnCore(source, coreId).flatMap(x -> x);
+    }
 }
