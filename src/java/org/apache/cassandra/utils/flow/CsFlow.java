@@ -468,7 +468,7 @@ public abstract class CsFlow<T>
     /**
      * Stops requesting items from the flow when the given predicate succeeds.
      *
-     * Unlike takeUntil, this applies on the request phase of execution, before anything has been produced (and as such
+     * Unlike takeWhile, this applies on the request phase of execution, before anything has been produced (and as such
      * cannot be given the next item in the flow as argument).
      */
     public CsFlow<T> takeUntil(BooleanSupplier tester)
