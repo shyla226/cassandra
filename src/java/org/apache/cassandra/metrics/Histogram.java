@@ -20,7 +20,9 @@ package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
+import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Sampling;
+import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.Snapshot;
 
 /**
@@ -31,8 +33,11 @@ import com.codahale.metrics.Snapshot;
  *
  * This class removes the {@link java.util.concurrent.atomic.LongAdder} of the {@link com.codahale.metrics.Histogram}
  * class and retrieves {@link this#getCount()} from {@link Reservoir}.
+ *
+ * This class needs to extend {@link com.codahale.metrics.Histogram} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getHistograms()} (used by {@link ScheduledReporter}).
  */
-public class Histogram implements Metric, Sampling, Counting
+public class Histogram extends com.codahale.metrics.Histogram implements Metric, Sampling, Counting
 {
     private final Reservoir reservoir;
 
@@ -42,6 +47,7 @@ public class Histogram implements Metric, Sampling, Counting
      * @param reservoir the reservoir to create a histogram from
      */
     public Histogram(Reservoir reservoir) {
+        super(reservoir);
         this.reservoir = reservoir;
     }
 

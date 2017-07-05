@@ -233,7 +233,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         }
 
         long repairedAt;
-        try (Timer.Context ctx = Keyspace.open(keyspace).metric.repairPrepareTime.time())
+        try (Timer.Context ctx = Keyspace.open(keyspace).metric.repairPrepareTime.timer())
         {
             ActiveRepairService.instance.prepareForRepair(parentSession, FBUtilities.getBroadcastAddress(), allNeighbors, options, columnFamilyStores);
             repairedAt = ActiveRepairService.instance.getParentRepairSession(parentSession).getRepairedAt();

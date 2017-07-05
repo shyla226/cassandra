@@ -156,7 +156,7 @@ public class ChunkCache
     {
         ChunkReader rebufferer = key.file;
         metrics.misses.mark();
-        try (Timer.Context ctx = metrics.missLatency.time())
+        try (Timer.Context ctx = metrics.missLatency.timer())
         {
             ByteBuffer buffer = BufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
             assert buffer != null;

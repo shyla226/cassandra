@@ -3,12 +3,13 @@ package org.apache.cassandra.metrics;
 import java.io.Closeable;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.ExponentiallyDecayingReservoir;
 import com.codahale.metrics.Metered;
+import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Sampling;
+import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.Snapshot;
 
 /**
@@ -18,8 +19,11 @@ import com.codahale.metrics.Snapshot;
  * This class is nearly identical to {@link com.codahale.metrics.Timer}, except that
  * it replaces the {@link com.codahale.metrics.Histogram} field with our own {@link Reservoir}
  * and replaces the {@link com.codahale.metrics.Meter} field with our own {@link Meter}.
+ *
+ * This class needs to extend {@link com.codahale.metrics.Timer} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getTimers()} (used by {@link ScheduledReporter}).
  */
-public class Timer implements Metered, Sampling
+public class Timer extends com.codahale.metrics.Timer implements Metered, Sampling
 {
     /**
      * A timing context.
@@ -118,12 +122,15 @@ public class Timer implements Metered, Sampling
     }
 
     /**
-     * Returns a new {@link Context}.
-     *
-     * @return a new {@link Context}
-     * @see Context
+     * We cannot instantiate a {@link com.codahale.metrics.Timer.Context} with our own metric containers
+     * due to its private constructor so we make this method unsupported and provide the same functionality
+     * via {@link this#timer()}.
      */
-    public Context time() {
+    public com.codahale.metrics.Timer.Context time() {
+        throw new UnsupportedOperationException("Use Timer.timer() instead.");
+    }
+
+    public Context timer() {
         return new Context(this, clock);
     }
 

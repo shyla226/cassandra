@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.ScheduledReporter;
 
 /**
  * An incrementing and decrementing counter metric.
@@ -29,8 +31,11 @@ import com.codahale.metrics.Metric;
  * This class is identical to {@link com.codahale.metrics.Counter}, except
  * that uses {@link LongAdder} instead of {@link com.codahale.metrics.LongAdder}
  * for a modest performance improvement.
+ *
+ * This class needs to extend {@link com.codahale.metrics.Counter} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getCounters()} (used by {@link ScheduledReporter}).
  */
-public class Counter implements Metric, Counting
+public class Counter extends com.codahale.metrics.Counter implements Metric, Counting
 {
     private final LongAdder count;
 

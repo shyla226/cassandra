@@ -411,7 +411,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         maxCompactionThreshold = new DefaultValue<>(metadata.get().params.compaction.maxCompactionThreshold());
         crcCheckChance = new DefaultValue<>(metadata.get().params.crcCheckChance);
         viewManager = keyspace.viewManager.forTable(metadata.id);
-        metric = new TableMetrics(this);
         fileIndexGenerator.set(generation);
         sampleLatencyNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getReadRpcTimeout() / 2);
 
@@ -423,13 +422,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             initialMemtable = new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), this);
         data = new Tracker(initialMemtable, loadSSTables);
 
-        // scan for sstables corresponding to this cf and load them
-        if (data.loadsstables)
-        {
-            Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
-            data.addInitialSSTables(sstables);
-        }
+        metric = new TableMetrics(this);
 
         /**
          * When creating a CFS offline we change the default logic needed by CASSANDRA-8671
@@ -439,7 +432,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             this.directories = directories;
         else
             this.directories = new Directories(metadata.get(), Directories.dataDirectories);
-
 
         // compaction strategy should be created after the CFS has been prepared
         compactionStrategyManager = new CompactionStrategyManager(this);
@@ -451,6 +443,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             logger.warn("Disabling compaction strategy by setting compaction thresholds to 0 is deprecated, set the compaction option 'enabled' to 'false' instead.");
             this.compactionStrategyManager.disable();
+        }
+
+        // scan for sstables corresponding to this cf and load them
+        if (data.loadsstables)
+        {
+            Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
+            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+            data.addInitialSSTables(sstables);
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes
