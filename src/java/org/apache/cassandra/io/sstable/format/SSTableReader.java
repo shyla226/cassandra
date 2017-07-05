@@ -55,7 +55,6 @@ import org.apache.cassandra.db.mos.MemoryOnlyStatus;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -1048,7 +1047,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public CsFlow<FlowableUnfilteredPartition> flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
-        return PartitionFlowable.create(this, listener, key, slices, selectedColumns, reversed);
+        return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed);
     }
 
 

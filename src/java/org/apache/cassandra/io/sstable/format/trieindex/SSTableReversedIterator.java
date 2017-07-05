@@ -267,6 +267,9 @@ class SSTableReversedIterator extends AbstractSSTableIterator
             super.close();
         }
 
+        /**
+         * This method must be async-read-safe.
+         */
         @Override
         public void setForSlice(Slice slice) throws IOException
         {

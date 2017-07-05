@@ -94,6 +94,9 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         next = advanceNode();
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     protected long nextPayloadedNode()     // returns payloaded node position
     {
         long toReturn = next;
@@ -102,6 +105,9 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         return toReturn;
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     long advanceNode()
     {
         if (stack == null)
@@ -110,15 +116,19 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         long child;
         int transitionByte;
 
+        // This method must be async-read-safe. Every read from new buffering position (the go() calls) can
+        // trigger NotInCacheException, and iteration must be able to redo the work that was interrupted during the next
+        // call. Hence the mutable state must be fully ready before all go() calls
+        // (i.e. they must either be the last step in the loop or the state must be unchaged until that call has succeeded).
         go(stack.node);
         while (true)
         {
             // advance position in node
-            --stack.childIndex;
+            int childIdx = stack.childIndex - 1;
             boolean beyondLimit = true;
-            if (stack.childIndex >= 0)
+            if (childIdx >= 0)
             {
-                transitionByte = transitionByte(stack.childIndex);
+                transitionByte = transitionByte(childIdx);
                 beyondLimit = transitionByte < stack.limit;
                 if (beyondLimit)
                 {
@@ -150,14 +160,20 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
                 continue;
             }
 
-            child = transition(stack.childIndex);
+            child = transition(childIdx);
             if (child != -1)
             {
+                // This call could throw NotInCacheException. If so, the loop will be re-entered in the same state as
+                // it was before entering this loop.
+                go(child);
+
+                stack.childIndex = childIdx;
+
                 // descend, stack up position
                 int l = -1;
                 if (transitionByte == stack.limit)
                     l = limit.next();
-                go(child);
+
                 stack = new IterationPosition(child, transitionRange(), l, stack);
             }
         }

@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
@@ -49,8 +50,8 @@ public class ChunkCache
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
 
-    public static boolean enabled = cacheSize > 0;
-    public static final ChunkCache instance = enabled ? new ChunkCache() : null;
+    public static final ChunkCache instance = cacheSize > 0 ? new ChunkCache() : null;
+    private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     private final AsyncLoadingCache<Key, Buffer> cache;
     public final CacheMissMetrics metrics;
@@ -220,10 +221,7 @@ public class ChunkCache
 
     public RebuffererFactory maybeWrap(ChunkReader file)
     {
-        if (!enabled)
-            return file;
-
-        return wrap(file);
+        return wrapper.apply(file);
     }
 
     public void invalidatePosition(FileHandle dfile, long position)
@@ -242,9 +240,16 @@ public class ChunkCache
     @VisibleForTesting
     public void enable(boolean enabled)
     {
-        ChunkCache.enabled = enabled;
+        wrapper = enabled ? this::wrap : x -> x;
         cache.synchronous().invalidateAll();
         metrics.reset();
+    }
+
+    @VisibleForTesting
+    public void intercept(Function<RebuffererFactory, RebuffererFactory> interceptor)
+    {
+        final Function<ChunkReader, RebuffererFactory> prevWrapper = wrapper;
+        wrapper = rdr -> interceptor.apply(prevWrapper.apply(rdr));
     }
 
     // TODO: Invalidate caches for obsoleted/MOVED_START tables?
@@ -302,7 +307,7 @@ public class ChunkCache
         @Override
         public Buffer rebuffer(long position, ReaderConstraint rc)
         {
-            if (rc != ReaderConstraint.IN_CACHE_ONLY || !enabled)
+            if (rc != ReaderConstraint.IN_CACHE_ONLY)
                 return rebuffer(position);
 
             metrics.requests.mark();
