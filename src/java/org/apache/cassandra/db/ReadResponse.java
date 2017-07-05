@@ -29,12 +29,12 @@ import io.reactivex.Single;
 import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Serializer;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -85,25 +85,25 @@ public abstract class ReadResponse
     {
     }
 
-    public static Single<ReadResponse> createDataResponse(PartitionsPublisher publisher, ReadCommand command, boolean forLocalDelivery)
+    public static Single<ReadResponse> createDataResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command, boolean forLocalDelivery)
     {
         return forLocalDelivery
-               ? LocalResponse.build(publisher)
-               : LocalDataResponse.build(publisher, EncodingVersion.last(), command);
+               ? LocalResponse.build(partitions)
+               : LocalDataResponse.build(partitions, EncodingVersion.last(), command);
     }
 
     @VisibleForTesting
-    public static ReadResponse createRemoteDataResponse(PartitionsPublisher publisher, ReadCommand command)
+    public static ReadResponse createRemoteDataResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
         final EncodingVersion version = EncodingVersion.last();
-        return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(publisher, command.columnFilter())
+        return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
                                            .map(buffer -> new RemoteDataResponse(buffer, version))
-                                           .blockingGet();
+                                           .blockingSingle();
     }
 
-    public static Single<ReadResponse> createDigestResponse(PartitionsPublisher publisher, ReadCommand command)
+    public static Single<ReadResponse> createDigestResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
-        return makeDigest(publisher, command).map(digest -> new DigestResponse(digest));
+        return makeDigest(partitions, command).map(digest -> new DigestResponse(digest));
     }
 
     public abstract UnfilteredPartitionIterator makeIterator(ReadCommand command);
@@ -118,13 +118,15 @@ public abstract class ReadResponse
         return ByteBuffer.wrap(digest.digest());
     }
 
-    protected static Single<ByteBuffer> makeDigest(PartitionsPublisher publisher, ReadCommand command)
+    protected static Single<ByteBuffer> makeDigest(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
-        return UnfilteredPartitionIterators.digest(publisher,
+        MessageDigest digest = FBUtilities.newMessageDigest("MD5");
+        return UnfilteredPartitionIterators.digest(partitions,
                                                    // TODO perf. - do we need a cache to replace threadLocalMD5Digest()?
-                                                   FBUtilities.newMessageDigest("MD5"),
+                                                   digest,
                                                    command.digestVersion())
-                                           .map(digest -> ByteBuffer.wrap(digest.digest()));
+                                           .processToRxCompletable()
+                                           .toSingle(() -> ByteBuffer.wrap(digest.digest()));
     }
 
     private static class DigestResponse extends ReadResponse
@@ -219,10 +221,11 @@ public abstract class ReadResponse
             this.partitions = partitions;
         }
 
-        public static Single<ReadResponse> build(PartitionsPublisher publisher)
+        public static Single<ReadResponse> build(CsFlow<FlowableUnfilteredPartition> partitions)
         {
-            return ImmutableBTreePartition.create(publisher)
-                                          .map(partitions -> new LocalResponse(partitions));
+            return ImmutableBTreePartition.create(partitions)
+                                          .toList()
+                                          .mapToRxSingle(LocalResponse::new);
         }
 
         public UnfilteredPartitionIterator makeIterator(ReadCommand command)
@@ -252,10 +255,10 @@ public abstract class ReadResponse
             super(data, version, SerializationHelper.Flag.LOCAL);
         }
 
-        private static Single<ReadResponse> build(PartitionsPublisher partitions, EncodingVersion version, ReadCommand command)
+        private static Single<ReadResponse> build(CsFlow<FlowableUnfilteredPartition> partitions, EncodingVersion version, ReadCommand command)
         {
             return UnfilteredPartitionIterators.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
-                                               .map(buffer -> new LocalDataResponse(buffer, version));
+                                               .mapToRxSingle(buffer -> new LocalDataResponse(buffer, version));
         }
     }
 

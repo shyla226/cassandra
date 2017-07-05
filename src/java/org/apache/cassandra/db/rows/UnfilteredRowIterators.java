@@ -36,6 +36,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * Static methods to work with atom iterators.
@@ -155,6 +156,19 @@ public abstract class UnfilteredRowIterators
     }
 
     /**
+     * Digests the provided partition.
+     *
+     * @param partition the partition to digest.
+     * @param digest the {@code MessageDigest} to use for the digest.
+     * @param version the version to use when producing the digest.
+     */
+    public static CsFlow<Void> digest(FlowableUnfilteredPartition partition, MessageDigest digest, DigestVersion version)
+    {
+        digestPartition(partition, digest, version);
+        return partition.content.process(unfiltered -> digestUnfiltered(unfiltered, digest));
+    }
+
+    /**
      * Digest the partition common information, excluding its content.
      */
     public static MessageDigest digestPartition(PartitionTrait partition, MessageDigest digest, DigestVersion version)
@@ -200,23 +214,6 @@ public abstract class UnfilteredRowIterators
      * @return the filtered iterator..
      */
     public static UnfilteredRowIterator withOnlyQueriedData(UnfilteredRowIterator iterator, ColumnFilter filter)
-    {
-        if (filter.allFetchedColumnsAreQueried())
-            return iterator;
-
-        return Transformation.apply(iterator, new WithOnlyQueriedData(filter));
-    }
-
-    /**
-     * Filter the provided iterator to exclude cells that have been fetched but are not queried by the user
-     * (see ColumnFilter for detailes).
-     *
-     * @param iterator the iterator to filter.
-     * @param filter the {@code ColumnFilter} to use when deciding which columns are the one queried by the
-     * user. This should be the filter that was used when querying {@code iterator}.
-     * @return the filtered iterator..
-     */
-    public static FlowableUnfilteredPartition withOnlyQueriedData(FlowableUnfilteredPartition iterator, ColumnFilter filter)
     {
         if (filter.allFetchedColumnsAreQueried())
             return iterator;

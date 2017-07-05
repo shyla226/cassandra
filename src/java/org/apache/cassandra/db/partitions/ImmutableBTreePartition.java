@@ -18,20 +18,18 @@
 */
 package org.apache.cassandra.db.partitions;
 
-import java.util.ArrayList;
 import java.util.List;
 
-import io.reactivex.Single;
-import org.apache.cassandra.db.MutableDeletionInfo;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
-import org.apache.cassandra.db.rows.publisher.ReduceCallbacks;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.btree.BTree;
+import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 public class ImmutableBTreePartition extends AbstractBTreePartition
 {
@@ -132,70 +130,61 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
     /**
      * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
      *
-     * @param publisher the partitions to gather in memory.
+     * @param partitions the partitions to gather in memory.
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<List<ImmutableBTreePartition>> create(PartitionsPublisher publisher)
+    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions)
     {
-        return create(publisher, INITIAL_ROW_CAPACITY);
+        return create(partitions, INITIAL_ROW_CAPACITY);
     }
 
     /**
      * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
      *
-     * @param publisher the partitions to gather in memory.
+     * @param partitions the partitions to gather in memory.
      * @param ordered {@code true} if the iterator will return the rows in order, {@code false} otherwise.
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<List<ImmutableBTreePartition>> create(PartitionsPublisher publisher, boolean ordered)
+    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions, boolean ordered)
     {
-        return create(publisher, INITIAL_ROW_CAPACITY, ordered);
+        return create(partitions, INITIAL_ROW_CAPACITY, ordered);
     }
 
     /**
      * Creates an {@code ImmutableBTreePartition} holding all the data of the provided iterator.
      *
-     * @param publisher the partitions to gather in memory.
+     * @param partitions the partitions to gather in memory.
      * @param initialRowCapacity sizing hint (in rows) to use for the created partition. It should ideally
      * correspond or be a good estimation of the number or rows in {@code iterator}.
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<List<ImmutableBTreePartition>> create(PartitionsPublisher publisher, int initialRowCapacity)
+    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions, int initialRowCapacity)
     {
-        return create(publisher, initialRowCapacity, true);
+        return create(partitions, initialRowCapacity, true);
     }
 
     /**
      * Creates an {@code ImmutableBTreePartition} holding all the data of the provided flowable.
      *
-     * @param publisher the partitions to gather in memory.
+     * @param partitions the partitions to gather in memory.
      * @param initialRowCapacity sizing hint (in rows) to use for the created partition. It should ideally
      * correspond or be a good estimation of the number or rows in {@code iterator}.
      * @param ordered {@code true} if the iterator will return the rows in order, {@code false} otherwise.
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static Single<List<ImmutableBTreePartition>> create(PartitionsPublisher publisher, int initialRowCapacity, boolean ordered)
+    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions, int initialRowCapacity, boolean ordered)
     {
-        return publisher.reduce(new ReduceCallbacks<List<ImmutableBTreePartition>, Pair<BTree.Builder, MutableDeletionInfo.Builder>>(
-            () -> new ArrayList<>(),
-            (list, partition) -> getBuilders(partition, initialRowCapacity, ordered),
-
-            (list, builders, unfiltered) -> addUnfiltered(builders, unfiltered),
-
-            (list, builders, partition) -> {
-                list.add(create(partition, builders));
-                return list;
-            }
-        ));
+        return partitions.flatMap(partition -> create(partition, initialRowCapacity, ordered));
     }
 
-    public static ImmutableBTreePartition create(PartitionTrait partition, Pair<BTree.Builder, MutableDeletionInfo.Builder> builders)
+    public static CsFlow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
-        return new ImmutableBTreePartition(partition.metadata(), partition.partitionKey(), AbstractBTreePartition.build(partition, builders));
+        return build(partition, initialRowCapacity, ordered)
+               .map(holder -> new ImmutableBTreePartition(partition.metadata(), partition.partitionKey(), holder));
     }
 
     public TableMetadata metadata()

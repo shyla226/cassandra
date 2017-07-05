@@ -22,11 +22,6 @@ package org.apache.cassandra.db.transform;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.db.rows.BaseRowIterator;
-import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
 
 // A Transformation that can stop an iterator earlier than its natural exhaustion
 public abstract class StoppingTransformation<I extends BaseRowIterator<?>> extends Transformation<I>
@@ -58,13 +53,6 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     }
 
     @Override
-    public void attachTo(PartitionsPublisher publisher)
-    {
-       // assert this.stop == null; // TODO cleanup: this may happen when extending
-        this.stop = publisher.stop;
-    }
-
-    @Override
     protected void attachTo(BasePartitions partitions)
     {
         assert this.stop == null;
@@ -89,33 +77,4 @@ public abstract class StoppingTransformation<I extends BaseRowIterator<?>> exten
     {
         stopInPartition = null;
     }
-
-    // FlowableOp interpretation of transformation
-    @Override
-    public void onNextUnfiltered(CsSubscriber<Unfiltered> subscriber, CsSubscription source, Unfiltered item)
-    {
-        // TODO: This is best done on request.
-        if (stopInPartition != null && stopInPartition.isSignalled)
-        {
-            subscriber.onComplete();
-            return;
-        }
-
-        super.onNextUnfiltered(subscriber, source, item);
-    }
-
-    // FlowableOp interpretation of transformation
-    @Override
-    public void onNextPartition(CsSubscriber<FlowableUnfilteredPartition> subscriber, CsSubscription source, FlowableUnfilteredPartition item)
-    {
-        if (stop != null && stop.isSignalled)
-        {
-            item.unused();
-            subscriber.onComplete();
-            return;
-        }
-
-        super.onNextPartition(subscriber, source, item);
-    }
-
 }

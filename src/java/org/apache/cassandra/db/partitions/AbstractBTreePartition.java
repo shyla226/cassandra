@@ -21,14 +21,14 @@ package org.apache.cassandra.db.partitions;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.BTreeSearchIterator;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
@@ -315,33 +315,36 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return new Holder(columns, builder.build(), deletionBuilder.build(), iterator.staticRow(), iterator.stats());
     }
 
-    public static Pair<BTree.Builder, MutableDeletionInfo.Builder> getBuilders(PartitionTrait partition, int initialRowCapacity, boolean ordered)
+    protected static CsFlow<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
-        final TableMetadata metadata = partition.metadata();
+        PartitionHeader header = partition.header;
+        ClusteringComparator comparator = header.metadata.comparator;
+        Row staticRow = partition.staticRow;
 
-        return Pair.create(BTree.builder(metadata.comparator, initialRowCapacity).auto(!ordered),
-                           MutableDeletionInfo.builder(partition.partitionLevelDeletion(), metadata.comparator, partition.isReverseOrder()));
-    }
+        MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionLevelDeletion, comparator, header.isReverseOrder);
+        BTree.Builder builder = BTree.builder(comparator, initialRowCapacity).auto(!ordered);
 
-    public static Pair<BTree.Builder, MutableDeletionInfo.Builder> addUnfiltered(Pair<BTree.Builder, MutableDeletionInfo.Builder> builders, Unfiltered unfiltered)
-    {
-        if (unfiltered.kind() == Unfiltered.Kind.ROW)
-            builders.left.add(unfiltered);
-        else
-            builders.right.add((RangeTombstoneMarker)unfiltered);
+        // Note that multiple subscribers would share the builder, i.e. Holder should not be reused.
+        return partition.content
+               .process(unfiltered ->
+                       {
+                           if (unfiltered.kind() == Unfiltered.Kind.ROW)
+                               builder.add(unfiltered);
+                           else
+                               deletionBuilder.add((RangeTombstoneMarker)unfiltered);
+                       })
+               .skippingMap(VOID ->
+                    {
+                        DeletionInfo deletion = deletionBuilder.build();
+                        // At this point we can easily check if the partition is empty and skip such partitions.
+                        if (builder.isEmpty() && deletion.isLive() && staticRow.isEmpty())
+                            return null;
 
-        return builders;
-    }
+                        if (header.isReverseOrder)
+                            builder.reverse();
 
-    public static Holder build(PartitionTrait partition, Pair<BTree.Builder, MutableDeletionInfo.Builder> builders)
-    {
-        final RegularAndStaticColumns columns = partition.columns();
-        final boolean reversed = partition.isReverseOrder();
-
-        if (reversed)
-            builders.left.reverse();
-
-        return new Holder(columns, builders.left.build(), builders.right.build(), partition.staticRow(), partition.stats());
+                        return new Holder(header.columns, builder.build(), deletion, staticRow, header.stats);
+                    });
     }
 
     // Note that when building with a RowIterator, deletion will generally be LIVE, but we allow to pass it nonetheless because PartitionUpdate

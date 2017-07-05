@@ -29,6 +29,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -61,7 +62,8 @@ import org.apache.cassandra.utils.versioning.Versioned;
  *
  * Please note that the format described above is the on-wire format. On-disk, the format is basically the
  * same, but the header is written once per sstable, not once per-partition. Further, the actual row and
- * range tombstones are not written using this class, but rather by {@link PartitionWriter}.
+ * range tombstones are not written using this class, but rather by
+ * {@link org.apache.cassandra.io.sstable.format.trieindex.PartitionWriter}.
  */
 public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVersion>
 {
@@ -84,12 +86,37 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
     }
 
     // Should only be used for the on-wire format.
+    public CsFlow<Void> serialize(FlowableUnfilteredPartition iterator, ColumnFilter selection, DataOutputPlus out) throws IOException
+    {
+        return serialize(iterator, selection, out, -1);
+    }
+
+    public CsFlow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
+    {
+        SerializationHeader header = new SerializationHeader(false,
+                                                             partition.header.metadata,
+                                                             partition.header.columns,
+                                                             partition.header.stats);
+
+        // Note: Emptiness check is not easy with flows. Since we skip over empty stuff anyway, we prefer not to invest
+        // the effort to check and we do not perform the serialization optimization for empty partitions.
+
+        serializeBeginningOfPartition(partition, header, selection, out, rowEstimate, false);
+
+        return partition.content.process(unfiltered -> serialize(unfiltered, header, out))
+                                .map(VOID ->
+                                     {
+                                         serializeEndOfPartition(out);
+                                         return VOID;
+                                     });
+    }
+
+    // Should only be used for the on-wire format.
+
     public void serialize(UnfilteredRowIterator iterator, ColumnFilter selection, DataOutputPlus out) throws IOException
     {
         serialize(iterator, selection, out, -1);
     }
-
-    // Should only be used for the on-wire format.
 
     public void serialize(UnfilteredRowIterator iterator, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
     {
@@ -99,9 +126,10 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
                                                              iterator.columns(),
                                                              iterator.stats());
 
-        serializeBeginningOfPartition(iterator, header, selection, out, rowEstimate);
+        boolean isEmpty = iterator.isEmpty();
+        serializeBeginningOfPartition(iterator, header, selection, out, rowEstimate, isEmpty);
 
-        if (iterator.isEmpty())
+        if (isEmpty)
             return;
 
         while (iterator.hasNext())
@@ -115,7 +143,8 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
                                               SerializationHeader header,
                                               ColumnFilter selection,
                                               DataOutputPlus out,
-                                              int rowEstimate) throws IOException
+                                              int rowEstimate,
+                                              boolean isEmpty) throws IOException
     {
         assert !header.isForSSTable();
 
@@ -125,7 +154,7 @@ public class UnfilteredRowIteratorSerializer extends VersionDependent<EncodingVe
         if (partition.isReverseOrder())
             flags |= IS_REVERSED;
 
-        if (partition.isEmpty())
+        if (isEmpty)
         {
             out.writeByte((byte)(flags | IS_EMPTY));
             return;

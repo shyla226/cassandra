@@ -63,6 +63,7 @@ import org.apache.cassandra.net.RateBasedBackPressure;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.LineNumberInference;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -127,6 +128,9 @@ public class DatabaseDescriptor
             throw new AssertionError("toolInitialization() already called");
         if (clientInitialized)
             throw new AssertionError("clientInitialization() already called");
+
+        // initialise line number inference, as it has to set dumpProxyClasses property before the lambdas start loading
+        LineNumberInference.init();
 
         // Some unit tests require this :(
         if (daemonInitialized)

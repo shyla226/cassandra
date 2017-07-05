@@ -710,6 +710,8 @@ public class Keyspace
                         logger.trace("Could not acquire lock for {} and table {}, retrying later", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
 
                     // This view update can't happen right now, so schedule another attempt later.
+                    // TODO: 1 microsecond is an arbitrary value that was chosen to avoid spinning the CPU too much, we
+                    // should perform some tests to see if there is an impact in changing this value (APOLLO-799)
                     mutation.getScheduler().scheduleDirect(() -> acquireLocksForView(source, mutation, locks, isDroppable), 1, TimeUnit.MICROSECONDS);
                     return;
                 }

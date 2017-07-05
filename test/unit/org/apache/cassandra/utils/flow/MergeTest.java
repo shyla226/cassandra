@@ -42,6 +42,7 @@ import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.UUIDGen;
@@ -51,6 +52,12 @@ import static org.junit.Assert.assertTrue;
 
 public class MergeTest
 {
+    @BeforeClass
+    public static void init() throws Exception
+    {
+        LineNumberInference.init();
+    }
+
     private static class CountingComparator<T> implements Comparator<T>
     {
         final Comparator<T> wrapped;

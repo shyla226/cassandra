@@ -67,11 +67,6 @@ public interface PartitionTrait
     public Row staticRow();
 
     /**
-     * Returns whether the provided iterator has no data.
-     */
-    public boolean isEmpty();
-
-    /**
      * The partition level deletion for the partition this iterate over.
      */
     public DeletionTime partitionLevelDeletion();

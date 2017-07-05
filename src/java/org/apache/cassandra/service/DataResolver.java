@@ -76,7 +76,7 @@ public class DataResolver extends ResponseResolver
         // Even though every responses should honor the limit, we might have more than requested post reconciliation,
         // so ensure we're respecting the limit.
         DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true);
-        return counter.applyTo(mergeWithShortReadProtection(iters, sources, counter));
+        return Transformation.apply(mergeWithShortReadProtection(iters, sources, counter), counter.asTransformation());
     }
 
     public void compareResponses()
@@ -416,7 +416,7 @@ public class DataResolver extends ResponseResolver
         private ShortReadProtection(InetAddress source, DataLimits.Counter postReconciliationCounter, long queryStartNanoTime)
         {
             this.source = source;
-            this.counter = command.limits().newCounter(command.nowInSec(), false).onlyCount();
+            this.counter = command.limits().newCounter(command.nowInSec(), false);
             this.postReconciliationCounter = postReconciliationCounter;
             this.queryStartNanoTime = queryStartNanoTime;
         }
@@ -424,7 +424,7 @@ public class DataResolver extends ResponseResolver
         @Override
         public UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
         {
-            partition = Transformation.apply(partition, counter);
+            partition = Transformation.apply(partition, counter.asCountOnlyTransformation());
             // must apply and extend with same protection instance
             ShortReadRowProtection protection = new ShortReadRowProtection(partition.metadata(), partition.partitionKey());
             partition = MoreRows.extend(partition, protection);

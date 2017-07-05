@@ -26,6 +26,7 @@ import java.util.function.Consumer;
 
 import com.google.common.collect.Ordering;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.LineNumberInference;
@@ -36,7 +37,11 @@ import static org.junit.Assert.fail;
 
 public class CsFlowTest
 {
-    private static final LineNumberInference lineNumbers = CsFlow.LINE_NUMBERS;
+    @BeforeClass
+    public static void init() throws Exception
+    {
+        LineNumberInference.init();
+    }
 
     CsFlow.MappingOp<Integer, Integer> inc = (i) -> i + 1;
     CsFlow.MappingOp<Integer, Integer> multiplyByTwo = (i) -> i * 2;
@@ -58,7 +63,6 @@ public class CsFlowTest
         }
         catch (Exception e)
         {
-            System.out.println("e. = " + e.getSuppressed()[0].getMessage());
             assertStacktraceMessage(e.getSuppressed()[0].getMessage(), new Object[]{ inc, multiplyByTwo, divideByZero, reduceToSum });
         }
     }
@@ -314,7 +318,8 @@ public class CsFlowTest
         for (Object tag : tags)
         {
             Assert.assertTrue(msg.contains(tag.toString()));
-            Pair<String, Integer> line = lineNumbers.getLine(tag.getClass());
+            Pair<String, Integer> line = CsFlow.LINE_NUMBERS.getLine(tag.getClass());
+            Assert.assertNotSame("Expected to have a defined source", line, LineNumberInference.UNKNOWN_SOURCE);
             Assert.assertTrue(msg.contains(line.left + ":" + line.right));
         }
     }

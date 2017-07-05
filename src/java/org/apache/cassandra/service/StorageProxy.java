@@ -55,6 +55,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.*;
@@ -1254,6 +1255,7 @@ public class StorageProxy implements StorageProxyMBean
             // called when the returned iterator is closed and we don't want to risk a bug in the Transformation
             // framework (which is non trivial code) making that not happen.
             final PartitionIterator iter = group.executeInternal(monitor).blockingGet();
+
             return Single.just(new PartitionIterator()
             {
                 public boolean hasNext()
@@ -1268,8 +1270,14 @@ public class StorageProxy implements StorageProxyMBean
 
                 public void close()
                 {
-                    // Make sure we close this as the first thing so it's always called.
-                    monitor.complete();
+                    try
+                    {
+                        monitor.complete();
+                    }
+                    finally
+                    {
+                        iter.close();
+                    }
                 }
             });
         }
@@ -1867,7 +1875,7 @@ public class StorageProxy implements StorageProxyMBean
             // We want to count the results for the sake of updating the concurrency factor (see updateConcurrencyFactor) but we don't want to
             // enforce any particular limit at this point (this could break code than rely on postReconciliationProcessing), hence the DataLimits.NONE.
             counter = DataLimits.NONE.newCounter(command.nowInSec(), true);
-            return counter.applyTo(PartitionIterators.concat(concurrentQueries));
+            return Transformation.apply(PartitionIterators.concat(concurrentQueries), counter.asTransformation());
         }
 
         public void close()
@@ -1986,6 +1994,7 @@ public class StorageProxy implements StorageProxyMBean
         return command.executeInternal(monitor)
                       .map(it -> {
                           final PartitionIterator iter = command.withLimitsAndPostReconciliation(it);
+
                           return new PartitionIterator()
                           {
                               public boolean hasNext()
@@ -2000,8 +2009,15 @@ public class StorageProxy implements StorageProxyMBean
 
                               public void close()
                               {
-                                  logger.debug("Completing monitor");
-                                  monitor.complete();
+                                  try
+                                  {
+                                      logger.debug("Completing monitor");
+                                      monitor.complete();
+                                  }
+                                  finally
+                                  {
+                                      iter.close();
+                                  }
                               }
                           };
                       })

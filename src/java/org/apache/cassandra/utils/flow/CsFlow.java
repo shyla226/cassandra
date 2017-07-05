@@ -23,22 +23,34 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.common.util.concurrent.Runnables;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.reactivex.Completable;
+import io.reactivex.CompletableObserver;
+import io.reactivex.CompletableSource;
+import io.reactivex.Single;
+import io.reactivex.SingleObserver;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.LineNumberInference;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
@@ -47,7 +59,7 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
  */
-public abstract class CsFlow<T>
+public abstract class   CsFlow<T>
 {
     public final static LineNumberInference LINE_NUMBERS = new LineNumberInference();
 
@@ -413,11 +425,112 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Take only the items from from the flow until the tester fails for the first time.
+     * Take only the items from from the flow until the tester fails for the first time, not including that item.
+     *
+     * This applies on the onNext phase of execution, after the item has been produced. If the item holds resources,
+     * tester must release these resources as the item will not be passed on downstream.
      */
     public CsFlow<T> takeWhile(TakeWhileOp<T> tester)
     {
         return apply(tester);
+    }
+
+    /**
+     * Interface for operators that apply to the subscription chain, modifying request() and close().
+     */
+    public interface SubscriptionLifter<T>
+    {
+        CsSubscription apply(CsSubscription source, CsSubscriber<T> subscriber);
+    }
+
+    /**
+     * Applies the given operator to the subscription chain of the given flow, permitting modifications to request()
+     * and subscribe().
+     *
+     * Note: This does not insert any corresponding operation on the subscriber chain, passing the previous subscriber
+     * directly to the upstream generator. As a result this operator will not be shown in the subscriber's chain.
+     */
+    public CsFlow<T> liftSubscription(SubscriptionLifter<T> lifter)
+    {
+        return liftSubscription(this, lifter);
+    }
+
+    public static <T> CsFlow<T> liftSubscription(CsFlow<T> source, SubscriptionLifter<T> lifter)
+    {
+        return new CsFlow<T>()
+        {
+            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            {
+                return lifter.apply(source.subscribe(subscriber), subscriber);
+            }
+        };
+    }
+
+    /**
+     * Stops requesting items from the flow when the given predicate succeeds.
+     *
+     * Unlike takeWhile, this applies on the request phase of execution, before anything has been produced (and as such
+     * cannot be given the next item in the flow as argument).
+     */
+    public CsFlow<T> takeUntil(BooleanSupplier tester)
+    {
+        return takeUntilAndDoOnClose(tester, Runnables.doNothing());
+    }
+
+    /**
+     * Apply the operation when the flow is closed.
+     */
+    public CsFlow<T> doOnClose(Runnable onClose)
+    {
+        return takeUntilAndDoOnClose(() -> false, onClose);
+    }
+
+
+    /**
+     * Combination of takeUntil and doOnClose using a single subscription object.
+     *
+     * Stops requesting items when the supplied tester returns true, and executes the runnable when the flow is closed.
+     */
+    public CsFlow<T> takeUntilAndDoOnClose(BooleanSupplier tester, Runnable onClose)
+    {
+        return liftSubscription((source, subscriber) -> new CsSubscription()
+        {
+            public void request()
+            {
+                boolean stop;
+                try
+                {
+                    stop = tester.getAsBoolean();
+                }
+                catch (Throwable t)
+                {
+                    subscriber.onError(t);
+                    return;
+                }
+
+                if (stop)
+                    subscriber.onComplete();
+                else
+                    source.request();
+            }
+
+            public void close() throws Exception
+            {
+                try
+                {
+                    source.close();
+                }
+                finally
+                {
+                    onClose.run();
+                }
+            }
+
+            public Throwable addSubscriberChainFromSource(Throwable throwable)
+            {
+                return source.addSubscriberChainFromSource(throwable);
+            }
+        });
     }
 
     /**
@@ -453,32 +566,6 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Op for applying an operation on close.
-     *
-     * This wrapper allows lambdas to extend to FlowableOp without extra objects being created.
-     */
-    public interface OnCloseOp<T> extends FlowableOp<T, T>, Runnable
-    {
-        default void onNext(CsSubscriber<T> subscriber, CsSubscription source, T next)
-        {
-            subscriber.onNext(next);
-        }
-
-        default void close() throws Exception
-        {
-            run();
-        }
-    }
-
-    /**
-     * Apply the operation when the flow is closed.
-     */
-    public CsFlow<T> doOnClose(OnCloseOp onClose)
-    {
-        return apply(onClose, "doOnClose");
-    }
-
-    /**
      * Group items using the supplied group op. See {@link GroupOp}
      */
     public <O> CsFlow<O> group(GroupOp<T, O> op)
@@ -502,6 +589,19 @@ public abstract class CsFlow<T>
     public static <T> CsFlow<T> concat(Iterable<CsFlow<T>> sources)
     {
         return concat(fromIterable(sources));
+    }
+
+    /**
+     * Map each element of the flow into CompletableSources, subscribe to them and
+     * wait until the upstream and all CompletableSources complete.
+     *
+     * @param mapper the function that receives each source value and transforms them into CompletableSources.
+     *
+     * @return the new Completable instance
+     * */
+    public Completable flatMapCompletable(Function<? super T, ? extends CompletableSource> mapper)
+    {
+        return FlatMapCompletable.flatMap(this, mapper);
     }
 
     /**
@@ -667,8 +767,8 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, BiFunction)},
-     * {@link #reduceWith(Supplier, BiFunction)} and {@link #reduceToFuture(Object, BiFunction)}.
+     * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, ReduceFunction)},
+     * {@link #reduce(Object, ReduceFunction)} and {@link #reduceToFuture(Object, ReduceFunction)}.
      */
     abstract static private class ReduceSubscriber<T, O> extends RequestLoop implements CsSubscriber<T>, CsSubscription
     {
@@ -844,27 +944,243 @@ public abstract class CsFlow<T>
 
     public CsFlow<T> last()
     {
-        return reduceWith(() -> null, (prev, next) -> next);
+        return reduce(null, (prev, next) -> next);
     }
 
     /**
-     * Reduce the flow, blocking until the operation completes.
+     * An abstract subscriber used by the reduce operators for rx java. It implements the Disposable
+     * interface of rx java, and stops requesting once disposed.
+     */
+    private static abstract class DisposableReduceSubscriber<T, O> extends ReduceSubscriber<T, O> implements Disposable
+    {
+        private volatile boolean isDisposed;
+        private volatile int isClosed;
+        private static AtomicIntegerFieldUpdater<DisposableReduceSubscriber> isClosedUpdater =
+                AtomicIntegerFieldUpdater.newUpdater(DisposableReduceSubscriber.class, "isClosed");
+
+        DisposableReduceSubscriber(O seed, CsFlow<T> source, ReduceFunction<O, T> reducer) throws Exception
+        {
+            super(seed, source, reducer);
+            isDisposed = false;
+            isClosed = 0;
+        }
+
+        public void request()
+        {
+            if (!isDisposed())
+                super.request();
+            else
+            {
+                try
+                {
+                    close();
+                }
+                catch (Throwable t)
+                {
+                    onError(t);
+                }
+            }
+        }
+
+        public void dispose()
+        {
+            isDisposed = true;
+        }
+
+        public boolean isDisposed()
+        {
+            return isDisposed;
+        }
+
+        @Override
+        public void onComplete()
+        {
+            try
+            {
+                close();
+            }
+            catch (Throwable t)
+            {
+                signalError(addSubscriberChainFromSource(t));
+                return;
+            }
+            signalSuccess(current);
+        }
+
+        @Override
+        public void onErrorInternal(Throwable t)
+        {
+            try
+            {
+                close();
+            }
+            catch (Throwable e)
+            {
+                t = Throwables.merge(t, e);
+            }
+
+            signalError(t);
+        }
+
+        @Override
+        public void close() throws Exception
+        {
+            // We may get onComplete/onError after disposal. Make sure we don't double-close in that case.
+            if (!isClosedUpdater.compareAndSet(this, 0, 1))
+                return;
+
+            assert isClosed == 1;
+            super.close();
+        }
+
+        abstract void signalError(Throwable t);
+        abstract void signalSuccess(O value);
+
+        // onNext/onComplete/onError may arrive after disposal. It's not really possible to prevent consumer
+        // receiving these messages after disposal (as it could be paused e.g. at the entrance point of the method), so
+        // we aren't really worried about that.
+        // Importantly, if onComplete arrives after disposal, it is not because it was triggered by the disposal.
+    }
+
+
+    /**
+     * Reduce the flow, returning a completable future that is completed when the operations complete.
+     *
+     * @param seed Initial value for the reduction.
+     * @param reducerToSingle Called repeatedly with the reduced value (starting with seed and continuing with the result
+     *          returned by the previous call) and the next item.
+     * @return The final reduced value.
+     */
+    public <O> Single<O> reduceToRxSingle(O seed, ReduceFunction<O, T> reducerToSingle)
+    {
+        class SingleFromCsFlow extends Single<O>
+        {
+            protected void subscribeActual(SingleObserver<? super O> observer)
+            {
+                class ReduceToSingle extends DisposableReduceSubscriber<T, O>
+                {
+                    ReduceToSingle() throws Exception
+                    {
+                        super(seed, CsFlow.this, reducerToSingle);
+                    }
+
+                    @Override
+                    public void signalSuccess(O value)
+                    {
+                        observer.onSuccess(value);
+                    }
+
+                    @Override
+                    public void signalError(Throwable t)
+                    {
+                        observer.onError(t);
+                    }
+                };
+
+                ReduceToSingle s;
+                try
+                {
+                    s = new ReduceToSingle();
+                }
+                catch (Exception e)
+                {
+                    observer.onError(e);
+                    return;
+                }
+
+                observer.onSubscribe(s);
+                s.request();
+            }
+        }
+
+        return new SingleFromCsFlow();
+    }
+
+    public interface RxSingleMapper<I, O> extends Function<I, O>, ReduceFunction<O, I>
+    {
+        @Override
+        default O apply(O prev, I curr) throws Exception
+        {
+            assert prev == null;
+            return apply(curr);
+        }
+    }
+
+    /**
+     * Maps a CsFlow holding a single value into an Rx Single using the supplied mapper.
+     */
+    public <O> Single<O> mapToRxSingle(RxSingleMapper<T, O> mapper)
+    {
+        return reduceToRxSingle(null, mapper);
+    }
+
+    // Not fully tested -- this is not meant for long-term use
+    public Completable processToRxCompletable(ConsumingOp<T> consumer)
+    {
+        class CompletableFromCsFlow extends Completable
+        {
+            protected void subscribeActual(CompletableObserver observer)
+            {
+                class CompletableFromCsFlowSubscriber extends DisposableReduceSubscriber<T, Void>
+                {
+                    public CompletableFromCsFlowSubscriber() throws Exception
+                    {
+                        super(null, CsFlow.this, consumer);
+                    }
+
+                    @Override
+                    public void signalSuccess(Void value)
+                    {
+                        observer.onComplete();
+                    }
+
+                    @Override
+                    public void signalError(Throwable t)
+                    {
+                        observer.onError(t);
+                    }
+                }
+
+                CompletableFromCsFlowSubscriber cs;
+                try
+                {
+                    cs = new CompletableFromCsFlowSubscriber();
+                }
+                catch (Throwable t)
+                {
+                    observer.onError(t);
+                    return;
+                }
+                observer.onSubscribe(cs);
+                cs.request();
+            }
+        }
+        return new CompletableFromCsFlow();
+    }
+
+    public Completable processToRxCompletable()
+    {
+        return processToRxCompletable(v -> {});
+    }
+
+    /**
+     * Reduce the flow and return a CsFlow containing the result.
      *
      * Note: the reduced should not hold resources that need to be released, as the content will be lost on error.
      *
-     * @param seedSupplier Supplier for the initial value for the reduction.
+     * @param seed The initial value for the reduction.
      * @param reducer Called repeatedly with the reduced value (starting with seed and continuing with the result
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> CsFlow<O> reduceWith(Supplier<O> seedSupplier, ReduceFunction<O, T> reducer)
+    public <O> CsFlow<O> reduce(O seed, ReduceFunction<O, T> reducer)
     {
         CsFlow<T> self = this;
         return new CsFlow<O>()
         {
             public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
             {
-                return new ReduceSubscriber<T, O>(seedSupplier.get(), self, reducer)
+                return new ReduceSubscriber<T, O>(seed, self, reducer)
                 {
                     volatile boolean completed = false;
 
@@ -895,6 +1211,48 @@ public abstract class CsFlow<T>
                 };
             }
         };
+    }
+
+    public <I, O, F> CsFlow<F> flatReduce(O seed, BiFunction<O, T, CsFlow<I>> mapper, ReduceFunction<O, I> reducer, MappingOp<O, F> onComplete)
+    {
+        return this.flatMap(x -> mapper.apply(seed, x))
+                   .reduce(seed,
+                           reducer)
+                   .map(onComplete);
+    }
+
+    public interface ConsumingOp<T> extends ReduceFunction<Void, T>
+    {
+        void accept(T item) throws Exception;
+
+        default Void apply(Void v, T item) throws Exception
+        {
+            accept(item);
+            return v;
+        }
+    }
+
+    static final ConsumingOp<Object> NO_OP_CONSUMER = (v) -> {};
+    static <T> ConsumingOp<T> noOp()
+    {
+        return (ConsumingOp<T>) NO_OP_CONSUMER;
+    }
+
+    public CsFlow<Void> process(ConsumingOp<T> consumer)
+    {
+        return reduce(null,
+                      consumer);
+    }
+
+    public CsFlow<Void> process()
+    {
+        return process(noOp());
+    }
+
+    public <I, O> CsFlow<Void> flatProcess(FlatMap.FlatMapper<T, Void> mapper)
+    {
+        return this.flatMap(mapper)
+                   .process();
     }
 
     /**
@@ -1183,9 +1541,17 @@ public abstract class CsFlow<T>
             public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
             {
                 R resource = resourceSupplier.get();
-                return flowSupplier.apply(resource)
-                                   .doOnClose(() -> resourceDisposer.accept(resource))
-                                   .subscribe(subscriber);
+                try
+                {
+                    return flowSupplier.apply(resource)
+                                       .doOnClose(() -> resourceDisposer.accept(resource))
+                                       .subscribe(subscriber);
+                }
+                catch (Throwable t)
+                {
+                    resourceDisposer.accept(resource);
+                    throw com.google.common.base.Throwables.propagate(t);
+                }
             }
         };
     }
@@ -1226,6 +1592,118 @@ public abstract class CsFlow<T>
                               }).get();
     }
 
+    /**
+     * Returns a flow containing:
+     * - the source if it is not empty.
+     * - nothing if it is empty.
+     *
+     * Note: Both resulting flows are single-use.
+     */
+    public CsFlow<CsFlow<T>> skipEmpty()
+    {
+        return SkipEmpty.skipEmpty(this);
+    }
+
+    /**
+     * Returns a flow containing:
+     * - the source passed through the supplied mapper if it is not empty.
+     * - nothing if it is empty.
+     *
+     * Note: The flow passed to the mapper, as well as the returned result, are single-use.
+     */
+    public <U> CsFlow<U> skipMapEmpty(Function<CsFlow<T>, U> mapper)
+    {
+        return SkipEmpty.skipMapEmpty(this, mapper);
+    }
+
+    public static <T> CloseableIterator<T> toIterator(CsFlow<T> source) throws Exception
+    {
+        return new ToIteratorSubscription<T>(source);
+    }
+
+    static class ToIteratorSubscription<T> implements CloseableIterator<T>, CsSubscriber<T>
+    {
+        static final Object POISON_PILL = new Object();
+
+        final CsSubscription subscription;
+        BlockingQueue<Object> queue = new ArrayBlockingQueue<>(1);
+        Throwable error = null;
+        Object next = null;
+
+        public ToIteratorSubscription(CsFlow<T> source) throws Exception
+        {
+            subscription = source.subscribe(this);
+        }
+
+        public void close()
+        {
+            try
+            {
+                subscription.close();
+            }
+            catch (Exception e)
+            {
+                throw com.google.common.base.Throwables.propagate(e);
+            }
+        }
+
+        @Override
+        public void onComplete()
+        {
+            Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
+        }
+
+        @Override
+        public void onError(Throwable arg0)
+        {
+            error = org.apache.cassandra.utils.Throwables.merge(error, arg0);
+            Uninterruptibles.putUninterruptibly(queue, POISON_PILL);
+        }
+
+        @Override
+        public void onNext(T arg0)
+        {
+            Uninterruptibles.putUninterruptibly(queue, arg0);
+        }
+
+        protected Object computeNext()
+        {
+            if (next != null)
+                return next;
+
+            assert queue.isEmpty();
+            subscription.request();
+
+            next = Uninterruptibles.takeUninterruptibly(queue);
+            if (error != null)
+                throw com.google.common.base.Throwables.propagate(error);
+            return next;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            return computeNext() != POISON_PILL;
+        }
+
+        public String toString()
+        {
+            return formatTrace("toIterator");
+        }
+
+        @Override
+        public T next()
+        {
+            boolean has = hasNext();
+            assert has;
+
+            @SuppressWarnings("resource")
+            T toReturn = (T) next;
+            next = null;
+            return toReturn;
+        }
+    }
+
     public static StackTraceElement[] maybeGetStackTrace()
     {
         if (CsFlow.DEBUG_ENABLED)
@@ -1242,15 +1720,17 @@ public abstract class CsFlow<T>
                 return throwable;
         }
 
-        throwable.addSuppressed(new CsFlowException(tag.toString(), throwable));
+        // Load lambdas before calling `toString` on the object
+        LINE_NUMBERS.preloadLambdas();
+        throwable.addSuppressed(new CsFlowException(tag.toString()));
         return throwable;
     }
 
     private static class CsFlowException extends RuntimeException
     {
-        private CsFlowException(Object tag, Throwable t)
+        private CsFlowException(Object tag)
         {
-            super("CsFlow call chain:\n" + tag.toString(), t);
+            super("CsFlow call chain:\n" + tag.toString());
         }
     }
 
@@ -1267,8 +1747,6 @@ public abstract class CsFlow<T>
     }
     public static String withLineNumber(Object obj)
     {
-        LINE_NUMBERS.preloadLambdas();
-
         LINE_NUMBERS.maybeProcessClass(obj.getClass());
         Pair<String, Integer> lineNumber = LINE_NUMBERS.getLine(obj.getClass());
         return obj + "(" + lineNumber.left + ":" + lineNumber.right + ")";

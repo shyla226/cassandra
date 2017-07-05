@@ -34,7 +34,6 @@ import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.context.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -44,6 +43,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -124,7 +124,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * @param nowInSec the time of query in seconds.
      * @return the filtered iterator.
      */
-    public abstract PartitionsPublisher filter(PartitionsPublisher publisher, TableMetadata metadata, int nowInSec);
+    public abstract CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> publisher, TableMetadata metadata, int nowInSec);
 
     /**
      * Whether the provided row in the provided partition satisfies this filter.
@@ -245,10 +245,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        public PartitionsPublisher filter(PartitionsPublisher publisher, TableMetadata metadata, int nowInSec)
+        public CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
         {
             if (expressions.isEmpty())
-                return publisher;
+                return iter;
 
             List<Expression> partitionLevelExpressions = new ArrayList<>();
             List<Expression> rowLevelExpressions = new ArrayList<>();
@@ -263,52 +263,54 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             long numberOfRegularColumnExpressions = rowLevelExpressions.size();
             final boolean filterNonStaticColumns = numberOfRegularColumnExpressions > 0;
 
-            class IsSatisfiedFilter extends Transformation
+            return iter.flatMap(
+            partition ->
             {
-                DecoratedKey pk;
+                DecoratedKey pk = partition.header.partitionKey;
 
-                @Override
-                public FlowableUnfilteredPartition applyToPartition(FlowableUnfilteredPartition partition)
+                // Short-circuit all partitions that won't match based on static and partition keys
+                for (Expression e : partitionLevelExpressions)
+                    if (!e.isSatisfiedBy(metadata, pk, partition.staticRow))
+                    {
+                        partition.unused();
+                        return CsFlow.empty();
+                    }
+
+                // TODO: This method has some odd behavior. It purges deletions when they are on their own
+                // but leaves them in if they are together with a live cell, leading to potential changes in content
+                // before and after compacting data.
+                CsFlow<Unfiltered> content = partition.content.skippingMap(unfiltered ->
                 {
-                    pk = partition.header.partitionKey;
-
-                    // Short-circuit all partitions that won't match based on static and partition keys
-                    for (Expression e : partitionLevelExpressions)
-                        if (!e.isSatisfiedBy(metadata, partition.header.partitionKey, partition.staticRow))
+                    if (unfiltered.isRow())
+                    {
+                        Row purged = ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec);
+                        if (purged == null)
                             return null;
 
-                    // TODO: We reject a partition here if it does not have rows and filterNonStaticColumns is true
-                    // This makes a material difference if the partition has a static row, as that static row will
-                    // disappear in this case.
-                    // I do not believe removing a static row at this point, before merging the data from all replicas,
-                    // can be correct. If one replica happened to get a static row update, while another got the content,
-                    // the removal here would hide the static row update from the combined view.
-                    // I believe a more correct treatment is to not count static rows in DataLimits if that's at all
-                    // possible, though this may require specific treatment for synchronization between nodes for this
-                    // case (so that digests do not include static rows for non-matches, but they are included on
-                    // full reads after digest mismatch).
+                        for (Expression e : rowLevelExpressions)
+                            if (!e.isSatisfiedBy(metadata, pk, purged))
+                                return null;
+                    }
 
-                    if (filterNonStaticColumns && !partition.hasData)
-                        return null;
+                    return unfiltered;
+                });
 
-                    return Transformation.apply(partition, this);
-                }
+                // TODO: We reject a partition here if it does not have rows and filterNonStaticColumns is true
+                // This makes a material difference if the partition has a static row, as that static row will
+                // disappear in this case.
+                // I do not believe removing a static row at this point, before merging the data from all replicas,
+                // can be correct. If one replica happened to get a static row update, while another got the content,
+                // the removal here would hide the static row update from the combined view.
+                // I believe a more correct treatment is to not count static rows in DataLimits if that's at all
+                // possible, though this may require specific treatment for synchronization between nodes for this
+                // case (so that digests do not include static rows for non-matches, but they are included on
+                // full reads after digest mismatch).
 
-                public Row applyToRow(Row row)
-                {
-                    Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec);
-                    if (purged == null)
-                        return null;
-
-                    for (Expression e : rowLevelExpressions)
-                        if (!e.isSatisfiedBy(metadata, pk, purged))
-                            return null;
-
-                    return row;
-                }
-            }
-
-            return publisher.transform(new IsSatisfiedFilter());
+                if (filterNonStaticColumns)
+                    return content.skipMapEmpty(c -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, c));
+                else
+                    return CsFlow.just(new FlowableUnfilteredPartition(partition.header, partition.staticRow, content));
+            });
         }
 
         protected RowFilter withNewExpressions(List<Expression> expressions)

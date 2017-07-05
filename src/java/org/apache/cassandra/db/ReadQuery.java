@@ -26,7 +26,8 @@ import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
-import org.apache.cassandra.db.rows.publisher.PartitionsPublisher;
+import org.apache.cassandra.db.rows.FlowablePartitions;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
@@ -34,6 +35,7 @@ import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 /**
  * Generic abstraction for read queries.
@@ -71,9 +73,9 @@ public interface ReadQuery extends Monitorable
             return Single.just(EmptyIterators.partition());
         }
 
-        public PartitionsPublisher executeLocally(Monitor monitor)
+        public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
-            return PartitionsPublisher.empty();
+            return CsFlow.empty();
         }
 
         public DataLimits limits()
@@ -182,9 +184,9 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the read query.
      */
-    public PartitionsPublisher executeLocally(@Nullable Monitor monitor);
+    public CsFlow<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
 
-    default public PartitionsPublisher executeLocally()
+    default public CsFlow<FlowableUnfilteredPartition> executeLocally()
     {
         return executeLocally(null);
     }
@@ -270,6 +272,6 @@ public interface ReadQuery extends Monitorable
      */
     default public UnfilteredPartitionIterator executeForTests()
     {
-        return executeLocally().toIterator(metadata());
+        return FlowablePartitions.toPartitions(FlowablePartitions.skipEmptyPartitions(executeLocally()), metadata());
     }
 }
