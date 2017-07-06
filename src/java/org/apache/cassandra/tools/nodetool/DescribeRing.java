@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.tools.nodetool;
 
-import io.airlift.command.Arguments;
-import io.airlift.command.Command;
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -26,6 +26,8 @@ import java.util.List;
 
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
+
+import static org.apache.commons.lang3.StringUtils.EMPTY;
 
 @Command(name = "describering", description = "Shows the token ranges info of a given keyspace")
 public class DescribeRing extends NodeToolCmd
