@@ -230,6 +230,10 @@ public class CoordinatorSession extends ConsistentSession
                 send(Verbs.REPAIR.FAILED_SESSION.newRequest(participant, message));
         }
         setAll(State.FAILED);
+
+        String exceptionMsg = String.format("Incremental repair session %s has failed", sessionID);
+        finalizeProposeFuture.setException(new RuntimeException(exceptionMsg));
+        prepareFuture.setException(new RuntimeException(exceptionMsg));
     }
 
     private static String formatDuration(long then, long now)
