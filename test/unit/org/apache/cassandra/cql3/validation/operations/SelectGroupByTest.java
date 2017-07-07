@@ -21,8 +21,6 @@ import java.util.Arrays;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.SimpleStatement;
-
 import org.apache.cassandra.cql3.CQLTester;
 
 public class SelectGroupByTest extends CQLTester
@@ -1813,10 +1811,5 @@ public class SelectGroupByTest extends CQLTester
                                                pageSize),
                           row(1, 1, 4L, 3L));
         }
-    }
-
-    private com.datastax.driver.core.ResultSet executeNetWithPaging(String query, int pageSize) throws Throwable
-    {
-        return sessionNet().execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
     }
 }
