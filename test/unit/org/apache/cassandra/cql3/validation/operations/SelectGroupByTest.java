@@ -23,7 +23,6 @@ import java.util.UUID;
 import org.junit.Test;
 
 import com.datastax.driver.core.LocalDate;
-import com.datastax.driver.core.SimpleStatement;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
@@ -2274,10 +2273,5 @@ public class SelectGroupByTest extends CQLTester
     private long toTime(String timeAsString)
     {
         return TimeSerializer.timeStringToLong(timeAsString);
-    }
-
-    private com.datastax.driver.core.ResultSet executeNetWithPaging(String query, int pageSize) throws Throwable
-    {
-        return sessionNet().execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
     }
 }
