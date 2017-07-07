@@ -501,7 +501,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
 
         ActiveRepairService.instance.consistent.local.maybeSetRepairing(desc.parentSessionId);
-        Validator validator = new Validator(desc, from, request.gcBefore, isConsistent(desc.parentSessionId), previewKind(desc.parentSessionId));
+        Validator validator = new Validator(desc, from, request.nowInSec, isConsistent(desc.parentSessionId), previewKind(desc.parentSessionId));
         CompactionManager.instance.submitValidation(store, validator);
     }
 

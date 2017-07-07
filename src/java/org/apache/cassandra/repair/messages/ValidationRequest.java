@@ -40,7 +40,7 @@ public class ValidationRequest extends RepairMessage<ValidationRequest>
         public void serialize(ValidationRequest message, DataOutputPlus out) throws IOException
         {
             RepairJobDesc.serializers.get(version).serialize(message.desc, out);
-            out.writeInt(message.gcBefore);
+            out.writeInt(message.nowInSec);
         }
 
         public ValidationRequest deserialize(DataInputPlus dis) throws IOException
@@ -52,24 +52,24 @@ public class ValidationRequest extends RepairMessage<ValidationRequest>
         public long serializedSize(ValidationRequest message)
         {
             return RepairJobDesc.serializers.get(version).serializedSize(message.desc)
-                   + TypeSizes.sizeof(message.gcBefore);
+                   + TypeSizes.sizeof(message.nowInSec);
         }
     });
 
-    public final int gcBefore;
+    public final int nowInSec;
 
-    public ValidationRequest(RepairJobDesc desc, int gcBefore)
+    public ValidationRequest(RepairJobDesc desc, int nowInSec)
     {
         super(desc);
-        this.gcBefore = gcBefore;
+        this.nowInSec = nowInSec;
     }
 
     @Override
     public String toString()
     {
         return "ValidationRequest{" +
-                "gcBefore=" + gcBefore +
-                "} " + super.toString();
+               "nowInSec=" + nowInSec +
+               "} " + super.toString();
     }
 
     @Override
@@ -79,13 +79,13 @@ public class ValidationRequest extends RepairMessage<ValidationRequest>
         if (o == null || getClass() != o.getClass()) return false;
 
         ValidationRequest that = (ValidationRequest) o;
-        return gcBefore == that.gcBefore;
+        return nowInSec == that.nowInSec;
     }
 
     @Override
     public int hashCode()
     {
-        return gcBefore;
+        return nowInSec;
     }
 
     public MessageSerializer<ValidationRequest> serializer(RepairVersion version)
