@@ -25,8 +25,8 @@ import javax.management.MBeanServerConnection;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterDescription;
 import com.beust.jcommander.Parameterized;
-import io.airlift.command.Arguments;
-import io.airlift.command.Command;
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
 import org.gridkit.jvmtool.JmxConnectionInfo;
 import org.gridkit.jvmtool.cli.CommandLauncher;
 

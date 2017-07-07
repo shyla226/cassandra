@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Joiner;
 
-import io.airlift.command.*;
+import io.airlift.airline.*;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool;
 import org.apache.cassandra.utils.Pair;

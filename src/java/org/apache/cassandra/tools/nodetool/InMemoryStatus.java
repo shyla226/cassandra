@@ -10,11 +10,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import io.airlift.command.Arguments;
-import io.airlift.command.Command;
 import org.apache.cassandra.db.mos.MemoryOnlyStatusMBean;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool;
+
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
 
 @Command(name = "inmemorystatus", description = "Returns a list of the in-memory tables for this node and the amount of memory each table is using, or information about a single table if the keyspace and columnfamily are given.")
 public class InMemoryStatus extends NodeTool.NodeToolCmd
