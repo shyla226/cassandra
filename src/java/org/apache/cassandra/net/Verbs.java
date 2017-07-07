@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import com.carrotsearch.hppc.IntObjectOpenHashMap;
+import com.carrotsearch.hppc.IntObjectHashMap;
 
 import org.apache.cassandra.db.ReadVerbs;
 import org.apache.cassandra.db.WriteVerbs;
@@ -68,7 +68,7 @@ public abstract class Verbs
         }
     }
 
-    private final static IntObjectOpenHashMap<VerbGroup> groupsByCode = new IntObjectOpenHashMap<>();
+    private final static IntObjectHashMap<VerbGroup> groupsByCode = new IntObjectHashMap<>();
     private static final List<VerbGroup<?>> allGroups = new ArrayList<>();
 
     public static final ReadVerbs READS            = register(new ReadVerbs(Group.READS));

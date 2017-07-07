@@ -47,7 +47,7 @@ import junit.framework.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
-import com.carrotsearch.hppc.LongOpenHashSet;
+import com.carrotsearch.hppc.LongHashSet;
 import com.carrotsearch.hppc.LongSet;
 import com.carrotsearch.hppc.cursors.LongCursor;
 import com.google.common.base.Function;
@@ -62,12 +62,37 @@ public class TokenTreeTest
         DatabaseDescriptor.daemonInitialization();
     }
 
-    static LongSet singleOffset = new LongOpenHashSet() {{ add(1); }};
-    static LongSet bigSingleOffset = new LongOpenHashSet() {{ add(2147521562L); }};
-    static LongSet shortPackableCollision = new LongOpenHashSet() {{ add(2L); add(3L); }}; // can pack two shorts
-    static LongSet intPackableCollision = new LongOpenHashSet() {{ add(6L); add(((long) Short.MAX_VALUE) + 1); }}; // can pack int & short
-    static LongSet multiCollision =  new LongOpenHashSet() {{ add(3L); add(4L); add(5L); }}; // can't pack
-    static LongSet unpackableCollision = new LongOpenHashSet() {{ add(((long) Short.MAX_VALUE) + 1); add(((long) Short.MAX_VALUE) + 2); }}; // can't pack
+    static final LongSet singleOffset;
+    static final LongSet bigSingleOffset;
+    static LongSet shortPackableCollision; // can pack two shorts
+    static LongSet intPackableCollision; // can pack int & short
+    static LongSet multiCollision; // can't pack
+    static LongSet unpackableCollision; // can't pack
+
+    static {
+        bigSingleOffset = new LongHashSet();
+        bigSingleOffset.add(2147521562L);
+
+        singleOffset = new LongHashSet();
+        singleOffset.add(1);
+
+        shortPackableCollision = new LongHashSet();
+        shortPackableCollision.add(2L);
+        shortPackableCollision.add(3L);
+
+        intPackableCollision = new LongHashSet();
+        intPackableCollision.add(6L);
+        intPackableCollision.add(((long) Short.MAX_VALUE) + 1);
+
+        multiCollision =  new LongHashSet();
+        multiCollision.add(3L);
+        multiCollision.add(4L);
+        multiCollision.add(5L);
+
+        unpackableCollision = new LongHashSet();
+        unpackableCollision.add(((long) Short.MAX_VALUE) + 1);
+        unpackableCollision.add(((long) Short.MAX_VALUE) + 2);
+    }
 
     final static SortedMap<Long, LongSet> simpleTokenMap = new TreeMap<Long, LongSet>()
     {{
@@ -267,12 +292,16 @@ public class TokenTreeTest
     public void skipPastEndDynamic() throws Exception
     {
         skipPastEnd(new DynamicTokenTreeBuilder(simpleTokenMap), simpleTokenMap);
+        skipPastEnd(new DynamicTokenTreeBuilder(collidingTokensMap), collidingTokensMap);
+        skipPastEnd(new DynamicTokenTreeBuilder(bigTokensMap), bigTokensMap);
     }
 
     @Test
     public void skipPastEndStatic() throws Exception
     {
         skipPastEnd(new StaticTokenTreeBuilder(new FakeCombinedTerm(simpleTokenMap)), simpleTokenMap);
+        skipPastEnd(new StaticTokenTreeBuilder(new FakeCombinedTerm(bigTokensMap)), bigTokensMap);
+        skipPastEnd(new StaticTokenTreeBuilder(new FakeCombinedTerm(collidingTokensMap)), collidingTokensMap);
     }
 
     public void skipPastEnd(TokenTreeBuilder builder, SortedMap<Long, LongSet> tokens) throws Exception
@@ -371,6 +400,7 @@ public class TokenTreeTest
     {
         testMergingOfEqualTokenTrees(simpleTokenMap);
         testMergingOfEqualTokenTrees(bigTokensMap);
+        testMergingOfEqualTokenTrees(collidingTokensMap);
     }
 
     public void testMergingOfEqualTokenTrees(SortedMap<Long, LongSet> tokensMap) throws Exception
@@ -414,7 +444,6 @@ public class TokenTreeTest
 
             LongSet found = result.getOffsets();
             Assert.assertEquals(entry.getValue(), found);
-
         }
     }
 
@@ -601,7 +630,7 @@ public class TokenTreeTest
 
     private static LongSet convert(long... values)
     {
-        LongSet result = new LongOpenHashSet(values.length);
+        LongSet result = new LongHashSet(values.length);
         for (long v : values)
             result.add(v);
 
@@ -632,7 +661,7 @@ public class TokenTreeTest
         {{
                 for (long i = minToken; i <= maxToken; i++)
                 {
-                    LongSet offsetSet = new LongOpenHashSet();
+                    LongSet offsetSet = new LongHashSet();
                     offsetSet.add(i);
                     put(i, offsetSet);
                 }

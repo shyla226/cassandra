@@ -452,7 +452,7 @@
           <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.3.5" />
           <dependency groupId="org.jctools" artifactId="jctools-core" version="2.0"/>
           <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava" version="2.0.4"/>
-          <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.5.4" />
+          <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.7.2" />
           <dependency groupId="org.apache.ant" artifactId="ant-junit" version="1.9.4" />
           <!-- dependencies for the DSE test framework-->
           <dependency groupId="org.apache.velocity" artifactId="velocity" version="1.7" scope="test">
@@ -818,7 +818,7 @@
         <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" />
         <dependency groupId="org.jctools" artifactId="jctools-core"/>
         <dependency groupId="io.reactivex.rxjava2" artifactId="rxjava"/>
-        <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.5.4" />
+        <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.7.2" />
         <dependency groupId="org.psjava" artifactId="psjava" version="0.1.19" />
 
         <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-cli"/>
