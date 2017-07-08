@@ -31,6 +31,7 @@ import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.compress.CompressionMetadata;
@@ -411,7 +412,10 @@ public class TableMetrics
         {
             public Integer getValue()
             {
-                return cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
+                CompactionStrategyManager compactionStrategyManager = cfs.getCompactionStrategyManager();
+                // cfs.pendingCompactions.getEstimatedRemainingCompactionTasks may be called by metrics reporter before
+                // compaction strategy manager is initialized
+                return compactionStrategyManager != null ? compactionStrategyManager.getEstimatedRemainingTasks() : 0;
             }
         });
         liveSSTableCount = createTableGauge("LiveSSTableCount", new Gauge<Integer>()

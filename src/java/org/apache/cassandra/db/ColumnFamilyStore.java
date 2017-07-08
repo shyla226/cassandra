@@ -142,6 +142,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                                                                           "internal");
 
     private static final ExecutorService [] perDiskflushExecutors = new ExecutorService[DatabaseDescriptor.getAllDataFileLocations().length];
+
     static
     {
         for (int i = 0; i < DatabaseDescriptor.getAllDataFileLocations().length; i++)
@@ -412,6 +413,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         metric = new TableMetrics(this);
 
+        // scan for sstables corresponding to this cf and load them
+        if (data.loadsstables)
+        {
+            Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
+            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+            data.addInitialSSTables(sstables);
+        }
+
         /**
          * When creating a CFS offline we change the default logic needed by CASSANDRA-8671
          * and link the passed directories to be picked up by the compaction strategy
@@ -432,14 +441,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             logger.warn("Disabling compaction strategy by setting compaction thresholds to 0 is deprecated, set the compaction option 'enabled' to 'false' instead.");
             this.compactionStrategyManager.disable();
-        }
-
-        // scan for sstables corresponding to this cf and load them
-        if (data.loadsstables)
-        {
-            Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-            Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
-            data.addInitialSSTables(sstables);
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes
