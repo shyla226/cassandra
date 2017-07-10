@@ -41,7 +41,7 @@ public class DiskOptimizationStrategyTest
         assertEquals(8192, strategy.roundBufferSize(4097));
         assertEquals(8192, strategy.roundBufferSize(8191));
         assertEquals(8192, strategy.roundBufferSize(8192));
-        assertEquals(12288, strategy.roundBufferSize(8193));
+        assertEquals(16384, strategy.roundBufferSize(8193));
         assertEquals(65536, strategy.roundBufferSize(65535));
         assertEquals(65536, strategy.roundBufferSize(65536));
         assertEquals(65536, strategy.roundBufferSize(65537));
@@ -58,13 +58,13 @@ public class DiskOptimizationStrategyTest
         assertEquals(4096, strategy.bufferSize(100));
         assertEquals(4096, strategy.bufferSize(4096));
         assertEquals(8192, strategy.bufferSize(4505));   // just < (4096 + 4096 * 0.1)
-        assertEquals(12288, strategy.bufferSize(4506));  // just > (4096 + 4096 * 0.1)
+        assertEquals(16384, strategy.bufferSize(4506));  // just > (4096 + 4096 * 0.1)
 
         strategy = new SsdDiskOptimizationStrategy(0.5);
         assertEquals(8192, strategy.bufferSize(4506));  // just > (4096 + 4096 * 0.1)
         assertEquals(8192, strategy.bufferSize(6143));  // < (4096 + 4096 * 0.5)
-        assertEquals(12288, strategy.bufferSize(6144));  // = (4096 + 4096 * 0.5)
-        assertEquals(12288, strategy.bufferSize(6145));  // > (4096 + 4096 * 0.5)
+        assertEquals(16384, strategy.bufferSize(6144));  // = (4096 + 4096 * 0.5)
+        assertEquals(16384, strategy.bufferSize(6145));  // > (4096 + 4096 * 0.5)
 
         strategy = new SsdDiskOptimizationStrategy(1.0); // never add a page
         assertEquals(8192, strategy.bufferSize(8191));
@@ -84,7 +84,7 @@ public class DiskOptimizationStrategyTest
         assertEquals(8192, strategy.bufferSize(10));
         assertEquals(8192, strategy.bufferSize(100));
         assertEquals(8192, strategy.bufferSize(4096));
-        assertEquals(12288, strategy.bufferSize(4097));
+        assertEquals(16384, strategy.bufferSize(4097));
     }
 
     @Test

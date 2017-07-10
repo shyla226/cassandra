@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.concurrent;
 
+import java.util.concurrent.Executor;
+
 import com.google.common.annotations.VisibleForTesting;
 
 /**
@@ -52,5 +54,13 @@ public class TPCScheduler extends EventLoopBasedScheduler<TPCEventLoop>
     public int coreId()
     {
         return thread().coreId();
+    }
+
+    /**
+     * To access the underlying executor
+     */
+    public Executor getExecutor()
+    {
+        return eventLoop;
     }
 }

@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.Iterator;
 
 import org.apache.cassandra.concurrent.TPCScheduler;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -151,7 +152,7 @@ public class SSTableFlushObserverTest
 
             try
             {
-                ByteBuffer indexKey = reader.keyAt(indexPosition).getKey();
+                ByteBuffer indexKey = reader.keyAt(indexPosition, Rebufferer.ReaderConstraint.NONE).getKey();
                 Assert.assertEquals(0, UTF8Type.instance.compare(key, indexKey));
             }
             catch (IOException ex)

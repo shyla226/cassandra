@@ -21,6 +21,8 @@ import java.lang.management.ManagementFactory;
 import java.util.Map;
 import javax.management.MBeanServer;
 
+import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,9 +34,9 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.format.big.BigRowIndexEntry;
-import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 public class StatusLogger
 {
@@ -74,6 +76,14 @@ public class StatusLogger
         }
         logger.info(String.format("%-25s%10s%10s",
                                   "MessagingService", "n/a", pendingLargeMessages + "/" + pendingSmallMessages));
+
+        //BufferPool stats
+        logger.info("Global file buffer pool size: {}", FBUtilities.prettyPrintMemory(BufferPool.sizeInBytes()));
+
+        //MemtablePool stats
+        logger.info("Global memtable buffer pool size: onHeap = {}, offHeap = {}",
+                    FBUtilities.prettyPrintMemory(Memtable.MEMORY_POOL.onHeap.used()),
+                    FBUtilities.prettyPrintMemory(Memtable.MEMORY_POOL.offHeap.used()));
 
         // Global key/row cache information
         AutoSavingCache<KeyCacheKey, BigRowIndexEntry> keyCache = CacheService.instance.keyCache;

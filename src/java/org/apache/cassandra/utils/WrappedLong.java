@@ -15,49 +15,48 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.io.util;
 
-public class EmptyRebufferer implements Rebufferer, RebuffererFactory
+package org.apache.cassandra.utils;
+
+/**
+ * Simple wrapper for native long type
+ */
+public class WrappedLong
 {
-    AsynchronousChannelProxy channel;
+    private long value;
 
-    public EmptyRebufferer(AsynchronousChannelProxy channel)
+    public WrappedLong(long initial)
     {
-        this.channel = channel;
+        this.value = initial;
     }
 
-    public AsynchronousChannelProxy channel()
+    public long get()
     {
-        return channel;
+        return value;
     }
 
-    public long fileLength()
+    public void set(int value)
     {
-        return 0;
+        this.value = value;
     }
 
-    public double getCrcCheckChance()
+    public void increment()
     {
-        return 0;
+        ++value;
     }
 
-    public Rebufferer instantiateRebufferer()
+    public void decrement()
     {
-        return this;
+        --value;
     }
 
-    public BufferHolder rebuffer(long position)
+    public void min(long l)
     {
-        return EMPTY;
+        value = Math.min(l, value);
     }
 
-    public void close()
+    public void max(long l)
     {
-        // nothing to do
-    }
-
-    public void closeReader()
-    {
-        // nothing to do
+        value = Math.max(l, value);
     }
 }

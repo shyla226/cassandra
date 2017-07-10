@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
 
 import org.apache.cassandra.io.compress.BufferType;
 
@@ -36,7 +37,7 @@ public interface ChunkReader extends RebuffererFactory
      * The source may have requirements for the positioning and/or size of the buffer (e.g. chunk-aligned and
      * chunk-sized). These must be satisfied by the caller. 
      */
-    void readChunk(long position, ByteBuffer buffer);
+    CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer buffer);
 
     /**
      * Buffer size required for this rebufferer. Must be power of 2 if alignment is required.

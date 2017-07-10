@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class ScrubIterator extends PartitionIndex.IndexPosIterator implements ScrubPartitionIterator
@@ -33,7 +34,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
 
     ScrubIterator(PartitionIndex partitionIndex, FileHandle rowIndexFile) throws IOException
     {
-        super(partitionIndex);
+        super(partitionIndex, Rebufferer.ReaderConstraint.NONE);
         this.rowIndexFile = rowIndexFile.sharedCopy();
         advance();
     }
@@ -65,7 +66,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
         {
             if (pos >= 0)
             {
-                try (FileDataInput in = rowIndexFile.createReader(pos))
+                try (FileDataInput in = rowIndexFile.createReader(pos, Rebufferer.ReaderConstraint.NONE))
                 {
                     key = ByteBufferUtil.readWithShortLength(in);
                     dataPosition = TrieIndexEntry.deserialize(in, in.getFilePointer()).position;

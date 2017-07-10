@@ -330,7 +330,7 @@ public class Memtable implements Comparable<Memtable>
         return Single.defer(() -> {
                         Map<PartitionPosition, AtomicBTreePartition> partitionMap = partitions.get(coreId);
                         AtomicBTreePartition previous = partitionMap.get(key);
-
+                        assert TPC.getCoreId() == coreId;
                         if (logger.isTraceEnabled())
                             logger.trace("Adding key {} to memtable", key);
 
@@ -497,9 +497,10 @@ public class Memtable implements Comparable<Memtable>
         return ret;
     }
 
-    public Partition getPartition(DecoratedKey key)
+    public CsFlow<Partition> getPartition(DecoratedKey key)
     {
-        return partitions.get(getCoreFor(key)).get(key);
+        int coreId = getCoreFor(key);
+        return Threads.evaluateOnCore(() -> partitions.get(coreId).get(key), coreId);
     }
 
     public long getMinTimestamp()

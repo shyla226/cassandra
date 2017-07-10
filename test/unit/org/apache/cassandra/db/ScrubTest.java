@@ -27,15 +27,12 @@ import java.util.*;
 import java.util.concurrent.ExecutionException;
 
 import com.google.common.collect.Sets;
-import org.apache.commons.lang3.ArrayUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.apache.cassandra.*;
 import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -164,6 +161,8 @@ public class ScrubTest
             fail("Expected a CorruptSSTableException to be thrown");
         }
         catch (IOError err) {}
+
+        ChunkCache.instance.invalidateFile(sstable.getFilename());
 
         // with skipCorrupted == true, the corrupt rows will be skipped
         Scrubber.ScrubResult scrubResult;

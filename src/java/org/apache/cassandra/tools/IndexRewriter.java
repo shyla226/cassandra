@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosI
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -130,23 +131,23 @@ public class IndexRewriter
         {
             IPartitioner partitioner = metadata.partitioner;
             boolean compressedData = new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists();
-            try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, Component.PARTITION_INDEX);
-                 FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, Component.ROW_INDEX);
-                 FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, compressedData))
+            try (FileHandle.Builder piBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.PARTITION_INDEX);
+                 FileHandle.Builder riBuilder = SSTableReader.indexFileHandleBuilder(desc, metadata, Component.ROW_INDEX);
+                 FileHandle.Builder dBuilder = SSTableReader.dataFileHandleBuilder(desc, metadata, compressedData))
             {
-                PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
+                PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE);
                 FileHandle dFile = dBuilder.complete();
                 FileHandle riFile = riBuilder.complete();
-                return new KeyIterator(index, dFile, riFile, partitioner);
+                return new KeyIterator(index, dFile, riFile, partitioner, Rebufferer.ReaderConstraint.NONE);
             } catch (IOException e)
             {
                 throw new RuntimeException(e);
             }
         }
 
-        private KeyIterator(PartitionIndex index, FileHandle dFile, FileHandle riFile, IPartitioner partitioner)
+        private KeyIterator(PartitionIndex index, FileHandle dFile, FileHandle riFile, IPartitioner partitioner, Rebufferer.ReaderConstraint rc)
         {
-            super(index);
+            super(index, rc);
             this.partitioner = partitioner;
             this.dFile = dFile;
             this.riFile = riFile;
@@ -170,10 +171,11 @@ public class IndexRewriter
         @Override
         public DecoratedKey next()
         {
+            Rebufferer.ReaderConstraint rc = Rebufferer.ReaderConstraint.NONE;
             assert indexPosition != PartitionIndex.NOT_FOUND;
             try
             {
-                try (FileDataInput in = indexPosition >= 0 ? riFile.createReader(indexPosition) : dFile.createReader(~indexPosition))
+                try (FileDataInput in = indexPosition >= 0 ? riFile.createReader(indexPosition, rc) : dFile.createReader(~indexPosition, rc))
                 {
                     DecoratedKey key = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
                     if (indexPosition >= 0)

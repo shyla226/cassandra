@@ -19,15 +19,22 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.channels.CompletionHandler;
+import java.util.concurrent.CompletableFuture;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 
 class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
+    private final static Logger logger = LoggerFactory.getLogger(SimpleChunkReader.class);
     private final int bufferSize;
     private final BufferType bufferType;
 
-    SimpleChunkReader(ChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
+    SimpleChunkReader(AsynchronousChannelProxy channel, long fileLength, BufferType bufferType, int bufferSize)
     {
         super(channel, fileLength);
         this.bufferSize = bufferSize;
@@ -35,11 +42,28 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     }
 
     @Override
-    public void readChunk(long position, ByteBuffer buffer)
+    public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer buffer)
     {
         buffer.clear();
-        channel.read(buffer, position);
-        buffer.flip();
+
+        CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
+        channel.read(buffer, position, new CompletionHandler<Integer, ByteBuffer>()
+        {
+            public void completed(Integer result, ByteBuffer attachment)
+            {
+                buffer.flip();
+                futureBuffer.complete(buffer);
+            }
+
+            public void failed(Throwable exc, ByteBuffer attachment)
+            {
+                // Make sure reader does not see stale data.
+                buffer.position(0).limit(0);
+                futureBuffer.completeExceptionally(new CorruptSSTableException(exc, channel.filePath()));
+            }
+        });
+
+        return futureBuffer;
     }
 
     @Override

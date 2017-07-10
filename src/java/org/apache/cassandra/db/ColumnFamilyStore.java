@@ -74,6 +74,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TableMetrics.Sampler;
 import org.apache.cassandra.schema.*;
@@ -1385,23 +1386,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
         return mt.put(update, indexer, opGroup)
                  .map(timeDelta ->
-                                     {
-                                         DecoratedKey key = update.partitionKey();
-                                         invalidateCachedPartition(key);
-                                         metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
-                                         StorageHook.instance.reportWrite(metadata.id, update);
-                                         metric.writeLatency.addNano(System.nanoTime() - start);
+                      {
+                          DecoratedKey key = update.partitionKey();
+                          invalidateCachedPartition(key);
+                          metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
+                          StorageHook.instance.reportWrite(metadata.id, update);
+                          metric.writeLatency.addNano(System.nanoTime() - start);
 
-                                         // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
-                                         // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
-                                         // a minimal write, etc). This limits the time delta to the max value the histogram
-                                         // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
-                                         // to update.
-                                         if (timeDelta < Long.MAX_VALUE)
-                                             metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+                          // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
+                          // large time deltas, either through a variety of sentinel timestamps (used for empty values, ensuring
+                          // a minimal write, etc). This limits the time delta to the max value the histogram
+                          // can bucket correctly. This also filters the Long.MAX_VALUE case where there was no previous value
+                          // to update.
+                          if (timeDelta < Long.MAX_VALUE)
+                              metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
 
-                                         return 0;
-                                     })
+                          return 0;
+                      })
                  .onErrorResumeNext(e ->
                                     {
                                         RuntimeException exc = new RuntimeException(e.getMessage()
@@ -1409,7 +1410,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                                                                     + keyspace.getName() + ", table: " + name, e);
                                         return Single.error(exc);
                                     })
-                .toCompletable();
+                 .toCompletable();
     }
 
     /**
@@ -1752,7 +1753,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
                 // check if the key actually exists in this sstable
-                if (sstr.contains(dk))
+                if (sstr.contains(dk, Rebufferer.ReaderConstraint.NONE))
                     files.add(sstr.getFilename());
             }
             return files;

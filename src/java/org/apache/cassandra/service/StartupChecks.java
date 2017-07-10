@@ -260,6 +260,9 @@ public class StartupChecks
                 DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.standard)
                 return; // no need to check if disk access mode is only standard and not mmap
 
+            //TPC: We only care about mmap when used with the MemoryOnlyStrategy
+            //but we can't detect if MOS is being used till later, so leaving this in place
+            //just incase.
             long maxMapCount = getMaxMapCount();
             if (maxMapCount < EXPECTED_MAX_MAP_COUNT)
                 logger.warn("Maximum number of memory map areas per process (vm.max_map_count) {} " +

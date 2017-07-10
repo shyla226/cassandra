@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.flow.CsFlow;
 import org.apache.cassandra.utils.flow.FlatMap;
+import org.apache.cassandra.utils.flow.Threads;
 
 public class QueryPlan
 {
@@ -94,6 +95,7 @@ public class QueryPlan
             operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
 
             CsFlow<DecoratedKey> keys = CsFlow.fromIterable(() -> operationTree)
+                                              .lift(Threads.requestOnIo())
                                               .flatMap(CsFlow::fromIterable);
 
             if (!keyRange.right.isMinimum())

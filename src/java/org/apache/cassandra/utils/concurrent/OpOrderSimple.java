@@ -18,9 +18,8 @@
  */
 package org.apache.cassandra.utils.concurrent;
 
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
-
-import sun.misc.Contended;
 
 /**
  * <p>A class for providing synchronization between producers and consumers that do not
@@ -170,6 +169,11 @@ public class OpOrderSimple implements OpOrder
 
         static final AtomicIntegerFieldUpdater<Group> runningUpdater = AtomicIntegerFieldUpdater.newUpdater(Group.class, "running");
 
+        private static final boolean ENABLE_DEBUGGING = false;
+
+        CopyOnWriteArrayList<StackTraceElement[]> startTraces = ENABLE_DEBUGGING ? new CopyOnWriteArrayList<>() : null;
+        CopyOnWriteArrayList<StackTraceElement[]> closeTraces = ENABLE_DEBUGGING ? new CopyOnWriteArrayList<>() : null;
+
         // constructs first instance only
         Group()
         {
@@ -211,7 +215,11 @@ public class OpOrderSimple implements OpOrder
                 if (current < 0)
                     return false;
                 if (runningUpdater.compareAndSet(this, current, current + 1))
+                {
+                    if (ENABLE_DEBUGGING)
+                        startTraces.add(Thread.currentThread().getStackTrace());
                     return true;
+                }
             }
         }
 
@@ -221,6 +229,9 @@ public class OpOrderSimple implements OpOrder
          */
         public void close()
         {
+            if (ENABLE_DEBUGGING)
+                closeTraces.add(Thread.currentThread().getStackTrace());
+
             while (true)
             {
                 int current = running;

@@ -215,6 +215,8 @@ public class BlacklistingCompactionsTest
                 // an ExecutionException wrapping a CSSTE.  This is probably Good Enough though, since if there are
                 // other errors in compaction presumably the other tests would bring that to light.
                 failures++;
+                for(SSTableReader t : sstables)
+                    ChunkCache.instance.invalidateFile(t.getFilename());
                 continue;
             }
             break;

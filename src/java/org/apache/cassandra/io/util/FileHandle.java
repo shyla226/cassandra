@@ -57,7 +57,7 @@ public class FileHandle extends SharedCloseableImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(FileHandle.class);
 
-    public final ChannelProxy channel;
+    public final AsynchronousChannelProxy channel;
 
     public final long onDiskLength;
 
@@ -82,8 +82,10 @@ public class FileHandle extends SharedCloseableImpl
     @Nullable
     private MmappedRegions regions;
 
+    private final boolean mmapped;
+
     private FileHandle(Cleanup cleanup,
-                       ChannelProxy channel,
+                       AsynchronousChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
                        CompressionMetadata compressionMetadata,
                        long onDiskLength,
@@ -95,6 +97,7 @@ public class FileHandle extends SharedCloseableImpl
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
         this.onDiskLength = onDiskLength;
         this.regions = regions;
+        this.mmapped = regions != null;
     }
 
     private FileHandle(FileHandle copy)
@@ -105,6 +108,7 @@ public class FileHandle extends SharedCloseableImpl
         compressionMetadata = copy.compressionMetadata;
         onDiskLength = copy.onDiskLength;
         regions = copy.regions;
+        mmapped = copy.mmapped;
     }
 
     /**
@@ -113,6 +117,11 @@ public class FileHandle extends SharedCloseableImpl
     public String path()
     {
         return channel.filePath();
+    }
+
+    public boolean mmapped()
+    {
+        return mmapped;
     }
 
     public long dataLength()
@@ -150,7 +159,17 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader()
     {
-        return createReader(null);
+        return createReader(Rebufferer.ReaderConstraint.NONE);
+    }
+
+    /**
+     * Create {@link RandomAccessReader} with configured method of reading content of the file.
+     *
+     * @return RandomAccessReader for the file
+     */
+    public RandomAccessReader createReader(Rebufferer.ReaderConstraint constraint)
+    {
+        return new RandomAccessReader(instantiateRebufferer(null), constraint);
     }
 
     /**
@@ -162,12 +181,12 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(RateLimiter limiter)
     {
-        return new RandomAccessReader(instantiateRebufferer(limiter));
+        return new RandomAccessReader(instantiateRebufferer(limiter), Rebufferer.ReaderConstraint.NONE);
     }
 
-    public FileDataInput createReader(long position)
+    public FileDataInput createReader(long position, Rebufferer.ReaderConstraint rc)
     {
-        RandomAccessReader reader = createReader();
+        RandomAccessReader reader = createReader(rc);
         reader.seek(position);
         return reader;
     }
@@ -228,13 +247,13 @@ public class FileHandle extends SharedCloseableImpl
      */
     private static class Cleanup implements RefCounted.Tidy
     {
-        final ChannelProxy channel;
+        final AsynchronousChannelProxy channel;
         final RebuffererFactory rebufferer;
         final CompressionMetadata compressionMetadata;
         final Optional<ChunkCache> chunkCache;
         final MmappedRegions regions;
 
-        private Cleanup(ChannelProxy channel,
+        private Cleanup(AsynchronousChannelProxy channel,
                         RebuffererFactory rebufferer,
                         CompressionMetadata compressionMetadata,
                         ChunkCache chunkCache,
@@ -269,7 +288,7 @@ public class FileHandle extends SharedCloseableImpl
     {
         private final String path;
 
-        private ChannelProxy channel;
+        private AsynchronousChannelProxy channel;
         private CompressionMetadata compressionMetadata;
         private MmappedRegions regions;
         private ChunkCache chunkCache;
@@ -284,7 +303,7 @@ public class FileHandle extends SharedCloseableImpl
             this.path = path;
         }
 
-        public Builder(ChannelProxy channel)
+        public Builder(AsynchronousChannelProxy channel)
         {
             this.channel = channel;
             this.path = channel.filePath();
@@ -379,10 +398,10 @@ public class FileHandle extends SharedCloseableImpl
         {
             if (channel == null)
             {
-                channel = new ChannelProxy(path);
+                channel = new AsynchronousChannelProxy(path);
             }
 
-            ChannelProxy channelCopy = channel.sharedCopy();
+            AsynchronousChannelProxy channelCopy = channel.sharedCopy();
             try
             {
                 if (compressed && compressionMetadata == null)
@@ -397,16 +416,19 @@ public class FileHandle extends SharedCloseableImpl
                 }
                 else if (mmapped)
                 {
-                    if (compressed)
+                    try (ChannelProxy blockingChannel = channelCopy.getBlockingChannel())
                     {
-                        regions = MmappedRegions.map(channelCopy, compressionMetadata);
-                        rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata,
-                                                                                       regions));
-                    }
-                    else
-                    {
-                        updateRegions(channelCopy, length);
-                        rebuffererFactory = new MmapRebufferer(channelCopy, length, regions.sharedCopy());
+                        if (compressed)
+                        {
+                            regions = MmappedRegions.map(blockingChannel, compressionMetadata);
+                            rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata,
+                                                                                           regions));
+                        }
+                        else
+                        {
+                            updateRegions(blockingChannel, length);
+                            rebuffererFactory = new MmapRebufferer(channelCopy, length, regions.sharedCopy());
+                        }
                     }
                 }
                 else
@@ -452,6 +474,7 @@ public class FileHandle extends SharedCloseableImpl
         {
             if (chunkCache != null)
                 return chunkCache.maybeWrap(reader);
+
             return reader;
         }
 

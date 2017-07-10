@@ -21,7 +21,12 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Observable;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -34,6 +39,7 @@ import org.reactivestreams.Subscription;
 
 public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 {
+    final static Logger logger = LoggerFactory.getLogger(AbstractSSTableIterator.class);
     protected final SSTableReader sstable;
     // We could use sstable.metadata(), but that can change during execution so it's good hygiene to grab an immutable instance
     protected final TableMetadata metadata;
@@ -57,7 +63,8 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                                       DecoratedKey key,
                                       RowIndexEntry indexEntry,
                                       Slices slices,
-                                      ColumnFilter columnFilter)
+                                      ColumnFilter columnFilter,
+                                      Rebufferer.ReaderConstraint readerConstraint)
     {
         this.sstable = sstable;
         this.metadata = sstable.metadata();
@@ -87,23 +94,22 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
                 {
                     // Not indexed (or is reading static), set to the beginning of the partition and read partition level deletion there
                     if (dataFileInput == null)
-                        dataFileInput = sstable.getFileDataInput(indexEntry.position);
+                        dataFileInput = sstable.getFileDataInput(indexEntry.position, readerConstraint);
                     else
                         dataFileInput.seek(indexEntry.position);
 
                     ByteBufferUtil.skipShortLength(dataFileInput); // Skip partition key
                     this.partitionLevelDeletion = DeletionTime.serializer.deserialize(dataFileInput);
 
-                    // Note that this needs to be called after file != null and after the partitionDeletion has been set, but before readStaticRow
-                    // (since it uses it) so we can't move that up (but we'll be able to simplify as soon as we drop support for the old file format).
-                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile);
+                    // Note that this needs to be called after file != null and after the partitionDeletion has been set so we can't move that up.
                     this.staticRow = readStaticRow(sstable, dataFileInput, helper, columns.fetchedColumns().statics);
+                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, readerConstraint);
                 }
                 else
                 {
                     this.partitionLevelDeletion = indexEntry.deletionTime();
                     this.staticRow = Rows.EMPTY_STATIC_ROW;
-                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile);
+                    this.reader = createReader(indexEntry, dataFileInput, shouldCloseFile, readerConstraint);
                 }
 
                 if (!slices.isEmpty())
@@ -134,11 +140,18 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         return slices.get(nextSliceIndex());
     }
 
+    private Slice currentSlice()
+    {
+        return slices.get(currentSliceIndex());
+    }
+
     /**
      * Returns the index of the next slice to process.
      * @return the index of the next slice to process
      */
     protected abstract int nextSliceIndex();
+
+    protected abstract int currentSliceIndex();
 
     /**
      * Checks if there are more slice to process.
@@ -165,12 +178,29 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         }
     }
 
-    protected abstract Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile);
+    protected abstract Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc);
 
-    private Reader createReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    private Reader createReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return slices.isEmpty() ? new NoRowsReader(file, shouldCloseFile)
-                                : createReaderInternal(indexEntry, file, shouldCloseFile);
+                                : createReaderInternal(indexEntry, file, shouldCloseFile, rc);
+    }
+
+    public void resetReaderState()
+    {
+        assert reader != null;
+        reader.resetState();
+        if (!slices.isEmpty())
+        {
+            try
+            {
+                reader.setForSlice(currentSlice());
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     public TableMetadata metadata()
@@ -203,6 +233,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         return sstable.stats();
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     public boolean hasNext()
     {
         while (true)
@@ -220,6 +253,9 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         }
     }
 
+    /**
+     * This method must be async-read-safe.
+     */
     public Unfiltered next()
     {
         assert reader != null;
@@ -283,11 +319,13 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
     {
         private final boolean shouldCloseFile;
         public FileDataInput file;
+        protected long filePos = -1;
 
         public UnfilteredDeserializer deserializer;
 
         // Records the currently open range tombstone (if any)
         public DeletionTime openMarker = null;
+        protected DeletionTime lastOpenMarker = null;
 
         protected Reader(FileDataInput file, boolean shouldCloseFile)
         {
@@ -304,16 +342,29 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
             deserializer = UnfilteredDeserializer.create(metadata, file, sstable.header, helper);
         }
 
+        /**
+         * Resets the state to the last known finished item
+         * This is needed to handle async retries - due to missing data in the chunk cache.
+         * Classes that override this must call the base class too.
+         */
+         protected void resetState()
+         {
+             deserializer.clearState();
+             openMarker = lastOpenMarker;
+         }
+
         public void seekToPosition(long position) throws IOException
         {
             // This may be the first time we're actually looking into the file
+            // Note: file can't be null in rx read path
             if (file == null)
             {
-                file = sstable.getFileDataInput(position);
+                file = sstable.getFileDataInput(position, Rebufferer.ReaderConstraint.NONE);
                 createDeserializer();
             }
             else
             {
+                filePos = position;
                 file.seek(position);
                 deserializer.clearState();
             }
@@ -321,6 +372,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 
         protected void updateOpenMarker(RangeTombstoneMarker marker)
         {
+            lastOpenMarker = null;
             // Note that we always read index blocks in forward order so this method is always called in forward order
             openMarker = marker.isOpen(false) ? marker.openDeletionTime(false) : null;
         }
@@ -328,6 +380,7 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         protected DeletionTime getAndClearOpenMarker()
         {
             DeletionTime toReturn = openMarker;
+            lastOpenMarker = openMarker;
             openMarker = null;
             return toReturn;
         }
@@ -408,6 +461,11 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
         protected Unfiltered nextInternal() throws IOException
         {
             throw new NoSuchElementException();
+        }
+
+        protected void resetState()
+        {
+
         }
     }
 }

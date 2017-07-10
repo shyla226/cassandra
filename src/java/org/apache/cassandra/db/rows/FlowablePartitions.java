@@ -25,6 +25,9 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.reactivex.Scheduler;
 import org.apache.cassandra.db.Clusterable;
 import org.apache.cassandra.db.Columns;
@@ -46,6 +49,8 @@ import org.apache.cassandra.utils.flow.Threads;
  */
 public class FlowablePartitions
 {
+    private final static Logger logger = LoggerFactory.getLogger(FlowablePartitions.class);
+
     static class BaseRowIterator<T> implements PartitionTrait
     {
         final PartitionTrait source;
@@ -223,10 +228,14 @@ public class FlowablePartitions
             return merged;
     }
 
-    private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = (x, y) -> x.header.partitionKey.compareTo(y.header.partitionKey);
+    private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = Comparator.comparing(x -> x.header.partitionKey);
 
     public static CsFlow<FlowableUnfilteredPartition> mergePartitions(final List<CsFlow<FlowableUnfilteredPartition>> sources, final int nowInSec)
     {
+        assert !sources.isEmpty();
+        if (sources.size() == 1)
+            return sources.get(0);
+
         return CsFlow.merge(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             private final List<FlowableUnfilteredPartition> toMerge = new ArrayList<>(sources.size());

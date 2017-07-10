@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sasi.utils.MappedBuffer;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.index.sasi.utils.RangeUnionIterator;
+import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.utils.MurmurHash;
@@ -177,7 +178,7 @@ public class TokenTreeTest
             writer.sync();
         }
 
-        final RandomAccessReader reader = RandomAccessReader.open(treeFile);
+        final ChannelProxy reader = new ChannelProxy(treeFile);
         final TokenTree tokenTree = new TokenTree(new MappedBuffer(reader));
 
         final Iterator<Token> tokenIterator = tokenTree.iterator(KEY_CONVERTER);
@@ -253,7 +254,7 @@ public class TokenTreeTest
             writer.sync();
         }
 
-        final RandomAccessReader reader = RandomAccessReader.open(treeFile);
+        final ChannelProxy reader = new ChannelProxy(treeFile);
         final TokenTree tokenTree = new TokenTree(new MappedBuffer(reader));
 
         final RangeIterator<Long, Token> treeIterator = tokenTree.iterator(KEY_CONVERTER);
@@ -316,7 +317,7 @@ public class TokenTreeTest
             writer.sync();
         }
 
-        final RandomAccessReader reader = RandomAccessReader.open(treeFile);
+        final ChannelProxy reader = new ChannelProxy(treeFile);
         final RangeIterator<Long, Token> tokenTree = new TokenTree(new MappedBuffer(reader)).iterator(KEY_CONVERTER);
 
         tokenTree.skipTo(tokens.lastKey() + 10);
@@ -460,7 +461,7 @@ public class TokenTreeTest
             writer.sync();
         }
 
-        final RandomAccessReader reader = RandomAccessReader.open(treeFile);
+        final ChannelProxy reader = new ChannelProxy(treeFile);
         return new TokenTree(new MappedBuffer(reader));
     }
 
@@ -678,11 +679,11 @@ public class TokenTreeTest
             writer.sync();
         }
 
-        RandomAccessReader reader = null;
+        ChannelProxy reader = null;
 
         try
         {
-            reader = RandomAccessReader.open(treeFile);
+            reader = new ChannelProxy(treeFile);
             return new TokenTree(new MappedBuffer(reader));
         }
         finally

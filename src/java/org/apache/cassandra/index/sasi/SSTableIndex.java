@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 import org.apache.commons.lang3.builder.HashCodeBuilder;
@@ -176,7 +177,7 @@ public class SSTableIndex
         {
             try
             {
-                return sstable.keyAt(offset);
+                return sstable.keyAt(offset, Rebufferer.ReaderConstraint.NONE);
             }
             catch (IOException e)
             {

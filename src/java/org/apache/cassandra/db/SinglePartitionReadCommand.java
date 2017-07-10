@@ -59,11 +59,11 @@ import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.Threads;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.SearchIterator;
-import org.apache.cassandra.utils.WrappedBoolean;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Threads;
 
 /**
  * A read command that selects a (part of a) single partition.
@@ -75,7 +75,26 @@ public class SinglePartitionReadCommand extends ReadCommand
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
-    private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
+
+    // Mutable query state.
+    private ColumnFamilyStore cfs;
+    private SSTableReadMetricsCollector metricsCollector;
+    private int oldestUnrepairedTombstone;
+
+
+    // Mutable query state as used by queryMemtableAndDiskInternal
+    private long mostRecentPartitionTombstone;
+    private long minTimestamp;
+    private int allTableCount;
+    private int includedDueToTombstones;
+    private int nonIntersectingSSTables;
+
+    // Mutable query state used by queryMemtableAndSSTablesInTimestampOrder
+    private ClusteringIndexNamesFilter namesFilter;
+    private int sstablesIterated;
+    private boolean onlyUnrepaired;
+    private ImmutableBTreePartition timeOrderedResult;
+
 
     private SinglePartitionReadCommand(DigestVersion digestVersion,
                                        TableMetadata metadata,
@@ -90,7 +109,27 @@ public class SinglePartitionReadCommand extends ReadCommand
         assert partitionKey.getPartitioner() == metadata.partitioner;
         this.partitionKey = partitionKey;
         this.clusteringIndexFilter = clusteringIndexFilter;
+        resetMutableState();
     }
+
+    private void resetMutableState()
+    {
+        metricsCollector = null;
+        cfs = null;
+        oldestUnrepairedTombstone = Integer.MAX_VALUE;
+
+        mostRecentPartitionTombstone = Long.MIN_VALUE;
+        minTimestamp = Long.MAX_VALUE;
+        allTableCount = 0;
+        includedDueToTombstones = 0;
+        nonIntersectingSSTables = 0;
+
+        namesFilter = null;
+        sstablesIterated = 0;
+        onlyUnrepaired = true;
+        timeOrderedResult = null;
+    }
+
 
     /**
      * Creates a new read command on a single partition.
@@ -351,6 +390,11 @@ public class SinglePartitionReadCommand extends ReadCommand
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
     public CsFlow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
+        //Resets our mutable state for short reads
+        //Since this object can be re-used
+        if (this.cfs != null)
+            resetMutableState();
+
         if (cfs.isRowCacheEnabled())
             return getThroughCache(cfs, executionController);       // tpc TODO: Not tested!
         else
@@ -359,13 +403,19 @@ public class SinglePartitionReadCommand extends ReadCommand
 
     public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
-        final SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
-        return Threads.evaluateOnCore(() -> queryMemtableAndDisk(cfs, executionController, metricsCollector),
-                                      TPC.getCoreForKey(cfs.keyspace, partitionKey()))
-                      .doOnClose(() -> updateMetrics(cfs.metric, metricsCollector));
+        //Resets our mutable state for short reads
+        //Since this object can be re-used
+        if (this.cfs != null)
+            resetMutableState();
+
+        metricsCollector = new SSTableReadMetricsCollector();
+
+        return Threads.deferOnCore(() -> queryMemtableAndDisk(cfs, executionController)
+                                         .doOnClose(() -> updateMetrics(cfs.metric)),
+                                   TPC.getCoreForKey(cfs.keyspace, partitionKey));
     }
 
-    private void updateMetrics(TableMetrics metrics, SSTableReadMetricsCollector metricsCollector)
+    private void updateMetrics(TableMetrics metrics)
     {
         int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
         metrics.updateSSTableIterated(mergedSSTablesIterated);
@@ -516,12 +566,13 @@ public class SinglePartitionReadCommand extends ReadCommand
      * Also note that one must have created a {@code ReadExecutionController} on the queried table and we require it as
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
-    private FlowableUnfilteredPartition queryMemtableAndDisk(ColumnFamilyStore cfs,
-                                                             ReadExecutionController executionController,
-                                                             SSTableReadMetricsCollector metricsCollector)
+    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDisk(ColumnFamilyStore cfs,
+                                                                     ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
+
         Tracing.trace("Executing single-partition query on {}", cfs.name);
+        this.cfs = cfs;
 
          /*
          * We have 2 main strategies:
@@ -534,10 +585,10 @@ public class SinglePartitionReadCommand extends ReadCommand
          *      we can't guarantee an older sstable won't have some elements that weren't in the most recent sstables,
          *      and counters are intrinsically a collection of shards and so have the same problem).
          */
-        if (clusteringIndexFilter() instanceof ClusteringIndexNamesFilter && !queriesMulticellType(cfs.metadata()))
-            return queryMemtableAndSSTablesInTimestampOrder(cfs, (ClusteringIndexNamesFilter) clusteringIndexFilter(), metricsCollector);
-
-        return queryMemtableAndDiskInternal(cfs, metricsCollector);
+        if (clusteringIndexFilter().kind() == ClusteringIndexFilter.Kind.NAMES && !queriesMulticellType(cfs.metadata()))
+            return queryMemtableAndSSTablesInTimestampOrder((ClusteringIndexNamesFilter) clusteringIndexFilter());
+        else
+            return queryMemtableAndDiskInternal();
     }
 
     @Override
@@ -546,111 +597,142 @@ public class SinglePartitionReadCommand extends ReadCommand
         return oldestUnrepairedTombstone;
     }
 
-    private FlowableUnfilteredPartition queryMemtableAndDiskInternal(ColumnFamilyStore cfs, SSTableReadMetricsCollector metricsCollector)
+    @SuppressWarnings("resource")
+    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
     {
-        Tracing.trace("Acquiring sstable references");
-        ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
-        List<FlowableUnfilteredPartition> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
-        ClusteringIndexFilter filter = clusteringIndexFilter();
-        long minTimestamp = Long.MAX_VALUE;
+        // We now build a flow of FlowableUnfilteredPartition sourced from three separate lists:
+        // - memtables
+        // - sstables that contain sliced data, but only newer than the most recent partition tombstone
+        // - sstables that contain tombstones newer than the data from above
 
-        for (Memtable memtable : view.memtables)
+        try
         {
-            Partition partition = memtable.getPartition(partitionKey());
-            if (partition == null)
-                continue;
+            Tracing.trace("Acquiring sstable references");
+            ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
 
-            minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
+            List<CsFlow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(3);
 
-            @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
-            UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
-            oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
-            iterators.add(FlowablePartitions.fromIterator(iter, null));
-        }
+            iterators.add(CsFlow.fromIterable(view.memtables)
+                                .flatMap(memtable ->
+                                {
+                                    minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
+                                    return memtable.getPartition(partitionKey());
+                                })
+                                .skippingMap(p ->
+                                {
+                                    if (p == null)
+                                        return null;
 
-        /*
-         * We can't eliminate full sstables based on the timestamp of what we've already read like
-         * in collectTimeOrderedData, but we still want to eliminate sstable whose maxTimestamp < mostRecentTombstone
-         * we've read. We still rely on the sstable ordering by maxTimestamp since if
-         *   maxTimestamp_s1 > maxTimestamp_s0,
-         * we're guaranteed that s1 cannot have a row tombstone such that
-         *   timestamp(tombstone) > maxTimestamp_s0
-         * since we necessarily have
-         *   timestamp(tombstone) <= maxTimestamp_s1
-         * In other words, iterating in maxTimestamp order allow to do our mostRecentPartitionTombstone elimination
-         * in one pass, and minimize the number of sstables for which we read a partition tombstone.
-         */
-        Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
-        long mostRecentPartitionTombstone = Long.MIN_VALUE;
-        int nonIntersectingSSTables = 0;
-        List<SSTableReader> skippedSSTablesWithTombstones = null;
+                                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
+                                                                         p.stats().minLocalDeletionTime);
 
-        for (SSTableReader sstable : view.sstables)
-        {
-            // if we've already seen a partition tombstone with a timestamp greater
-            // than the most recent update to this sstable, we can skip it
-            if (sstable.getMaxTimestamp() < mostRecentPartitionTombstone)
-                break;
-            // TODO: Filter out flow content if table or partition covered by partition-level deletion
+                                    mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
+                                                                            p.partitionLevelDeletion().markedForDeleteAt());
 
-            if (!shouldInclude(sstable))
+                                    return FlowablePartitions.fromIterator(clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), p),
+                                                                           null);
+                                }));
+
+            /*
+             * We can't eliminate full sstables based on the timestamp of what we've already read like
+             * in collectTimeOrderedData, but we still want to eliminate sstable whose maxTimestamp < mostRecentTombstone
+             * we've read. We still rely on the sstable ordering by maxTimestamp since if
+             *   maxTimestamp_s1 > maxTimestamp_s0,
+             * we're guaranteed that s1 cannot have a row tombstone such that
+             *   timestamp(tombstone) > maxTimestamp_s0
+             * since we necessarily have
+             *   timestamp(tombstone) <= maxTimestamp_s1
+             * In other words, iterating in maxTimestamp order allow to do our mostRecentPartitionTombstone elimination
+             * in one pass, and minimize the number of sstables for which we read a partition tombstone.
+             */
+
+            Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
+            List<SSTableReader> skippedSSTablesWithTombstones = null;
+            List<SSTableReader> filteredSSTables = new ArrayList<>(view.sstables.size());
+
+            for (SSTableReader sstable : view.sstables)
             {
-                nonIntersectingSSTables++;
-                if (sstable.mayHaveTombstones())
-                { // if sstable has tombstones we need to check after one pass if it can be safely skipped
-                    if (skippedSSTablesWithTombstones == null)
-                        skippedSSTablesWithTombstones = new ArrayList<>();
-                    skippedSSTablesWithTombstones.add(sstable);
-                }
-                continue;
-            }
+                ++allTableCount;
 
-            minTimestamp = Math.min(minTimestamp, sstable.getMinTimestamp());
-
-            @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception,
-                       // or through the closing of the final merged iterator
-            FlowableUnfilteredPartition/*WithLowerBound*/ iter = makeFlowable(cfs, sstable, metricsCollector);
-            if (!sstable.isRepaired())
-                oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
-
-            iterators.add(iter);
-            mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
-                                                    iter.header.partitionLevelDeletion.markedForDeleteAt());
-        }
-
-        int includedDueToTombstones = 0;
-        // Check for sstables with tombstones that are not expired
-        if (skippedSSTablesWithTombstones != null)
-        {
-            for (SSTableReader sstable : skippedSSTablesWithTombstones)
-            {
-                if (sstable.getMaxTimestamp() <= minTimestamp)
+                if (!shouldInclude(sstable))
+                {
+                    nonIntersectingSSTables++;
+                    if (sstable.mayHaveTombstones())
+                    { // if sstable has tombstones we need to check after one pass if it can be safely skipped
+                        if (skippedSSTablesWithTombstones == null)
+                            skippedSSTablesWithTombstones = new ArrayList<>();
+                        skippedSSTablesWithTombstones.add(sstable);
+                    }
                     continue;
-
-                @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception,
-                // or through the closing of the final merged iterator
-                FlowableUnfilteredPartition/*WithLowerBound*/ iter = makeFlowable(cfs, sstable, metricsCollector);
-                if (!sstable.isRepaired())
-                    oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
-
-                iterators.add(iter);
-                includedDueToTombstones++;
+                }
+                filteredSSTables.add(sstable);
             }
+
+            // Operating over this flow executes the operations in each takeWhile below only after the preceding items have
+            // been processed, which ensures that the relevant fields are properly set.
+
+            iterators.add(CsFlow.fromIterable(filteredSSTables)
+                                .takeWhile(sstable -> sstable.getMaxTimestamp() >= mostRecentPartitionTombstone)
+                                .flatMap(sstable ->
+                                {
+                                    minTimestamp = Math.min(minTimestamp, sstable.getMinTimestamp());
+
+                                    if (!sstable.isRepaired())
+                                        oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
+                                                                             sstable.getMinLocalDeletionTime());
+
+                                    return makeFlowable(sstable);
+                                })
+                                .map(fup -> {
+                                    mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
+                                                                            fup.header.partitionLevelDeletion.markedForDeleteAt());
+                                    return fup;
+                                }));
+
+            // These one must be added at the end, so that minTimestamp (which is also affected by mostRecentPartitionTombstone)
+            // is calculated correctly for them.
+            if (skippedSSTablesWithTombstones != null)
+            {
+                iterators.add(CsFlow.fromIterable(skippedSSTablesWithTombstones)
+                                    .takeWhile(sstable -> sstable.getMaxTimestamp() > minTimestamp)
+                                    .flatMap(sstable ->
+                                    {
+                                        // This has no sliced data so we no longer need to update minTimestamp
+
+                                        includedDueToTombstones++;
+
+                                        if (!sstable.isRepaired())
+                                            oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone,
+                                                                                 sstable.getMinLocalDeletionTime());
+
+                                        return makeFlowable(sstable);
+                                    }));
+            }
+
+            return CsFlow.concat(iterators)
+                         .toList()
+                         .map(this::mergeResult);
         }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            throw t;
+        }
+    }
+
+    private FlowableUnfilteredPartition mergeResult(List<FlowableUnfilteredPartition> fups)
+    {
         if (Tracing.isTracing())
             Tracing.trace("Skipped {}/{} non-slice-intersecting sstables, included {} due to tombstones",
-                          nonIntersectingSSTables, view.sstables.size(), includedDueToTombstones);
+                          nonIntersectingSSTables, allTableCount, includedDueToTombstones);
 
-        if (iterators.isEmpty())
-            return FlowablePartitions.empty(cfs.metadata(), partitionKey(), filter.isReversed());
+        if (fups.isEmpty())
+            return FlowablePartitions.empty(metadata(), partitionKey(), clusteringIndexFilter().isReversed());
 
-        StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
+        StorageHook.instance.reportRead(metadata().id, partitionKey());
+        cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(partitionKey.getKey(), partitionKey.hashCode(), 1);
 
-        FlowableUnfilteredPartition merged = FlowablePartitions.merge(iterators, nowInSec());
-
-        DecoratedKey key = merged.header.partitionKey;
-        cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(merged.header.partitionKey.getKey(), key.hashCode(), 1);
-        return merged;
+        return FlowablePartitions.merge(fups, nowInSec());
     }
 
     private boolean shouldInclude(SSTableReader sstable)
@@ -664,12 +746,14 @@ public class SinglePartitionReadCommand extends ReadCommand
         return clusteringIndexFilter().shouldInclude(sstable);
     }
 
-    private FlowableUnfilteredPartition makeFlowable(ColumnFamilyStore cfs,
-                                                     SSTableReader sstable,
-                                                     SSTableReadsListener listener)
+    private CsFlow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable, final ClusteringIndexNamesFilter clusterFilter)
     {
-        // synchronous!
-        return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), listener);
+        return sstable.flow(partitionKey(), clusterFilter.getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
+    }
+
+    private CsFlow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable)
+    {
+        return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
 
     private boolean queriesMulticellType(TableMetadata table)
@@ -694,101 +778,115 @@ public class SinglePartitionReadCommand extends ReadCommand
      * no collection or counters are included).
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
-    private FlowableUnfilteredPartition queryMemtableAndSSTablesInTimestampOrder(ColumnFamilyStore cfs,
-                                                                                 ClusteringIndexNamesFilter filter,
-                                                                                 SSTableReadMetricsCollector metricsCollector)
+    @SuppressWarnings("resource")
+    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(final ClusteringIndexNamesFilter initFilter)
     {
-        // FIXME: Code here is synchronous aka bad.
-        Tracing.trace("Acquiring sstable references");
-        ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
-
-        ImmutableBTreePartition result = null;
-
-        Tracing.trace("Merging memtable contents");
-        for (Memtable memtable : view.memtables)
+        try
         {
-            Partition partition = memtable.getPartition(partitionKey());
-            if (partition == null)
-                continue;
+            Tracing.trace("Acquiring sstable references");
+            ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
 
-            try (UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition))
+            namesFilter = initFilter;
+            List<CsFlow<Void>> memtableList = new ArrayList<>(Iterables.size(view.memtables));
+
+            Tracing.trace("Merging memtable contents");
+            for (Memtable memtable : view.memtables)
             {
-                if (iter.isEmpty())
-                    continue;
-
-                result = add(iter, result, filter, false);
+                memtableList.add(memtable.getPartition(partitionKey())
+                                         .map(p ->
+                                              {
+                                                  if (p != null)
+                                                  {
+                                                      try (UnfilteredRowIterator iter = namesFilter.getUnfilteredRowIterator(columnFilter(), p))
+                                                      {
+                                                          if (!iter.isEmpty())
+                                                              addTimeOrdered(iter, namesFilter, false);
+                                                      }
+                                                  }
+                                                  return null;
+                                              }));
             }
+
+            if (!view.sstables.isEmpty())
+            {
+                /* sort the SSTables on disk */
+                Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
+
+                memtableList.add(CsFlow.fromIterable(view.sstables)
+                                       .takeWhile(sstable ->
+                                                  {
+                                                      // if we've already seen a partition tombstone with a timestamp greater
+                                                      // than the most recent update to this sstable, we're done, since the rest of the sstables
+                                                      // will also be older
+                                                      if (timeOrderedResult != null &&
+                                                          sstable.getMaxTimestamp() < timeOrderedResult.partitionLevelDeletion().markedForDeleteAt())
+                                                          return false;
+
+                                                      long currentMaxTs = sstable.getMaxTimestamp();
+                                                      namesFilter = reduceFilter(namesFilter,
+                                                                                 timeOrderedResult, currentMaxTs);
+                                                      return (namesFilter != null);
+                                                  })
+                                       .flatMap(this::processSSTableInTimeOrder));
+            }
+
+            return CsFlow.concat(memtableList)
+                         .last()
+                         .map(v -> outputTimeOrderedResult(cfs));
+        }
+        catch (Exception e)
+        {
+            JVMStabilityInspector.inspectThrowable(e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    private CsFlow<Void> processSSTableInTimeOrder(SSTableReader sstable)
+    {
+        if (!shouldInclude(sstable))
+        {
+            // This means that nothing queried by the filter can be in the sstable, but tombstones can still span over
+            // queried data. We can completely skip a table that doesn't have any tombstones, though.
+            if (!sstable.mayHaveTombstones())
+                return CsFlow.empty();
+
+            ++includedDueToTombstones;
         }
 
-        /* add the SSTables on disk */
-        Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
-        boolean onlyUnrepaired = true;
-        // read sorted sstables
-        for (SSTableReader sstable : view.sstables)
-        {
-            // if we've already seen a partition tombstone with a timestamp greater
-            // than the most recent update to this sstable, we're done, since the rest of the sstables
-            // will also be older
-            if (result != null && sstable.getMaxTimestamp() < result.partitionLevelDeletion().markedForDeleteAt())
-                break;
+        ++sstablesIterated;
+        return makeFlowable(sstable, namesFilter)
+               .flatMap(fup ->
+                        {
+                            Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
 
-            long currentMaxTs = sstable.getMaxTimestamp();
-            filter = reduceFilter(filter, result, currentMaxTs);
-            if (filter == null)
-                break;
+                            if (sstable.isRepaired())
+                                onlyUnrepaired = false;
 
-            if (!shouldInclude(sstable))
-            {
-                // This mean that nothing queried by the filter can be in the sstable. One exception is the top-level partition deletion
-                // however: if it is set, it impacts everything and must be included. Getting that top-level partition deletion costs us
-                // some seek in general however (unless the partition is indexed and is in the key cache), so we first check if the sstable
-                // has any tombstone at all as a shortcut.
-                if (!sstable.mayHaveTombstones())
-                    continue; // no tombstone at all, we can skip that sstable
+                            //TODO: replace with CsFlow.create when implemented.
+                            return fup.content.toList()
+                                              .map(u ->
+                                                   {
+                                                       addTimeOrdered(ImmutableBTreePartition.create(fup, u)
+                                                                                             .unfilteredIterator(columnFilter(),
+                                                                                                      Slices.ALL,
+                                                                                                      namesFilter.isReversed()),
+                                                                      namesFilter, sstable.isRepaired());
+                                                       return null;
+                                                   });
+                        });
+    }
 
-                // We need to get the partition deletion and include it if it's live. In any case though, we're done with that sstable.
-                try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
-                                                                                       sstable,
-                                                                                       partitionKey(),
-                                                                                       filter.getSlices(metadata()),
-                                                                                       columnFilter(),
-                                                                                       filter.isReversed(),
-                                                                                       metricsCollector))
-                {
-                    if (!iter.partitionLevelDeletion().isLive())
-                        result = add(UnfilteredRowIterators.noRowsIterator(iter.metadata(), iter.partitionKey(), Rows.EMPTY_STATIC_ROW, iter.partitionLevelDeletion(), filter.isReversed()), result, filter, sstable.isRepaired());
-                    else
-                        result = add(iter, result, filter, sstable.isRepaired());
-                }
-                continue;
-            }
+    private FlowableUnfilteredPartition outputTimeOrderedResult(ColumnFamilyStore cfs)
+    {
+        if (timeOrderedResult == null || timeOrderedResult.isEmpty())
+            return FlowablePartitions.empty(metadata(), partitionKey(), clusteringIndexFilter().isReversed());
 
-            try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
-                                                                                   sstable,
-                                                                                   partitionKey(),
-                                                                                   filter.getSlices(metadata()),
-                                                                                   columnFilter(),
-                                                                                   filter.isReversed(),
-                                                                                   metricsCollector))
-            {
-                if (iter.isEmpty())
-                    continue;
-
-                if (sstable.isRepaired())
-                    onlyUnrepaired = false;
-                result = add(iter, result, filter, sstable.isRepaired());
-            }
-        }
-
-        if (result == null || result.isEmpty())
-            return FlowablePartitions.empty(metadata(), partitionKey(), false);
-
-        DecoratedKey key = result.partitionKey();
+        DecoratedKey key = timeOrderedResult.partitionKey();
         cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
         StorageHook.instance.reportRead(cfs.metadata.id, partitionKey());
 
         // "hoist up" the requested data into a more recent sstable
-        if (metricsCollector.getMergedSSTables() > cfs.getMinimumCompactionThreshold()
+        if (sstablesIterated > cfs.getMinimumCompactionThreshold()
             && onlyUnrepaired
             && !cfs.isAutoCompactionDisabled()
             && cfs.getCompactionStrategyManager().shouldDefragment())
@@ -797,30 +895,37 @@ public class SinglePartitionReadCommand extends ReadCommand
             //               we will need to track the lifetime of this mutation as well
             Tracing.trace("Defragmenting requested data");
 
-            try (UnfilteredRowIterator iter = result.unfilteredIterator(columnFilter(), Slices.ALL, false))
-            {
-                final Mutation mutation = new Mutation(PartitionUpdate.fromIterator(iter, columnFilter()));
-                // skipping commitlog and index updates is fine since we're just de-fragmenting existing data
-                // Fire and forget
-                Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false, true);
-            }
+            Schedulers.io().scheduleDirect(() ->
+                                           {
+                                               try (UnfilteredRowIterator iter = timeOrderedResult.unfilteredIterator(columnFilter(), Slices.ALL, false))
+                                               {
+                                                   final Mutation mutation = new Mutation(PartitionUpdate.fromIterator(iter, columnFilter()));
+                                                   // skipping commitlog and index updates is fine since we're just de-fragmenting existing data
+                                                   // Fire and forget
+                                                   Keyspace.open(mutation.getKeyspaceName()).apply(mutation, false, false, true).subscribe();
+                                               }
+                                           });
         }
 
-        return FlowablePartitions.fromIterator(result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()), null);
+        return FlowablePartitions.fromIterator(timeOrderedResult.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed()), null);
     }
 
-    private ImmutableBTreePartition add(UnfilteredRowIterator iter, ImmutableBTreePartition result, ClusteringIndexNamesFilter filter, boolean isRepaired)
+    private void addTimeOrdered(UnfilteredRowIterator iter, ClusteringIndexNamesFilter filter, boolean isRepaired)
     {
         if (!isRepaired)
             oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, iter.stats().minLocalDeletionTime);
 
         int maxRows = Math.max(filter.requestedRows().size(), 1);
-        if (result == null)
-            return ImmutableBTreePartition.create(iter, maxRows);
-
-        try (UnfilteredRowIterator merged = UnfilteredRowIterators.merge(Arrays.asList(iter, result.unfilteredIterator(columnFilter(), Slices.ALL, filter.isReversed())), nowInSec()))
+        if (timeOrderedResult == null)
         {
-            return ImmutableBTreePartition.create(merged, maxRows);
+            timeOrderedResult = ImmutableBTreePartition.create(iter, maxRows);
+        }
+        else
+        {
+            try (UnfilteredRowIterator merged = UnfilteredRowIterators.merge(Arrays.asList(iter, timeOrderedResult.unfilteredIterator(columnFilter(), Slices.ALL, filter.isReversed())), nowInSec()))
+            {
+                timeOrderedResult = ImmutableBTreePartition.create(merged, maxRows);
+            }
         }
     }
 

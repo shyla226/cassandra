@@ -595,7 +595,8 @@ public class RowIndexEntryTest extends CQLTester
 
         BigRowIndexEntry rie = new BigRowIndexEntry(0L)
         {
-            public IndexInfoRetriever openWithIndex(FileHandle indexFile)
+            @Override
+            public IndexInfoRetriever openWithIndex(FileHandle indexFile, Rebufferer.ReaderConstraint rc)
             {
                 return new IndexInfoRetriever()
                 {
@@ -617,7 +618,7 @@ public class RowIndexEntryTest extends CQLTester
         };
         
         IndexState indexState = new IndexState(
-            null, comp, rie, false, null                                                                                              
+           null, comp, rie, false, null, Rebufferer.ReaderConstraint.NONE
         );
         
         assertEquals(0, indexState.indexFor(cn(-1L), -1));
@@ -631,7 +632,7 @@ public class RowIndexEntryTest extends CQLTester
         assertEquals(3, indexState.indexFor(cn(100L), 3));
 
         indexState = new IndexState(
-            null, comp, rie, true, null
+            null, comp, rie, true, null, Rebufferer.ReaderConstraint.NONE
         );
 
         assertEquals(-1, indexState.indexFor(cn(-1L), -1));

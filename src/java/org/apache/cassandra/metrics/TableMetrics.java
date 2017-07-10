@@ -24,6 +24,9 @@ import java.util.concurrent.ConcurrentMap;
 
 import com.google.common.collect.Maps;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -45,6 +48,7 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  */
 public class TableMetrics
 {
+    private final static Logger logger = LoggerFactory.getLogger(TableMetrics.class);
 
     public static final long[] EMPTY = new long[0];
 

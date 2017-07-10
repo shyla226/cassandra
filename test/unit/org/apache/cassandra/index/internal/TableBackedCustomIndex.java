@@ -1,6 +1,7 @@
 package org.apache.cassandra.index.internal;
 
 import io.reactivex.Completable;
+import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -121,7 +122,7 @@ public class TableBackedCustomIndex implements Index
     {
         this.metadata = indexDef;
         this.indexCfm = buildIndexCFMetadata();
-        MigrationManager.announceNewTable(this.indexCfm, true).blockingAwait();
+        MigrationManager.announceNewTable(this.indexCfm, true).observeOn(Schedulers.io()).blockingAwait();
         indexCfs = Keyspace.openAndGetStore(this.indexCfm);
     }
 

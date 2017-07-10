@@ -441,18 +441,12 @@ concurrent_materialized_view_writes: 2
 # Maximum memory to use for sstable chunk cache and buffer pooling.
 # 32MB of this are reserved for pooling buffers, the rest is used as an
 # cache that holds uncompressed sstable chunks.
-# Defaults to the smaller of 1/4 of heap or 512MB. This pool is allocated off-heap,
+# Defaults to 1/3 of total system memory. This pool is allocated off-heap,
 # so is in addition to the memory allocated for heap. The cache also has on-heap
 # overhead which is roughly 128 bytes per chunk (i.e. 0.2% of the reserved size
 # if the default 64k chunk size is used).
 # Memory is only allocated when needed.
-# file_cache_size_in_mb: 512
-
-# Flag indicating whether to allocate on or off heap when the sstable buffer
-# pool is exhausted, that is when it has exceeded the maximum memory
-# file_cache_size_in_mb, beyond which it will not cache buffers but allocate on request.
-
-# buffer_pool_use_heap_if_exhausted: true
+# file_cache_size_in_mb: 4096
 
 # The strategy for optimizing disk read
 # Possible values are:

@@ -22,15 +22,20 @@ import java.util.NoSuchElementException;
 
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  *  A Cell Iterator over SSTable
@@ -42,20 +47,21 @@ public class SSTableIterator extends AbstractSSTableIterator
      */
     private int slice;
 
-    public SSTableIterator(BigTableReader sstable,
+    public SSTableIterator(SSTableReader sstable,
                            FileDataInput file,
                            DecoratedKey key,
                            BigRowIndexEntry indexEntry,
                            Slices slices,
-                           ColumnFilter columns)
+                           ColumnFilter columns,
+                           Rebufferer.ReaderConstraint readerConstraint)
     {
-        super(sstable, file, key, indexEntry, slices, columns);
+        super(sstable, file, key, indexEntry, slices, columns, readerConstraint);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ForwardIndexedReader((BigRowIndexEntry) indexEntry, file, shouldCloseFile)
+             ? new ForwardIndexedReader((BigRowIndexEntry) indexEntry, file, shouldCloseFile, rc)
              : new ForwardReader(file, shouldCloseFile);
     }
 
@@ -64,6 +70,12 @@ public class SSTableIterator extends AbstractSSTableIterator
         int next = slice;
         slice++;
         return next;
+    }
+
+    protected int currentSliceIndex()
+    {
+        assert slice > 0 : slice;
+        return slice - 1;
     }
 
     protected boolean hasMoreSlices()
@@ -182,6 +194,7 @@ public class SSTableIterator extends AbstractSSTableIterator
                 }
             }
 
+
             next = computeNext();
             if (next != null)
                 return true;
@@ -214,10 +227,10 @@ public class SSTableIterator extends AbstractSSTableIterator
 
         private int lastBlockIdx; // the last index block that has data for the current query
 
-        private ForwardIndexedReader(BigRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        private ForwardIndexedReader(BigRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
-            this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ((BigTableReader) sstable).ifile);
+            this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ((BigTableReader) sstable).ifile, rc);
             this.lastBlockIdx = indexState.blocksCount(); // if we never call setForSlice, that's where we want to stop
         }
 
@@ -226,6 +239,13 @@ public class SSTableIterator extends AbstractSSTableIterator
         {
             super.close();
             this.indexState.close();
+        }
+
+        @Override
+        protected void resetState()
+        {
+            super.resetState();
+            this.indexState.reset();
         }
 
         @Override
@@ -286,6 +306,7 @@ public class SSTableIterator extends AbstractSSTableIterator
         @Override
         protected Unfiltered computeNext() throws IOException
         {
+
             while (true)
             {
                 // Our previous read might have made us cross an index block boundary. If so, update our informations.

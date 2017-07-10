@@ -28,7 +28,7 @@ public class MmapRebufferer extends AbstractReaderFileProxy implements Rebuffere
 {
     protected final MmappedRegions regions;
 
-    MmapRebufferer(ChannelProxy channel, long fileLength, MmappedRegions regions)
+    MmapRebufferer(AsynchronousChannelProxy channel, long fileLength, MmappedRegions regions)
     {
         super(channel, fileLength);
         this.regions = regions;

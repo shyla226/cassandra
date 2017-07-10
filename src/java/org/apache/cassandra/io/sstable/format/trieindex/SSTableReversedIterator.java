@@ -25,11 +25,13 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundMarker;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.Rebufferer;
 
 /**
  *  A Cell Iterator in reversed clustering order over SSTable
@@ -46,15 +48,16 @@ class SSTableReversedIterator extends AbstractSSTableIterator
                                    DecoratedKey key,
                                    RowIndexEntry indexEntry,
                                    Slices slices,
-                                   ColumnFilter columns)
+                                   ColumnFilter columns,
+                                   Rebufferer.ReaderConstraint readerConstraint)
     {
-        super(sstable, file, key, indexEntry, slices, columns);
+        super(sstable, file, key, indexEntry, slices, columns, readerConstraint);
     }
 
-    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+    protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
     {
         return indexEntry.isIndexed()
-             ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile)
+             ? new ReverseIndexedReader(indexEntry, file, shouldCloseFile, rc)
              : new ReverseReader(file, shouldCloseFile);
     }
 
@@ -68,6 +71,12 @@ class SSTableReversedIterator extends AbstractSSTableIterator
         int next = slice;
         slice++;
         return slices.size() - (next + 1);
+    }
+
+    protected int currentSliceIndex()
+    {
+        assert slice > 0;
+        return slices.size() - slice;
     }
 
     protected boolean hasMoreSlices()
@@ -89,6 +98,7 @@ class SSTableReversedIterator extends AbstractSSTableIterator
     private class ReverseReader extends Reader
     {
         LongStack rowOffsets = new LongStack();
+        Long currentOffset = null;
         RangeTombstoneMarker blockOpenMarker, blockCloseMarker;
         Unfiltered next = null;
         boolean foundLessThan;
@@ -152,10 +162,11 @@ class SSTableReversedIterator extends AbstractSSTableIterator
             }
             while (!rowOffsets.isEmpty())
             {
-                seekToPosition(rowOffsets.pop());
+                seekToPosition(rowOffsets.peek());
                 boolean hasNext = deserializer.hasNext();
                 assert hasNext;
                 toReturn = deserializer.readNext();
+                rowOffsets.pop();
                 // We may get empty row for the same reason expressed on UnfilteredSerializer.deserializeOne.
                 if (!toReturn.isEmpty())
                     return toReturn;
@@ -237,12 +248,15 @@ class SSTableReversedIterator extends AbstractSSTableIterator
         long basePosition;
         Slice currentSlice;
         long currentBlockStart;
+        IndexInfo currentIndexInfo;
+        Rebufferer.ReaderConstraint rc;
 
-        public ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
+        public ReverseIndexedReader(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile, Rebufferer.ReaderConstraint rc)
         {
             super(file, shouldCloseFile);
             basePosition = indexEntry.position;
             this.indexEntry = indexEntry;
+            this.rc = rc;
         }
 
         @Override
@@ -253,38 +267,48 @@ class SSTableReversedIterator extends AbstractSSTableIterator
             super.close();
         }
 
+        /**
+         * This method must be async-read-safe.
+         */
         @Override
         public void setForSlice(Slice slice) throws IOException
         {
-            currentSlice = slice;
-            ClusteringComparator comparator = metadata.comparator;
-            if (indexReader != null)
-                indexReader.close();
-            indexReader = new RowIndexReverseIterator(((TrieIndexSSTableReader) sstable).rowIndexFile,
-                    indexEntry,
-                    comparator.asByteComparableSource(slice.end()));
-            blockOpenMarker = null;
-            gotoBlock(indexReader.nextIndexInfo(), true, Long.MAX_VALUE);
+            if (currentSlice == null || !slice.equals(currentSlice))
+            {
+                ClusteringComparator comparator = metadata.comparator;
+                if (indexReader != null)
+                    indexReader.close();
+                indexReader = new RowIndexReverseIterator(((TrieIndexSSTableReader) sstable).rowIndexFile,
+                                                          indexEntry,
+                                                          comparator.asByteComparableSource(slice.end()), rc);
+                blockOpenMarker = null;
+                currentIndexInfo = indexReader.nextIndexInfo();
+                gotoBlock(slice, currentIndexInfo, true, Long.MAX_VALUE);
+                currentSlice = slice;
+            }
         }
 
-        boolean gotoBlock(IndexInfo indexInfo, boolean filterEnd, long blockEnd) throws IOException
+        boolean gotoBlock(Slice slice, IndexInfo indexInfo, boolean filterEnd, long blockEnd) throws IOException
         {
             blockCloseMarker = null;
             rowOffsets.clear();
             if (indexInfo == null)
                 return false;
-            currentBlockStart = basePosition + indexInfo.offset;
+            long tmpCurrentBlockStart = basePosition + indexInfo.offset;
             openMarker = indexInfo.openDeletion;
-
-            seekToPosition(currentBlockStart);
-            fillOffsets(currentSlice, true, filterEnd, blockEnd);
+            seekToPosition(tmpCurrentBlockStart);
+            fillOffsets(slice, true, filterEnd, blockEnd);
+            currentIndexInfo = null;
+            currentBlockStart = tmpCurrentBlockStart;
             return !rowOffsets.isEmpty();
         }
 
         @Override
         protected boolean advanceIndexBlock() throws IOException
         {
-            return gotoBlock(indexReader.nextIndexInfo(), false, currentBlockStart);
+            if (currentIndexInfo == null)
+                currentIndexInfo = indexReader.nextIndexInfo();
+            return gotoBlock(currentSlice, currentIndexInfo, false, currentBlockStart);
         }
     }
 }

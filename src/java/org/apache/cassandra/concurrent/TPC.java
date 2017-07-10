@@ -17,12 +17,14 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.Aio;
 import io.netty.channel.epoll.Epoll;
 import io.reactivex.plugins.RxJavaPlugins;
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -32,6 +34,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.StorageService;
@@ -65,6 +68,9 @@ public class TPC
     private static final int NIO_IO_RATIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
     public static final boolean USE_EPOLL = Boolean.parseBoolean(System.getProperty("cassandra.native.epoll.enabled", "true"))
                                             && Epoll.isAvailable();
+    public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
+                                          && Aio.isAvailable() && USE_EPOLL &&
+                                          (Boolean.parseBoolean(System.getProperty("cassandra.native.aio.force", "false")) || FileUtils.isSSD());
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
@@ -397,6 +403,17 @@ public class TPC
                 throw t;
             }
         }
+    }
+
+    /**
+     * Creates an executor that tries to stay on the local thread.
+     * Used by ChunkCache
+     *
+     * @return
+     */
+    public static Executor getWrappedExecutor()
+    {
+        return command -> TPC.bestTPCScheduler().getExecutor().execute(command);
     }
 
 }

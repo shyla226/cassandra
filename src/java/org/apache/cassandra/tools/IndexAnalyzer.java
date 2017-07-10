@@ -36,6 +36,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.PageAware;
 
 /**
@@ -91,9 +92,9 @@ public class IndexAnalyzer
         }
         Descriptor desc = Descriptor.fromFilename(ssTableFileName);
         String fname = ssTableFileName.contains("Partitions") ? ssTableFileName : desc.filenameFor(Component.PARTITION_INDEX);
-        try (FileHandle.Builder fhBuilder = new FileHandle.Builder(fname).bufferSize(PageAware.PAGE_SIZE).mmapped(true);
-             PartitionIndex index = PartitionIndex.load(fhBuilder, null, false);
-             Analyzer analyzer = new Analyzer(index))
+        try (FileHandle.Builder fhBuilder = new FileHandle.Builder(fname).bufferSize(PageAware.PAGE_SIZE);
+             PartitionIndex index = PartitionIndex.load(fhBuilder, null, false, Rebufferer.ReaderConstraint.NONE);
+             Analyzer analyzer = new Analyzer(index, Rebufferer.ReaderConstraint.NONE))
         {
             analyzer.run();
             analyzer.printResults();
@@ -191,9 +192,9 @@ public class IndexAnalyzer
         List<AtomicLong> countPerDepth = new ArrayList<>();
         List<AtomicLong> countPerPageDepth = new ArrayList<>();
 
-        Analyzer(PartitionIndex index)
+        Analyzer(PartitionIndex index, Rebufferer.ReaderConstraint rc)
         {
-            super(index);
+            super(index, rc);
         }
         
         void run()

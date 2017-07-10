@@ -20,41 +20,29 @@ package org.apache.cassandra.metrics;
 
 import java.io.IOException;
 
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.service.EmbeddedCassandraService;
 
 import static junit.framework.Assert.assertEquals;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
-public class CQLMetricsTest extends SchemaLoader
+public class CQLMetricsTest extends CQLTester
 {
-    private static EmbeddedCassandraService cassandra;
-
-    private static Cluster cluster;
     private static Session session;
 
-    @BeforeClass()
-    public static void setup() throws ConfigurationException, IOException
+    @Before
+    public void setup() throws ConfigurationException, IOException
     {
-        Schema.instance.clear();
-
-        cassandra = new EmbeddedCassandraService();
-        cassandra.start();
-
-        cluster = Cluster.builder().addContactPoint("127.0.0.1").withPort(DatabaseDescriptor.getNativeTransportPort()).build();
-        session = cluster.connect();
+        session = sessionNet();
 
         session.execute("CREATE KEYSPACE IF NOT EXISTS junit WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };");
         session.execute("CREATE TABLE IF NOT EXISTS junit.metricstest (id int PRIMARY KEY, val text);");

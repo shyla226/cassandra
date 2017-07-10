@@ -20,23 +20,33 @@ package org.apache.cassandra.io.util;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.CompletionHandler;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.netty.util.Recycler;
+import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.utils.ChecksumType;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public abstract class CompressedChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
+    private final static Logger logger = LoggerFactory.getLogger(CompressedChunkReader.class);
     final CompressionMetadata metadata;
     final int maxCompressedLength;
 
-    protected CompressedChunkReader(ChannelProxy channel, CompressionMetadata metadata)
+    protected CompressedChunkReader(AsynchronousChannelProxy channel, CompressionMetadata metadata)
     {
         super(channel, metadata.dataLength);
         this.metadata = metadata;
@@ -75,7 +85,8 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     @Override
     public BufferType preferredBufferType()
     {
-        return metadata.compressor().preferredBufferType();
+        return (metadata.compressor().preferredBufferType() == BufferType.ON_HEAP && TPC.USE_AIO) ?
+               BufferType.OFF_HEAP : metadata.compressor().preferredBufferType();
     }
 
     @Override
@@ -87,28 +98,60 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     public static class Standard extends CompressedChunkReader
     {
         // we read the raw compressed bytes into this buffer, then uncompressed them into the provided one.
-        private final ThreadLocal<ByteBuffer> compressedHolder;
+        private static final Recycler<BufferHolder> compressedHolder = new Recycler<BufferHolder>()
+        {
+            protected BufferHolder newObject(Handle<BufferHolder> handle)
+            {
+                return new BufferHolder(handle);
+            }
+        };
 
-        public Standard(ChannelProxy channel, CompressionMetadata metadata)
+        public Standard(AsynchronousChannelProxy channel, CompressionMetadata metadata)
         {
             super(channel, metadata);
-            compressedHolder = ThreadLocal.withInitial(this::allocateBuffer);
         }
 
-        public ByteBuffer allocateBuffer()
+        static class BufferHolder
         {
-            return allocateBuffer(Math.min(maxCompressedLength,
-                                           metadata.compressor().initialCompressedBufferLength(metadata.chunkLength())));
-        }
+            private final Recycler.Handle<BufferHolder> handle;
+            private ByteBuffer buffer;
 
-        public ByteBuffer allocateBuffer(int size)
-        {
-            return metadata.compressor().preferredBufferType().allocate(size);
+            BufferHolder(Recycler.Handle<BufferHolder> handle)
+            {
+                this.handle = handle;
+            }
+
+            ByteBuffer get(int maxCompressedLength, CompressionMetadata metadata, BufferType bufferType)
+            {
+                int length = Math.min(maxCompressedLength, metadata.compressor().initialCompressedBufferLength(metadata.chunkLength()));
+
+                if (buffer == null || buffer.capacity() < length ||
+                    ((buffer.isDirect() && bufferType.equals(BufferType.ON_HEAP) ||
+                      !buffer.isDirect() && bufferType.equals(BufferType.OFF_HEAP))))
+                    buffer = allocateBuffer(bufferType, length);
+
+                return buffer;
+            }
+
+            ByteBuffer allocateBuffer(BufferType bufferType, int size)
+            {
+                //O_DIRECT requires length to be aligned to page size
+                if ((size & (MemoryUtil.pageSize() - 1)) != 0)
+                    size = (size + MemoryUtil.pageSize() - 1) & ~(MemoryUtil.pageSize() - 1);
+                return bufferType.allocate(size);
+            }
+
+            void recycle()
+            {
+                handle.recycle(this);
+            }
         }
 
         @Override
-        public void readChunk(long position, ByteBuffer uncompressed)
+        public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer uncompressed)
         {
+            CompletableFuture<ByteBuffer> futureBuffer = new CompletableFuture<>();
+
             try
             {
                 // accesses must always be aligned
@@ -116,57 +159,128 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 assert position <= fileLength;
 
                 CompressionMetadata.Chunk chunk = metadata.chunkFor(position);
+
+                //O_DIRECT read positions must be aligned to DMA size
+                long alignedOffset = Math.max(0, (chunk.offset & 511) == 0 ? chunk.offset : (chunk.offset - 511) & ~511);
+                int alignmentShift = Ints.checkedCast(chunk.offset - alignedOffset);
+
+                ByteBuffer input;
+                final BufferHolder scratchInput;
                 if (chunk.length <= maxCompressedLength)
                 {
-                    ByteBuffer compressed = compressedHolder.get();
-                    assert compressed.capacity() >= chunk.length;
-                    compressed.clear().limit(chunk.length);
-                    if (channel.read(compressed, chunk.offset) != chunk.length)
-                        throw new CorruptBlockException(channel.filePath(), chunk);
-
-                    compressed.flip();
-                    uncompressed.clear();
-
-                    try
-                    {
-                        metadata.compressor().uncompress(compressed, uncompressed);
-                    }
-                    catch (IOException e)
-                    {
-                        throw new CorruptBlockException(channel.filePath(), chunk, e);
-                    }
-                    maybeCheckCrc(chunk, compressed);
+                    scratchInput = compressedHolder.get();
+                    input = scratchInput.get(maxCompressedLength, metadata, preferredBufferType());
                 }
                 else
                 {
-                    uncompressed.position(0).limit(chunk.length);
-                    if (channel.read(uncompressed, chunk.offset) != chunk.length)
-                        throw new CorruptBlockException(channel.filePath(), chunk);
-                    maybeCheckCrc(chunk, uncompressed);
+                    scratchInput = null;
+                    input = uncompressed;
                 }
-                uncompressed.flip();
+
+                input.clear();
+                input.limit(chunk.length + alignmentShift + Integer.BYTES);
+
+                channel.read(input, alignedOffset, new CompletionHandler<Integer, ByteBuffer>()
+                {
+                    public void completed(Integer result, ByteBuffer attachment)
+                    {
+                        try
+                        {
+                            if (result < chunk.length + alignmentShift)
+                            {
+                                futureBuffer.completeExceptionally(new CorruptBlockException(channel.filePath() + " result = " + result, chunk));
+                                return;
+                            }
+
+                            input.limit(chunk.length + alignmentShift);
+                            input.position(alignmentShift);
+
+                            //CASSANDRA-10520 adds this threshold where we skip decompressing if
+                            //the compression ratio is not enough of a win to be worth it.
+                            if (chunk.length <= maxCompressedLength)
+                            {
+                                uncompressed.clear();
+
+                                try
+                                {
+                                    metadata.compressor().uncompress(input, uncompressed);
+                                }
+                                catch (IOException e)
+                                {
+                                    // Make sure reader does not see stale data.
+                                    uncompressed.position(0).limit(0);
+                                    futureBuffer.completeExceptionally(new CorruptSSTableException(new CorruptBlockException(channel.filePath(), chunk, e), channel.filePath()));
+                                    return;
+                                }
+                                finally
+                                {
+                                    input.position(alignmentShift);
+                                    uncompressed.flip();
+                                }
+                            }
+                            else
+                            {
+                                //in this case the input is our uncompressed buffer
+                                //so we already have read it and set it up
+                            }
+
+
+                            if (getCrcCheckChance() > ThreadLocalRandom.current().nextDouble())
+                            {
+                                int checksum = (int) ChecksumType.CRC32.of(input);
+
+                                //Change the limit to include the checksum
+                                input.limit(result);
+                                input.position(chunk.length + alignmentShift);
+
+                                if (input.remaining() < Integer.BYTES || input.getInt() != checksum)
+                                {
+                                    // Make sure reader does not see stale data.
+                                    uncompressed.position(0).limit(0);
+                                    futureBuffer.completeExceptionally(new CorruptSSTableException(new CorruptBlockException(channel.filePath(), chunk), channel.filePath()));
+                                    return;
+                                }
+
+                                //In the case compression was avoided on this block
+                                //We set it up to be used after checksum check
+                                if (input == uncompressed)
+                                {
+                                    uncompressed.limit(chunk.length + alignmentShift);
+                                    uncompressed.position(alignmentShift);
+                                }
+
+                                futureBuffer.complete(uncompressed);
+                            }
+                            else
+                            {
+                                futureBuffer.complete(uncompressed);
+                            }
+                        }
+                        finally
+                        {
+                            if (scratchInput != null)
+                                scratchInput.recycle();
+                        }
+                    }
+
+                    public void failed(Throwable exc, ByteBuffer attachment)
+                    {
+                        // Make sure reader does not see stale data.
+                        uncompressed.position(0).limit(0);
+                        futureBuffer.completeExceptionally(new CorruptSSTableException(exc, channel.filePath()));
+                        if (scratchInput != null)
+                            scratchInput.recycle();
+                    }
+                });
             }
-            catch (CorruptBlockException e)
+            catch (Throwable t)
             {
                 // Make sure reader does not see stale data.
                 uncompressed.position(0).limit(0);
-                throw new CorruptSSTableException(e, channel.filePath());
+                futureBuffer.completeExceptionally(new CorruptSSTableException(t, channel.filePath()));
             }
-        }
 
-        void maybeCheckCrc(CompressionMetadata.Chunk chunk, ByteBuffer content) throws CorruptBlockException
-        {
-            if (metadata.parameters.maybeCheckCrc())
-            {
-                content.flip();
-                int checksum = (int) ChecksumType.CRC32.of(content);
-
-                ByteBuffer scratch = compressedHolder.get(); // This may match content. That's ok, we no longer need it.
-                scratch.clear().limit(Integer.BYTES);
-                if (channel.read(scratch, chunk.offset + chunk.length) != Integer.BYTES
-                            || scratch.getInt(0) != checksum)
-                    throw new CorruptBlockException(channel.filePath(), chunk);
-            }
+            return futureBuffer;
         }
     }
 
@@ -174,15 +288,17 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     {
         protected final MmappedRegions regions;
 
-        public Mmap(ChannelProxy channel, CompressionMetadata metadata, MmappedRegions regions)
+        public Mmap(AsynchronousChannelProxy channel, CompressionMetadata metadata, MmappedRegions regions)
         {
             super(channel, metadata);
             this.regions = regions;
         }
 
         @Override
-        public void readChunk(long position, ByteBuffer uncompressed)
+        public CompletableFuture<ByteBuffer> readChunk(long position, ByteBuffer uncompressed)
         {
+            CompletableFuture<ByteBuffer> future = new CompletableFuture<>();
+
             try
             {
                 // accesses must always be aligned
@@ -228,9 +344,11 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             {
                 // Make sure reader does not see stale data.
                 uncompressed.position(0).limit(0);
-                throw new CorruptSSTableException(e, channel.filePath());
+                future.completeExceptionally(new CorruptSSTableException(e, channel.filePath()));
             }
 
+            future.complete(uncompressed);
+            return future;
         }
 
         public void close()

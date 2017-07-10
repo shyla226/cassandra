@@ -85,8 +85,6 @@ public class CorruptionTest extends SchemaLoader
         putStatement = session.prepare("INSERT INTO " + TABLE + " (key, value) VALUES (?, ?);");
         putStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
 
-
-
         StringBuilder s = new StringBuilder();
         char a='a';
         char z='z';

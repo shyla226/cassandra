@@ -89,6 +89,7 @@ public class ReadExecutorTest
         ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         AbstractReadExecutor executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime(), true);
         DatabaseDescriptor.setReadRpcTimeout(1); // we must give a chance to the task scheduled by AbstractReadExecutor.NeverSpeculatingReadExecutor.maybeTryAdditionalReplicas() to run first
+        executor.executeAsync().subscribe();
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
         try
@@ -107,6 +108,8 @@ public class ReadExecutorTest
         //Shouldn't increment
         command = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), 0, Util.dk("ry@n_luvs_teh_y@nk33z"));
         executor = new AbstractReadExecutor.NeverSpeculatingReadExecutor(ks, cfs, command, ConsistencyLevel.LOCAL_QUORUM, targets, System.nanoTime(), false);
+
+        executor.executeAsync().subscribe();
         executor.maybeTryAdditionalReplicas().blockingAwait();
 
         try

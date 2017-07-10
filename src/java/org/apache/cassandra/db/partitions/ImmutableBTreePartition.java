@@ -18,12 +18,15 @@
 */
 package org.apache.cassandra.db.partitions;
 
+import java.util.List;
+
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.flow.CsFlow;
@@ -117,6 +120,11 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
     public static ImmutableBTreePartition create(UnfilteredRowIterator iterator, int initialRowCapacity, boolean ordered)
     {
         return new ImmutableBTreePartition(iterator.metadata(), iterator.partitionKey(), build(iterator, initialRowCapacity, ordered));
+    }
+
+    public static ImmutableBTreePartition create(FlowableUnfilteredPartition fup, List<Unfiltered> materializedRows)
+    {
+        return new ImmutableBTreePartition(fup.header.metadata, fup.header.partitionKey, build(fup, materializedRows));
     }
 
     /**

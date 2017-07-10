@@ -40,6 +40,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
@@ -106,7 +107,8 @@ public class TrieIndexSSTableWriter extends SSTableWriter
                     writerOption);
         }
         dbuilder = new FileHandle.Builder(descriptor.filenameFor(Component.DATA)).compressed(compression)
-                                              .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap);
+                                                                                 .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap &&
+                                                                                          metadata().params.compaction.klass().equals(MemoryOnlyStrategy.class));
         chunkCache.ifPresent(dbuilder::withChunkCache);
         iwriter = new IndexWriter(keyCount);
 
@@ -430,9 +432,9 @@ public class TrieIndexSSTableWriter extends SSTableWriter
         IndexWriter(long keyCount)
         {
             rowIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.ROW_INDEX)), writerOption);
-            rowIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, Component.ROW_INDEX);
+            rowIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, metadata(), Component.ROW_INDEX);
             partitionIndexFile = new SequentialWriter(new File(descriptor.filenameFor(Component.PARTITION_INDEX)), writerOption);
-            partitionIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, Component.PARTITION_INDEX);
+            partitionIndexFHBuilder = SSTableReader.indexFileHandleBuilder(descriptor, metadata(), Component.PARTITION_INDEX);
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
             bf = FilterFactory.getFilter(keyCount, metadata().params.bloomFilterFpChance, true);
             // register listeners to be alerted when the data files are flushed
@@ -547,7 +549,7 @@ public class TrieIndexSSTableWriter extends SSTableWriter
             complete();
             try
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false);
+                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false, Rebufferer.ReaderConstraint.NONE);
             }
             catch (IOException e)
             {

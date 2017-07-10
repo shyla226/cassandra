@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.reactivex.Single;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
@@ -300,7 +301,7 @@ class SSTableScanner implements ISSTableScanner
                             else
                             {
                                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(SSTableScanner.this.metadata()), columns, filter.isReversed());
+                                return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(SSTableScanner.this.metadata()), columns, filter.isReversed(), Rebufferer.ReaderConstraint.NONE);
                             }
                         }
                         catch (CorruptSSTableException e)

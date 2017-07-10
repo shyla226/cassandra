@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
+
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -47,6 +48,7 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.MemoryOnlyStrategy;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.mos.MemoryLockedBuffer;
 import org.apache.cassandra.db.mos.MemoryOnlyStatus;
@@ -67,6 +69,7 @@ import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.io.util.FileHandle.Builder;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -78,6 +81,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
+import org.apache.cassandra.utils.flow.CsFlow;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 
@@ -710,29 +714,30 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     protected Builder indexFileHandleBuilder(Component component)
     {
-        return indexFileHandleBuilder(descriptor, component);
+        return indexFileHandleBuilder(descriptor, metadata(), component);
     }
 
-    public static Builder indexFileHandleBuilder(Descriptor descriptor, Component component)
+    public static Builder indexFileHandleBuilder(Descriptor descriptor, TableMetadata metadata, Component component)
     {
         return new FileHandle.Builder(descriptor.filenameFor(component))
-                   .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap)
+                   .withChunkCache(ChunkCache.instance)
+                   .mmapped(DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard && metadata.params.compaction.klass().equals(MemoryOnlyStrategy.class))
                    .bufferSize(PageAware.PAGE_SIZE)
                    .withChunkCache(ChunkCache.instance);
     }
 
-    public static Builder dataFileHandleBuilder(Descriptor descriptor, boolean compression)
+    public static Builder dataFileHandleBuilder(Descriptor descriptor, TableMetadata metadata, boolean compression)
     {
         return new FileHandle.Builder(descriptor.filenameFor(Component.DATA))
                    .compressed(compression)
-                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap)
+                   .mmapped(DatabaseDescriptor.getDiskAccessMode() == Config.DiskAccessMode.mmap && metadata.params.compaction.klass().equals(MemoryOnlyStrategy.class))
                    .withChunkCache(ChunkCache.instance);
     }
 
     Builder dataFileHandleBuilder()
     {
         int dataBufferSize = optimizationStrategy.bufferSize(sstableMetadata.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-        return dataFileHandleBuilder(descriptor, compression)
+        return dataFileHandleBuilder(descriptor, metadata(), compression)
                    .bufferSize(dataBufferSize);
     }
 
@@ -799,7 +804,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             // TODO: merge with caller's firstKeyBeyond() work,to save time
             if (newStart.compareTo(first) > 0)
             {
-                long dataStart = getExactPosition(newStart).position;
+                long dataStart = getExactPosition(newStart, Rebufferer.ReaderConstraint.NONE).position;
                 this.tidy.addCloseable(new DropPageCache(dataFile, dataStart, null, 0));
             }
 
@@ -1009,7 +1014,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     public RowIndexEntry getPosition(PartitionPosition key, Operator op)
     {
-        return getPosition(key, op, SSTableReadsListener.NOOP_LISTENER);
+        return getPosition(key, op, SSTableReadsListener.NOOP_LISTENER, Rebufferer.ReaderConstraint.NONE);
     }
 
     /**
@@ -1019,17 +1024,32 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
      * @param listener the {@code SSTableReaderListener} that must handle the notifications.
      */
-    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener);
-    public abstract RowIndexEntry getExactPosition(DecoratedKey key);
-    public abstract boolean contains(DecoratedKey key);
+    public abstract RowIndexEntry getPosition(PartitionPosition key, Operator op, SSTableReadsListener listener, Rebufferer.ReaderConstraint rc);
+    public abstract RowIndexEntry getExactPosition(DecoratedKey key, Rebufferer.ReaderConstraint rc);
+    public abstract boolean contains(DecoratedKey key, Rebufferer.ReaderConstraint rc);
 
-    public abstract UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener);
-    public abstract FlowableUnfilteredPartition flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener);
-    public abstract UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed);
+    public abstract UnfilteredRowIterator iterator(DecoratedKey key,
+                                                   Slices slices,
+                                                   ColumnFilter selectedColumns,
+                                                   boolean reversed,
+                                                   SSTableReadsListener listener);
+    public abstract UnfilteredRowIterator iterator(FileDataInput file,
+                                                   DecoratedKey key,
+                                                   RowIndexEntry indexEntry,
+                                                   Slices slices,
+                                                   ColumnFilter selectedColumns,
+                                                   boolean reversed,
+                                                   Rebufferer.ReaderConstraint readerConstraint);
 
     public abstract PartitionIndexIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException;
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
     public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
+
+    public CsFlow<FlowableUnfilteredPartition> flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    {
+        return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed);
+    }
+
 
     public PartitionIndexIterator coveredKeysIterator(AbstractBounds<? extends PartitionPosition> bounds) throws IOException
     {
@@ -1108,7 +1128,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         return !(bf instanceof AlwaysPresentFilter)
                 ? bf.isPresent(dk)
-                : contains(dk);
+                : contains(dk, Rebufferer.ReaderConstraint.NONE);
     }
 
     /**
@@ -1122,7 +1142,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             if (pos == null)
                 return null;
 
-            try (FileDataInput in = dataFile.createReader(pos.position))
+            try (FileDataInput in = dataFile.createReader(pos.position, Rebufferer.ReaderConstraint.NONE))
             {
                 ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
                 DecoratedKey indexDecoratedKey = decorateKey(indexKey);
@@ -1228,9 +1248,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return getScanner(Collections.singletonList(range));
     }
 
-    public FileDataInput getFileDataInput(long position)
+    public FileDataInput getFileDataInput(long position, Rebufferer.ReaderConstraint rc)
     {
-        return dataFile.createReader(position);
+        return dataFile.createReader(position, rc);
     }
 
     /**
@@ -1265,7 +1285,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * Retrieves the key at the given position, as specified by PartitionIndexIterator.keyPosition() as well as
      * SSTableFlushObserver.startPartition().
      */
-    abstract public DecoratedKey keyAt(long position) throws IOException;
+    abstract public DecoratedKey keyAt(long position, Rebufferer.ReaderConstraint rc) throws IOException;
 
     public boolean isPendingRepair()
     {
@@ -1456,11 +1476,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dataFile.createReader();
     }
 
-    public ChannelProxy getDataChannel()
+    public AsynchronousChannelProxy getDataChannel()
     {
         return dataFile.channel;
     }
-
+    
     /**
      * @param component component to get timestamp.
      * @return last modified time for given component. 0 if given component does not exist or IO error occurs.
@@ -1545,7 +1565,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         identities.add(tidy.globalRef);
         dataFile.addTo(identities);
         bf.addTo(identities);
-    }
+        }
 
     /**
      * Lock memory mapped segments in RAM, see APOLLO-342.
@@ -1558,7 +1578,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             JVMStabilityInspector.inspectThrowable(ret);
             logger.error("Failed to lock {}", this, ret);
-        }
+}
     }
 
     /**

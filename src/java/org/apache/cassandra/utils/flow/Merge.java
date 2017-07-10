@@ -241,6 +241,7 @@ public class Merge<In, Out> extends CsFlow<Out>
             for (int i = needingAdvance - 1; i >= 0; --i)
             {
                 Candidate<In> candidate = heap[i];
+
                 // The test below should now be true for every item that hit needsRequest() in the loop above.
                 if (candidate.justAdvanced())
                     replaceAndSink(heap[i], i);

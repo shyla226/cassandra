@@ -253,7 +253,7 @@ public class Config
 
     public Integer file_cache_size_in_mb;
 
-    public boolean buffer_pool_use_heap_if_exhausted = true;
+    public boolean buffer_pool_use_heap_if_exhausted = false;
 
     public DiskOptimizationStrategy disk_optimization_strategy = DiskOptimizationStrategy.ssd;
 

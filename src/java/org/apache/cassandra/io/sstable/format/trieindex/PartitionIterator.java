@@ -26,6 +26,7 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 class PartitionIterator extends PartitionIndex.IndexPosIterator implements PartitionIndexIterator
@@ -41,9 +42,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     final IPartitioner partitioner;
 
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile,
-                      PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight) throws IOException
+                      PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight, Rebufferer.ReaderConstraint rc) throws IOException
     {
-        super(partitionIndex, left, right);
+        super(partitionIndex, left, right, rc);
         this.partitioner = partitioner;
         this.limit = right;
         this.exclusiveLimit = exclusiveRight;
@@ -56,9 +57,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         advance();
     }
 
-    PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile) throws IOException
+    PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile, Rebufferer.ReaderConstraint rc) throws IOException
     {
-        super(partitionIndex);
+        super(partitionIndex, rc);
         this.partitioner = partitioner;
         this.limit = null;
         this.exclusiveLimit = 0;
@@ -111,13 +112,13 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         if (pos != PartitionIndex.NOT_FOUND)
         {
             if (pos >= 0)
-                try (FileDataInput in = rowIndexFile.createReader(pos))
+                try (FileDataInput in = rowIndexFile.createReader(pos, rc))
                 {
                     nextKey = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
                     nextEntry = TrieIndexEntry.deserialize(in, in.getFilePointer());
                 }
             else
-                try (FileDataInput in = dataFile.createReader(~pos))
+                try (FileDataInput in = dataFile.createReader(~pos, rc))
                 {
                     nextKey = partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
                     nextEntry = new RowIndexEntry(~pos);

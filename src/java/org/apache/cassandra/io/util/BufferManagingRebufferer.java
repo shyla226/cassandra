@@ -22,7 +22,12 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.concurrent.CompletionException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 /**
@@ -33,6 +38,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
  */
 public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer.BufferHolder
 {
+    private static Logger logger = LoggerFactory.getLogger(BufferManagingRebufferer.class);
     protected final ChunkReader source;
     protected final ByteBuffer buffer;
     protected long offset = 0;
@@ -61,7 +67,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     }
 
     @Override
-    public ChannelProxy channel()
+    public AsynchronousChannelProxy channel()
     {
         return source.channel();
     }
@@ -75,8 +81,21 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     @Override
     public BufferHolder rebuffer(long position)
     {
+        assert !TPC.isTPCThread();
+
         offset = alignedPosition(position);
-        source.readChunk(offset, buffer);
+        try
+        {
+            source.readChunk(offset, buffer).join();
+        }
+        catch (CompletionException t)
+        {
+            if (t.getCause() != null && t.getCause() instanceof RuntimeException)
+                throw (RuntimeException) t.getCause();
+
+            throw t;
+        }
+
         return this;
     }
 

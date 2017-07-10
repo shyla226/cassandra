@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.utils.flow;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -58,7 +59,7 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
  */
-public abstract class CsFlow<T>
+public abstract class   CsFlow<T>
 {
     public final static LineNumberInference LINE_NUMBERS = new LineNumberInference();
 
@@ -580,6 +581,16 @@ public abstract class CsFlow<T>
         return FlatMap.flatMap(this, op);
     }
 
+    public static <T> CsFlow<T> concat(CsFlow<CsFlow<T>> source)
+    {
+        return source.flatMap(x -> x);
+    }
+
+    public static <T> CsFlow<T> concat(Iterable<CsFlow<T>> sources)
+    {
+        return concat(fromIterable(sources));
+    }
+
     /**
      * Map each element of the flow into CompletableSources, subscribe to them and
      * wait until the upstream and all CompletableSources complete.
@@ -929,6 +940,11 @@ public abstract class CsFlow<T>
 
         s.request();
         return result;
+    }
+
+    public CsFlow<T> last()
+    {
+        return reduce(null, (prev, next) -> next);
     }
 
     /**
@@ -1469,6 +1485,28 @@ public abstract class CsFlow<T>
         return Merge.get(flows, comparator, reducer);
     }
 
+
+    /**
+     * Materializes a list of CsFlow<I> into a CsFlow with a single List of I
+     */
+    public static <I> CsFlow<List<I>> zipToList(List<CsFlow<I>> flows)
+    {
+        return CsFlow.merge(flows, Comparator.comparing((c) -> 0),
+                            new Reducer<I, List<I>>()
+                            {
+                                List<I> list = new ArrayList<>(flows.size());
+
+                                public void reduce(int idx, I current)
+                                {
+                                    list.add(current);
+                                }
+
+                                public List<I> getReduced()
+                                {
+                                    return list;
+                                }
+                            });
+    }
 
     public interface Operator<I, O>
     {

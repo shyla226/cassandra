@@ -107,7 +107,7 @@ public class BufferPool
     {
         return onHeap
                ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+               : allocateDirectAligned(size);
     }
 
     private static ByteBuffer takeFromPool(int size, boolean allocateOnHeapWhenExhausted)
@@ -526,7 +526,7 @@ public class BufferPool
         });
     }
 
-    private static ByteBuffer allocateDirectAligned(int capacity)
+    public static ByteBuffer allocateDirectAligned(int capacity)
     {
         int align = MemoryUtil.pageSize();
         if (Integer.bitCount(align) != 1)
