@@ -7,6 +7,7 @@ DSE 5.0.x
 
 
 DSE 5.0.12
+ * LCS levels are not respected for `nodetool refresh` and replacing a node (DB-639)
  * Print heap histogram on OOM errors by default (DB-1489)
  * Support frozen collection list and set in stress (DB-1464)
  * Improved streams logging (DB-1409)
