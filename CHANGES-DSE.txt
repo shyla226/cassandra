@@ -1,4 +1,5 @@
 DSE 5.0.12
+ * Fix for Local DC connections are compressed despite internode_compression: dc (DB-734)
  * Expanded hinted handoff instrumentation (DB-853)
  * Improve Gossip Dissemination Time (DB-996)
  * Use more intelligent level picking when we have a non-l0 file (DB-639)
