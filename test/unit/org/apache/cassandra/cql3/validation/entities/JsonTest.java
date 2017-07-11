@@ -42,9 +42,11 @@ import static org.junit.Assert.fail;
 public class JsonTest extends CQLTester
 {
     @BeforeClass
-    public static void setUp()
+    public static void setUpClass() // overrides CQLTester.setUpClass()
     {
         StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
+
+        prepareServer();
     }
 
     @Test
