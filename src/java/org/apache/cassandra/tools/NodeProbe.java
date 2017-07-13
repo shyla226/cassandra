@@ -1086,6 +1086,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.getStreamThroughputMbPerSec();
     }
 
+    public int getStreamingConnectionsPerHost()
+    {
+        return ssProxy.getStreamThroughputMbPerSec();
+    }
+
     public int getInterDCStreamThroughput()
     {
         return ssProxy.getInterDCStreamThroughputMbPerSec();
@@ -1194,9 +1199,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.describeRingJMX(keyspaceName);
     }
 
-    public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources)
+    public String rebuild(List<String> keyspaces, String tokens, String mode,
+                          List<String> whitelistDcs, List<String> blacklistDcs,
+                          List<String> whitelistSources, List<String> blacklistSources)
     {
-        ssProxy.rebuild(sourceDc, keyspace, tokens, specificSources);
+        return ssProxy.rebuild(keyspaces, tokens, mode, whitelistDcs, blacklistDcs, whitelistSources, blacklistSources);
     }
 
     public List<String> sampleKeyRange()

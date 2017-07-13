@@ -97,7 +97,6 @@ public class BootStrapperTest
         InetAddress myEndpoint = InetAddress.getByName("127.0.0.1");
 
         assertEquals(numOldNodes, tmd.sortedTokens().size());
-        RangeStreamer s = new RangeStreamer(tmd, null, myEndpoint, "Bootstrap", true, DatabaseDescriptor.getEndpointSnitch(), new StreamStateStore(), false);
         IFailureDetector mockFailureDetector = new IFailureDetector()
         {
             public boolean isAlive(InetAddress ep)
@@ -112,7 +111,16 @@ public class BootStrapperTest
             public void remove(InetAddress ep) { throw new UnsupportedOperationException(); }
             public void forceConviction(InetAddress ep) { throw new UnsupportedOperationException(); }
         };
-        s.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(mockFailureDetector));
+        RangeStreamer s = new RangeStreamer(tmd,
+                                            null,
+                                            myEndpoint,
+                                            "Bootstrap",
+                                            true,
+                                            DatabaseDescriptor.getEndpointSnitch(),
+                                            new StreamStateStore(),
+                                            false,
+                                            SourceFilters.failureDetectorFilter(mockFailureDetector));
+
         s.addRanges(keyspaceName, Keyspace.open(keyspaceName).getReplicationStrategy().getPendingAddressRanges(tmd, myToken, myEndpoint));
 
         Collection<Map.Entry<InetAddress, Collection<Range<Token>>>> toFetch = s.toFetch().get(keyspaceName);
