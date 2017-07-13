@@ -79,7 +79,7 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.5");
 
         RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
         validateRange(rangesWithSources, map);
 
         Assert.assertEquals(4, map.asMap().keySet().size());
@@ -151,7 +151,7 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.1", "127.0.0.2");
 
         RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
         validateRange(rangesWithSources, map);
 
         //We should validate that it streamed from only non local host and only one range
@@ -171,7 +171,7 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.1");
 
         RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
         //All ranges map to local host so we will not stream anything.
         Assert.assertTrue(map.isEmpty());
     }
@@ -199,7 +199,7 @@ public class RangeFetchMapCalculatorTest
                                                                      });
 
         RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, filter, "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
 
         validateRange(rangesWithSources, map);
 
