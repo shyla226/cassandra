@@ -62,6 +62,7 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -629,7 +630,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 states.add(Pair.create(ApplicationState.STATUS, valueFactory.hibernate(true)));
                 Gossiper.instance.addLocalApplicationStates(states);
             }
-            doAuthSetup();
+            TPCUtils.blockingAwait(doAuthSetup());
             logger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
 
@@ -1007,13 +1008,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         setTokens(tokens);
 
         assert tokenMetadata.sortedTokens().size() > 0;
-        doAuthSetup().blockingAwait();
+        TPCUtils.blockingAwait(doAuthSetup());
     }
 
     private Completable doAuthSetup()
     {
-        if (!doneAuthSetup.getAndSet(true))
-            return Completable.complete(); // TODO - merge , is this equivalent?
+        if (doneAuthSetup.getAndSet(true))
+            return Completable.complete();
 
         return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
                 .doOnComplete(() -> {
