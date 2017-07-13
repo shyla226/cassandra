@@ -1033,15 +1033,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Completable maybeAddKeyspace(KeyspaceMetadata ksm)
     {
-        try
-        {
-            return MigrationManager.announceNewKeyspace(ksm, 0, false);
-        }
-        catch (AlreadyExistsException e)
-        {
-            logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
-            return Completable.complete();
-        }
+        return MigrationManager.announceNewKeyspace(ksm, 0, false)
+                               .onErrorResumeNext(e -> {
+                                   if (e instanceof AlreadyExistsException)
+                                   {
+                                       logger.debug("Attempted to create new keyspace {}, but it already exists", ksm.name);
+                                       return Completable.complete();
+                                   }
+
+                                   return Completable.error(e);
+
+        });
     }
 
     /**
