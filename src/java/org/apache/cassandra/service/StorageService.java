@@ -27,6 +27,8 @@ import java.util.Map.Entry;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.MatchResult;
+import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 import javax.management.*;
 import javax.management.openmbean.TabularData;
@@ -1106,13 +1108,59 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void rebuild(String sourceDc)
     {
+        rebuild(sourceDc, null, null, null);
+    }
+
+    public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources)
+    {
+        rebuild(keyspace != null ? Collections.singletonList(keyspace) : Collections.emptyList(),
+                tokens,
+                RebuildMode.NORMAL,
+                StreamingOptions.forRebuild(tokenMetadata.cloneOnlyTokenMap(),
+                                            sourceDc, specificSources));
+    }
+
+    public String rebuild(List<String> keyspaces,
+                          String tokens,
+                          String mode,
+                          List<String> srcDcNames,
+                          List<String> excludeDcNames,
+                          List<String> specifiedSources,
+                          List<String> excludeSources)
+    {
+        return rebuild(keyspaces != null ? keyspaces : Collections.emptyList(),
+                       tokens,
+                       RebuildMode.getMode(mode),
+                       StreamingOptions.forRebuild(tokenMetadata.cloneOnlyTokenMap(),
+                                                   srcDcNames, excludeDcNames, specifiedSources, excludeSources));
+    }
+
+    private String rebuild(List<String> keyspaces,
+                           String tokens,
+                           RebuildMode mode,
+                           StreamingOptions options)
+    {
         // check ongoing rebuild
         if (!isRebuilding.compareAndSet(false, true))
         {
             throw new IllegalStateException("Node is still rebuilding. Check nodetool netstats.");
         }
 
-        logger.info("rebuild from dc: {}", sourceDc == null ? "(any dc)" : sourceDc);
+        keyspaces = keyspaces != null ? keyspaces : Collections.emptyList();
+
+        // check the arguments
+        if (keyspaces.isEmpty() && tokens != null)
+        {
+            throw new IllegalArgumentException("Cannot specify tokens without keyspace.");
+        }
+
+
+        String msg = String.format("%s, %s, %s, %s",
+                                   !keyspaces.isEmpty() ? keyspaces : "(All keyspaces)",
+                                   tokens == null ? "(All tokens)" : tokens,
+                                   mode, options);
+
+        logger.info("starting rebuild for {}", msg);
         long t0 = System.currentTimeMillis();
 
         try
@@ -1123,13 +1171,70 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                        "Rebuild",
                                                        !replacing && useStrictConsistency,
                                                        DatabaseDescriptor.getEndpointSnitch(),
-                                                       streamStateStore);
-            streamer.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(FailureDetector.instance));
-            if (sourceDc != null)
-                streamer.addSourceFilter(new RangeStreamer.SingleDatacenterFilter(DatabaseDescriptor.getEndpointSnitch(), sourceDc));
+                                                       streamStateStore,
+                                                       false,
+                                                       options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
+                                                                              FailureDetector.instance));
 
-            for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
-                streamer.addRanges(keyspaceName, getLocalRanges(keyspaceName));
+            if (keyspaces.isEmpty())
+            {
+                keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
+            }
+
+            if (tokens == null)
+            {
+                for (String keyspaceName : keyspaces)
+                    streamer.addRanges(keyspaceName, getLocalRanges(keyspaceName));
+
+                mode.beforeStreaming(keyspaces);
+            }
+            else
+            {
+                List<Range<Token>> ranges = new ArrayList<>();
+                Token.TokenFactory factory = getTokenFactory();
+                Pattern rangePattern = Pattern.compile("\\(\\s*(-?\\w+)\\s*,\\s*(-?\\w+)\\s*\\]");
+                try (Scanner tokenScanner = new Scanner(tokens))
+                {
+                    while (tokenScanner.findInLine(rangePattern) != null)
+                    {
+                        MatchResult range = tokenScanner.match();
+                        Token startToken = factory.fromString(range.group(1));
+                        Token endToken = factory.fromString(range.group(2));
+                        logger.info("adding range: ({},{}]", startToken, endToken);
+                        ranges.add(new Range<>(startToken, endToken));
+                    }
+                    if (tokenScanner.hasNext())
+                        throw new IllegalArgumentException("Unexpected string: " + tokenScanner.next());
+                }
+
+                Map<String, Collection<Range<Token>>> keyspaceRanges = new HashMap<>();
+                for (String keyspaceName : keyspaces)
+                {
+                    // Ensure all specified ranges are actually ranges owned by this host
+                    Collection<Range<Token>> localRanges = getLocalRanges(keyspaceName);
+                    Set<Range<Token>> specifiedNotFoundRanges = new HashSet<>(ranges);
+                    for (Range<Token> specifiedRange : ranges)
+                    {
+                        for (Range<Token> localRange : localRanges)
+                        {
+                            if (localRange.contains(specifiedRange))
+                            {
+                                specifiedNotFoundRanges.remove(specifiedRange);
+                                break;
+                            }
+                        }
+                    }
+                    if (!specifiedNotFoundRanges.isEmpty())
+                    {
+                        throw new IllegalArgumentException(String.format("The specified range(s) %s is not a range that is owned by this node. Please ensure that all token ranges specified to be rebuilt belong to this node.", specifiedNotFoundRanges));
+                    }
+
+                    streamer.addRanges(keyspaceName, ranges);
+                    keyspaceRanges.put(keyspaceName, ranges);
+                }
+
+                mode.beforeStreaming(keyspaceRanges);
+            }
 
             StreamResultFuture resultFuture = streamer.fetchAsync();
             // wait for result
@@ -1139,17 +1244,32 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             long totalBytes = 0L;
             for (SessionInfo session : resultFuture.getCurrentState().sessions)
                 totalBytes += session.getTotalSizeReceived();
-            logger.info("finished rebuild from dc: {} after {} seconds receiving {} bytes", sourceDc == null ? "(any dc)" : sourceDc, t / 1000, totalBytes);
+            String info = String.format("finished rebuild for %s after %s seconds receiving %d bytes",
+                                        msg, t / 1000, totalBytes);
+            logger.info("{}", info);
+            return info;
         }
         catch (InterruptedException e)
         {
             throw new RuntimeException("Interrupted while waiting on rebuild streaming");
+        }
+        catch (IllegalArgumentException | IllegalStateException e)
+        {
+            // These are (usally) validation errors caused by wrong input parameters.
+            // No need to log a stack trace as an error.
+            logger.warn("Parameter error while rebuilding node", e);
+            throw new RuntimeException("Parameter error while rebuilding node: " + e);
         }
         catch (ExecutionException e)
         {
             // This is used exclusively through JMX, so log the full trace but only throw a simple RTE
             logger.error("Error while rebuilding node", e.getCause());
             throw new RuntimeException("Error while rebuilding node: " + e.getCause().getMessage());
+        }
+        catch (RuntimeException e)
+        {
+            logger.error("Error while rebuilding node", e);
+            throw e;
         }
         finally
         {
