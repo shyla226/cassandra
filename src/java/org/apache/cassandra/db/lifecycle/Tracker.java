@@ -101,7 +101,6 @@ public class Tracker
         return new LifecycleTransaction(this, operationType, sstables);
     }
 
-
     // METHODS FOR ATOMICALLY MODIFYING THE VIEW
 
     Pair<View, View> apply(Function<View, View> function)
@@ -485,5 +484,19 @@ public class Tracker
     public View getView()
     {
         return view.get();
+    }
+
+    @VisibleForTesting
+    public void removeUnsafe(Set<SSTableReader> toRemove)
+    {
+        Pair<View, View> result = apply(view -> {
+            return updateLiveSet(toRemove, emptySet()).apply(view);
+        });
+    }
+
+    @VisibleForTesting
+    public Collection<INotificationConsumer> getSubscribers()
+    {
+        return Sets.newHashSet(subscribers);
     }
 }

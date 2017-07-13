@@ -134,6 +134,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
     private static final ScheduledThreadPoolExecutor syncExecutor = new ScheduledThreadPoolExecutor(1);
+
     static
     {
         // Immediately remove readMeter sync task when cancelled.
@@ -2296,5 +2297,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                            OpenReason openReason,
                                            SerializationHeader header);
 
+    }
+
+    public boolean intersectsWith(SSTableReader other)
+    {
+        return getRange().intersects(new Range<>(other.first.getToken(), other.last.getToken()));
+    }
+
+    public Range<Token> getRange()
+    {
+        return new Range<>(first.getToken(), last.getToken());
     }
 }
