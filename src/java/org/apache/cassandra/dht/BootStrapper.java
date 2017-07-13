@@ -17,17 +17,15 @@
  */
 package org.apache.cassandra.dht;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.util.concurrent.ListenableFuture;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.tokenallocator.TokenAllocation;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -35,9 +33,9 @@ import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.*;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventNotifierSupport;
 import org.apache.cassandra.utils.progress.ProgressEventType;
@@ -64,7 +62,9 @@ public class BootStrapper extends ProgressEventNotifierSupport
 
     public ListenableFuture<StreamState> bootstrap(StreamStateStore stateStore, boolean useStrictConsistency)
     {
-        logger.trace("Beginning bootstrap process");
+        StreamingOptions options = StreamingOptions.forBootStrap(tokenMetadata.cloneOnlyTokenMap());
+
+        logger.info("Bootstrapping with streaming options:{}", options);
 
         RangeStreamer streamer = new RangeStreamer(tokenMetadata,
                                                    tokens,
@@ -74,12 +74,17 @@ public class BootStrapper extends ProgressEventNotifierSupport
                                                    DatabaseDescriptor.getEndpointSnitch(),
                                                    stateStore,
                                                    true,
-                                                   DatabaseDescriptor.getStreamingConnectionsPerHost());
-        streamer.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(FailureDetector.instance));
-        streamer.addSourceFilter(new RangeStreamer.ExcludeLocalNodeFilter());
+                                                   DatabaseDescriptor.getStreamingConnectionsPerHost(),
+                                                   options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
+                                                                          FailureDetector.instance));
 
         for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
         {
+            if (!options.acceptKeyspace(keyspaceName))
+            {
+                logger.warn("Keyspace '{}' is explicitly excluded from bootstrap on user request. Make sure to rebuild the keyspace!");
+                continue;
+            }
             AbstractReplicationStrategy strategy = Keyspace.open(keyspaceName).getReplicationStrategy();
             streamer.addRanges(keyspaceName, strategy.getPendingAddressRanges(tokenMetadata, tokens, address));
         }
