@@ -20,11 +20,16 @@ package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Counting;
 import com.codahale.metrics.Metric;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.ScheduledReporter;
 
 /**
  * An incrementing and decrementing counter metric.
+ *
+ * This class needs to extend {@link com.codahale.metrics.Counter} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getCounters()} (used by {@link ScheduledReporter}).
  */
-public abstract class Counter implements Metric, Counting, Composable<Counter>
+public abstract class Counter extends com.codahale.metrics.Counter implements Metric, Counting, Composable<Counter>
 {
     /**
      * Increment the counter by one.

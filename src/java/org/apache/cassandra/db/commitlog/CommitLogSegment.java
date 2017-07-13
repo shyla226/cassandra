@@ -22,13 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -433,7 +427,7 @@ public abstract class CommitLogSegment
         while (lastSyncedOffset < position)
         {
             WaitQueue.Signal signal = waitingOnCommit != null ?
-                                      syncComplete.register(Thread.currentThread(), waitingOnCommit.time()) :
+                                      syncComplete.register(Thread.currentThread(), waitingOnCommit.timer()) :
                                       syncComplete.register(Thread.currentThread());
             if (lastSyncedOffset < position)
                 signal.awaitUninterruptibly();

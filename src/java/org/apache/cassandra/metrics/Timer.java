@@ -8,7 +8,9 @@ import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Metered;
+import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Sampling;
+import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.Snapshot;
 
 /**
@@ -19,10 +21,10 @@ import com.codahale.metrics.Snapshot;
  * it replaces the {@link com.codahale.metrics.Histogram} field with our own {@link Histogram}
  * and replaces the {@link com.codahale.metrics.Meter} field with our own {@link Meter}.
  *
- * The underlying histogram and meter may be aggregated, making this timer aggregated, that is
- * uncapable of updating its values directly.
+ * This class needs to extend {@link com.codahale.metrics.Timer} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getTimers()} (used by {@link ScheduledReporter}).
  */
-public class Timer implements Metered, Sampling, Composable<Timer>
+public class Timer extends com.codahale.metrics.Timer implements Metered, Sampling, Composable<Timer>
 {
     /**
      * A timing context.
@@ -135,12 +137,16 @@ public class Timer implements Metered, Sampling, Composable<Timer>
     }
 
     /**
-     * Returns a new {@link Context}.
-     *
-     * @return a new {@link Context}
-     * @see Context
+     * We cannot instantiate a {@link com.codahale.metrics.Timer.Context} with our own metric containers
+     * due to its private constructor so we make this method unsupported and provide the same functionality
+     * via {@link this#timer()}.
      */
-    public Context time()
+    public com.codahale.metrics.Timer.Context time()
+    {
+        throw new UnsupportedOperationException("Use Timer.timer() instead.");
+    }
+
+    public Context timer()
     {
         if (composableType == Type.COMPOSITE)
             throw new UnsupportedOperationException("Composite timer cannot time an event");

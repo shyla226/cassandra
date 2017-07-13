@@ -69,10 +69,14 @@ public class PendingAntiCompaction
 
         void abort()
         {
-            txn.abort();
-            refs.release();
+            if (txn != null)
+                txn.abort();
+            if (refs != null)
+                refs.release();
         }
     }
+
+    static class SSTableAcquisitionException extends RuntimeException {}
 
     static class AcquisitionCallable implements Callable<AcquireResult>
     {
@@ -148,7 +152,7 @@ public class PendingAntiCompaction
                         result.abort();
                     }
                 }
-                return Futures.immediateFailedFuture(new RuntimeException("unable to acquire sstables"));
+                return Futures.immediateFailedFuture(new SSTableAcquisitionException());
             }
             else
             {

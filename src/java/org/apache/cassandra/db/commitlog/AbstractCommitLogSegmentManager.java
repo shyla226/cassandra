@@ -263,7 +263,7 @@ public abstract class AbstractCommitLogSegmentManager
     {
         do
         {
-            WaitQueue.Signal prepared = segmentPrepared.register(Thread.currentThread(), commitLog.metrics.waitingOnSegmentAllocation.time());
+            WaitQueue.Signal prepared = segmentPrepared.register(Thread.currentThread(), commitLog.metrics.waitingOnSegmentAllocation.timer());
             if (availableSegment == null && allocatingFrom == currentAllocatingFrom)
                 prepared.awaitUninterruptibly();
             else

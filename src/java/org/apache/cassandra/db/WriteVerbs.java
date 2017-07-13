@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 
 import com.google.common.base.Throwables;
@@ -28,6 +29,7 @@ import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.InternalRequestExecutionException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.net.*;
@@ -77,36 +79,31 @@ public class WriteVerbs extends VerbGroup<WriteVerbs.WriteVersion>
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
         // We should not wait for the result of the write in this thread, otherwise we could have a distributed
         // deadlock between replicas running this handler (see #4578).
-        try
-        {
-            return StorageProxy.applyCounterMutationOnLeader(mutation, localDataCenter, queryStartNanoTime)
-                               .exceptionally(t -> {
-                                   if (t instanceof RequestTimeoutException)
-                                   {
-                                       // Getting a timeout here should mean the coordinator that forwarded that counter write has already timed out
-                                       // on its own, so there isn't much benefit in answering.
-                                       throw new DroppingResponseException();
-                                   }
-                                   else if (t instanceof RequestExecutionException)
-                                   {
-                                       // Other execution exceptions are more indicative of a failure (mostly WriteFailure currently but no reason not
-                                       // to catch all RequestExecutionException to be on the safe side).
-                                       throw new CounterForwardingException((RequestExecutionException)t);
-                                   }
-                                   else
-                                   {
-                                       // Otherwise, it's unexpected so let the normal exception handling from VerbHandlers do its job
-                                       throw Throwables.propagate(t);
-                                   }
-                               });
-        }
-        catch (RequestExecutionException e)
-        {
-            // applyCounterMutationOnLeader can only throw OverloadedException for now, but catch RequestExecutioException
-            // to future proof since we'd want to handle any request failure the same way (with the exclusion of a
-            // timeout, but that's the one exception we know won't be thrown by the method as it's asynchronous)
-            throw new CounterForwardingException(e);
-        }
+        return StorageProxy.applyCounterMutationOnLeader(mutation, localDataCenter, queryStartNanoTime)
+                           .exceptionally(t -> {
+
+                               if (t instanceof CompletionException && t.getCause() != null)
+                                   t = t.getCause();
+
+                               if (t instanceof RequestTimeoutException)
+                               {
+                                   // Getting a timeout here should mean the coordinator that forwarded that counter write has already timed out
+                                   // on its own, so there isn't much benefit in answering.
+                                   throw new DroppingResponseException();
+                               }
+                               else if (t instanceof RequestExecutionException || t instanceof InternalRequestExecutionException)
+                               {
+                                   // Other execution exceptions are more indicative of a failure (mostly WriteFailure currently but no reason not
+                                   // to catch all RequestExecutionException to be on the safe side).
+                                   throw new CounterForwardingException(t);
+                               }
+                               else
+                               {
+                                   // Otherwise, it's unexpected so let the normal exception handling from VerbHandlers do its job
+                                   throw Throwables.propagate(t);
+                               }
+                           });
+
     };
 
     public WriteVerbs(Verbs.Group id)

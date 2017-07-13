@@ -22,9 +22,14 @@ package org.apache.cassandra.index.sasi;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.UUID;
 
-import org.apache.cassandra.schema.ColumnMetadata;
+import com.google.common.collect.Multimap;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.CompactionInfo;
@@ -40,6 +45,7 @@ import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -48,12 +54,12 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     private final ColumnFamilyStore cfs;
     private final UUID compactionId = UUIDGen.getTimeUUID();
 
-    private final SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables;
+    private final SortedMap<SSTableReader, Multimap<ColumnMetadata, ColumnIndex>> sstables;
 
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
 
-    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables)
+    public SASIIndexBuilder(ColumnFamilyStore cfs, SortedMap<SSTableReader, Multimap<ColumnMetadata, ColumnIndex>> sstables)
     {
         long totalIndexBytes = 0;
         for (SSTableReader sstable : sstables.keySet())
@@ -67,10 +73,10 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
     public void build()
     {
         AbstractType<?> keyValidator = cfs.metadata().partitionKeyType;
-        for (Map.Entry<SSTableReader, Map<ColumnMetadata, ColumnIndex>> e : sstables.entrySet())
+        for (Map.Entry<SSTableReader, Multimap<ColumnMetadata, ColumnIndex>> e : sstables.entrySet())
         {
             SSTableReader sstable = e.getKey();
-            Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
+            Multimap<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
             try (RandomAccessReader dataFile = sstable.openDataReader())
             {

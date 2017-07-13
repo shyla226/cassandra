@@ -34,7 +34,6 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -237,9 +236,8 @@ public class StreamReceiveTask extends StreamTask
                     {
                         task.finishTransaction();
 
-                        // add sstables and build secondary indexes
+                        // add sstables (this will build secondary indexes too, see CASSANDRA-10130)
                         cfs.addSSTables(readers);
-                        cfs.indexManager.buildAllIndexesBlocking(readers);
 
                         //invalidate row and counter cache
                         if (cfs.isRowCacheEnabled() || cfs.metadata().isCounter())

@@ -31,6 +31,7 @@ import com.codahale.metrics.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.compress.CompressionMetadata;
@@ -148,6 +149,10 @@ public class TableMetrics
     public final LatencyMetrics casCommit;
     /** percent of the data that is repaired */
     public final Gauge<Double> percentRepaired;
+    /** Number of started repairs as coordinator on this table */
+    public final Counter repairsStarted;
+    /** Number of completed repairs as coordinator on this table */
+    public final Counter repairsCompleted;
     /** time spent anticompacting data before participating in a consistent repair */
     public final Timer anticompactionTime;
     /** time spent creating merkle trees */
@@ -433,7 +438,10 @@ public class TableMetrics
         {
             public Integer getValue()
             {
-                return cfs.getCompactionStrategyManager().getEstimatedRemainingTasks();
+                CompactionStrategyManager compactionStrategyManager = cfs.getCompactionStrategyManager();
+                // cfs.pendingCompactions.getEstimatedRemainingCompactionTasks may be called by metrics reporter before
+                // compaction strategy manager is initialized
+                return compactionStrategyManager != null ? compactionStrategyManager.getEstimatedRemainingTasks() : 0;
             }
         });
         liveSSTableCount = createTableGauge("LiveSSTableCount", new Gauge<Integer>()
@@ -725,6 +733,9 @@ public class TableMetrics
         casPropose = new LatencyMetrics(factory, aliasFactory, "CasPropose", cfs.keyspace.metric.casPropose);
         casCommit = new LatencyMetrics(factory, aliasFactory, "CasCommit", cfs.keyspace.metric.casCommit);
 
+        repairsStarted = createTableCounter("RepairJobsStarted");
+        repairsCompleted = createTableCounter("RepairJobsCompleted");
+
         anticompactionTime = createTableTimer("AnticompactionTime", cfs.keyspace.metric.anticompactionTime);
         validationTime = createTableTimer("ValidationTime", cfs.keyspace.metric.validationTime);
         syncTime = createTableTimer("SyncTime", cfs.keyspace.metric.repairSyncTime);
@@ -755,14 +766,12 @@ public class TableMetrics
     {
         for(Map.Entry<String, String> entry : all.entrySet())
         {
-            CassandraMetricsRegistry.MetricName name = factory.createMetricName(entry.getKey());
-            CassandraMetricsRegistry.MetricName alias = aliasFactory.createMetricName(entry.getValue());
-            String metricName = name.getMetricName();
-
-            if (Metrics.getMetrics().containsKey(metricName))
-            {   // not all metrics in the all map have necessarily been created, for example views do not create
-                // "ViewReadTime" or "ViewLockAcquireTime"
-                allTableMetrics.get(entry.getKey()).remove(Metrics.getMetrics().get(metricName));
+            final CassandraMetricsRegistry.MetricName name = factory.createMetricName(entry.getKey());
+            final Metric metric = Metrics.getMetrics().get(name.getMetricName());
+            if (metric != null)
+            {  // Metric will be null if it's a view metric we are releasing. Views have null for ViewLockAcquireTime and ViewLockReadTime
+                final CassandraMetricsRegistry.MetricName alias = aliasFactory.createMetricName(entry.getValue());
+                allTableMetrics.get(entry.getKey()).remove(metric);
                 Metrics.remove(name, alias);
             }
         }

@@ -36,14 +36,14 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
 {
     private final RepairJobDesc desc;
     private final InetAddress endpoint;
-    private final int gcBefore;
+    private final int nowInSec;
     private final PreviewKind previewKind;
 
-    public ValidationTask(RepairJobDesc desc, InetAddress endpoint, int gcBefore, PreviewKind previewKind)
+    public ValidationTask(RepairJobDesc desc, InetAddress endpoint, int nowInSec, PreviewKind previewKind)
     {
         this.desc = desc;
         this.endpoint = endpoint;
-        this.gcBefore = gcBefore;
+        this.nowInSec = nowInSec;
         this.previewKind = previewKind;
     }
 
@@ -52,7 +52,7 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
      */
     public void run()
     {
-        ValidationRequest request = new ValidationRequest(desc, gcBefore);
+        ValidationRequest request = new ValidationRequest(desc, nowInSec);
         MessagingService.instance().send(Verbs.REPAIR.VALIDATION_REQUEST.newRequest(endpoint, request));
     }
 

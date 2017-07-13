@@ -368,6 +368,13 @@ public class LocalSessions
         QueryProcessor.executeInternal(String.format(query, keyspace, table), sessionID);
     }
 
+    private void syncTable()
+    {
+        TableId tid = Schema.instance.getTableMetadata(keyspace, table).id;
+        ColumnFamilyStore cfm = Schema.instance.getColumnFamilyStoreInstance(tid);
+        cfm.forceBlockingFlush();
+    }
+
     /**
      * Loads a session directly from the table. Should be used for testing only
      */
@@ -554,8 +561,21 @@ public class LocalSessions
 
             public void onFailure(Throwable t)
             {
-                logger.error(String.format("Prepare phase for incremental repair session %s failed", sessionID), t);
-                failSession(sessionID);
+                logger.error("Prepare phase for incremental repair session {} failed", sessionID, t);
+                if (t instanceof PendingAntiCompaction.SSTableAcquisitionException)
+                {
+                    logger.warn("Prepare phase for incremental repair session {} was unable to " +
+                                "acquire exclusive access to the neccesary sstables. " +
+                                "This is usually caused by running multiple incremental repairs on nodes that share token ranges",
+                                sessionID);
+
+                }
+                else
+                {
+                    logger.error("Prepare phase for incremental repair session {} failed", sessionID, t);
+                }
+                send(Verbs.REPAIR.CONSISTENT_RESPONSE.newRequest(coordinator, new PrepareConsistentResponse(sessionID, getBroadcastAddress(), false)));
+                failSession(sessionID, false);
                 executor.shutdown();
             }
         });
@@ -586,8 +606,18 @@ public class LocalSessions
         try
         {
             setStateAndSave(session, FINALIZE_PROMISED);
+
+            /*
+            Flushing the repairs table here, *before* responding to the coordinator prevents a scenario where we respond
+            with a promise to the coordinator, but there is a failure before the commit log mutation with the
+            FINALIZE_PROMISED status is synced to disk. This could cause the state for this session to revert to an
+            earlier status on startup, which would prevent the failure recovery mechanism from ever being able to promote
+            this session to FINALIZED, likely creating inconsistencies in the repaired data sets across nodes.
+            */
+            syncTable();
+
             send(Verbs.REPAIR.FINALIZE_PROMISE.newRequest(from, new FinalizePromise(sessionID, getBroadcastAddress(), true)));
-            logger.debug("Received FinalizePropose message for incremental repair session {}, responded with FinalizePromise");
+            logger.debug("Received FinalizePropose message for incremental repair session {}, responded with FinalizePromise", sessionID);
         }
         catch (IllegalArgumentException e)
         {

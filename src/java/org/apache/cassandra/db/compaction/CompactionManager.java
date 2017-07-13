@@ -588,7 +588,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             protected void runMayThrow() throws Exception
             {
-            try (Timer.Context ctx = cfs.metric.anticompactionTime.time())
+            try (Timer.Context ctx = cfs.metric.anticompactionTime.timer())
             {
                 performAnticompaction(cfs, ranges, sstables, txn, ActiveRepairService.UNREPAIRED_SSTABLE, sessionId, sessionId);
             }
@@ -631,7 +631,7 @@ public class CompactionManager implements CompactionManagerMBean
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(parentRepairSession);
         Preconditions.checkArgument(!prs.isPreview(), "Cannot anticompact for previews");
 
-        logger.info("{} Starting anticompaction for {}.{} on {}/{} sstables", PreviewKind.NONE.logPrefix(parentRepairSession), cfs.keyspace.getName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables());
+        logger.info("{} Starting anticompaction for {}.{} on {}/{} sstables", PreviewKind.NONE.logPrefix(parentRepairSession), cfs.keyspace.getName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables().size());
         logger.trace("{} Starting anticompaction for ranges {}", PreviewKind.NONE.logPrefix(parentRepairSession), ranges);
         Set<SSTableReader> sstables = new HashSet<>(validatedForRepair);
         Set<SSTableReader> mutatedRepairStatuses = new HashSet<>();
@@ -936,7 +936,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             public Object call() throws IOException
             {
-                try (Timer.Context c = cfStore.metric.validationTime.time())
+                try (Timer.Context c = cfStore.metric.validationTime.timer())
                 {
                     doValidationCompaction(cfStore, validator);
                 }
@@ -1316,9 +1316,6 @@ public class CompactionManager implements CompactionManagerMBean
         Refs<SSTableReader> sstables = null;
         try
         {
-
-            int gcBefore;
-            int nowInSec = FBUtilities.nowInSeconds();
             UUID parentRepairSessionId = validator.desc.parentSessionId;
             String snapshotName;
             boolean isGlobalSnapshotValidation = cfs.snapshotExists(parentRepairSessionId.toString());
@@ -1334,13 +1331,6 @@ public class CompactionManager implements CompactionManagerMBean
                 // note that we populate the parent repair session when creating the snapshot, meaning the sstables in the snapshot are the ones we
                 // are supposed to validate.
                 sstables = cfs.getSnapshotSSTableReaders(snapshotName);
-
-
-                // Computing gcbefore based on the current time wouldn't be very good because we know each replica will execute
-                // this at a different time (that's the whole purpose of repair with snaphsot). So instead we take the creation
-                // time of the snapshot, which should give us roughtly the same time on each replica (roughtly being in that case
-                // 'as good as in the non-snapshot' case)
-                gcBefore = cfs.gcBefore((int)(cfs.getSnapshotCreationTime(snapshotName) / 1000));
             }
             else
             {
@@ -1352,10 +1342,6 @@ public class CompactionManager implements CompactionManagerMBean
                 sstables = getSSTablesToValidate(cfs, validator);
                 if (sstables == null)
                     return; // this means the parent repair session was removed - the repair session failed on another node and we removed it
-                if (validator.gcBefore > 0)
-                    gcBefore = validator.gcBefore;
-                else
-                    gcBefore = getDefaultGcBefore(cfs, nowInSec);
             }
 
             // Create Merkle trees suitable to hold estimated partitions for the given ranges.
@@ -1364,8 +1350,8 @@ public class CompactionManager implements CompactionManagerMBean
             long start = System.nanoTime();
             long partitionCount = 0;
             try (AbstractCompactionStrategy.ScannerList scanners = cfs.getCompactionStrategyManager().getScanners(sstables, validator.desc.ranges);
-                 ValidationCompactionController controller = new ValidationCompactionController(cfs, gcBefore);
-                 CompactionIterator ci = new ValidationCompactionIterator(scanners.scanners, controller, nowInSec, metrics))
+                 ValidationCompactionController controller = new ValidationCompactionController(cfs, getDefaultGcBefore(cfs, validator.nowInSec));
+                 CompactionIterator ci = new ValidationCompactionIterator(scanners.scanners, controller, validator.nowInSec, metrics))
             {
                 // validate the CF as we iterate over it
                 validator.prepare(cfs, tree);
@@ -1628,7 +1614,7 @@ public class CompactionManager implements CompactionManagerMBean
     /**
      * Is not scheduled, because it is performing disjoint work from sstable compaction.
      */
-    public Future<?> submitIndexBuild(final SecondaryIndexBuilder builder)
+    public ListenableFuture<?> submitIndexBuild(final SecondaryIndexBuilder builder)
     {
         Runnable runnable = new Runnable()
         {

@@ -721,7 +721,6 @@ public abstract class CassandraIndex implements Index
                             baseCfs.metadata.keyspace,
                             baseCfs.metadata.name,
                             metadata.name);
-                baseCfs.indexManager.markIndexBuilt(metadata.name);
                 return;
             }
 
@@ -735,7 +734,6 @@ public abstract class CassandraIndex implements Index
             Future<?> future = CompactionManager.instance.submitIndexBuild(builder);
             FBUtilities.waitOnFuture(future);
             indexCfs.forceBlockingFlush();
-            baseCfs.indexManager.markIndexBuilt(metadata.name);
         }
         logger.info("Index build of {} complete", metadata.name);
     }

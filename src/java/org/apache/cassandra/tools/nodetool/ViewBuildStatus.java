@@ -22,8 +22,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import io.airlift.command.Arguments;
-import io.airlift.command.Command;
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool;
 import org.apache.cassandra.tools.nodetool.formatter.TableBuilder;
@@ -40,24 +40,42 @@ public class ViewBuildStatus extends NodeTool.NodeToolCmd
 
     protected void execute(NodeProbe probe)
     {
-        String keyspace = null, view = null;
-        if (args.size() == 2)
+        if (args.isEmpty())
         {
-            keyspace = args.get(0);
-            view = args.get(1);
-        }
-        else if (args.size() == 1)
-        {
-            String[] input = args.get(0).split("\\.");
-            checkArgument(input.length == 2, "viewbuildstatus requires keyspace and view name arguments");
-            keyspace = input[0];
-            view = input[1];
+            for (Map.Entry<String, List<String>> ksViews : probe.getKeyspacesAndViews().entrySet())
+            {
+                for (String table : ksViews.getValue())
+                {
+                    viewBuildStatus(probe, ksViews.getKey(), table);
+                }
+            }
         }
         else
         {
-            checkArgument(false, "viewbuildstatus requires keyspace and view name arguments");
-        }
+            String keyspace = null, view = null;
+            if (args.size() == 2)
+            {
+                keyspace = args.get(0);
+                view = args.get(1);
+            }
+            else if (args.size() == 1)
+            {
+                String[] input = args.get(0).split("\\.");
+                checkArgument(input.length == 2, "viewbuildstatus requires keyspace and view name arguments");
+                keyspace = input[0];
+                view = input[1];
+            }
+            else
+            {
+                checkArgument(false, "viewbuildstatus requires keyspace and view name arguments");
+            }
 
+            System.exit(viewBuildStatus(probe, keyspace, view) ? 0 : 1);
+        }
+    }
+
+    private boolean viewBuildStatus(NodeProbe probe, String keyspace, String view)
+    {
         Map<String, String> buildStatus = probe.getViewBuildStatuses(keyspace, view);
         boolean failed = false;
         TableBuilder builder = new TableBuilder();
@@ -75,10 +93,10 @@ public class ViewBuildStatus extends NodeTool.NodeToolCmd
             System.out.println(String.format("%s.%s has not finished building; node status is below.", keyspace, view));
             System.out.println();
             builder.printTo(System.out);
-            System.exit(1);
+            return false;
         } else {
             System.out.println(String.format("%s.%s has finished building", keyspace, view));
-            System.exit(0);
+            return true;
         }
     }
 }

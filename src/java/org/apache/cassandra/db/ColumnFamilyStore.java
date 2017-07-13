@@ -417,9 +417,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         minCompactionThreshold = new DefaultValue<>(metadata.get().params.compaction.minCompactionThreshold());
         maxCompactionThreshold = new DefaultValue<>(metadata.get().params.compaction.maxCompactionThreshold());
         crcCheckChance = new DefaultValue<>(metadata.get().params.crcCheckChance);
-        indexManager = new SecondaryIndexManager(this);
         viewManager = keyspace.viewManager.forTable(metadata.id);
-        metric = new TableMetrics(this);
         fileIndexGenerator.set(generation);
         sampleLatencyNanos = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getReadRpcTimeout() / 2);
 
@@ -430,6 +428,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (DatabaseDescriptor.isDaemonInitialized())
             initialMemtable = new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), this);
         data = new Tracker(initialMemtable, loadSSTables);
+
+        metric = new TableMetrics(this);
 
         // scan for sstables corresponding to this cf and load them
         if (data.loadsstables)
@@ -448,7 +448,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         else
             this.directories = new Directories(metadata.get(), Directories.dataDirectories);
 
-
         // compaction strategy should be created after the CFS has been prepared
         compactionStrategyManager = new CompactionStrategyManager(this);
 
@@ -462,6 +461,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes
+        indexManager = new SecondaryIndexManager(this);
         for (IndexMetadata info : metadata.get().indexes)
             indexManager.addIndex(info);
 
@@ -577,7 +577,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         data.dropSSTables();
         LifecycleTransaction.waitForDeletions();
-        indexManager.invalidateAllIndexesBlocking();
+        indexManager.dropAllIndexes();
 
         invalidateCaches();
     }
@@ -810,7 +810,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         try (Refs<SSTableReader> refs = Refs.ref(newSSTables))
         {
             data.addSSTables(newSSTables);
-            indexManager.buildAllIndexesBlocking(newSSTables);
         }
 
         logger.info("Done loading load new SSTables for {}/{}", keyspace.getName(), name);
@@ -825,14 +824,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(cfName);
 
-        Set<String> indexes = new HashSet<String>(Arrays.asList(idxNames));
-
-        Iterable<SSTableReader> sstables = cfs.getSSTables(SSTableSet.CANONICAL);
-        try (Refs<SSTableReader> refs = Refs.ref(sstables))
-        {
-            logger.info("User Requested secondary index re-build for {}/{} indexes: {}", ksName, cfName, Joiner.on(',').join(idxNames));
-            cfs.indexManager.rebuildIndexesBlocking(refs, indexes);
-        }
+        logger.info("User Requested secondary index re-build for {}/{} indexes: {}", ksName, cfName, Joiner.on(',').join(idxNames));
+        cfs.indexManager.rebuildIndexesBlocking(Sets.newHashSet(Arrays.asList(idxNames)));
     }
 
     public AbstractCompactionStrategy createCompactionStrategyInstance(CompactionParams compactionParams)
@@ -1500,7 +1493,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public void addSSTable(SSTableReader sstable)
     {
         assert sstable.getColumnFamilyName().equals(name);
-        addSSTables(Arrays.asList(sstable));
+        addSSTables(Collections.singletonList(sstable));
     }
 
     public void addSSTables(Collection<SSTableReader> sstables)

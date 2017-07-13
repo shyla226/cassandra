@@ -1174,10 +1174,11 @@ Table of Contents
                                        the reasons are shared between both exception.
                                0x0004  Some failures (one or more) were reported to the replica
                                        "leading" a counter write. The actual error didn't
-                                       occur on the node that sent this failure, it is
-                                       is simply the node reporting it due to how counter writes
+                                       necessarily occur on the node that sent this failure, it is
+                                       simply the node reporting it due to how counter writes
                                        work; the initial reason for the failure should have been
-                                       logged on the actual replica on which the problem occured).
+                                       logged on the actual replica on which the problem occured,
+                                       which may or may not be the same node.
                             Any other value for <failurecode> must be considered as an
                             Unknown reason (but drivers should not fail) as new <failurecode>
                             may be added without a bump of the protocol version.

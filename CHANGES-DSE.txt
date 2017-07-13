@@ -1,4 +1,7 @@
 dse 6.0.0
+ * Use shaded mobility-rpc jar to fix DSE build issues (APOLLO-839)
+ * Better exception handling for counter mutations (APOLLO-576)
+ * When "repairing" Paxos commits, only block on nodes being repaired (APOLLO-761)
  * MigrationManager should use toDebugString() when logging TableMetadata (APOLLO-739)
  * Fix LWT asserts for immutable TableMetadata (APOLLO-728)
  * Add DSE columns to system tables (APOLLO-716)
@@ -13,6 +16,11 @@ dse 6.0.0
  * For TWCS, flush to separate sstables based on write time (APOLLO-42)
  * Cleanup maven dependencies and download sources on maven ant tasks (APOLLO-302)
 Merged from dse5.1:
+ * Make o.a.c.metrics extend org.codahale.metrics to fix Metrics Reporter (APOLLO-811)
+ * Make sure to handle range queries while filtering (APOLLO-546)
+ * Allow mapping a single column to multiple SASI indexes (APOLLO-521)
+ * Properly evict pstmts from prepared statements cache (APOLLO-818)
+ * Add `nodetool sequence` batch functionality (APOLLO-651)
  * null assertion in MemtablePostFlush (APOLLO-708)
  * Show correct protocol version in cqlsh (APOLLO-616)
  * Update to logback-1.2.3 and redefine default rotation policy (APOLLO-643)

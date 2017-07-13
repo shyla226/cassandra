@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sasi;
 
+import java.io.File;
 import java.io.FileWriter;
 import java.io.Writer;
 import java.nio.ByteBuffer;
@@ -33,22 +34,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.Assert;
 
-import junit.framework.Assert;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
-import org.apache.cassandra.index.Index;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.sstable.CQLSSTableWriter;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.statements.IndexTarget;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -97,11 +100,14 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.flow.CsFlow;
 
+import static org.junit.Assert.*;
+
 public class SASIIndexTest
 {
     private static final IPartitioner PARTITIONER;
 
-    static {
+    static
+    {
         System.setProperty("cassandra.config", "cassandra-murmur.yaml");
         PARTITIONER = Murmur3Partitioner.instance;
     }
@@ -837,14 +843,14 @@ public class SASIIndexTest
         Assert.assertTrue(rows.toString(), rows.isEmpty());
 
         // now let's trigger index rebuild and check if we got the data back
-        store.indexManager.buildIndexBlocking(store.indexManager.getIndexByName(store.name + "_data_output_id"));
+        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.name + "_data_output_id"));
 
         rows = getIndexed(store, 10, buildExpression(dataOutputId, Operator.LIKE_CONTAINS, UTF8Type.instance.decompose("a")));
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2" }, rows.toArray(new String[rows.size()])));
 
         // also let's try to build an index for column which has no data to make sure that doesn't fail
-        store.indexManager.buildIndexBlocking(store.indexManager.getIndexByName(store.name + "_first_name"));
-        store.indexManager.buildIndexBlocking(store.indexManager.getIndexByName(store.name + "_data_output_id"));
+        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.name + "_first_name"));
+        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.name + "_data_output_id"));
 
         rows = getIndexed(store, 10, buildExpression(dataOutputId, Operator.LIKE_CONTAINS, UTF8Type.instance.decompose("a")));
         Assert.assertTrue(rows.toString(), Arrays.equals(new String[] { "key1", "key2" }, rows.toArray(new String[rows.size()])));
@@ -1796,6 +1802,8 @@ public class SASIIndexTest
 
     public void testStaticIndex(boolean shouldFlush) throws Exception
     {
+        double delta = 0.0000001;
+
         ColumnFamilyStore store = Keyspace.open(KS_NAME).getColumnFamilyStore(STATIC_CF_NAME);
 
         executeCQL(STATIC_CF_NAME, "INSERT INTO %s.%s (sensor_id,sensor_type) VALUES(?, ?)", 1, "TEMPERATURE");
@@ -1825,18 +1833,18 @@ public class SASIIndexTest
 
         UntypedResultSet.Row row1 = iterator.next();
         Assert.assertEquals(20160401L, row1.getLong("date"));
-        Assert.assertEquals(24.46, row1.getDouble("value"));
+        Assert.assertEquals(24.46, row1.getDouble("value"), delta);
         Assert.assertEquals(2, row1.getInt("variance"));
 
 
         UntypedResultSet.Row row2 = iterator.next();
         Assert.assertEquals(20160402L, row2.getLong("date"));
-        Assert.assertEquals(25.62, row2.getDouble("value"));
+        Assert.assertEquals(25.62, row2.getDouble("value"), delta);
         Assert.assertEquals(5, row2.getInt("variance"));
 
         UntypedResultSet.Row row3 = iterator.next();
         Assert.assertEquals(20160403L, row3.getLong("date"));
-        Assert.assertEquals(24.96, row3.getDouble("value"));
+        Assert.assertEquals(24.96, row3.getDouble("value"), delta);
         Assert.assertEquals(4, row3.getInt("variance"));
 
 
@@ -1848,7 +1856,7 @@ public class SASIIndexTest
 
         row1 = results.one();
         Assert.assertEquals(20160402L, row1.getLong("date"));
-        Assert.assertEquals(1.04, row1.getDouble("value"));
+        Assert.assertEquals(1.04, row1.getDouble("value"), delta);
         Assert.assertEquals(7, row1.getInt("variance"));
 
         // Only non statc columns filtering
@@ -1861,26 +1869,26 @@ public class SASIIndexTest
         row1 = iterator.next();
         Assert.assertEquals("TEMPERATURE", row1.getString("sensor_type"));
         Assert.assertEquals(20160401L, row1.getLong("date"));
-        Assert.assertEquals(24.46, row1.getDouble("value"));
+        Assert.assertEquals(24.46, row1.getDouble("value"), delta);
         Assert.assertEquals(2, row1.getInt("variance"));
 
 
         row2 = iterator.next();
         Assert.assertEquals("TEMPERATURE", row2.getString("sensor_type"));
         Assert.assertEquals(20160402L, row2.getLong("date"));
-        Assert.assertEquals(25.62, row2.getDouble("value"));
+        Assert.assertEquals(25.62, row2.getDouble("value"), delta);
         Assert.assertEquals(5, row2.getInt("variance"));
 
         row3 = iterator.next();
         Assert.assertEquals("TEMPERATURE", row3.getString("sensor_type"));
         Assert.assertEquals(20160403L, row3.getLong("date"));
-        Assert.assertEquals(24.96, row3.getDouble("value"));
+        Assert.assertEquals(24.96, row3.getDouble("value"), delta);
         Assert.assertEquals(4, row3.getInt("variance"));
 
         UntypedResultSet.Row row4 = iterator.next();
         Assert.assertEquals("PRESSURE", row4.getString("sensor_type"));
         Assert.assertEquals(20160402L, row4.getLong("date"));
-        Assert.assertEquals(1.04, row4.getDouble("value"));
+        Assert.assertEquals(1.04, row4.getDouble("value"), delta);
         Assert.assertEquals(7, row4.getInt("variance"));
     }
 
@@ -2338,6 +2346,60 @@ public class SASIIndexTest
         Assert.assertEquals(index.searchMemtable(expression).getCount(), 0);
     }
 
+    @Test
+    public void testMultipleIndexes() throws Exception
+    {
+        String tableName = "test_multiple_indexes";
+
+        File tempDir = com.google.common.io.Files.createTempDir();
+        File dataDir = new File(tempDir.getAbsolutePath() + File.separator + KS_NAME + File.separator + tableName);
+        assertTrue(dataDir.mkdirs());
+
+        String schema = "CREATE TABLE IF NOT EXISTS %s.%s (k int primary key, v text);";
+        String insertQuery = "INSERT INTO %s.%s (k, v) VALUES (?, ?);";
+
+        try (CQLSSTableWriter writer = CQLSSTableWriter.builder()
+                                                       .inDirectory(dataDir)
+                                                       .forTable(String.format(schema, "cql_sstable_writer", tableName))
+                                                       .using(String.format(insertQuery, "cql_sstable_writer", tableName))
+                                                       .build())
+        {
+            writer.addRow(0, "Null");
+            writer.addRow(1, "Eins");
+            writer.addRow(2, "Zwei");
+            writer.addRow(3, "Drei");
+            writer.addRow(4, "Vier");
+        }
+
+        QueryProcessor.executeOnceInternal(String.format(schema, KS_NAME, tableName)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex' " +
+                                                         "WITH OPTIONS = { 'mode' : 'CONTAINS', " +
+                                                         "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.NonTokenizingAnalyzer', " +
+                                                         "'case_sensitive': 'false' };",
+                                                         KS_NAME, tableName)).blockingGet();
+        QueryProcessor.executeOnceInternal(String.format("CREATE CUSTOM INDEX IF NOT EXISTS ON %s.%s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'",
+                                                         KS_NAME, tableName)).blockingGet();
+
+        ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(tableName);
+        for (File file : dataDir.listFiles())
+            com.google.common.io.Files.copy(file, new File(cfs.getDirectories().getDirectoryForNewSSTables().getAbsolutePath() + File.separator + file.getName()));
+
+        cfs.loadNewSSTables();
+
+        UntypedResultSet results;
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s;", KS_NAME, tableName)).blockingGet();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(5, results.size());
+
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v LIKE '%%ei%%';", KS_NAME, tableName)).blockingGet();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(3, results.size());
+
+        results = QueryProcessor.executeOnceInternal(String.format("SELECT * FROM %s.%s WHERE v = 'Zwei';", KS_NAME, tableName)).blockingGet();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+    }
+
     private static ColumnFamilyStore loadData(Map<String, Pair<String, Integer>> data, boolean forceFlush)
     {
         return loadData(data, System.currentTimeMillis(), forceFlush);
@@ -2524,7 +2586,7 @@ public class SASIIndexTest
     private static Cell buildCell(TableMetadata cfm, ByteBuffer name, ByteBuffer value, long timestamp)
     {
         ColumnMetadata column = cfm.getColumn(name);
-        assert column != null;
+        assertNotNull(column);
         return BufferCell.live(column, timestamp, value);
     }
 

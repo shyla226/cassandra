@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.SortedSetMultimap;
@@ -32,6 +33,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessagingVersion;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.versioning.VersionDependent;
@@ -70,12 +72,11 @@ public class ColumnFilter
 
     // True if _fetched_ includes all regular columns (and any static in _queried_), in which case metadata must not be
     // null. If false, then _fetched_ == _queried_ and we only store _queried_.
-    private final boolean fetchAllRegulars;
+    final boolean fetchAllRegulars;
 
-    private final TableMetadata metadata; // can be null if !isFetchAll
-
-    private final RegularAndStaticColumns queried; // can be null if fetchAllRegulars, to represent a wildcard query (all
-                                            // static and regular columns are both _fetched_ and _queried_).
+    final RegularAndStaticColumns fetched;
+    final RegularAndStaticColumns queried; // can be null if fetchAllRegulars, to represent a wildcard query (all
+                                           // static and regular columns are both _fetched_ and _queried_).
     private final SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections; // can be null
 
     private ColumnFilter(boolean fetchAllRegulars,
@@ -86,7 +87,36 @@ public class ColumnFilter
         assert !fetchAllRegulars || metadata != null;
         assert fetchAllRegulars || queried != null;
         this.fetchAllRegulars = fetchAllRegulars;
-        this.metadata = metadata;
+
+        if (fetchAllRegulars)
+        {
+            RegularAndStaticColumns all = metadata.regularAndStaticColumns();
+
+            this.fetched = (all.statics.isEmpty() || queried == null)
+                           ? all
+                           : new RegularAndStaticColumns(queried.statics, all.regulars);
+        }
+        else
+        {
+            this.fetched = queried;
+        }
+
+        this.queried = queried;
+        this.subSelections = subSelections;
+    }
+
+    /**
+     * Used on replica for deserialisation
+     */
+    private ColumnFilter(boolean fetchAllRegulars,
+                         RegularAndStaticColumns fetched,
+                         RegularAndStaticColumns queried,
+                         SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections)
+    {
+        assert !fetchAllRegulars || fetched != null;
+        assert fetchAllRegulars || queried != null;
+        this.fetchAllRegulars = fetchAllRegulars;
+        this.fetched = fetchAllRegulars ? fetched : queried;
         this.queried = queried;
         this.subSelections = subSelections;
     }
@@ -108,7 +138,7 @@ public class ColumnFilter
      */
     public static ColumnFilter selection(RegularAndStaticColumns columns)
     {
-        return new ColumnFilter(false, null, columns, null);
+        return new ColumnFilter(false, (TableMetadata) null, columns, null);
     }
 
 	/**
@@ -127,15 +157,7 @@ public class ColumnFilter
      */
     public RegularAndStaticColumns fetchedColumns()
     {
-        if (!fetchAllRegulars)
-            return queried;
-
-        // We always fetch all regulars, but only fetch the statics in queried. Unless queried == null, in which
-        // case it's a wildcard and we fetch everything.
-        RegularAndStaticColumns all = metadata.regularAndStaticColumns();
-        return queried == null || all.statics.isEmpty()
-             ? all
-             : new RegularAndStaticColumns(queried.statics, all.regulars);
+        return fetched;
     }
 
     /**
@@ -145,8 +167,7 @@ public class ColumnFilter
      */
     public RegularAndStaticColumns queriedColumns()
     {
-        assert queried != null || fetchAllRegulars;
-        return queried == null ? metadata.regularAndStaticColumns() : queried;
+        return queried == null ? fetched : queried;
     }
 
     /**
@@ -434,6 +455,23 @@ public class ColumnFilter
     }
 
     @Override
+    public boolean equals(Object other)
+    {
+        if (other == this)
+            return true;
+
+        if (!(other instanceof ColumnFilter))
+            return false;
+
+        ColumnFilter otherCf = (ColumnFilter) other;
+
+        return otherCf.fetchAllRegulars == this.fetchAllRegulars &&
+               Objects.equals(otherCf.fetched, this.fetched) &&
+               Objects.equals(otherCf.queried, this.queried) &&
+               Objects.equals(otherCf.subSelections, this.subSelections);
+    }
+
+    @Override
     public String toString()
     {
         if (fetchAllRegulars && queried == null)
@@ -478,8 +516,8 @@ public class ColumnFilter
 
     public static class Serializer extends VersionDependent<ReadVersion>
     {
-        private static final int FETCH_ALL_MASK       = 0x01;
-        private static final int HAS_QUERIED_MASK      = 0x02;
+        private static final int FETCH_ALL_MASK          = 0x01;
+        private static final int HAS_QUERIED_MASK        = 0x02;
         private static final int HAS_SUB_SELECTIONS_MASK = 0x04;
 
         private Serializer(ReadVersion version)
@@ -494,9 +532,9 @@ public class ColumnFilter
                  | (selection.subSelections != null ? HAS_SUB_SELECTIONS_MASK : 0);
         }
 
-        private ColumnFilter maybeUpdateForBackwardCompatility(ColumnFilter selection)
+        public ColumnFilter maybeUpdateForBackwardCompatility(ColumnFilter selection)
         {
-            if (version != ReadVersion.OSS_30 || !selection.fetchAllRegulars || selection.queried == null)
+            if (version.compareTo(ReadVersion.OSS_3014) > 0 || !selection.fetchAllRegulars || selection.queried == null)
                 return selection;
 
             // The meaning of fetchAllRegulars changed (at least when queried != null) due to CASSANDRA-12768: in
@@ -506,12 +544,11 @@ public class ColumnFilter
             // queried some columns that are actually only fetched, but it's fine during upgrade).
             // More concretely, we replace our filter by a non-fetch-all one that queries every columns that our
             // current filter fetches.
-            Columns allRegulars = selection.metadata.regularColumns();
             Set<ColumnMetadata> queriedStatic = new HashSet<>();
             Iterables.addAll(queriedStatic, Iterables.filter(selection.queried, ColumnMetadata::isStatic));
             return new ColumnFilter(false,
-                                    null,
-                                    new RegularAndStaticColumns(Columns.from(queriedStatic), allRegulars),
+                                    (TableMetadata) null,
+                                    new RegularAndStaticColumns(Columns.from(queriedStatic), selection.fetched.regulars),
                                     selection.subSelections);
         }
 
@@ -520,6 +557,12 @@ public class ColumnFilter
             selection = maybeUpdateForBackwardCompatility(selection);
 
             out.writeByte(makeHeaderByte(selection));
+
+            if (version.compareTo(ReadVersion.OSS_3014) >= 0 && selection.fetchAllRegulars)
+            {
+                Columns.serializer.serialize(selection.fetched.statics, out);
+                Columns.serializer.serialize(selection.fetched.regulars, out);
+            }
 
             if (selection.queried != null)
             {
@@ -542,7 +585,23 @@ public class ColumnFilter
             boolean hasQueried = (header & HAS_QUERIED_MASK) != 0;
             boolean hasSubSelections = (header & HAS_SUB_SELECTIONS_MASK) != 0;
 
+            RegularAndStaticColumns fetched = null;
             RegularAndStaticColumns queried = null;
+
+            if (isFetchAll)
+            {
+                if (version.compareTo(ReadVersion.OSS_3014) >= 0)
+                {
+                    Columns statics = Columns.serializer.deserialize(in, metadata);
+                    Columns regulars = Columns.serializer.deserialize(in, metadata);
+                    fetched = new RegularAndStaticColumns(statics, regulars);
+                }
+                else
+                {
+                    fetched = metadata.regularAndStaticColumns();
+                }
+            }
+
             if (hasQueried)
             {
                 Columns statics = Columns.serializer.deserialize(in, metadata);
@@ -571,7 +630,7 @@ public class ColumnFilter
             if (version == ReadVersion.OSS_30 && isFetchAll && queried != null)
                 queried = new RegularAndStaticColumns(metadata.staticColumns(), queried.regulars);
 
-            return new ColumnFilter(isFetchAll, isFetchAll ? metadata : null, queried, subSelections);
+            return new ColumnFilter(isFetchAll, fetched, queried, subSelections);
         }
 
         public long serializedSize(ColumnFilter selection)
@@ -579,6 +638,12 @@ public class ColumnFilter
             selection = maybeUpdateForBackwardCompatility(selection);
 
             long size = 1; // header byte
+
+            if (version.compareTo(ReadVersion.OSS_3014) >= 0 && selection.fetchAllRegulars)
+            {
+                size += Columns.serializer.serializedSize(selection.fetched.statics);
+                size += Columns.serializer.serializedSize(selection.fetched.regulars);
+            }
 
             if (selection.queried != null)
             {

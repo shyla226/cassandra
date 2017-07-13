@@ -27,8 +27,8 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
  */
 class CounterForwardingException extends InternalRequestExecutionException
 {
-    CounterForwardingException(RequestExecutionException e)
+    CounterForwardingException(Throwable t)
     {
-        super(RequestFailureReason.COUNTER_FORWARDING_FAILURE, e);
+        super(RequestFailureReason.COUNTER_FORWARDING_FAILURE, t);
     }
 }

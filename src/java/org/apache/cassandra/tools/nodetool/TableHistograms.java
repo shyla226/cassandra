@@ -19,12 +19,15 @@ package org.apache.cassandra.tools.nodetool;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.String.format;
-import io.airlift.command.Arguments;
-import io.airlift.command.Command;
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
+import org.apache.cassandra.db.ColumnFamilyStoreMBean;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
@@ -40,11 +43,12 @@ public class TableHistograms extends NodeToolCmd
     @Override
     public void execute(NodeProbe probe)
     {
-        String keyspace = null, table = null;
+        String keyspace, table;
         if (args.size() == 2)
         {
             keyspace = args.get(0);
             table = args.get(1);
+            tableHistograms(probe, keyspace, table);
         }
         else if (args.size() == 1)
         {
@@ -52,12 +56,22 @@ public class TableHistograms extends NodeToolCmd
             checkArgument(input.length == 2, "tablehistograms requires keyspace and table name arguments");
             keyspace = input[0];
             table = input[1];
+            tableHistograms(probe, keyspace, table);
         }
         else
         {
-            checkArgument(false, "tablehistograms requires keyspace and table name arguments");
+            for (Iterator<Map.Entry<String, ColumnFamilyStoreMBean>> cfIter = probe.getColumnFamilyStoreMBeanProxies(); cfIter.hasNext();)
+            {
+                Map.Entry<String, ColumnFamilyStoreMBean> entry = cfIter.next();
+                String ks = entry.getKey();
+                String tab = entry.getValue().getTableName();
+                tableHistograms(probe, ks, tab);
+            }
         }
+    }
 
+    private void tableHistograms(NodeProbe probe, String keyspace, String table)
+    {
         // calculate percentile of row size and column count
         long[] estimatedPartitionSize = (long[]) probe.getColumnFamilyMetric(keyspace, table, "EstimatedPartitionSizeHistogram");
         long[] estimatedColumnCount = (long[]) probe.getColumnFamilyMetric(keyspace, table, "EstimatedColumnCountHistogram");

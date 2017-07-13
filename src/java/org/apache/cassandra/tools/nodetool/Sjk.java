@@ -25,8 +25,8 @@ import javax.management.MBeanServerConnection;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterDescription;
 import com.beust.jcommander.Parameterized;
-import io.airlift.command.Arguments;
-import io.airlift.command.Command;
+import io.airlift.airline.Arguments;
+import io.airlift.airline.Command;
 import org.gridkit.jvmtool.JmxConnectionInfo;
 import org.gridkit.jvmtool.cli.CommandLauncher;
 
@@ -55,6 +55,13 @@ public class Sjk extends NodeToolCmd
             // invoke common nodetool handling to establish MBeanServerConnection
             super.run();
         }
+    }
+
+    public void sequenceRun(NodeProbe probe)
+    {
+        wrapper.prepare(args != null ? args.toArray(new String[0]) : new String[]{"help"});
+        if (!wrapper.run(probe))
+            probe.failed();
     }
 
     protected void execute(NodeProbe probe)

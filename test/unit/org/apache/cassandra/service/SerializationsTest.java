@@ -135,8 +135,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         {
             ValidationRequest message = ValidationRequest.serializers.get(getRepairVersion()).deserialize(in);
             assert DESC.equals(message.desc);
-            assert message.gcBefore == 1234;
-
+            assert message.nowInSec == 1234;
             assert serializer.deserialize(in, inet) != null;
         }
     }

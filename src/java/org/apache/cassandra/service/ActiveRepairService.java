@@ -29,6 +29,8 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.base.Predicate;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
@@ -78,6 +80,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
 /**
@@ -109,6 +112,11 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
     }
 
+    public enum ParentRepairStatus
+    {
+        IN_PROGRESS, COMPLETED, FAILED
+    }
+
     public static class ConsistentSessions
     {
         public final LocalSessions local = new LocalSessions();
@@ -137,11 +145,21 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
     private final IFailureDetector failureDetector;
     private final Gossiper gossiper;
+    private final Cache<Integer, Pair<ParentRepairStatus, List<String>>> repairStatusByCmd;
 
     public ActiveRepairService(IFailureDetector failureDetector, Gossiper gossiper)
     {
         this.failureDetector = failureDetector;
         this.gossiper = gossiper;
+        this.repairStatusByCmd = CacheBuilder.newBuilder()
+                                             .expireAfterWrite(
+                                             Long.getLong("cassandra.parent_repair_status_expiry_seconds",
+                                                          TimeUnit.SECONDS.convert(1, TimeUnit.DAYS)), TimeUnit.SECONDS)
+                                             // using weight wouldn't work so well, since it doesn't reflect mutation of cached data
+                                             // see https://github.com/google/guava/wiki/CachesExplained
+                                             // We assume each entry is unlikely to be much more than 100 bytes, so bounding the size should be sufficient.
+                                             .maximumSize(Long.getLong("cassandra.parent_repair_status_cache_size", 100_000))
+                                             .build();
 
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
         try
@@ -187,6 +205,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              Set<InetAddress> endpoints,
                                              boolean isConsistent,
                                              boolean pullRepair,
+                                             boolean force,
                                              PreviewKind previewKind,
                                              ListeningExecutorService executor,
                                              String... cfnames)
@@ -197,7 +216,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (cfnames.length == 0)
             return null;
 
-        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isConsistent, pullRepair, previewKind, cfnames);
+        final RepairSession session = new RepairSession(parentRepairSession, UUIDGen.getTimeUUID(), range, keyspace, parallelismDegree, endpoints, isConsistent, pullRepair, force, previewKind, cfnames);
 
         sessions.put(session.getId(), session);
         // register listeners
@@ -247,6 +266,17 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             session.forceShutdown(cause);
         }
         parentRepairSessions.clear();
+    }
+
+    public void recordRepairStatus(int cmd, ParentRepairStatus parentRepairStatus, List<String> messages)
+    {
+        repairStatusByCmd.put(cmd, Pair.create(parentRepairStatus, messages));
+    }
+
+
+    Pair<ParentRepairStatus, List<String>> getRepairStatus(Integer cmd)
+    {
+        return repairStatusByCmd.getIfPresent(cmd);
     }
 
     /**
@@ -372,8 +402,16 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             }
             else
             {
-                // bailout early to avoid potentially waiting for a long time.
-                failRepair(parentRepairSession, "Endpoint not alive: " + neighbour);
+                if (options.isForcedRepair())
+                {
+                    prepareLatch.countDown();
+                }
+                else
+                {
+                    // bailout early to avoid potentially waiting for a long time.
+                    failRepair(parentRepairSession, "Endpoint not alive: " + neighbour);
+                }
+
             }
         }
         try
@@ -463,7 +501,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         }
 
         ActiveRepairService.instance.consistent.local.maybeSetRepairing(desc.parentSessionId);
-        Validator validator = new Validator(desc, from, request.gcBefore, isConsistent(desc.parentSessionId), previewKind(desc.parentSessionId));
+        Validator validator = new Validator(desc, from, request.nowInSec, isConsistent(desc.parentSessionId), previewKind(desc.parentSessionId));
         CompactionManager.instance.submitValidation(store, validator);
     }
 

@@ -225,6 +225,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private final StreamStateStore streamStateStore = new StreamStateStore();
 
+    private final AtomicBoolean doneAuthSetup = new AtomicBoolean(false);
+
     /** This method updates the local token on disk  */
     public void setTokens(Collection<Token> tokens)
     {
@@ -627,6 +629,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 states.add(Pair.create(ApplicationState.STATUS, valueFactory.hibernate(true)));
                 Gossiper.instance.addLocalApplicationStates(states);
             }
+            doAuthSetup();
             logger.info("Not joining ring as requested. Use JMX (StorageService->joinRing()) to initiate ring joining");
         }
 
@@ -1009,6 +1012,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Completable doAuthSetup()
     {
+        if (!doneAuthSetup.getAndSet(true))
+            return Completable.complete(); // TODO - merge , is this equivalent?
+
         return maybeAddOrUpdateKeyspace(AuthKeyspace.metadata())
                 .doOnComplete(() -> {
                     DatabaseDescriptor.getRoleManager().setup();
@@ -1344,6 +1350,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         DatabaseDescriptor.setCompactionThroughputMbPerSec(value);
         CompactionManager.instance.setRate(value);
+    }
+
+    public int getBatchlogReplayThrottleInKB()
+    {
+        return DatabaseDescriptor.getBatchlogReplayThrottleInKB();
+    }
+
+    public void setBatchlogReplayThrottleInKB(int throttleInKB)
+    {
+        DatabaseDescriptor.setBatchlogReplayThrottleInKB(throttleInKB);
+        BatchlogManager.instance.setRate(throttleInKB);
     }
 
     public int getConcurrentCompactors()
@@ -3350,6 +3367,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         ActiveRepairService.instance.terminateSessions();
     }
 
+
+    @Nullable
+    public List<String> getParentRepairStatus(int cmd)
+    {
+        Pair<ActiveRepairService.ParentRepairStatus, List<String>> pair = ActiveRepairService.instance.getRepairStatus(cmd);
+        return pair == null ? null :
+               ImmutableList.<String>builder().add(pair.left.name()).addAll(pair.right).build();
+    }
+
     /* End of MBean interface methods */
 
     /**
@@ -4569,6 +4595,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public List<String> getNonLocalStrategyKeyspaces()
     {
         return Collections.unmodifiableList(Schema.instance.getNonLocalStrategyKeyspaces());
+    }
+
+    public Map<String,List<String>> getKeyspacesAndViews()
+    {
+        Map<String, List<String>> map = new HashMap<>();
+        for (String ks : Schema.instance.getKeyspaces())
+        {
+            List<String> tables = new ArrayList<>();
+            map.put(ks, tables);
+            for (Iterator<ViewMetadata> viewIter = Schema.instance.getKeyspaceMetadata(ks).views.iterator(); viewIter.hasNext();)
+            {
+                tables.add(viewIter.next().name);
+            }
+        }
+        return map;
     }
 
     public Map<String, String> getViewBuildStatuses(String keyspace, String view)

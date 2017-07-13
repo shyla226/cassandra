@@ -199,6 +199,15 @@ public class SelectStatement implements CQLStatement
                                    perPartitionLimit);
     }
 
+    /**
+     * Returns the columns requested by the user
+     * @return the columns requested by the user
+     */
+    public final List<ColumnSpecification> getSelectedColumns()
+    {
+        return selection.getSelectedColumns();
+    }
+
     public Iterable<Function> getFunctions()
     {
         List<Function> functions = new ArrayList<>();
@@ -1410,7 +1419,7 @@ public class SelectStatement implements CQLStatement
          */
         private boolean selectOnlyStaticColumns(TableMetadata table, List<Selectable> selectables)
         {
-            if (!table.hasStaticColumns() || selectables.isEmpty())
+            if (table.isStaticCompactTable() || !table.hasStaticColumns() || selectables.isEmpty())
                 return false;
 
             return Selectable.selectColumns(selectables, (column) -> column.isStatic())

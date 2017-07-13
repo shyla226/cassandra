@@ -27,7 +27,6 @@ import com.google.common.base.Throwables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.driver.core.schemabuilder.Drop;
 import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.db.monitoring.Monitor;
 import org.apache.cassandra.db.monitoring.Monitorable;

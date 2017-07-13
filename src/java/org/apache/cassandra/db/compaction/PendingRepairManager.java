@@ -183,11 +183,13 @@ class PendingRepairManager
         strategies.values().forEach(AbstractCompactionStrategy::shutdown);
     }
 
+    @Deprecated
     synchronized void enable()
     {
         strategies.values().forEach(AbstractCompactionStrategy::enable);
     }
 
+    @Deprecated
     synchronized void disable()
     {
         strategies.values().forEach(AbstractCompactionStrategy::disable);
@@ -357,7 +359,7 @@ class PendingRepairManager
         Set<ISSTableScanner> scanners = new HashSet<>(sessionSSTables.size());
         for (Map.Entry<UUID, Set<SSTableReader>> entry : sessionSSTables.entrySet())
         {
-            scanners.addAll(get(entry.getKey()).getScanners(entry.getValue(), ranges).scanners);
+            scanners.addAll(getOrCreate(entry.getKey()).getScanners(entry.getValue(), ranges).scanners);
         }
         return scanners;
     }

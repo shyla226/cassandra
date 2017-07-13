@@ -836,7 +836,7 @@ public final class MessagingService implements MessagingServiceMBean
                 updateDroppedMutationCount((IMutation) payload);
         }
 
-        incrementDroppedMessages(definition, message.lifetimeMillis(), message.from().equals(message.to()));
+        incrementDroppedMessages(definition, message.lifetimeMillis(), !message.isLocal());
     }
 
     @VisibleForTesting

@@ -20,10 +20,7 @@ package org.apache.cassandra.metrics;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import com.codahale.metrics.Counting;
-import com.codahale.metrics.Metric;
-import com.codahale.metrics.Sampling;
-import com.codahale.metrics.Snapshot;
+import com.codahale.metrics.*;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.EstimatedHistogram;
 
@@ -35,6 +32,11 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  *
  * This class removes the {@link java.util.concurrent.atomic.LongAdder} of the {@link com.codahale.metrics.Histogram}
  * class and retrieves {@link this#getCount()} from {@link Reservoir}.
+ *
+ * TODO: This class needs to extend {@link com.codahale.metrics.Histogram} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getHistograms()} (used by {@link ScheduledReporter})
+ * but we can't easily do that since we need access to the reservoir, which can be shared. We also
+ * don't want to use a LongAdder by default.
  */
 public interface Histogram extends Metric, Sampling, Counting, Composable<Histogram>
 {

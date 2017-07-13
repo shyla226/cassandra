@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Metered;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.ScheduledReporter;
+
 import org.apache.cassandra.concurrent.TPC;
 
 /**
@@ -35,9 +38,12 @@ import org.apache.cassandra.concurrent.TPC;
  * by comparing the value of the counter with the last value that was used in the
  * previous tick.
  *
+ * This class needs to extend {@link com.codahale.metrics.Meter} to allow this metric
+ * to be retrieved by {@link MetricRegistry#getMeters()} (used by {@link ScheduledReporter}).
+ *
  * @see EWMA
  */
-public class Meter implements Metered, Composable<Meter>
+public class Meter extends com.codahale.metrics.Meter implements Metered, Composable<Meter>
 {
     private static final long TICK_INTERVAL = TimeUnit.SECONDS.toNanos(5);
 
