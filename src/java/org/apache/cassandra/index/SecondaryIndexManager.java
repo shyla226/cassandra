@@ -71,6 +71,7 @@ import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -202,7 +203,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     @SuppressWarnings("unchecked")
-    private synchronized Future<?> createIndex(IndexMetadata indexDef)
+    private Index createIndex(IndexMetadata indexDef)
     {
         final Index index = createInstance(indexDef);
         index.register(this);
@@ -210,9 +211,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // now mark as building prior to initializing
         markIndexesBuilding(ImmutableSet.of(index), true);
 
+       return index;
+    }
+
+    private Future<?> buildIndex(final Index index)
+    {
         Callable<?> initialBuildTask = null;
         // if the index didn't register itself, we can probably assume that no initialization needs to happen
-        if (indexes.containsKey(indexDef.name))
+        if (indexes.containsKey(index.getIndexMetadata().name))
         {
             try
             {
@@ -259,12 +265,34 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      *
      * @param indexDef the IndexMetadata describing the index
      */
+    @VisibleForTesting
     public synchronized Future<?> addIndex(IndexMetadata indexDef)
     {
         if (indexes.containsKey(indexDef.name))
             return reloadIndex(indexDef);
         else
-            return createIndex(indexDef);
+            return buildIndex(createIndex(indexDef));
+    }
+
+    /**
+     * Create the table indexes, and then build them asynchronously.
+     *
+     * Note that we need to postpone the build until after all indexes
+     * have been created because of a potential race between flushing the system
+     * index info tables (done by {@link #markIndexesBuilding(Set, boolean)} and
+     * indexing the partition (done by {@link #indexPartition(DecoratedKey, Set, int)}),
+     * see APOLLO-882 for more details.
+     *
+     * @param metadata - the table metadata that contains the metadata of the indexes to create and build
+     */
+    public synchronized void loadIndexesAsync(TableMetadata metadata)
+    {
+        List<Index> indexes = new ArrayList<>(metadata.indexes.size());
+        for (IndexMetadata info : metadata.indexes)
+            indexes.add(createIndex(info));
+
+        for (Index index : indexes)
+            buildIndex(index);
     }
 
     /**

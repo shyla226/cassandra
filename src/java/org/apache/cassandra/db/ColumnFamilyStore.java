@@ -460,10 +460,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             this.compactionStrategyManager.disable();
         }
 
-        // create the private ColumnFamilyStores for the secondary column indexes
+        // create the private ColumnFamilyStores for the secondary column indexes and build the indexes
         indexManager = new SecondaryIndexManager(this);
-        for (IndexMetadata info : metadata.get().indexes)
-            indexManager.addIndex(info);
+        indexManager.loadIndexesAsync(metadata());
 
         if (registerBookeeping)
         {
