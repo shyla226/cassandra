@@ -417,13 +417,39 @@ public class SinglePartitionReadCommand extends ReadCommand
 
             try
             {
-                int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
+                final int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
+
                 @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
                 UnfilteredRowIterator iter = SinglePartitionReadCommand.fullPartitionRead(metadata(), nowInSec(), partitionKey()).queryMemtableAndDisk(cfs, executionController);
                 try
                 {
+                    // Use a custom iterator instead of DataLimits to avoid stopping the original iterator
+                    UnfilteredRowIterator toCacheIterator = new WrappingUnfilteredRowIterator(iter)
+                    {
+                        private int rowsCounted = 0;
+
+                        @Override
+                        public boolean hasNext()
+                        {
+                            return rowsCounted < rowsToCache && super.hasNext();
+                        }
+
+                        @Override
+                        public Unfiltered next()
+                        {
+                            Unfiltered unfiltered = super.next();
+                            if (unfiltered.isRow())
+                            {
+                                Row row = (Row) unfiltered;
+                                if (row.hasLiveData(nowInSec()))
+                                    rowsCounted++;
+                            }
+                            return unfiltered;
+                        }
+                    };
+
                     // We want to cache only rowsToCache rows
-                    CachedPartition toCache = CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(iter, nowInSec()), nowInSec());
+                    CachedPartition toCache = CachedBTreePartition.create(toCacheIterator, nowInSec());
                     if (sentinelSuccess && !toCache.isEmpty())
                     {
                         Tracing.trace("Caching {} rows", toCache.rowCount());
@@ -904,6 +930,12 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @Override
+    public boolean selectsFullPartition()
+    {
+        return clusteringIndexFilter.selectsAllPartition() && !rowFilter().hasExpressionOnClusteringOrRegularColumns();
+    }
+
+    @Override
     public String toString()
     {
         return String.format("Read(%s columns=%s rowFilter=%s limits=%s key=%s filter=%s, nowInSec=%d)",
@@ -952,14 +984,17 @@ public class SinglePartitionReadCommand extends ReadCommand
         public final List<SinglePartitionReadCommand> commands;
         private final DataLimits limits;
         private final int nowInSec;
+        private final boolean selectsFullPartitions;
 
         public Group(List<SinglePartitionReadCommand> commands, DataLimits limits)
         {
             assert !commands.isEmpty();
             this.commands = commands;
             this.limits = limits;
-            this.nowInSec = commands.get(0).nowInSec();
 
+            SinglePartitionReadCommand firstCommand = commands.get(0);
+            this.nowInSec = firstCommand.nowInSec();
+            this.selectsFullPartitions = firstCommand.selectsFullPartition();
             for (int i = 1; i < commands.size(); i++)
                 assert commands.get(i).nowInSec() == nowInSec;
         }
@@ -989,6 +1024,12 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).metadata();
         }
 
+        @Override
+        public boolean selectsFullPartition()
+        {
+            return selectsFullPartitions;
+        }
+
         public ReadExecutionController executionController()
         {
             // Note that the only difference between the command in a group must be the partition key on which
@@ -1005,7 +1046,9 @@ public class SinglePartitionReadCommand extends ReadCommand
 
         public PartitionIterator executeInternal(ReadExecutionController controller)
         {
-            return limits.filter(UnfilteredPartitionIterators.filter(executeLocally(controller, false), nowInSec), nowInSec);
+            return limits.filter(UnfilteredPartitionIterators.filter(executeLocally(controller, false), nowInSec),
+                                 nowInSec,
+                                 selectsFullPartitions);
         }
 
         public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)

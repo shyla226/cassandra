@@ -153,7 +153,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
         private Pager(DataLimits pageLimits, ReadCommand pageCommand, int nowInSec)
         {
-            this.counter = pageLimits.newCounter(nowInSec, true);
+            this.counter = pageLimits.newCounter(nowInSec, true, command.selectsFullPartition());
             this.pageLimits = pageLimits;
             this.pageCommand = pageCommand;
         }

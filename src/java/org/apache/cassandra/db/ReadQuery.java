@@ -100,7 +100,13 @@ public interface ReadQuery extends Monitorable
         {
             return "<EMPTY>";
         }
-    }
+
+        @Override
+        public boolean selectsFullPartition()
+        {
+            return false;
+        }
+    };
 
     /**
      * Starts a new read operation.
@@ -218,4 +224,10 @@ public interface ReadQuery extends Monitorable
     {
         return toCQLString();
     }
+
+    /**
+     * Checks if this {@code ReadQuery} selects full partitions, that is it has no filtering on clustering or regular columns.
+     * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
+     */
+    public boolean selectsFullPartition();
 }

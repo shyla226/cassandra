@@ -1,4 +1,5 @@
 4.0
+ * Allow skipping equality-restricted clustering columns in ORDER BY clause (CASSANDRA-10271)
  * Use common nowInSec for validation compactions (CASSANDRA-13671)
  * Improve handling of IR prepare failures (CASSANDRA-13672)
  * Send IR coordinator messages synchronously (CASSANDRA-13673)
@@ -96,13 +97,16 @@
  * Duplicate the buffer before passing it to analyser in SASI operation (CASSANDRA-13512)
  * Properly evict pstmts from prepared statements cache (CASSANDRA-13641)
 Merged from 3.0:
+ * Make concat work with iterators that have different subsets of columns (CASSANDRA-13482)
  * Set test.runners based on cores and memory size (CASSANDRA-13078)
  * Allow different NUMACTL_ARGS to be passed in (CASSANDRA-13557)
  * Fix secondary index queries on COMPACT tables (CASSANDRA-13627)
  * Nodetool listsnapshots output is missing a newline, if there are no snapshots (CASSANDRA-13568)
 Merged from 2.2:
-  * Fix toJSONString for the UDT, tuple and collection types (CASSANDRA-13592)
-  * Fix nested Tuples/UDTs validation (CASSANDRA-13646)
+ * Fix queries with LIMIT and filtering on clustering columns (CASSANDRA-11223)
+ * Fix potential NPE when resume bootstrap fails (CASSANDRA-13272)
+ * Fix toJSONString for the UDT, tuple and collection types (CASSANDRA-13592)
+ * Fix nested Tuples/UDTs validation (CASSANDRA-13646)
 
 3.11.0
  * Allow native function calls in CQLSSTableWriter (CASSANDRA-12606)
