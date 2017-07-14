@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.streaming;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,26 +51,39 @@ public class SessionInfoTest
         StreamSummary sending = new StreamSummary(cfId, 10, 100);
         SessionInfo info = new SessionInfo(local, 0, local, summaries, Collections.singleton(sending), StreamSession.State.PREPARING);
 
-        assert info.getTotalFilesToReceive() == 45;
-        assert info.getTotalFilesToSend() == 10;
-        assert info.getTotalSizeToReceive() == 550;
-        assert info.getTotalSizeToSend() == 100;
+        assertEquals(info.getTotalFilesToReceive(), 45);
+        assertEquals(info.getTotalFilesToSend(), 10);
+        assertEquals(info.getTotalSizeToReceive(), 550);
+        assertEquals(info.getTotalSizeToSend(), 100);
         // still, no files received or sent
-        assert info.getTotalFilesReceived() == 0;
-        assert info.getTotalFilesSent() == 0;
+        assertEquals(info.getTotalFilesReceived(), 0);
+        assertEquals(info.getTotalFilesSent(), 0);
 
         // receive in progress
         info.updateProgress(new ProgressInfo(local, 0, "test.txt", ProgressInfo.Direction.IN, 50, 100));
         // still in progress, but not completed yet
-        assert info.getTotalSizeReceived() == 50;
-        assert info.getTotalSizeSent() == 0;
-        assert info.getTotalFilesReceived() == 0;
-        assert info.getTotalFilesSent() == 0;
+        assertEquals(info.getTotalSizeReceived(), 50);
+        assertEquals(info.getTotalSizeSent(), 0);
+        assertEquals(info.getTotalFilesReceived(), 0);
+        assertEquals(info.getTotalFilesSent(), 0);
         info.updateProgress(new ProgressInfo(local, 0, "test.txt", ProgressInfo.Direction.IN, 100, 100));
         // 1 file should be completed
-        assert info.getTotalSizeReceived() == 100;
-        assert info.getTotalSizeSent() == 0;
-        assert info.getTotalFilesReceived() == 1;
-        assert info.getTotalFilesSent() == 0;
+        assertEquals(info.getTotalSizeReceived(), 100);
+        assertEquals(info.getTotalSizeSent(), 0);
+        assertEquals(info.getTotalFilesReceived(), 1);
+        assertEquals(info.getTotalFilesSent(), 0);
+
+        SessionInfo finished = new SessionInfo(local, 0, local, Collections.EMPTY_LIST, Collections.EMPTY_LIST, StreamSession.State.COMPLETE);
+        finished.copyProgress(info);
+        assertEquals(finished.getTotalSizeReceived(), 100);
+        assertEquals(finished.getTotalSizeSent(), 0);
+        assertEquals(finished.getTotalFilesReceived(), 1);
+        assertEquals(finished.getTotalFilesSent(), 0);
+        assertEquals(finished.peer, local);
+        assertEquals(finished.sessionIndex, 0);
+        assertEquals(finished.connecting, local);
+        assertTrue(finished.receivingSummaries.isEmpty());
+        assertTrue(finished.sendingSummaries.isEmpty());
+        assertEquals(finished.state, StreamSession.State.COMPLETE);
     }
 }

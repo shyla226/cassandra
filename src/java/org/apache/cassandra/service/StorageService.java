@@ -1244,8 +1244,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             long totalBytes = 0L;
             for (SessionInfo session : resultFuture.getCurrentState().sessions)
                 totalBytes += session.getTotalSizeReceived();
-            String info = String.format("finished rebuild for %s after %s seconds receiving %d bytes",
-                                        msg, t / 1000, totalBytes);
+
+            String info = String.format("finished rebuild for %s after %d seconds receiving %s.",
+                                        msg, t / 1000, FileUtils.stringifyFileSize(totalBytes));
             logger.info("{}", info);
             return info;
         }

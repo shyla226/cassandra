@@ -282,7 +282,11 @@ public class StreamCoordinator
 
         public void addSessionInfo(SessionInfo info)
         {
-            sessionInfos.put(info.sessionIndex, info);
+            sessionInfos.merge(info.sessionIndex, info, (previous, value) -> {
+                // need to retain previous progress of transferred and received bytes.
+                value.copyProgress(previous);
+                return value;
+            });
         }
 
         public Collection<SessionInfo> getAllSessionInfo()
