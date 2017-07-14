@@ -260,7 +260,13 @@ public class RangeStreamer
                 if (!filter.shouldInclude(address))
                     continue;
 
-                assert !address.equals(FBUtilities.getBroadcastAddress()) : "Localhost should never be included - range " + range + ", keyspace " + keyspace;
+                if (address.equals(FBUtilities.getBroadcastAddress()))
+                {
+                    // If localhost is a source, we have found one, but we don't add it to the map to avoid
+                    // streaming locally. This is used for relocate/move.
+                    foundSource = true;
+                    continue;
+                }
 
                 logger.info("Including {} for streaming range {} in keyspace {}", address, range, keyspace);
                 rangeFetchMapMap.put(address, range);
@@ -294,11 +300,13 @@ public class RangeStreamer
             throw new IllegalStateException("Unable to find sufficient sources for streaming range " + range + " in keyspace " + keyspace);
     }
 
-    public static Multimap<InetAddress, Range<Token>> getWorkMap(Multimap<Range<Token>, InetAddress> rangesWithSourceTarget, String keyspace,
-                                                                 IFailureDetector fd, boolean useStrictConsistency)
+    public static Multimap<InetAddress, Range<Token>> getWorkMapForMove(Multimap<Range<Token>, InetAddress> rangesWithSourceTarget, String keyspace,
+                                                                        IFailureDetector fd, boolean useStrictConsistency)
     {
+        // do *not* exclude the local host via the source-filter - this is meant for relocate/move, which likely
+        // involves the local node
         return getRangeFetchMap(rangesWithSourceTarget,
-                                composite(excludeLocalNode(), failureDetectorFilter(fd)),
+                                failureDetectorFilter(fd),
                                 keyspace,
                                 useStrictConsistency);
     }
