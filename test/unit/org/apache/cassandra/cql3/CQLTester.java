@@ -36,7 +36,6 @@ import java.util.stream.Collectors;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Ordering;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

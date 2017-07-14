@@ -991,7 +991,6 @@ public class SinglePartitionReadCommand extends ReadCommand
             assert !commands.isEmpty();
             this.commands = commands;
             this.limits = limits;
-
             SinglePartitionReadCommand firstCommand = commands.get(0);
             this.nowInSec = firstCommand.nowInSec();
             this.selectsFullPartitions = firstCommand.selectsFullPartition();
