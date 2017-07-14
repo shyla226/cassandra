@@ -352,7 +352,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
     public PartitionIterator withLimitsAndPostReconciliation(PartitionIterator iterator)
     {
-        return limits().filter(postReconciliationProcessing(iterator), nowInSec());
+        return limits().filter(postReconciliationProcessing(iterator), nowInSec(), selectsFullPartition());
     }
 
     /**
@@ -371,6 +371,12 @@ public class PartitionRangeReadCommand extends ReadCommand
     public boolean queriesOnlyLocalData()
     {
         return StorageProxy.isLocalRange(metadata().ksName, dataRange.keyRange());
+    }
+
+    @Override
+    public boolean selectsFullPartition()
+    {
+        return dataRange.selectsAllPartition() && !rowFilter().hasExpressionOnClusteringOrRegularColumns();
     }
 
     @Override

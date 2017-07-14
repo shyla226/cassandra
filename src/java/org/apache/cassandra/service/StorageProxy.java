@@ -1816,7 +1816,7 @@ public class StorageProxy implements StorageProxyMBean
             // might not honor it and so we should enforce it; For continuous paging however, we know we enforce this
             // later (by always wrapping in a pager) so don't bother
             if (!forContinuousPaging && group.commands.size() > 1)
-                result = group.limits().filter(result, group.nowInSec());
+                result = group.limits().filter(result, group.nowInSec(), group.selectsFullPartition());
             return result;
         }
         catch (UnavailableException e)
@@ -2415,7 +2415,7 @@ public class StorageProxy implements StorageProxyMBean
             Tracing.trace("Submitted {} concurrent range requests", concurrentQueries.size());
             // We want to count the results for the sake of updating the concurrency factor (see updateConcurrencyFactor) but we don't want to
             // enforce any particular limit at this point (this could break code than rely on postReconciliationProcessing), hence the DataLimits.NONE.
-            counter = DataLimits.NONE.newCounter(command.nowInSec(), true);
+            counter = DataLimits.NONE.newCounter(command.nowInSec(), true, command.selectsFullPartition());
             return counter.applyTo(PartitionIterators.concat(concurrentQueries));
         }
 

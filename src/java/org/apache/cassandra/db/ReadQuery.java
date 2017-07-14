@@ -109,7 +109,13 @@ public interface ReadQuery
         {
             return true;
         }
-    }
+
+        @Override
+        public boolean selectsFullPartition()
+        {
+            return false;
+        }
+    };
 
     /**
      * Starts a new read operation.
@@ -253,4 +259,10 @@ public interface ReadQuery
      * @return true if we can perform this query only with local data, false otherwise.
      */
     public boolean queriesOnlyLocalData();
+
+    /**
+     * Checks if this {@code ReadQuery} selects full partitions, that is it has no filtering on clustering or regular columns.
+     * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
+     */
+    public boolean selectsFullPartition();
 }
