@@ -1096,21 +1096,74 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources)
     {
+        rebuild(keyspace != null ? Collections.singletonList(keyspace) : Collections.emptyList(),
+                tokens,
+                RebuildMode.NORMAL,
+                0,
+                StreamingOptions.forRebuild(tokenMetadata.cloneOnlyTokenMap(),
+                                            sourceDc, specificSources));
+    }
+
+    public String rebuild(List<String> keyspaces,
+                          String tokens,
+                          String mode,
+                          List<String> srcDcNames,
+                          List<String> excludeDcNames,
+                          List<String> specifiedSources,
+                          List<String> excludeSources)
+    {
+        return rebuild(keyspaces, tokens, mode, 0,
+                       srcDcNames, excludeDcNames, specifiedSources, excludeSources);
+    }
+
+    public String rebuild(List<String> keyspaces,
+                          String tokens,
+                          String mode,
+                          int streamingConnectionsPerHost,
+                          List<String> srcDcNames,
+                          List<String> excludeDcNames,
+                          List<String> specifiedSources,
+                          List<String> excludeSources)
+    {
+        return rebuild(keyspaces != null ? keyspaces : Collections.emptyList(),
+                       tokens,
+                       RebuildMode.getMode(mode),
+                       streamingConnectionsPerHost,
+                       StreamingOptions.forRebuild(tokenMetadata.cloneOnlyTokenMap(),
+                                                   srcDcNames, excludeDcNames, specifiedSources, excludeSources));
+    }
+
+    private String rebuild(List<String> keyspaces,
+                           String tokens,
+                           RebuildMode mode,
+                           int streamingConnectionsPerHost,
+                           StreamingOptions options)
+    {
         // check ongoing rebuild
         if (!isRebuilding.compareAndSet(false, true))
         {
             throw new IllegalStateException("Node is still rebuilding. Check nodetool netstats.");
         }
 
+        keyspaces = keyspaces != null ? keyspaces : Collections.emptyList();
+
         // check the arguments
-        if (keyspace == null && tokens != null)
+        if (keyspaces.isEmpty() && tokens != null)
         {
             throw new IllegalArgumentException("Cannot specify tokens without keyspace.");
         }
 
-        logger.info("rebuild from dc: {}, {}, {}", sourceDc == null ? "(any dc)" : sourceDc,
-                    keyspace == null ? "(All keyspaces)" : keyspace,
-                    tokens == null ? "(All tokens)" : tokens);
+        if (streamingConnectionsPerHost <= 0)
+        {
+            streamingConnectionsPerHost = DatabaseDescriptor.getStreamingConnectionsPerHost();
+        }
+
+        String msg = String.format("%s, %s, %d streaming connections, %s, %s",
+                                   !keyspaces.isEmpty() ? keyspaces : "(All keyspaces)",
+                                   tokens == null ? "(All tokens)" : tokens,
+                                   streamingConnectionsPerHost, mode, options);
+
+        logger.info("starting rebuild for {}", msg);
         long t0 = System.currentTimeMillis();
 
         try
@@ -1123,24 +1176,26 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                        DatabaseDescriptor.getEndpointSnitch(),
                                                        streamStateStore,
                                                        false,
-                                                       DatabaseDescriptor.getStreamingConnectionsPerHost());
-            streamer.addSourceFilter(new RangeStreamer.FailureDetectorSourceFilter(FailureDetector.instance));
-            if (sourceDc != null)
-                streamer.addSourceFilter(new RangeStreamer.SingleDatacenterFilter(DatabaseDescriptor.getEndpointSnitch(), sourceDc));
+                                                       streamingConnectionsPerHost,
+                                                       options.toSourceFilter(DatabaseDescriptor.getEndpointSnitch(),
+                                                                              FailureDetector.instance));
 
-            if (keyspace == null)
+            if (keyspaces.isEmpty())
             {
-                for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces())
-                    streamer.addRanges(keyspaceName, getLocalRanges(keyspaceName));
+                keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
             }
-            else if (tokens == null)
+
+            if (tokens == null)
             {
-                streamer.addRanges(keyspace, getLocalRanges(keyspace));
+                for (String keyspaceName : keyspaces)
+                    streamer.addRanges(keyspaceName, getLocalRanges(keyspaceName));
+
+                mode.beforeStreaming(keyspaces);
             }
             else
             {
-                Token.TokenFactory factory = getTokenFactory();
                 List<Range<Token>> ranges = new ArrayList<>();
+                Token.TokenFactory factory = getTokenFactory();
                 Pattern rangePattern = Pattern.compile("\\(\\s*(-?\\w+)\\s*,\\s*(-?\\w+)\\s*\\]");
                 try (Scanner tokenScanner = new Scanner(tokens))
                 {
@@ -1156,49 +1211,33 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         throw new IllegalArgumentException("Unexpected string: " + tokenScanner.next());
                 }
 
-                // Ensure all specified ranges are actually ranges owned by this host
-                Collection<Range<Token>> localRanges = getLocalRanges(keyspace);
-                for (Range<Token> specifiedRange : ranges)
+                Map<String, Collection<Range<Token>>> keyspaceRanges = new HashMap<>();
+                for (String keyspaceName : keyspaces)
                 {
-                    boolean foundParentRange = false;
-                    for (Range<Token> localRange : localRanges)
+                    // Ensure all specified ranges are actually ranges owned by this host
+                    Collection<Range<Token>> localRanges = getLocalRanges(keyspaceName);
+                    Set<Range<Token>> specifiedNotFoundRanges = new HashSet<>(ranges);
+                    for (Range<Token> specifiedRange : ranges)
                     {
-                        if (localRange.contains(specifiedRange))
+                        for (Range<Token> localRange : localRanges)
                         {
-                            foundParentRange = true;
-                            break;
-                        }
-                    }
-                    if (!foundParentRange)
-                    {
-                        throw new IllegalArgumentException(String.format("The specified range %s is not a range that is owned by this node. Please ensure that all token ranges specified to be rebuilt belong to this node.", specifiedRange.toString()));
-                    }
-                }
-
-                if (specificSources != null)
-                {
-                    String[] stringHosts = specificSources.split(",");
-                    Set<InetAddress> sources = new HashSet<>(stringHosts.length);
-                    for (String stringHost : stringHosts)
-                    {
-                        try
-                        {
-                            InetAddress endpoint = InetAddress.getByName(stringHost);
-                            if (FBUtilities.getBroadcastAddress().equals(endpoint))
+                            if (localRange.contains(specifiedRange))
                             {
-                                throw new IllegalArgumentException("This host was specified as a source for rebuilding. Sources for a rebuild can only be other nodes in the cluster.");
+                                specifiedNotFoundRanges.remove(specifiedRange);
+                                break;
                             }
-                            sources.add(endpoint);
-                        }
-                        catch (UnknownHostException ex)
-                        {
-                            throw new IllegalArgumentException("Unknown host specified " + stringHost, ex);
                         }
                     }
-                    streamer.addSourceFilter(new RangeStreamer.WhitelistedSourcesFilter(sources));
+                    if (!specifiedNotFoundRanges.isEmpty())
+                    {
+                        throw new IllegalArgumentException(String.format("The specified range(s) %s is not a range that is owned by this node. Please ensure that all token ranges specified to be rebuilt belong to this node.", specifiedNotFoundRanges));
+                    }
+
+                    streamer.addRanges(keyspaceName, ranges);
+                    keyspaceRanges.put(keyspaceName, ranges);
                 }
 
-                streamer.addRanges(keyspace, ranges);
+                mode.beforeStreaming(keyspaceRanges);
             }
 
             StreamResultFuture resultFuture = streamer.fetchAsync();
@@ -1209,20 +1248,32 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             long totalBytes = 0L;
             for (SessionInfo session : resultFuture.getCurrentState().sessions)
                 totalBytes += session.getTotalSizeReceived();
-            logger.info("finished rebuild from dc: {}, {}, {} after {} seconds receiving {} bytes", sourceDc == null ? "(any dc)" : sourceDc,
-                        keyspace == null ? "(All keyspaces)" : keyspace,
-                        tokens == null ? "(All tokens)" : tokens,
-                        t / 1000, totalBytes);
+            String info = String.format("finished rebuild for %s after %s seconds receiving %d bytes",
+                                        msg, t / 1000, totalBytes);
+            logger.info("{}", info);
+            return info;
         }
         catch (InterruptedException e)
         {
             throw new RuntimeException("Interrupted while waiting on rebuild streaming");
+        }
+        catch (IllegalArgumentException | IllegalStateException e)
+        {
+            // These are (usally) validation errors caused by wrong input parameters.
+            // No need to log a stack trace as an error.
+            logger.warn("Parameter error while rebuilding node", e);
+            throw new RuntimeException("Parameter error while rebuilding node: " + e);
         }
         catch (ExecutionException e)
         {
             // This is used exclusively through JMX, so log the full trace but only throw a simple RTE
             logger.error("Error while rebuilding node", e.getCause());
             throw new RuntimeException("Error while rebuilding node: " + e.getCause().getMessage());
+        }
+        catch (RuntimeException e)
+        {
+            logger.error("Error while rebuilding node", e);
+            throw e;
         }
         finally
         {
@@ -1328,6 +1379,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public int getStreamThroughputMbPerSec()
     {
         return DatabaseDescriptor.getStreamThroughputOutboundMegabitsPerSec();
+    }
+
+    public void setStreamingConnectionsPerHost(int value)
+    {
+        DatabaseDescriptor.setStreamingConnectionsPerHost(value);
+    }
+
+    public int getStreamingConnectionsPerHost()
+    {
+        return DatabaseDescriptor.getStreamingConnectionsPerHost();
     }
 
     public void setInterDCStreamThroughputMbPerSec(int value)

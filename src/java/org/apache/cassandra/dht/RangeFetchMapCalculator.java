@@ -19,7 +19,9 @@
 package org.apache.cassandra.dht;
 
 import java.net.InetAddress;
-import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
@@ -29,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.dht.RangeStreamer.ISourceFilter;
 import org.psjava.algo.graph.flownetwork.FordFulkersonAlgorithm;
 import org.psjava.algo.graph.flownetwork.MaximumFlowAlgorithm;
 import org.psjava.algo.graph.flownetwork.MaximumFlowAlgorithmResult;
@@ -64,23 +67,23 @@ public class RangeFetchMapCalculator
 {
     private static final Logger logger = LoggerFactory.getLogger(RangeFetchMapCalculator.class);
     private final Multimap<Range<Token>, InetAddress> rangesWithSources;
-    private final Collection<RangeStreamer.ISourceFilter> sourceFilters;
+    private final ISourceFilter filter;
     private final String keyspace;
     //We need two Vertices to act as source and destination in the algorithm
     private final Vertex sourceVertex = OuterVertex.getSourceVertex();
     private final Vertex destinationVertex = OuterVertex.getDestinationVertex();
 
-    public RangeFetchMapCalculator(Multimap<Range<Token>, InetAddress> rangesWithSources, Collection<RangeStreamer.ISourceFilter> sourceFilters, String keyspace)
+    public RangeFetchMapCalculator(Multimap<Range<Token>, InetAddress> rangesWithSources, ISourceFilter filter, String keyspace)
     {
         this.rangesWithSources = rangesWithSources;
-        this.sourceFilters = sourceFilters;
+        this.filter = filter;
         this.keyspace = keyspace;
     }
 
-    public Multimap<InetAddress, Range<Token>> getRangeFetchMap()
+    public Multimap<InetAddress, Range<Token>> getRangeFetchMap(boolean useStrictConsistency)
     {
         //Get the graph with edges between ranges and their source endpoints
-        MutableCapacityGraph<Vertex, Integer> graph = getGraph();
+        MutableCapacityGraph<Vertex, Integer> graph = getGraph(useStrictConsistency);
         //Add source and destination vertex and edges
         addSourceAndDestination(graph, getDestinationLinkCapacity(graph));
 
@@ -104,11 +107,55 @@ public class RangeFetchMapCalculator
             flow = newFlow;
         }
 
-        return getRangeFetchMapFromGraphResult(graph, result);
+        Multimap<InetAddress, Range<Token>> rangeFetchMap = getRangeFetchMapFromGraphResult(graph, result);
+
+        logger.info("Output from RangeFetchMapCalculator for keyspace {}", keyspace);
+        validateRangeFetchMap(rangesWithSources, rangeFetchMap, keyspace, useStrictConsistency);
+
+        return rangeFetchMap;
     }
 
-    /*
-        Return the total number of range vertices in the graph
+    /**
+     * Verify that source returned for each range is correct
+     */
+    private static void validateRangeFetchMap(Multimap<Range<Token>, InetAddress> rangesWithSources,
+                                              Multimap<InetAddress, Range<Token>> rangeFetchMapMap,
+                                              String keyspace, boolean useStrictConsistency)
+    {
+        HashSet<Range<Token>> requestedRanges = new HashSet<>(rangesWithSources.keySet());
+
+        for (Map.Entry<InetAddress, Range<Token>> entry : rangeFetchMapMap.entries())
+        {
+            if (entry.getKey().equals(FBUtilities.getBroadcastAddress()))
+            {
+                throw new IllegalStateException("Trying to stream locally. Range: " + entry.getValue()
+                                                + " in keyspace " + keyspace);
+            }
+
+            if (!rangesWithSources.get(entry.getValue()).contains(entry.getKey()))
+            {
+                throw new IllegalStateException("Trying to stream from wrong endpoint. Range: " + entry.getValue()
+                                                + " in keyspace " + keyspace + " from endpoint: " + entry.getKey());
+            }
+
+            requestedRanges.remove(entry.getValue());
+
+            logger.info("Streaming range {} from endpoint {} for keyspace {}", entry.getValue(), entry.getKey(), keyspace);
+        }
+
+        // CASSANDRA-4650 somehow removed this check
+        if (useStrictConsistency && !requestedRanges.isEmpty())
+        {
+            throw new IllegalStateException("Unable to find sufficient sources for streaming range(s) "
+                                            + requestedRanges.stream()
+                                                             .map(Range::toString)
+                                                             .collect(Collectors.joining(", "))
+                                            + " in keyspace " + keyspace);
+        }
+    }
+
+    /**
+     * Return the total number of range vertices in the graph
      */
     private int getTotalRangeVertices(MutableCapacityGraph<Vertex, Integer> graph)
     {
@@ -233,7 +280,7 @@ public class RangeFetchMapCalculator
      *  It will try to use sources from local DC if possible
      * @return  The generated graph
      */
-    private MutableCapacityGraph<Vertex, Integer> getGraph()
+    private MutableCapacityGraph<Vertex, Integer> getGraph(boolean useStrictConsistency)
     {
         MutableCapacityGraph<Vertex, Integer> capacityGraph = MutableCapacityGraph.create();
 
@@ -253,8 +300,9 @@ public class RangeFetchMapCalculator
 
             //We could not find any source for this range which passed the filters. Ignore if localhost is part of the endpoints for this range
             if (!sourceFound && !rangesWithSources.get(range).contains(FBUtilities.getBroadcastAddress()))
-                throw new IllegalStateException("Unable to find sufficient sources for streaming range " + range + " in keyspace " + keyspace);
-
+            {
+                RangeStreamer.handleSourceNotFound(keyspace, useStrictConsistency, range);
+            }
         }
 
         return capacityGraph;
@@ -297,16 +345,15 @@ public class RangeFetchMapCalculator
      */
     private boolean passFilters(final InetAddress endpoint, boolean localDCCheck)
     {
-        for (RangeStreamer.ISourceFilter filter : sourceFilters)
+        if (filter.shouldInclude(endpoint) &&
+            (!localDCCheck || isInLocalDC(endpoint)))
         {
-            if (!filter.shouldInclude(endpoint))
-                return false;
+            logger.debug("Including {}", endpoint);
+            return true;
         }
 
-        if(endpoint.equals(FBUtilities.getBroadcastAddress()))
-            return false;
-
-        return !localDCCheck || isInLocalDC(endpoint);
+        logger.debug("Excluding {}", endpoint);
+        return false;
     }
 
     private static abstract class Vertex

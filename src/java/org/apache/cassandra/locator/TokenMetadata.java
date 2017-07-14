@@ -97,7 +97,7 @@ public class TokenMetadata
     private final ReadWriteLock lock = new ReentrantReadWriteLock(true);
     private volatile ArrayList<Token> sortedTokens;
 
-    private final Topology topology;
+    protected final Topology topology;
     public final IPartitioner partitioner;
 
     private static final Comparator<InetAddress> inetaddressCmp = new Comparator<InetAddress>()
@@ -1308,7 +1308,8 @@ public class TokenMetadata
         /** reverse-lookup map for endpoint to current known dc/rack assignment */
         private final Map<InetAddress, Pair<String, String>> currentLocations;
 
-        Topology()
+        @VisibleForTesting
+        public Topology()
         {
             dcEndpoints = HashMultimap.create();
             dcRacks = new HashMap<>();

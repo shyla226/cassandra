@@ -53,9 +53,7 @@ public class RangeFetchMapCalculatorTest
             @Override
             public String getDatacenter(InetAddress endpoint)
             {
-                if (getIPLastPart(endpoint) <= 50)
-                    return DatabaseDescriptor.getLocalDataCenter();
-                else if (getIPLastPart(endpoint) % 2 == 0)
+                if (getIPLastPart(endpoint) <= 50 || getIPLastPart(endpoint) % 2 == 0)
                     return DatabaseDescriptor.getLocalDataCenter();
                 else
                     return DatabaseDescriptor.getLocalDataCenter() + "Remote";
@@ -80,8 +78,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 31, 40, "127.0.0.4");
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.5");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<RangeStreamer.ISourceFilter>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
         validateRange(rangesWithSources, map);
 
         Assert.assertEquals(4, map.asMap().keySet().size());
@@ -97,8 +95,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 31, 40, "127.0.0.7", "127.0.0.8");
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.9", "127.0.0.10");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<RangeStreamer.ISourceFilter>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
         validateRange(rangesWithSources, map);
 
         Assert.assertEquals(5, map.asMap().keySet().size());
@@ -112,8 +110,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 11, 20, "127.0.0.2", "127.0.0.3");
         addRangeAndSources(rangesWithSources, 21, 30, "127.0.0.3", "127.0.0.4");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<RangeStreamer.ISourceFilter>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
         validateRange(rangesWithSources, map);
 
         //We should validate that it streamed from 3 unique sources
@@ -130,8 +128,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 31, 40, "127.0.0.3");
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.3", "127.0.0.2");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<RangeStreamer.ISourceFilter>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
         validateRange(rangesWithSources, map);
 
         //We should validate that it streamed from 2 unique sources
@@ -152,8 +150,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 31, 40, "127.0.0.1");
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.1", "127.0.0.2");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<RangeStreamer.ISourceFilter>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
         validateRange(rangesWithSources, map);
 
         //We should validate that it streamed from only non local host and only one range
@@ -172,8 +170,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 31, 40, "127.0.0.1");
         addRangeAndSources(rangesWithSources, 41, 50, "127.0.0.1");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<RangeStreamer.ISourceFilter>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
         //All ranges map to local host so we will not stream anything.
         Assert.assertTrue(map.isEmpty());
     }
@@ -187,26 +185,21 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 21, 30, "127.0.0.3");
 
         //Return false for all except 127.0.0.5
-        final RangeStreamer.ISourceFilter filter = new RangeStreamer.ISourceFilter()
-        {
-            public boolean shouldInclude(InetAddress endpoint)
-            {
-                try
-                {
-                    if (endpoint.equals(InetAddress.getByName("127.0.0.5")))
-                        return false;
-                    else
-                        return true;
-                }
-                catch (UnknownHostException e)
-                {
-                    return true;
-                }
-            }
-        };
+        RangeStreamer.ISourceFilter filter = SourceFilters.composite(SourceFilters.excludeLocalNode(),
+                                                                     endpoint ->
+                                                                     {
+                                                                         try
+                                                                         {
+                                                                             return !endpoint.equals(InetAddress.getByName("127.0.0.5"));
+                                                                         }
+                                                                         catch (UnknownHostException e)
+                                                                         {
+                                                                             return true;
+                                                                         }
+                                                                     });
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, Arrays.asList(filter), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, filter, "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(false);
 
         validateRange(rangesWithSources, map);
 
@@ -225,16 +218,10 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 11, 20, "127.0.0.2");
         addRangeAndSources(rangesWithSources, 21, 30, "127.0.0.3");
 
-        final RangeStreamer.ISourceFilter allDeadFilter = new RangeStreamer.ISourceFilter()
-        {
-            public boolean shouldInclude(InetAddress endpoint)
-            {
-                return false;
-            }
-        };
+        final RangeStreamer.ISourceFilter allDeadFilter = endpoint -> false;
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, Arrays.asList(allDeadFilter), "Test");
-        calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, allDeadFilter, "Test");
+        calculator.getRangeFetchMap(true);
     }
 
     @Test
@@ -245,8 +232,8 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 11, 20, "127.0.0.1", "127.0.0.3", "127.0.0.57");
         addRangeAndSources(rangesWithSources, 21, 30, "127.0.0.2", "127.0.0.59", "127.0.0.61");
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, new ArrayList<>(), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, SourceFilters.excludeLocalNode(), "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
         validateRange(rangesWithSources, map);
         Assert.assertEquals(2, map.asMap().size());
 
@@ -264,26 +251,20 @@ public class RangeFetchMapCalculatorTest
         addRangeAndSources(rangesWithSources, 21, 30, "127.0.0.2", "127.0.0.59");
 
         //Reject only 127.0.0.3 and accept everyone else
-        final RangeStreamer.ISourceFilter localHostFilter = new RangeStreamer.ISourceFilter()
+        final RangeStreamer.ISourceFilter localHostFilter = endpoint ->
         {
-            public boolean shouldInclude(InetAddress endpoint)
+            try
             {
-                try
-                {
-                    if (endpoint.equals(InetAddress.getByName("127.0.0.3")))
-                        return false;
-                    else
-                        return true;
-                }
-                catch (UnknownHostException e)
-                {
-                    return true;
-                }
+                return !endpoint.equals(InetAddress.getByName("127.0.0.3"));
+            }
+            catch (UnknownHostException e)
+            {
+                return true;
             }
         };
 
-        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, Arrays.asList(localHostFilter), "Test");
-        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap();
+        RangeFetchMapCalculator calculator = new RangeFetchMapCalculator(rangesWithSources, localHostFilter, "Test");
+        Multimap<InetAddress, Range<Token>> map = calculator.getRangeFetchMap(true);
         validateRange(rangesWithSources, map);
         Assert.assertEquals(3, map.asMap().size());
 
@@ -317,7 +298,7 @@ public class RangeFetchMapCalculatorTest
 
     private Collection<InetAddress> makeAddrs(String... hosts) throws UnknownHostException
     {
-        ArrayList<InetAddress> addrs = new ArrayList<InetAddress>(hosts.length);
+        ArrayList<InetAddress> addrs = new ArrayList<>(hosts.length);
         for (String host : hosts)
             addrs.add(InetAddress.getByName(host));
         return addrs;
@@ -325,6 +306,6 @@ public class RangeFetchMapCalculatorTest
 
     private Range<Token> generateRange(int left, int right)
     {
-        return new Range<Token>(new RandomPartitioner.BigIntegerToken(String.valueOf(left)), new RandomPartitioner.BigIntegerToken(String.valueOf(right)));
+        return new Range<>(new RandomPartitioner.BigIntegerToken(String.valueOf(left)), new RandomPartitioner.BigIntegerToken(String.valueOf(right)));
     }
 }

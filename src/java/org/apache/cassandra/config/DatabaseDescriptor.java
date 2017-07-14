@@ -2103,6 +2103,11 @@ public class DatabaseDescriptor
         return conf.streaming_connections_per_host;
     }
 
+    public static void setStreamingConnectionsPerHost(int streamingConnectionsPerHost)
+    {
+        conf.streaming_connections_per_host = streamingConnectionsPerHost;
+    }
+
     public static String getLocalDataCenter()
     {
         return localDC;

@@ -17,9 +17,7 @@
  */
 package org.apache.cassandra.db;
 
-import java.io.File;
-import java.io.IOError;
-import java.io.IOException;
+import java.io.*;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -29,11 +27,7 @@ import java.util.stream.StreamSupport;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
 
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.SetMultimap;
-import com.google.common.collect.Sets;
+import com.google.common.collect.*;
 import com.google.common.io.ByteStreams;
 import io.reactivex.Single;
 import org.slf4j.Logger;
@@ -51,15 +45,14 @@ import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.dht.*;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.metrics.RestorableMeter;
-import org.apache.cassandra.net.Verbs;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.MessagingVersion;
+import org.apache.cassandra.net.*;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
@@ -70,7 +63,6 @@ import org.apache.cassandra.utils.*;
 import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
-
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalAsync;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
@@ -1224,12 +1216,7 @@ public final class SystemKeyspace
     public static synchronized void updateAvailableRanges(String keyspace, Collection<Range<Token>> completedRanges)
     {
         String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE keyspace_name = ?";
-        Set<ByteBuffer> rangesToUpdate = new HashSet<>(completedRanges.size());
-        for (Range<Token> range : completedRanges)
-        {
-            rangesToUpdate.add(rangeToBytes(range));
-        }
-        executeInternal(String.format(cql, AVAILABLE_RANGES), rangesToUpdate, keyspace);
+        executeInternal(String.format(cql, AVAILABLE_RANGES), rangesToUpdate(completedRanges), keyspace);
     }
 
     public static synchronized Set<Range<Token>> getAvailableRanges(String keyspace, IPartitioner partitioner)
@@ -1249,6 +1236,18 @@ public final class SystemKeyspace
         return ImmutableSet.copyOf(result);
     }
 
+    public static void resetAvailableRanges(String keyspace)
+    {
+        String cql = "UPDATE system.%s SET ranges = null WHERE keyspace_name = ?";
+        executeInternal(format(cql, AVAILABLE_RANGES), keyspace);
+    }
+
+    public static void resetAvailableRanges(String keyspace, Collection<Range<Token>> ranges)
+    {
+        String cql = "UPDATE system.%s SET ranges = ranges - ? WHERE keyspace_name = ?";
+        executeInternal(format(cql, AVAILABLE_RANGES), rangesToUpdate(ranges), keyspace);
+    }
+
     public static void resetAvailableRanges()
     {
         ColumnFamilyStore availableRanges = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(AVAILABLE_RANGES);
@@ -1261,12 +1260,14 @@ public final class SystemKeyspace
                                                          Collection<Range<Token>> streamedRanges)
     {
         String cql = "UPDATE system.%s SET ranges = ranges + ? WHERE operation = ? AND peer = ? AND keyspace_name = ?";
-        Set<ByteBuffer> rangesToUpdate = new HashSet<>(streamedRanges.size());
-        for (Range<Token> range : streamedRanges)
-        {
-            rangesToUpdate.add(rangeToBytes(range));
-        }
-        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate, streamOperation.getDescription(), peer, keyspace);
+        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate(streamedRanges), streamOperation.getDescription(), peer, keyspace);
+    }
+
+    private static Set<ByteBuffer> rangesToUpdate(Collection<Range<Token>> ranges)
+    {
+        return ranges.stream()
+                     .map(SystemKeyspace::rangeToBytes)
+                     .collect(Collectors.toSet());
     }
 
     public static synchronized Map<InetAddress, Set<Range<Token>>> getTransferredRanges(String description, String keyspace, IPartitioner partitioner)
