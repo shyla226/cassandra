@@ -33,54 +33,59 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  * This class removes the {@link java.util.concurrent.atomic.LongAdder} of the {@link com.codahale.metrics.Histogram}
  * class and retrieves {@link this#getCount()} from {@link Reservoir}.
  *
- * TODO: This class needs to extend {@link com.codahale.metrics.Histogram} to allow this metric
+ * This class needs to extend {@link com.codahale.metrics.Histogram} to allow this metric
  * to be retrieved by {@link MetricRegistry#getHistograms()} (used by {@link ScheduledReporter})
  * but we can't easily do that since we need access to the reservoir, which can be shared. We also
- * don't want to use a LongAdder by default.
+ * don't want to use a LongAdder by default. Was it not for this fact, it would have been an interface.
  */
-public interface Histogram extends Metric, Sampling, Counting, Composable<Histogram>
+public abstract class Histogram extends com.codahale.metrics.Histogram implements Composable<Histogram>
 {
     /**
      * Whether zeros are considered by default.
      */
-    boolean DEFAULT_ZERO_CONSIDERATION = false;
+    public static boolean DEFAULT_ZERO_CONSIDERATION = false;
 
     /** The maximum trackable value, 18 TB. This comes from the legacy implementation based on
      * {@link EstimatedHistogram#newOffsets(int, boolean)} with size set to 164 and  considerZeros
      * set to true.*/
-    long DEFAULT_MAX_TRACKABLE_VALUE = 18 * (1L << 43);
+    public static long DEFAULT_MAX_TRACKABLE_VALUE = 18 * (1L << 43);
+
+    protected Histogram()
+    {
+        super(null); // use a fake null reservoir for the base since our implementors use a different one and override all methods
+    }
 
     /**
      * Adds a recorded value.
      *
      * @param value the length of the value
      */
-    public void update(final long value);
+    public abstract void update(final long value);
 
     /**
      * @return the number of values recorded
      */
     @Override
-    public long getCount();  //from Counting
+    public abstract long getCount();  //from Counting
 
     /**
      *
      * @return a snapshot of the histogram.
      */
     @Override
-    public Snapshot getSnapshot(); //from Sampling
+    public abstract Snapshot getSnapshot(); //from Sampling
 
     @VisibleForTesting
-    public void clear();
+    public abstract void clear();
 
     @VisibleForTesting
-    public void aggregate();
+    public abstract void aggregate();
 
-    public boolean considerZeroes();
+    public abstract boolean considerZeroes();
 
-    public long maxTrackableValue();
+    public abstract long maxTrackableValue();
 
-    public long[] getOffsets();
+    public abstract long[] getOffsets();
 
     public static Histogram make(boolean isComposite)
     {

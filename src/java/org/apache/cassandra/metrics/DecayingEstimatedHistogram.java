@@ -82,7 +82,7 @@ import org.apache.cassandra.utils.EstimatedHistogram;
  * [2]: https://en.wikipedia.org/wiki/Half-life
  * [3]: https://github.com/dropwizard/metrics/blob/v3.1.2/metrics-core/src/main/java/com/codahale/metrics/ExponentiallyDecayingReservoir.java
  */
-final class DecayingEstimatedHistogram implements Histogram
+final class DecayingEstimatedHistogram extends Histogram
 {
     /**
      * The reservoir contains the buckets with and without decay, and they are periodically

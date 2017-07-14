@@ -24,11 +24,11 @@ import com.codahale.metrics.Snapshot;
  * A histogram class which is an aggregation of other histograms with the same
  * max trackable value and zero consideration, i.e. the same bucket offsets.
  */
-class CompositeHistogram implements Histogram
+class CompositeHistogram extends Histogram
 {
     private final Reservoir reservoir;
 
-    public CompositeHistogram(Reservoir reservoir)
+    CompositeHistogram(Reservoir reservoir)
     {
         this.reservoir = reservoir;
     }

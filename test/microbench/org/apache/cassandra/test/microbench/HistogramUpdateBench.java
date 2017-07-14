@@ -20,6 +20,7 @@ package org.apache.cassandra.test.microbench;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.Histogram;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -57,6 +58,8 @@ public class HistogramUpdateBench
     @Setup
     public void setup()
     {
+        DatabaseDescriptor.daemonInitialization();
+
         histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
     }
 

@@ -63,6 +63,8 @@ public class HistogramAggregationBench
     @Setup(Level.Iteration)
     public void setup() throws InterruptedException
     {
+        DatabaseDescriptor.daemonInitialization();
+
         histogram = Histogram.make(Histogram.DEFAULT_ZERO_CONSIDERATION, Histogram.DEFAULT_MAX_TRACKABLE_VALUE, UPDATE_TIME_MILLIS, false);
 
         int numCores = TPC.getNumCores();
