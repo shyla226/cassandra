@@ -99,14 +99,14 @@ final class DecayingEstimatedHistogram extends Histogram
 
     DecayingEstimatedHistogram(boolean considerZeroes, long maxTrackableValue, int updateTimeMillis, Clock clock)
     {
-        BucketProperties bucketProperties = new BucketProperties(maxTrackableValue);
+        BucketProperties bucketProperties = new BucketProperties(considerZeroes, maxTrackableValue);
         this.reservoir = new ForwardDecayingReservoir(bucketProperties, clock, considerZeroes, updateTimeMillis, false);
         this.recorder = new Recorder(bucketProperties, reservoir);
     }
 
     static Reservoir makeCompositeReservoir(boolean considerZeroes, long maxTrackableValue, int updateIntervalMillis, Clock clock)
     {
-        return new ForwardDecayingReservoir(new BucketProperties(maxTrackableValue),
+        return new ForwardDecayingReservoir(new BucketProperties(considerZeroes, maxTrackableValue),
                                             clock,
                                             considerZeroes,
                                             updateIntervalMillis,
@@ -208,10 +208,19 @@ final class DecayingEstimatedHistogram extends Histogram
      */
     static final class BucketProperties
     {
+        /** True if the first bucket starts with an offset of zero. This only affects the snapshots and is kept
+         * for backward compatibility, internally offsets will always start at zero.
+         */
+        final boolean considerZeros;
+
         /** The maximum value that can be tracked by the histogram */
         final long maxTrackableValue;
 
-        /** The number of buckets needed to cover the maximum trackable value */
+        /** The histogram offsets, these depend on {@code considerZeros} and {@code maxTrackableValue} */
+        final long[] offsets;
+
+        /** The number of buckets needed to cover the maximum trackable value with considerZeros always true, since
+         * the histogram only works considering zeros. However, snapshots may not consider zeros. */
         final int numBuckets;
 
         /** Values for calculating buckets and indexes */
@@ -224,20 +233,23 @@ final class DecayingEstimatedHistogram extends Histogram
         final long subBucketMask;
         final int leadingZeroCountBase;
 
-        BucketProperties(long maxTrackableValue)
+        BucketProperties(boolean considerZeros, long maxTrackableValue)
         {
+            this.considerZeros = considerZeros;
             this.maxTrackableValue = maxTrackableValue;
-            this.numBuckets = makeOffsets(true).length;
+            this.offsets = makeOffsets(considerZeros);
+            // add one more if we are not considering zero since the bucket impl always does, snapshots may not
+            this.numBuckets = offsets.length + (!considerZeros ? 1 : 0);
             this.subBucketMask = (long)(subBucketCount - 1) << unitMagnitude;
             this.leadingZeroCountBase = 64 - unitMagnitude - subBucketHalfCountMagnitude - 1;
         }
 
         /**
-         * Return a number of buckets sufficient to track up to maxTrackableValue.
+         * Return a number of buckets sufficient to track up to {@code maxTrackableValue}.
          * @param considerZeroes when true add zero as the first value to the offsets
-         * @return the number of buckets required (the array size)
+         * @return an array containing the bucket offsets
          */
-        long[] makeOffsets(boolean considerZeroes)
+        private long[] makeOffsets(boolean considerZeroes)
         {
             ArrayList<Long> ret = new ArrayList<>();
             if (considerZeroes)
@@ -347,9 +359,6 @@ final class DecayingEstimatedHistogram extends Histogram
          * */
         private final CopyOnWriteArrayList<Recorder> recorders;
 
-        /** The core on which the aggregating thread is running */
-        private final int coreId;
-
         /** The aggregated buckets without forward decaying */
         private final long[] buckets;
 
@@ -386,7 +395,6 @@ final class DecayingEstimatedHistogram extends Histogram
             this.recorders = new CopyOnWriteArrayList<>();
             this.decayLandmark = clock.getTime();
             this.snapshot = new Snapshot(this);
-            this.coreId = TPC.getNextCore();
             this.scheduled = new AtomicBoolean(false);
             this.isComposite = isComposite;
 
@@ -404,13 +412,13 @@ final class DecayingEstimatedHistogram extends Histogram
                 return;
 
             if (scheduled.compareAndSet(false, true))
-                TPC.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPC.bestTPCScheduler().scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         void scheduleIfComposite()
         {
             if (updateIntervalMillis > 0 && isComposite)
-                TPC.getForCore(coreId).scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
+                TPC.bestTPCScheduler().scheduleDirect(this::aggregate, updateIntervalMillis, TimeUnit.MILLISECONDS);
         }
 
         @Override
@@ -474,12 +482,20 @@ final class DecayingEstimatedHistogram extends Histogram
                 rescaleIfNeeded(now);
 
                 final long weight = Math.round(forwardDecayWeight(now, decayLandmark));
-                this.isOverflowed = recorders.stream().map(Recorder::isOverFlowed).reduce(Boolean.FALSE, Boolean::logicalOr);
+
+                this.isOverflowed = false;
+                for (Recorder recorder : recorders)
+                {
+                    if (recorder.isOverFlowed())
+                    {
+                        this.isOverflowed = true;
+                        break;
+                    }
+                }
 
                 for (int i = 0; i < buckets.length; i++)
                 {
-                    final int index = i;
-                    long value = recorders.stream().map(recorder -> recorder.getValue(index)).reduce(0L, Long::sum);
+                    long value = getRecordersSum(i);
                     long delta = value - buckets[i];
                     if (delta > 0)
                     {
@@ -495,6 +511,16 @@ final class DecayingEstimatedHistogram extends Histogram
             {
                 scheduleIfComposite();
             }
+        }
+
+        private long getRecordersSum(int index)
+        {
+            long ret = 0;
+
+            for (Recorder recorder : recorders)
+                ret += recorder.getValue(index);
+
+            return ret;
         }
 
         private boolean isCompatible(Reservoir other)
@@ -523,7 +549,7 @@ final class DecayingEstimatedHistogram extends Histogram
 
         public long[] getOffsets()
         {
-            return bucketProperties.makeOffsets(considerZeroes);
+            return bucketProperties.offsets;
         }
 
         void clear()
@@ -633,21 +659,34 @@ final class DecayingEstimatedHistogram extends Histogram
         // not thread-safe: must only be called by the aggregating thread
         boolean isOverFlowed()
         {
-            return Arrays.stream(buffers)
-                         .filter(Objects::nonNull).map(b -> b.isOverflowed)
-                         .reduce(Boolean.FALSE, Boolean::logicalOr);
+            for (Buffer buffer : buffers)
+            {
+                if (buffer == null)
+                    continue;
+
+                if (buffer.isOverflowed)
+                    return true;
+            }
+
+            return false;
         }
 
         // not thread-safe: must only be called by the aggregating thread
         long getValue(final int index)
         {
-            return Arrays.stream(buffers)
-                         .filter(Objects::nonNull)
-                         // here we may loose an update at most I think, since a lazy set
-                         // aka putOrderedLong takes a few nanoseconds to be visible but for
-                         // metrics it should be acceptable as long as it is atomic
-                         .map(b -> b.getLongVolatile(index))
-                         .reduce(0L, Long::sum);
+            long ret = 0;
+            for (Buffer buffer : buffers)
+            {
+                if (buffer == null)
+                    continue;
+
+                // here we may loose an update at most I think, since a lazy set
+                // aka putOrderedLong takes a few nanoseconds to be visible but for
+                // metrics it should be acceptable as long as it is atomic
+                ret += buffer.getLongVolatile(index);
+            }
+
+            return ret;
         }
 
         // not thread-safe: testing only
