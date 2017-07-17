@@ -125,6 +125,12 @@ public interface ReadQuery extends Monitorable
         {
             return true;
         }
+
+         @Override
+        public boolean selectsFullPartition()
+        {
+            return false;
+        }
     }
 
     /**
@@ -266,6 +272,12 @@ public interface ReadQuery extends Monitorable
      * @return - true if the query is empty, false otherwise.
      */
     public boolean isEmpty();
+
+    /**
+     * Checks if this {@code ReadQuery} selects full partitions, that is it has no filtering on clustering or regular columns.
+     * @return {@code true} if this {@code ReadQuery} selects full partitions, {@code false} otherwise.
+     */
+    public boolean selectsFullPartition();
 
     /**
      * Test-only helper method.

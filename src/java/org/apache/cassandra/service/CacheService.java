@@ -419,7 +419,7 @@ public class CacheService implements CacheServiceMBean
                     try (ReadExecutionController controller = cmd.executionController();
                          UnfilteredRowIterator iter = FlowablePartitions.toIterator(cmd.deferredQuery(cfs, controller).blockingSingle()))
                     {
-                        CachedPartition toCache = CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(iter, nowInSec), nowInSec);
+                        CachedPartition toCache = CachedBTreePartition.create(DataLimits.cqlLimits(rowsToCache).filter(iter, nowInSec, true), nowInSec);
                         return Pair.create(new RowCacheKey(cfs.metadata(), key), toCache);
                     }
                 }

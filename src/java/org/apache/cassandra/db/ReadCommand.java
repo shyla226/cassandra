@@ -383,7 +383,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
                 // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
                 // processing we do on it).
                 r = updatedFilter.filter(r, cfs.metadata(), nowInSec());
-                return limits().filter(r, nowInSec());
+                return limits().filter(r, nowInSec(), selectsFullPartition());
             });
 
         return flow;

@@ -193,6 +193,11 @@ public class DataRange
         return startKey().isMinimum() && stopKey().isMinimum() && clusteringIndexFilter.selectsAllPartition();
     }
 
+    public boolean selectsAllPartition()
+    {
+        return clusteringIndexFilter.selectsAllPartition();
+    }
+
     /**
      * Whether the underlying {@code ClusteringIndexFilter} is reversed or not.
      *

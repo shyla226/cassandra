@@ -66,6 +66,7 @@ import static org.apache.cassandra.SchemaLoader.compositeIndexCFMD;
 import static org.apache.cassandra.SchemaLoader.createKeyspace;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
@@ -142,9 +143,9 @@ public class StreamingTransferTest
         {
             public void onSuccess(StreamState result)
             {
-                assert planId.equals(result.planId);
-                assert result.streamOperation == StreamOperation.OTHER;
-                assert result.sessions.isEmpty();
+                assertEquals(planId, result.planId);
+                assertEquals(result.streamOperation, StreamOperation.OTHER);
+                assertTrue(result.sessions.isEmpty());
             }
 
             public void onFailure(Throwable t)
@@ -170,17 +171,17 @@ public class StreamingTransferTest
 
         UUID planId = futureResult.planId;
         StreamState result = futureResult.get();
-        assert planId.equals(result.planId);
-        assert result.streamOperation == StreamOperation.OTHER;
+        assertEquals(planId, result.planId);
+        assertEquals(result.streamOperation, StreamOperation.OTHER);
 
         // we should have completed session with empty transfer
-        assert result.sessions.size() == 1;
+        assertEquals(result.sessions.size(),1);
         SessionInfo session = Iterables.get(result.sessions, 0);
-        assert session.peer.equals(LOCAL);
-        assert session.getTotalFilesReceived() == 0;
-        assert session.getTotalFilesSent() == 0;
-        assert session.getTotalSizeReceived() == 0;
-        assert session.getTotalSizeSent() == 0;
+        assertEquals(session.peer,LOCAL);
+        assertEquals(session.getTotalFilesReceived(),0);
+        assertEquals(session.getTotalFilesSent(),0);
+        assertEquals(session.getTotalSizeReceived(),0);
+        assertEquals(session.getTotalSizeSent(),0);
     }
 
     /**
@@ -228,8 +229,8 @@ public class StreamingTransferTest
             int expectedCol = offs[i];
 
             ImmutableBTreePartition partition = partitions.get(i);
-            Assert.assertEquals(expectedKey, (int) Int32Type.instance.getSerializer().deserialize(partition.partitionKey().getKey()));
-            Assert.assertEquals(expectedCol, (int) Int32Type.instance.getSerializer().deserialize(partition.iterator().next().clustering().get(0)));
+            assertEquals(expectedKey, (int) Int32Type.instance.getSerializer().deserialize(partition.partitionKey().getKey()));
+            assertEquals(expectedCol, (int) Int32Type.instance.getSerializer().deserialize(partition.iterator().next().clustering().get(0)));
 
             DecoratedKey key = Murmur3Partitioner.instance.decorateKey(Int32Type.instance.getSerializer().serialize(expectedKey));
             Assert.assertFalse(Util.getAll(Util.cmd(cfs, key).build()).isEmpty());
@@ -264,7 +265,7 @@ public class StreamingTransferTest
                 Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(1))),
                 Murmur3Partitioner.instance.getToken(Int32Type.instance.getSerializer().serialize(sortedKeys.get(0)))));
         StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferRanges(LOCAL, cfs.keyspace.getName(), ranges, cfs.getTableName());
-        streamPlan.execute().get();
+        StreamState state = streamPlan.execute().get();
         verifyConnectionsAreClosed();
 
         //cannot add ranges after stream session is finished
@@ -277,12 +278,23 @@ public class StreamingTransferTest
         {
             //do nothing
         }
+        assertBytesSent(state);
+    }
+
+    private void assertBytesSent(StreamState state)
+    {
+        long totalBytesSent = 0L;
+        for (SessionInfo session : state.sessions)
+        {
+            totalBytesSent += session.getTotalFilesSent();
+        }
+        assertTrue(totalBytesSent > 0);
     }
 
     private void transfer(SSTableReader sstable, List<Range<Token>> ranges) throws Exception
     {
         StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferFiles(LOCAL, makeStreamingDetails(ranges, Refs.tryRef(Arrays.asList(sstable))));
-        streamPlan.execute().get();
+        StreamState state = streamPlan.execute().get();
         verifyConnectionsAreClosed();
 
         //cannot add files after stream session is finished
@@ -295,6 +307,7 @@ public class StreamingTransferTest
         {
             //do nothing
         }
+        assertBytesSent(state);
     }
 
     /**
@@ -356,7 +369,7 @@ public class StreamingTransferTest
                                                                                    cfs.metadata.keyspace, cfs.metadata.name, val));
             assertEquals(1, result.size());
 
-            Assert.assertEquals((int) key, result.iterator().next().getInt("key"));
+            assertEquals((int) key, result.iterator().next().getInt("key"));
         }
     }
 

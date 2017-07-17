@@ -1389,7 +1389,7 @@ public class StorageProxy implements StorageProxyMBean
         return result.map(r ->
                           {
                               if (!forContinuousPaging && group.commands.size() > 1)
-                                  return group.limits().filter(r, group.nowInSec());
+                                  return group.limits().filter(r, group.nowInSec(), group.selectsFullPartition());
 
                               return r;
                           })
@@ -1888,7 +1888,7 @@ public class StorageProxy implements StorageProxyMBean
             Tracing.trace("Submitted {} concurrent range requests", concurrentQueries.size());
             // We want to count the results for the sake of updating the concurrency factor (see updateConcurrencyFactor) but we don't want to
             // enforce any particular limit at this point (this could break code than rely on postReconciliationProcessing), hence the DataLimits.NONE.
-            counter = DataLimits.NONE.newCounter(command.nowInSec(), true);
+            counter = DataLimits.NONE.newCounter(command.nowInSec(), true, command.selectsFullPartition());
             return Transformation.apply(PartitionIterators.concat(concurrentQueries), counter.asTransformation());
         }
 

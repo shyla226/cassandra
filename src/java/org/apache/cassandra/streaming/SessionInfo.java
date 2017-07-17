@@ -20,9 +20,11 @@ package org.apache.cassandra.streaming;
 import java.io.Serializable;
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.datastax.driver.core.Session;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -44,8 +46,8 @@ public final class SessionInfo implements Serializable
     /** Current session state */
     public final StreamSession.State state;
 
-    private final Map<String, ProgressInfo> receivingFiles;
-    private final Map<String, ProgressInfo> sendingFiles;
+    private Map<String, ProgressInfo> receivingFiles;
+    private Map<String, ProgressInfo> sendingFiles;
 
     public SessionInfo(InetAddress peer,
                        int sessionIndex,
@@ -62,6 +64,17 @@ public final class SessionInfo implements Serializable
         this.receivingFiles = new ConcurrentHashMap<>();
         this.sendingFiles = new ConcurrentHashMap<>();
         this.state = state;
+    }
+
+    /**
+     * copy previous transferred and received files
+     *
+     * @param previous sessionInfo to be replaced
+     */
+    public void copyProgress(SessionInfo previous)
+    {
+        this.receivingFiles = new ConcurrentHashMap<>(previous.receivingFiles);
+        this.sendingFiles = new ConcurrentHashMap<>(previous.sendingFiles);
     }
 
     public boolean isFailed()
