@@ -1426,7 +1426,7 @@ public class SelectStatement implements CQLStatement
          * @return the restrictions
          * @throws InvalidRequestException if a problem occurs while building the restrictions
          */
-        private StatementRestrictions prepareRestrictions(TableMetadata metadata,
+        protected StatementRestrictions prepareRestrictions(TableMetadata metadata,
                                                           VariableSpecifications boundNames,
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
@@ -1452,7 +1452,7 @@ public class SelectStatement implements CQLStatement
             return prepLimit;
         }
 
-        private static void verifyOrderingIsAllowed(StatementRestrictions restrictions) throws InvalidRequestException
+        protected void verifyOrderingIsAllowed(StatementRestrictions restrictions) throws InvalidRequestException
         {
             checkFalse(restrictions.usesSecondaryIndexing(), "ORDER BY with 2ndary indexes is not supported.");
             checkFalse(restrictions.isKeyRange(), "ORDER BY is only supported when the partition key is restricted by an EQ or an IN.");
@@ -1579,7 +1579,7 @@ public class SelectStatement implements CQLStatement
             checkFalse(f.isAggregate(), "Aggregate functions are not supported within the GROUP BY clause, got: %s", f.name());
         }
 
-        private Comparator<List<ByteBuffer>> getOrderingComparator(TableMetadata metadata,
+        protected Comparator<List<ByteBuffer>> getOrderingComparator(TableMetadata metadata,
                                                                    Selection selection,
                                                                    StatementRestrictions restrictions,
                                                                    Map<ColumnMetadata, Boolean> orderingColumns)
@@ -1615,7 +1615,7 @@ public class SelectStatement implements CQLStatement
             return orderingIndexes;
         }
 
-        private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Boolean> orderingColumns) throws InvalidRequestException
+        protected boolean isReversed(TableMetadata table, Map<ColumnMetadata, Boolean> orderingColumns) throws InvalidRequestException
         {
             Boolean[] reversedMap = new Boolean[table.clusteringColumns().size()];
             int i = 0;

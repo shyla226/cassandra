@@ -34,7 +34,7 @@ import org.apache.cassandra.index.SecondaryIndexManager;
  *
  * <p>This class is immutable.</p>
  */
-final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
+public final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
 {
     /**
      * The comparator used to sort the <code>Restriction</code>s.
