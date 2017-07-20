@@ -505,7 +505,8 @@ public abstract class DataLimits
             @Override
             public void endOfIteration()
             {
-                // nothing to do
+                if (logger.isTraceEnabled())
+                    logger.trace("{} - counter done: {}", hashCode(), toString());
             }
 
             protected void incrementRowCount()
