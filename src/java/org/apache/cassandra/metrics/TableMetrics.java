@@ -200,9 +200,8 @@ public class TableMetrics
         {
             double repaired = 0;
             double total = 0;
-            for (String keyspace : Schema.instance.getNonSystemKeyspaces())
+            for (Keyspace k : Keyspace.nonSystem())
             {
-                Keyspace k = Schema.instance.getKeyspaceInstance(keyspace);
                 if (SchemaConstants.DISTRIBUTED_KEYSPACE_NAME.equals(k.getName()))
                     continue;
                 if (k.getReplicationStrategy().getReplicationFactor() < 2)
