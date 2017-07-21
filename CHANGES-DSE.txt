@@ -1,3 +1,4 @@
 DSE 4.8.14
-* Integrate top threads command in nodetool (APOLLO-652)
+  * Allow aggressive expiration of fully expired sstables without timestamp/key overlap checks (APOLLO-902)
+  * Integrate top threads command in nodetool (APOLLO-652)
 

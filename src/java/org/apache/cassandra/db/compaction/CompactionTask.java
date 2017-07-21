@@ -44,7 +44,6 @@ import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 public class CompactionTask extends AbstractCompactionTask
@@ -52,14 +51,24 @@ public class CompactionTask extends AbstractCompactionTask
     protected static final Logger logger = LoggerFactory.getLogger(CompactionTask.class);
     protected final int gcBefore;
     private final boolean offline;
+    private final boolean ignoreOverlaps;
     protected static long totalBytesCompacted = 0;
     private CompactionExecutorStatsCollector collector;
 
     public CompactionTask(ColumnFamilyStore cfs, Iterable<SSTableReader> sstables, int gcBefore, boolean offline)
     {
+        this(cfs, sstables, gcBefore, offline, false);
+    }
+
+    /**
+     * {@param ignoreOverlaps} is only used by the {@code TimeWindowCompactionStrategy}, so it defaults to {@code false}
+     */
+    public CompactionTask(ColumnFamilyStore cfs, Iterable<SSTableReader> sstables, int gcBefore, boolean offline, boolean ignoreOverlaps)
+    {
         super(cfs, Sets.newHashSet(sstables));
         this.gcBefore = gcBefore;
         this.offline = offline;
+        this.ignoreOverlaps = ignoreOverlaps;
     }
 
     public static synchronized long addToTotalBytesCompacted(long bytesCompacted)
@@ -144,7 +153,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         long totalKeysWritten = 0;
 
-        try (CompactionController controller = getCompactionController(sstables);)
+        try (CompactionController controller = getCompactionController(sstables))
         {
             Set<SSTableReader> actuallyCompact = Sets.difference(sstables, controller.getFullyExpiredSSTables());
 
@@ -315,7 +324,7 @@ public class CompactionTask extends AbstractCompactionTask
 
     protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
     {
-        return new CompactionController(cfs, toCompact, gcBefore);
+        return new CompactionController(cfs, toCompact, gcBefore, ignoreOverlaps);
     }
 
     protected boolean partialCompactionsAcceptable()

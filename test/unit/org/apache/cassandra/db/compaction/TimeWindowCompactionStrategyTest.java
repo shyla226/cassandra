@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
@@ -51,6 +52,18 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
 {
     public static final String KEYSPACE1 = "Keyspace1";
     private static final String CF_STANDARD1 = "Standard1";
+
+    @BeforeClass
+    public static void loadSchema() throws ConfigurationException
+    {
+        // Allow testing aggressive expiration; still has to be enabled on cf level
+        System.setProperty(TimeWindowCompactionStrategyOptions.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY,  "true");
+
+        // Disable tombstone histogram rounding for tests
+        System.setProperty("cassandra.streaminghistogram.roundseconds", "1");
+
+        loadSchema(null);
+    }
 
     @Test
     public void testOptionsValidation() throws ConfigurationException
@@ -221,29 +234,19 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
 
         // create 2 sstables
-        DecoratedKey key = Util.dk(String.valueOf("expired"));
-        Mutation rm = new Mutation(KEYSPACE1, key.getKey());
-        rm.add(CF_STANDARD1, Util.cellname("column"), value, System.currentTimeMillis(), 1);
-        rm.apply();
+        makeUpdate(cfs, System.currentTimeMillis(), 1, Util.dk("expired"), value);
+
         cfs.forceBlockingFlush();
         SSTableReader expiredSSTable = cfs.getSSTables().iterator().next();
         Thread.sleep(10);
-        key = Util.dk(String.valueOf("nonexpired"));
-        rm = new Mutation(KEYSPACE1, key.getKey());
-        rm.add(CF_STANDARD1, Util.cellname("column"), value, System.currentTimeMillis());
-        rm.apply();
+
+        makeUpdate(cfs, System.currentTimeMillis(), -1, Util.dk("nonexpired"), value);
+
         cfs.forceBlockingFlush();
         assertEquals(cfs.getSSTables().size(), 2);
 
-        Map<String, String> options = new HashMap<>();
+        TimeWindowCompactionStrategy twcs = makeTSWC(cfs, 30, TimeUnit.SECONDS, TimeUnit.MILLISECONDS, 0, false);
 
-        options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, "30");
-        options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY, "SECONDS");
-        options.put(TimeWindowCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, "MILLISECONDS");
-        options.put(TimeWindowCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, "0");
-        TimeWindowCompactionStrategy twcs = new TimeWindowCompactionStrategy(cfs, options);
-        for (SSTableReader sstable : cfs.getSSTables())
-            twcs.addSSTable(sstable);
         twcs.startup();
         assertNull(twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000)));
         Thread.sleep(2000);
@@ -255,4 +258,135 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         cfs.getDataTracker().unmarkCompacting(cfs.getSSTables());
     }
 
+    @Test
+    public void testOverlappingSSTables() throws Throwable
+    {
+        testOverlappingSSTables(0, true);
+        testOverlappingSSTables(0, false);
+
+        testOverlappingSSTables(1000, true);
+        testOverlappingSSTables(1000, false);
+    }
+
+    private void testOverlappingSSTables(long timeDifference, boolean allowUnsafeExpiration) throws InterruptedException
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        cfs.truncateBlocking();
+        cfs.disableAutoCompaction();
+
+        ByteBuffer value = ByteBuffer.wrap(new byte[100]);
+
+        long ts1 = System.currentTimeMillis();
+        makeUpdate(cfs, ts1, 1, Util.dk("expired1"), value);
+        cfs.forceBlockingFlush();
+        Thread.sleep(1000);
+
+        long ts2 = System.currentTimeMillis();
+        makeUpdate(cfs, ts2, 1, Util.dk("expired2"), value);
+        cfs.forceBlockingFlush();
+        Thread.sleep(1000);
+
+        // Create an expired yet resident row
+        long ts3 = ts1 - timeDifference;
+        makeUpdate(cfs, ts3, 1, Util.dk("expired3"), value);
+        makeUpdate(cfs, System.currentTimeMillis(), -1, Util.dk("nonexpired"), value);
+        cfs.forceBlockingFlush();
+        Thread.sleep(1000);
+
+        TimeWindowCompactionStrategy twcs = makeTSWC(cfs, 30, TimeUnit.SECONDS, TimeUnit.MILLISECONDS, 0, allowUnsafeExpiration);
+        twcs.startup();
+
+        if (allowUnsafeExpiration)
+        {
+            // First two sstables expire
+            AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000));
+            t.run();
+            assertEquals(cfs.getLiveSSTableCount(), 1);
+            assertEquals(cfs.getSSTables().iterator().next().getMinTimestamp(), ts3);
+        }
+        else
+        {
+            // None of them can expire
+            AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000));
+            assertNull(t);
+        }
+        cfs.getDataTracker().unmarkCompacting(cfs.getDataTracker().getCompacting());
+    }
+
+
+    @Test
+    public void testNonDroppedOverlappingSSTables() throws Throwable
+    {
+        testNonDroppedOverlappingSSTables(0, true);
+        testNonDroppedOverlappingSSTables(0, false);
+
+        testNonDroppedOverlappingSSTables(1000, true);
+        testNonDroppedOverlappingSSTables(1000, false);
+    }
+
+    private void testNonDroppedOverlappingSSTables(long timeDifference, boolean allowUnsafeExpiration) throws InterruptedException
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        cfs.truncateBlocking();
+        cfs.disableAutoCompaction();
+
+        ByteBuffer value = ByteBuffer.wrap(new byte[100]);
+
+        long ts1 = System.currentTimeMillis();
+        makeUpdate(cfs, ts1, 1, Util.dk("expired1"), value);
+        makeUpdate(cfs, ts1, -1, Util.dk("nonexpired"), value);
+        cfs.forceBlockingFlush();
+        Thread.sleep(1000);
+
+        long ts2 = System.currentTimeMillis();
+        makeUpdate(cfs, ts2, 1, Util.dk("expired2"), value);
+        makeUpdate(cfs, ts1, -1, Util.dk("nonexpired"), value);
+        cfs.forceBlockingFlush();
+        Thread.sleep(1000);
+
+        // Create an expired yet resident row
+        long ts3 = ts1 - timeDifference;
+        makeUpdate(cfs, ts3, 1, Util.dk("expired3"), value);
+        makeUpdate(cfs, System.currentTimeMillis(), -1, Util.dk("nonexpired"), value);
+        cfs.forceBlockingFlush();
+        Thread.sleep(1000);
+
+        TimeWindowCompactionStrategy twcs = makeTSWC(cfs, 30, TimeUnit.SECONDS, TimeUnit.MILLISECONDS, 0, allowUnsafeExpiration);
+        twcs.startup();
+
+        // None of them can expire
+        AbstractCompactionTask t = twcs.getNextBackgroundTask((int) (System.currentTimeMillis() / 1000));
+        assertNull(t);
+        cfs.getDataTracker().unmarkCompacting(cfs.getDataTracker().getCompacting());
+    }
+
+    private static void makeUpdate(ColumnFamilyStore cfs, long timestamp, int ttl, DecoratedKey key, ByteBuffer value)
+    {
+        Mutation mutation = new Mutation(cfs.keyspace.getName(), key.getKey());
+
+        if (ttl > 0)
+            mutation.add(cfs.name, Util.cellname("column"), value, timestamp, ttl);
+        else
+            mutation.add(cfs.name, Util.cellname("column"), value, timestamp);
+
+        mutation.apply();
+    }
+
+    private TimeWindowCompactionStrategy makeTSWC(ColumnFamilyStore cfs, int windowSize, TimeUnit timeUnit, TimeUnit resolution, int expiredSSTablesCheckFrequencySeconds,
+                                                  boolean allowUnsafeExpiration)
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, Integer.toString(windowSize));
+        options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY, timeUnit.toString());
+        options.put(TimeWindowCompactionStrategyOptions.TIMESTAMP_RESOLUTION_KEY, resolution.toString());
+        options.put(TimeWindowCompactionStrategyOptions.EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY, Integer.toString(expiredSSTablesCheckFrequencySeconds));
+        options.put(TimeWindowCompactionStrategyOptions.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_TABLE_OPTION, Boolean.toString(allowUnsafeExpiration));
+
+        TimeWindowCompactionStrategy twcs = new TimeWindowCompactionStrategy(cfs, options);
+        for (SSTableReader sstable : cfs.getSSTables())
+            twcs.addSSTable(sstable);
+        return twcs;
+    }
 }
