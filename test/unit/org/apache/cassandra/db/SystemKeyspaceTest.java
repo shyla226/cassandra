@@ -25,7 +25,6 @@ import java.util.*;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -84,7 +83,7 @@ public class SystemKeyspaceTest
     @Test
     public void testLocalHostID()
     {
-        UUID firstId = SystemKeyspace.getLocalHostId();
+        UUID firstId = SystemKeyspace.setLocalHostIdBlocking();
         UUID secondId = SystemKeyspace.getLocalHostId();
         assert firstId.equals(secondId) : String.format("%s != %s%n", firstId.toString(), secondId.toString());
     }

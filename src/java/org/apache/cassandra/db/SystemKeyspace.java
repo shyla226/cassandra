@@ -33,6 +33,8 @@ import io.reactivex.Single;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.TPC;
+import org.apache.cassandra.concurrent.TPCUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -320,6 +322,14 @@ public final class SystemKeyspace
               + "ranges set<blob>, "
               + "cfids set<uuid>, "
               + "PRIMARY KEY (parent_id))").build();
+
+
+    /**
+     * The local host id.
+     *
+     * Set during start-up and only changed when replacing a node, again during startup.
+     * */
+    private static UUID localHostId = null;
 
     private static TableMetadata.Builder parse(String table, String description, String cql)
     {
@@ -992,13 +1002,39 @@ public final class SystemKeyspace
     }
 
     /**
-     * Read the host ID from the system keyspace, creating (and storing) one if
-     * none exists.
+     * Retrieve the local host id from a cached value that was set when calling {@link #setLocalHostIdBlocking()}
+     * during start-up.
      */
     public static UUID getLocalHostId()
     {
+        assert localHostId != null : "local host id not yet set, setLocalHostIdBlocking() called?";
+        return localHostId;
+    }
+
+    /**
+     * Read the host ID from the system keyspace, creating (and storing) one if
+     * none exists.
+     * <p>
+     * It is safe to call this method multiple times but it will throw
+     * {@link org.apache.cassandra.concurrent.TPCUtils.WouldBlockException} if called from
+     * a TPC thread and if the host id is not yet set.
+     * <p>
+     * This is currently called during startup to ensure the host id is available without blocking when
+     * calling {@link #getLocalHostId()}.
+     *
+     * @return the local host id
+     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a TPC thread
+     */
+    public static UUID setLocalHostIdBlocking()
+    {
+        return localHostId == null
+               ? setLocalHostIdBlocking(initialLocalHostIdBlocking())
+               : localHostId;
+    }
+
+    private static UUID initialLocalHostIdBlocking()
+    {
         String req = "SELECT host_id FROM system.%s WHERE key='%s'";
-        // TODO make async
         UntypedResultSet result = executeInternal(format(req, LOCAL, LOCAL));
 
         // Look up the Host UUID (return it if found)
@@ -1008,18 +1044,36 @@ public final class SystemKeyspace
         // ID not found, generate a new one, persist, and then return it.
         UUID hostId = UUID.randomUUID();
         logger.warn("No host ID found, created {} (Note: This should happen exactly once per node).", hostId);
-        return setLocalHostId(hostId);
+        return hostId;
     }
 
     /**
-     * Sets the local host ID explicitly.  Should only be called outside of SystemTable when replacing a node.
+     * Sets the local host ID explicitly.  Should only be called outside of SystemKeyspace when replacing a node.
+     *
+     * @return the host id
+     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a TPC thread
      */
-    public static UUID setLocalHostId(UUID hostId)
+    public synchronized static UUID setLocalHostIdBlocking(UUID hostId)
     {
-        String req = "INSERT INTO system.%s (key, host_id) VALUES ('%s', ?)";
-        // TODO make async
-        executeInternal(format(req, LOCAL, LOCAL), hostId);
-        return hostId;
+        if (TPC.isTPCThread())
+            throw new TPCUtils.WouldBlockException("Calling setLocalHostIdBlocking would block a TPC thread");
+
+        UUID old = localHostId;
+        localHostId = hostId;
+
+        try
+        {
+            String req = "INSERT INTO system.%s (key, host_id) VALUES ('%s', ?)";
+            executeInternal(format(req, LOCAL, LOCAL), hostId);
+        }
+        catch (Throwable t)
+        {
+            logger.error("Failed to change local host id from {} to {}", old, hostId, t);
+            localHostId = old;
+            throw t;
+        }
+
+        return localHostId;
     }
 
     /**

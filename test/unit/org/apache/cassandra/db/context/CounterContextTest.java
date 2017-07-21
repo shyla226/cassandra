@@ -29,6 +29,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.concurrent.TPCScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClockAndCount;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.context.CounterContext.Relationship;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
@@ -52,9 +53,10 @@ public class CounterContextTest
     private static final int stepLength = idLength + clockLength + countLength;
 
     @BeforeClass
-    public static void setupDD()
+    public static void setup()
     {
         DatabaseDescriptor.daemonInitialization();
+        SystemKeyspace.setLocalHostIdBlocking();
     }
 
     @Test

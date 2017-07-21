@@ -339,9 +339,18 @@ public class QueryProcessor implements QueryHandler
                                  });
     }
 
+    /**
+     * Executes the query internally.
+     *
+     * @param query - the query to execute
+     * @param values - the query values
+     *
+     * @return the query result
+     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a core thread
+     */
     public static UntypedResultSet executeInternal(String query, Object... values)
     {
-        return executeInternalAsync(query, values).blockingGet();
+        return TPCUtils.blockingGet(executeInternalAsync(query, values));
     }
 
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, Object... values)
@@ -350,14 +359,26 @@ public class QueryProcessor implements QueryHandler
         return execute(query, cl, internalQueryState(), values);
     }
 
+    /**
+     * Executes the query.
+     *
+     * @param query - the query to execute
+     * @param cl - the consistency level
+     * @param state - the query state
+     * @param values - the query values
+     *
+     * @return the query result
+     *
+     * @throws RequestExecutionException
+     * @throws org.apache.cassandra.concurrent.TPCUtils.WouldBlockException when called from a core thread
+     */
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
     throws RequestExecutionException
     {
         try
         {
             ParsedStatement.Prepared prepared = prepareInternal(query);
-            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime())
-                                                     .blockingGet();
+            ResultMessage result = TPCUtils.blockingGet(prepared.statement.execute(state, makeInternalOptions(prepared, values, cl), System.nanoTime()));
             if (result instanceof ResultMessage.Rows)
                 return UntypedResultSet.create(((ResultMessage.Rows)result).result);
             else

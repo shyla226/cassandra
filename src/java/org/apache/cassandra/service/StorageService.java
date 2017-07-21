@@ -434,7 +434,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return daemon;
     }
 
-    private synchronized UUID prepareForReplacement() throws ConfigurationException
+    private synchronized UUID prepareForReplacement(UUID localHostId) throws ConfigurationException
     {
         if (SystemKeyspace.bootstrapComplete())
             throw new RuntimeException("Cannot replace address with a node that is already bootstrapped");
@@ -468,12 +468,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new RuntimeException(e);
         }
 
-        UUID localHostId = SystemKeyspace.getLocalHostId();
-
         if (isReplacingSameAddress())
         {
             localHostId = Gossiper.instance.getHostId(replaceAddress, epStates);
-            SystemKeyspace.setLocalHostId(localHostId); // use the replacee's host Id as our own so we receive hints, etc
+            SystemKeyspace.setLocalHostIdBlocking(localHostId); // use the replacee's host Id as our own so we receive hints, etc
         }
 
         return localHostId;
@@ -713,11 +711,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (!MessagingService.instance().isListening())
                 MessagingService.instance().listen();
 
-            UUID localHostId = SystemKeyspace.getLocalHostId();
+            UUID localHostId = SystemKeyspace.setLocalHostIdBlocking();
 
             if (replacing)
             {
-                localHostId = prepareForReplacement();
+                localHostId = prepareForReplacement(localHostId);
                 appStates.put(ApplicationState.TOKENS, valueFactory.tokens(bootstrapTokens));
 
                 if (!DatabaseDescriptor.isAutoBootstrap())
