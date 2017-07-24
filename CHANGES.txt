@@ -16,6 +16,10 @@ DSE backports
  * Reduce contention getting instances of CompositeType (CASSANDRA-10433)
  * Fix potential NPE for compactionstats (CASSANDRA-12462)
 
+2.1.19
+ * Clone HeartBeatState when building gossip messages. Make its generation/version volatile (CASSANDRA-13700)
+
+
 2.1.18
  * Fix 2ndary indexes on primary key columns to don't create expiring entries (CASSANDRA-13412)
  * Set javac encoding to utf-8 (CASSANDRA-13466)
