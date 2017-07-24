@@ -428,12 +428,17 @@ public class LeveledCompactionStrategyTest
         logger.info("Starting Levels {}", startLevels);
 
         Set<SSTableReader> tables = cfs.getLiveSSTables();
+
+        Refs<SSTableReader> refs = Refs.ref(tables);
+
         //Transfer the tables ontop of itself
         for (int i = 0; i < 2; i++)
         {
             for (SSTableReader table : tables)
                 transferKeepLevels(table);
         }
+
+        refs.release(tables);
 
         long compactionTasks = CompactionManager.instance.getCompletedTasks();
 
