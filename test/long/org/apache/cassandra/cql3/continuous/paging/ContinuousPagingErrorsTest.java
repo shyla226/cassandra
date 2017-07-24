@@ -23,8 +23,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import com.datastax.driver.core.ContinuousPagingOptions;
-import com.datastax.driver.core.exceptions.DriverException;
 import com.datastax.driver.core.exceptions.OperationTimedOutException;
+import com.datastax.driver.core.exceptions.ServerError;
 import org.apache.cassandra.cql3.CQLTester;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
@@ -52,15 +52,15 @@ public class ContinuousPagingErrorsTest extends CQLTester
     @BMRule(name="throw_exception_on_first_page",
     targetClass = "ContinuousPageWriter",
     targetMethod = "sendPage",
-    targetLocation = "AT INVOKE java.util.concurrent.ArrayBlockingQueue.offer",
-    action = "throw new org.apache.cassandra.exceptions.ClientWriteException(\"Timed out adding page to output queue\");")
+    targetLocation = "AT INVOKE java.util.concurrent.ArrayBlockingQueue.add",
+    action = "throw new java.lang.IllegalStateException(\"Queue full\");")
     public void serverFailureOnFirstPageTest() throws Throwable
     {
         try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(100)
                                                                                                          .numClusterings(100)
                                                                                                          .partitionSize(2048)
                                                                                                          .failAfter(0)
-                                                                                                         .exception(DriverException.class)
+                                                                                                         .exception(ServerError.class)
                                                                                                          .build())
         {
             helper.testContinuousPaging(1, 500, ContinuousPagingOptions.PageUnit.ROWS);
@@ -78,16 +78,16 @@ public class ContinuousPagingErrorsTest extends CQLTester
                     @BMRule(name="throw_exception_on_second_page",
                     targetClass = "ContinuousPageWriter",
                     targetMethod = "sendPage",
-                    targetLocation = "AT INVOKE java.util.concurrent.ArrayBlockingQueue.offer",
+                    targetLocation = "AT INVOKE java.util.concurrent.ArrayBlockingQueue.add",
                     condition = "incrementCounter($0) >= 2",
-                    action = "throw new org.apache.cassandra.exceptions.ClientWriteException(\"Timed out adding page to output queue\");")})
+                    action = "throw new java.lang.IllegalStateException(\"Queue full\");")})
     public void serverFailureOnSecondPageTest() throws Throwable
     {
         try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(100)
                                                                                                          .numClusterings(100)
                                                                                                          .partitionSize(2048)
                                                                                                          .failAfter(1)
-                                                                                                         .exception(DriverException.class)
+                                                                                                         .exception(ServerError.class)
                                                                                                          .build())
         {
             helper.testContinuousPaging(1, 500, ContinuousPagingOptions.PageUnit.ROWS);

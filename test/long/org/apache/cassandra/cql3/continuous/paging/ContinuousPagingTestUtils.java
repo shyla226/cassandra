@@ -354,7 +354,6 @@ class ContinuousPagingTestUtils
     static class SchemaBuilder
     {
         final CQLTester tester;
-        final ProtocolVersion protocolVersion = ProtocolVersion.CURRENT;
         Function<SchemaBuilder, TestSchema> schemaSupplier;
         int numPartitions;
         int numClusterings;
@@ -428,6 +427,7 @@ class ContinuousPagingTestUtils
         int cancelAfter; // send a cancel after this number of pages
         int failAfter = -1; // we expect a failure after this number of pages
         Class<? extends Throwable> exception; // we expect an exception
+        ProtocolVersion protocolVersion = ProtocolVersion.CURRENT;
 
         TestBuilder(CQLTester tester)
         {
@@ -534,6 +534,12 @@ class ContinuousPagingTestUtils
             return this;
         }
 
+        TestBuilder protocolVersion(ProtocolVersion protocolVersion)
+        {
+            this.protocolVersion = protocolVersion;
+            return this;
+        }
+
         TestSchema buildSchema() throws Throwable
         {
             if (schema != null)
@@ -572,7 +578,7 @@ class ContinuousPagingTestUtils
         {
             this.tester = builder.tester;
             this.schema = builder.buildSchema();
-            this.protocolVersion = ProtocolVersion.DSE_V1;
+            this.protocolVersion = builder.protocolVersion;
             this.numClientThreads = builder.numClientThreads;
             this.clientPauseMillis = builder.clientPauseMillis;
             this.checkRows = builder.checkRows;
@@ -640,10 +646,12 @@ class ContinuousPagingTestUtils
                         .build();
 
                 int expectedPage = 1;
+                boolean needCancel = false;
+                AsyncContinuousPagingResult result = null;
 
                 try
                 {
-                    AsyncContinuousPagingResult result = ((ContinuousPagingSession) session).executeContinuouslyAsync(statement, pagingOptions).get();
+                    result = ((ContinuousPagingSession) session).executeContinuouslyAsync(statement, pagingOptions).get();
 
                     while (true)
                     {
@@ -653,6 +661,7 @@ class ContinuousPagingTestUtils
 
                         if (result.isLast() || cancelAfter > 0 && expectedPage >= cancelAfter)
                         {
+                            needCancel = !result.isLast();
                             break;
                         }
                         else
@@ -670,6 +679,9 @@ class ContinuousPagingTestUtils
                 }
 
                 checker.checkAll();
+
+                if (needCancel && result != null)
+                    result.cancel();
             }
 
             return (System.nanoTime() - start) / (1000000 * numTrials);

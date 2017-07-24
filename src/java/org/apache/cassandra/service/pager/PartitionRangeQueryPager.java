@@ -24,6 +24,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Pages a PartitionRangeReadCommand.
@@ -80,9 +81,13 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
 
     private PagingState makePagingState(DecoratedKey lastKey, PagingState.RowMark lastRow, boolean inclusive)
     {
+        // inclusive means that the next search command should include the row that has already been counted by the pager
+        int maxRemaining = inclusive ? FBUtilities.add(maxRemaining(), 1) : maxRemaining();
+        int remainingInPartition = inclusive ? FBUtilities.add(remainingInPartition(), 1) : remainingInPartition();
+
         return lastKey == null
                ? null
-               : new PagingState(lastKey.getKey(), lastRow, maxRemaining(), remainingInPartition(), inclusive);
+               : new PagingState(lastKey.getKey(), lastRow, maxRemaining, remainingInPartition, inclusive);
     }
 
     protected ReadCommand nextPageReadCommand(DataLimits limits, PageSize pageSize)

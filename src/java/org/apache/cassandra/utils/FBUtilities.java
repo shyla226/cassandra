@@ -900,9 +900,25 @@ public class FBUtilities
     public static long add(long x, long y)
     {
         long r = x + y;
+        // HD 2-12 Overflow iff both arguments have the opposite sign of the result, see Math.addExact()
         if (((x ^ r) & (y ^ r)) < 0)
         {
             return Long.MAX_VALUE;
+        }
+
+        return r;
+    }
+
+    /**
+     * Return the sum of its arguments or Integer.MAX_VALUE on overflow.
+     */
+    public static int add(int x, int y)
+    {
+        int r = x + y;
+        // HD 2-12 Overflow iff both arguments have the opposite sign of the result, see Math.addExact()
+        if (((x ^ r) & (y ^ r)) < 0)
+        {
+            return Integer.MAX_VALUE;
         }
 
         return r;

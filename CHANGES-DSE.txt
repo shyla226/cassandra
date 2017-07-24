@@ -1,4 +1,5 @@
 dse 6.0.0
+ * Continuous paging backpressure and integration with TPC (APOLLO-707)
  * SystemKeyspace.snapshotOnVersionChange() never called in production code (APOLLO-797)
  * Internal implementation of paging by bytes (APOLLO-414).
  * Check for mismatched versions when answering schema pulls (APOLLO-1026)

@@ -32,6 +32,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.flow.Flow;
 
 /**
@@ -128,10 +129,14 @@ public class MultiPartitionPager implements QueryPager
         if (logger.isTraceEnabled())
             logger.trace("{} - state: {}, current: {}", hashCode(), state, current);
 
+        // inclusive means that the next search command should include the row that has already been counted by the pager
+        int remaining = inclusive ? FBUtilities.add(this.remaining, 1) : this.remaining;
+        int remainingInPartition = inclusive ? FBUtilities.add(pagers[current].remainingInPartition(), 1) : pagers[current].remainingInPartition();
+
         return new PagingState(pagers[current].key(),
                                state == null ? null : state.rowMark,
                                remaining,
-                               pagers[current].remainingInPartition(),
+                               remainingInPartition,
                                inclusive);
     }
 

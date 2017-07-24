@@ -1469,11 +1469,6 @@ public class DatabaseDescriptor
         return conf.concurrent_reads;
     }
 
-    public static int getContinuousPagingThreads()
-    {
-        return conf.continuous_paging.max_threads;
-    }
-
     public static int getConcurrentWriters()
     {
         return conf.concurrent_writes;
@@ -1755,14 +1750,6 @@ public class DatabaseDescriptor
     public static int getNativeTransportMaxFrameSize()
     {
         return conf.native_transport_max_frame_size_in_mb * 1024 * 1024;
-    }
-
-    @VisibleForTesting
-    public static int setNativeTransportMaxFrameSizeInMb(int size)
-    {
-        int ret = conf.native_transport_max_frame_size_in_mb;
-        conf.native_transport_max_frame_size_in_mb = size;
-        return ret;
     }
 
     public static long getNativeTransportMaxConcurrentConnections()

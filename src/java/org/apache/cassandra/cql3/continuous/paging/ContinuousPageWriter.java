@@ -23,16 +23,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import com.google.common.util.concurrent.RateLimiter;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
-import org.apache.cassandra.config.ContinuousPagingConfig;
-import org.apache.cassandra.exceptions.ClientWriteException;
-import org.apache.cassandra.transport.Connection;
 import org.apache.cassandra.transport.Frame;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -45,25 +44,26 @@ class ContinuousPageWriter
 {
     private static final Logger logger = LoggerFactory.getLogger(ContinuousPageWriter.class);
 
+    private final int queueSizeInPages;
     // byteman tests rely on the exact name and type of pages, see ContinuousPagingErrorsTest
     private final ArrayBlockingQueue<Frame> pages;
     private final Writer writer;
-    private final ContinuousPagingConfig config;
 
     /**
      * Create a continuous page writer.
      *
-     * @param connection - the connection to which pages should be written to.
+     * @param channel - the supplier for the channel to which pages should be written to.
      * @param maxPagesPerSecond - the maximum pages to send per second.
-     * @param config - the yaml configuration for continuous paging.
+     * @param queueSizeInPages - the desired size of the queue in pages
      */
-    ContinuousPageWriter(Connection connection,
+    ContinuousPageWriter(Supplier<Channel> channel,
                          int maxPagesPerSecond,
-                         ContinuousPagingConfig config)
+                         int queueSizeInPages)
     {
-        this.pages = new ArrayBlockingQueue<>(config.max_session_pages);
-        this.writer = new Writer(connection.channel(), pages, maxPagesPerSecond);
-        this.config = config;
+        assert queueSizeInPages >= 1 : "queue size must be at least one";
+        this.queueSizeInPages = queueSizeInPages;
+        this.pages = new ArrayBlockingQueue<>(queueSizeInPages);
+        this.writer = new Writer(channel.get(), pages, maxPagesPerSecond);
     }
 
     /**
@@ -80,19 +80,17 @@ class ContinuousPageWriter
     }
 
     /**
-     * Add a page to the queue, potentially blocking up to {@link ContinuousPagingConfig#max_client_wait_time_ms}
-     * if there is no space.
+     * Add a page to the queue, unless the writer has been cancelled. Check that the writer has not been
+     * completed, fire an assertion if the writer is completed.
      *
-     * This method is a target of byteman tests, see ContinuousPagingErrorsTest,
-     * if it is renamed then the tests should also be modified.
-     *
-     * @param frame, the page
-     * @param hasMorePages, whether there are more pages to follow
+     * @param frame, the page to add
+     * @param hasMorePages, whether there are more pages to follow, if no more pages the writer will be completed.
      */
     void sendPage(Frame frame, boolean hasMorePages)
     {
         if (writer.canceled)
         {
+            logger.trace("Discarding page because writer was cancelled");
             frame.release();
             return;
         }
@@ -101,43 +99,35 @@ class ContinuousPageWriter
 
         try
         {
-            // byteman tests rely on pages.offer() to inject exceptions in this method, see ContinuousPagingErrorsTest
-            if (!pages.offer(frame))
-            { // if we cannot add the page immediately, try again with a timeout and update the metrics to keep track
-              // of this fact
-                long start = System.nanoTime();
-                ContinuousPagingService.metrics.serverBlocked.inc();
-
-                if (!pages.offer(frame, config.max_client_wait_time_ms, TimeUnit.MILLISECONDS))
-                    throw new ClientWriteException(String.format("Timed out adding page to output queue for %s, queue was still full after %d milliseconds",
-                                                                 writer.channel.remoteAddress(), config.max_client_wait_time_ms));
-
-                ContinuousPagingService.metrics.serverBlockedLatency.addNano(System.nanoTime() - start);
-            }
-        }
-        catch (InterruptedException ex)
-        {
-            frame.release();
-            throw new ClientWriteException("Interrupted whilst adding page to output queue");
+            pages.add(frame);
         }
         catch (Throwable t)
         {
+            logger.warn("Failed to add continuous paging result to queue: {}", t.getMessage());
             frame.release();
             throw t;
         }
 
         if (!hasMorePages)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Completing writer");
             // this will call schedule internally, it's important to only
-            // call complete after having added all the pages to the queue
+            // call sendError after having added all the pages to the queue
             writer.complete();
         }
         else
         {
             writer.schedule(0);
         }
+    }
+
+    boolean hasSpace()
+    {
+        return pages.size() < queueSizeInPages;
+    }
+
+    boolean halfQueueAvailable()
+    {
+        return pages.size() < (queueSizeInPages/2 + 1);
     }
 
     /**
@@ -204,13 +194,19 @@ class ContinuousPageWriter
             channel.closeFuture().addListener((ChannelFutureListener) future ->
             {   // stop trying to send pages if the socket is closed by the client, this
                 // will avoid time-out exceptions in the producer thread
+                if (logger.isTraceEnabled())
+                    logger.trace("Socket {} closed by the client", channel);
                 cancel();
             });
         }
 
         public void cancel()
         {
-            this.canceled = true;
+            if (canceled)
+                return;
+
+            logger.trace("Continuous page writer cancelled");
+            canceled = true;
             complete();
         }
 
@@ -275,7 +271,7 @@ class ContinuousPageWriter
                 // completed is set either after the last message has been added to the queue, or when
                 // canceled it set to true or an error is added, in both cases aborted() will return true
                 // and no more page will be sent, so if the queue is empty it's OK to send any error and
-                // complete the future.
+                // sendError the future.
                 if (completed() && !completionFuture.isDone())
                 {
                     // it's important to check that the queue is empty after checking completed since
@@ -343,9 +339,6 @@ class ContinuousPageWriter
 
             if (!queue.isEmpty())
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("Rescheduling since queue is not empty, either channel was not writable or permit not available");
-
                 schedule(pauseMicros);
             }
         }

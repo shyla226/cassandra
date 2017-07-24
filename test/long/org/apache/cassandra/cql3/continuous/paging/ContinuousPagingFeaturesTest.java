@@ -33,6 +33,8 @@ import com.datastax.driver.core.ContinuousPagingOptions;
 import org.apache.cassandra.config.ContinuousPagingConfig;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.LineNumberInference;
 
 import static org.junit.Assert.assertTrue;
 import static org.apache.cassandra.cql3.continuous.paging.ContinuousPagingTestUtils.*;
@@ -47,7 +49,41 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     @BeforeClass
     public static void startup()
     {
+        LineNumberInference.init();
         ContinuousPagingTestUtils.startup();
+    }
+
+    @Test
+    public void selectEntireTable_v1() throws Throwable
+    {
+        selectEntireTable(ProtocolVersion.DSE_V1);
+    }
+
+    @Test
+    public void selectEntireTable_v2() throws Throwable
+    {
+        selectEntireTable(ProtocolVersion.DSE_V2);
+    }
+
+    // a simple test with various page sizes on an entire table, used to make sure we are still compatible
+    // with different protocol versions
+    private void selectEntireTable(ProtocolVersion protocolVersion) throws Throwable
+    {
+        try(ContinuousPagingTestUtils.TestHelper helper = new ContinuousPagingTestUtils.TestBuilder(this).numPartitions(100)
+                                                                                                         .numClusterings(100)
+                                                                                                         .partitionSize(1024)
+                                                                                                         .checkRows(true)
+                                                                                                         .protocolVersion(protocolVersion)
+                                                                                                         .build())
+        {
+
+            helper.testContinuousPaging(1, 10, ContinuousPagingOptions.PageUnit.ROWS);
+            helper.testContinuousPaging(1, 100, ContinuousPagingOptions.PageUnit.ROWS);
+            helper.testContinuousPaging(1, 1000, ContinuousPagingOptions.PageUnit.ROWS);
+
+            helper.testContinuousPaging(1, 1024, ContinuousPagingOptions.PageUnit.BYTES);
+            helper.testContinuousPaging(1, 65536, ContinuousPagingOptions.PageUnit.BYTES);
+        }
     }
 
     @Test
@@ -142,7 +178,8 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     @Test
     public void testLargePages() throws Throwable
     {
-        int old = DatabaseDescriptor.setNativeTransportMaxFrameSizeInMb(4); // the max page size is half this value
+        int old = DatabaseDescriptor.getContinuousPaging().max_page_size_mb;
+        DatabaseDescriptor.getContinuousPaging().max_page_size_mb = 2;
 
         try(TestHelper helper = new TestBuilder(this).numPartitions(100)
                                                      .numClusterings(100)
@@ -157,7 +194,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         }
         finally
         {
-            DatabaseDescriptor.setNativeTransportMaxFrameSizeInMb(old);
+            DatabaseDescriptor.getContinuousPaging().max_page_size_mb = old;
         }
     }
 
@@ -167,7 +204,8 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     @Test
     public void testSmallPages() throws Throwable
     {
-        int old = DatabaseDescriptor.setNativeTransportMaxFrameSizeInMb(4); // the max page size is half this value
+        int old = DatabaseDescriptor.getContinuousPaging().max_page_size_mb;
+        DatabaseDescriptor.getContinuousPaging().max_page_size_mb = 2;
 
         try(TestHelper helper = new TestBuilder(this).numPartitions(100)
                                                      .numClusterings(100)
@@ -186,7 +224,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         }
         finally
         {
-            DatabaseDescriptor.setNativeTransportMaxFrameSizeInMb(old);
+            DatabaseDescriptor.getContinuousPaging().max_page_size_mb = old;
         }
     }
 
@@ -196,7 +234,8 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     @Test
     public void testLargePagesEvenLargerRows() throws Throwable
     {
-        int old = DatabaseDescriptor.setNativeTransportMaxFrameSizeInMb(3); // the max page size is half this value
+        int old = DatabaseDescriptor.getContinuousPaging().max_page_size_mb;
+        DatabaseDescriptor.getContinuousPaging().max_page_size_mb = 2;
 
         try(TestHelper helper = new TestBuilder(this).numPartitions(100)
                                                      .numClusterings(1)
@@ -216,7 +255,7 @@ public class ContinuousPagingFeaturesTest extends CQLTester
         }
         finally
         {
-            DatabaseDescriptor.setNativeTransportMaxFrameSizeInMb(old);
+            DatabaseDescriptor.getContinuousPaging().max_page_size_mb = old;
         }
     }
 
@@ -439,7 +478,6 @@ public class ContinuousPagingFeaturesTest extends CQLTester
     public void testOneMoreSessionThanMaxConcurrentSessions() throws Throwable
     {
         testTooManyConcurrentSessions(1, 1);
-
     }
 
     /**

@@ -24,6 +24,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Common interface to single partition queries (by slice and by name).
@@ -83,9 +84,13 @@ public class SinglePartitionPager extends AbstractQueryPager<SinglePartitionRead
 
     private PagingState makePagingState(PagingState.RowMark lastRow, boolean inclusive)
     {
+        // inclusive means that the next search command should include the row that has already been counted by the pager
+        int maxRemaining = inclusive ? FBUtilities.add(maxRemaining(), 1) : maxRemaining();
+        int remainingInPartition = inclusive ? FBUtilities.add(remainingInPartition(), 1) : remainingInPartition();
+
         return lastRow == null
                ? null
-               : new PagingState(null, lastRow, maxRemaining(), remainingInPartition(), inclusive);
+               : new PagingState(null, lastRow, maxRemaining, remainingInPartition, inclusive);
     }
 
     protected ReadCommand nextPageReadCommand(DataLimits limits, PageSize pageSize)

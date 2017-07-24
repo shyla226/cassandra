@@ -1272,20 +1272,10 @@ public class StorageProxy implements StorageProxyMBean
     {
         assert ctx.consistencyLevel.isSingleNode();
 
-        // Not using the controller in a try-with-resource is a bit dodgy, but having to pass it all the way down
-        // the execution path when it's used only in this specific path is annoying, we've made it clear in the
-        // javadoc that the returned iterator must be closed, and we have a good track record of using
-        // PartitionIterator in try-with-resource.
-
-        final Monitor monitor = Monitor.createAndStartNoReporting(group,
-                                                                  System.currentTimeMillis(),
-                                                                  DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
-
         if (logger.isTraceEnabled())
             logger.trace("Querying single partition commands {} for continuous paging", group);
 
-        return group.executeInternal(monitor)
-                    .doOnClose(monitor::complete)
+        return group.executeInternal()
                     .doOnError(error -> {
                         readMetrics.failures.mark();
                         readMetricsMap.get(ctx.consistencyLevel).failures.mark();
@@ -1943,13 +1933,8 @@ public class StorageProxy implements StorageProxyMBean
         if (logger.isTraceEnabled())
             logger.trace("Querying local ranges {} for continuous paging", command);
 
-        final Monitor monitor = Monitor.createAndStartNoReporting(command,
-                                                                  System.currentTimeMillis(),
-                                                                  DatabaseDescriptor.getContinuousPaging().max_local_query_time_ms);
-
         // Same reasoning as in readLocalContinuous, see there for details.
-        return command.withLimitsAndPostReconciliation(command.executeInternal(monitor))
-                      .doOnClose(monitor::complete)
+        return command.withLimitsAndPostReconciliation(command.executeInternal())
                       .doOnError(e -> rangeMetrics.failures.mark());
     }
 

@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
 import io.netty.buffer.ByteBuf;
@@ -146,7 +147,7 @@ public abstract class QueryOptions
      *
      * <p>The column specifications will be present only for prepared statements.</p>
      *
-     * <p>Invoke the {@link #hasColumnSpecifications} method before invoking this method in order to ensure that this
+     * <p>Invoke the {@link #hasColumnSpecifications()} method before invoking this method in order to ensure that this
      * <code>QueryOptions</code> contains the column specifications.</p>
      *
      * @return the option names
@@ -386,7 +387,8 @@ public abstract class QueryOptions
      */
     public static class PagingOptions
     {
-        private enum Mechanism
+        @VisibleForTesting
+        public enum Mechanism
         {
             /** The client requests only a single page */
             SINGLE,
@@ -404,13 +406,16 @@ public abstract class QueryOptions
         private final PagingState pagingState;
         private final int maxPages;
         private final int maxPagesPerSecond;
+        private final int nextPages;
 
-        private PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState)
+        @VisibleForTesting
+        public PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState)
         {
-            this(pageSize, mechanism, pagingState, 0, 0);
+            this(pageSize, mechanism, pagingState, 0, 0, 0);
         }
 
-        private PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState, int maxPages, int maxPagesPerSecond)
+        @VisibleForTesting
+        public PagingOptions(PageSize pageSize, Mechanism mechanism, PagingState pagingState, int maxPages, int maxPagesPerSecond, int nextPages)
         {
             assert pageSize != null : "pageSize cannot be null";
 
@@ -419,6 +424,7 @@ public abstract class QueryOptions
             this.pagingState = pagingState;
             this.maxPages = maxPages <= 0 ? Integer.MAX_VALUE : maxPages;
             this.maxPagesPerSecond = maxPagesPerSecond;
+            this.nextPages = nextPages;
         }
 
         public boolean isContinuous()
@@ -446,10 +452,15 @@ public abstract class QueryOptions
             return maxPagesPerSecond;
         }
 
+        public int nextPages()
+        {
+            return nextPages;
+        }
+
         @Override
         public final int hashCode()
         {
-            return Objects.hash(pageSize, mechanism, pagingState, maxPages, maxPagesPerSecond);
+            return Objects.hash(pageSize, mechanism, pagingState, maxPages, maxPagesPerSecond, nextPages);
         }
 
         @Override
@@ -463,14 +474,15 @@ public abstract class QueryOptions
                 && Objects.equals(this.mechanism, that.mechanism)
                 && Objects.equals(this.pagingState, that.pagingState)
                 && this.maxPages == that.maxPages
-                && this.maxPagesPerSecond == that.maxPagesPerSecond;
+                && this.maxPagesPerSecond == that.maxPagesPerSecond
+                && this.nextPages == that.nextPages;
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s %s (max %d, %d per second) with state %s",
-                                 pageSize, mechanism, maxPages, maxPagesPerSecond, pagingState);
+            return String.format("%s %s (max %d, %d per second, %d next pages) with state %s",
+                                 pageSize, mechanism, maxPages, maxPagesPerSecond, nextPages, pagingState);
         }
     }
 
@@ -580,6 +592,7 @@ public abstract class QueryOptions
 
                 PagingOptions pagingOptions = null;
                 boolean hasContinuousPaging = flags.contains(Flag.CONTINUOUS_PAGING);
+                String keyspace = flags.contains(Flag.KEYSPACE) ? CBUtil.readString(body) : null;
 
                 if (pageSize == null)
                 {
@@ -594,7 +607,11 @@ public abstract class QueryOptions
                     if (version.isSmallerThan(ProtocolVersion.DSE_V1))
                         throw new ProtocolException("Continuous paging requires DSE_V1 or higher");
 
-                    pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.CONTINUOUS, pagingState, body.readInt(), body.readInt());
+                    int maxPages = body.readInt();
+                    int maxPagesPerSecond = body.readInt();
+                    int nextPages = version.isGreaterOrEqualTo(ProtocolVersion.DSE_V2) ? body.readInt() : 0;
+
+                    pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.CONTINUOUS, pagingState, maxPages, maxPagesPerSecond, nextPages);
                 }
                 else
                 {
@@ -604,7 +621,6 @@ public abstract class QueryOptions
                     pagingOptions = new PagingOptions(pageSize, PagingOptions.Mechanism.SINGLE, pagingState);
                 }
 
-                String keyspace = flags.contains(Flag.KEYSPACE) ? CBUtil.readString(body) : null;
                 options = new SpecificOptions(pagingOptions, serialConsistency, timestamp, keyspace);
             }
 
@@ -640,6 +656,8 @@ public abstract class QueryOptions
             {
                 dest.writeInt(pagingOptions.maxPages);
                 dest.writeInt(pagingOptions.maxPagesPerSecond);
+                if (version.isGreaterOrEqualTo(ProtocolVersion.DSE_V2))
+                    dest.writeInt(pagingOptions.nextPages());
             }
 
             // Note that we don't really have to bother with NAMES_FOR_VALUES server side,
@@ -670,7 +688,7 @@ public abstract class QueryOptions
             if (flags.contains(Flag.KEYSPACE))
                 size += CBUtil.sizeOfString(options.getSpecificOptions().keyspace);
             if (flags.contains(Flag.CONTINUOUS_PAGING))
-                size += 8;
+                size += (version.isGreaterOrEqualTo(ProtocolVersion.DSE_V2) ? 12 : 8);
 
             return size;
         }

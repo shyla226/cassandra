@@ -302,6 +302,9 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 
     void restoreState(DecoratedKey lastKey, int remaining, int remainingInPartition, boolean inclusive)
     {
+        if (logger.isTraceEnabled())
+            logger.trace("{} - restoring state: {}/{}/{}/{}", hashCode(), lastKey, remaining, remainingInPartition, inclusive);
+
         this.lastKey = lastKey;
         this.remaining = remaining;
         this.remainingInPartition = remainingInPartition;

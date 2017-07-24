@@ -476,6 +476,7 @@
           <dependency groupId="org.gridkit.jvmtool" artifactId="mxdump" version="0.5.1"/>
           <dependency groupId="org.gridkit.lab" artifactId="jvm-attach-api" version="1.2"/>
           <dependency groupId="com.beust" artifactId="jcommander" version="1.30"/>
+          <dependency groupId="org.mockito" artifactId="mockito-all" version="1.9.5"/>
         </dependencyManagement>
         <developer id="adelapena" name="Andres de la Peña"/>
         <developer id="alakshman" name="Avinash Lakshman"/>

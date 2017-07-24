@@ -152,7 +152,7 @@ public abstract class ResultBuilder
      *
      * @param row - the completed row
      * @param nextRowPending - true when there is a new row still to be processed
-     * @return true if we should prcess more rows
+     * @return true if we should process more rows
      */
     public abstract boolean onRowCompleted(List<ByteBuffer> row, boolean nextRowPending);
 

@@ -22,7 +22,7 @@ Table of Contents
       4.1.6. EXECUTE
       4.1.7. BATCH
       4.1.8. REGISTER
-      4.1.9. CANCEL
+      4.1.9. REVISE_REQUEST
     4.2. Responses
       4.2.1. ERROR
       4.2.2. READY
@@ -193,7 +193,7 @@ Table of Contents
     0x0E    AUTH_CHALLENGE
     0x0F    AUTH_RESPONSE
     0x10    AUTH_SUCCESS
-    0xFF    CANCEL
+    0xFF    REVISE_REQUEST
 
   Messages are described in Section 4.
 
@@ -418,10 +418,16 @@ Table of Contents
                 to the client in total, set this to zero to indicate no limit.
               - <pages_per_second>, an [int] indicating the maximum number of pages per second, set this
                 to zero to indicate no limit.
+              - <next_pages>, an [int] indicating the number of pages that the client is ready to receive
+                right now. The server will not send more pages than this number, until a REVISE_UPDATE is
+                received with a revision of type backpressure, see section 4.1.9. Set this parameter to zero
+                to indicate no limit. In this case the server will send as many pages as it is able to send,
+                up to <max_num_pages> and at the rate specified by <pages_per_second>.
               When continuous paging is enabled, the query results will be pushed to the client asynchronously and
               according to the paging options in the request message, without the client having to request each
               single page. Each response message will have the same stream id as the initial request.
-              Continuous paging can be interrupted by the client at any time via a CANCEL request, see section 4.1.9.
+              Continuous paging can be interrupted by the client at any time via a REVISE_REQUEST with a revision of
+              type cancel, see section 4.1.9.
 
   Note that the consistency is ignored by some queries (USE, CREATE, ALTER,
   TRUNCATE, ...).
@@ -539,18 +545,23 @@ Table of Contents
   for events on all connections, as this would only result in receiving
   multiple times the same event messages, wasting bandwidth.
 
-4.1.9. CANCEL
+4.1.9. REVISE_REQUEST
 
-  Request to cancel an asynchronous operation. The body of the message is:
-  - an [int] identifying the operation type:
-      - 0x00000001 for "continuous paging", see section 4.1.4
+  Revise a previous request, typically a long running request such as continuous paging.
+  The body of the message is:
+  - an [int] identifying the revision type:
+      - 0x00000001 to cancel a continuous paging session, see section 4.1.4
+      - 0x00000002 to request more pages for a continuous paging session with next_pages > 0,
+      see section 4.1.4
   - an [int] equal to the stream id of the initial request message.
+  - Optional parameters specific to the revision type:
+    - for revision type 2, then [next_pages] as described in section 4.1.4
 
   The server will reply with a RESULT of type ROWS (section 4.2.5.2),
   containing a single row with a single boolean value, which is set to:
-  - true if the operation was cancelled,
-  - false if the operation was not found.
-  If an operation is found but cannot be cancelled, an error is returned instead.
+  - true if the update succeeded,
+  - false if the initial request was not found or is no longer running.
+  If the initial request is found but the update cannot be carryed out, then an error is returned instead.
 
 
 4.2. Responses
@@ -1333,3 +1344,5 @@ Table of Contents
   * Added [int] flags field in PREPARE message (Section 4.1.5).
   * Added STARTUP message parameters to pass client instance, driver information and
     application information.
+  * Added [next_pages] to continuous paging QUERY messages (section 4.1.4)
+  * Renamed CANCEL to REVISE_REQUEST and added revision type 2 for updating [next_pages] (section 4.1.9)

@@ -56,7 +56,6 @@ public class StageManager
         stages.put(Stage.MIGRATION, new JMXEnabledThreadPoolExecutor(Stage.MIGRATION));
         stages.put(Stage.MISC, new JMXEnabledThreadPoolExecutor(Stage.MISC));
         stages.put(Stage.READ_REPAIR, multiThreadedStage(Stage.READ_REPAIR, FBUtilities.getAvailableProcessors()));
-        stages.put(Stage.CONTINUOUS_PAGING, multiThreadedStage(Stage.CONTINUOUS_PAGING, getContinuousPagingThreads()));
 
         // add the corresponding scheduler to each stage
         stages.forEach((stage, executor) -> schedulers.put(stage, Schedulers.from(executor)));

@@ -105,7 +105,7 @@ public abstract class Message
         AUTH_SUCCESS   (16, Direction.RESPONSE, AuthSuccess.codec),
 
         // Private messages
-        CANCEL         (255, Direction.REQUEST, CancelMessage.codec);
+        REVISE_REQUEST (255, Direction.REQUEST, ReviseRequestMessage.codec);
 
         public final int opcode;
         public final Direction direction;

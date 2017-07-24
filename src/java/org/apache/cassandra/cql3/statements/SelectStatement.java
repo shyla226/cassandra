@@ -17,11 +17,13 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,11 +31,12 @@ import io.reactivex.Scheduler;
 import io.reactivex.Single;
 import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.auth.permission.CorePermission;
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.continuous.paging.ContinuousBackPressureException;
 import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingService;
+import org.apache.cassandra.cql3.continuous.paging.ContinuousPagingState;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
@@ -57,7 +60,6 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UserType;
-import org.apache.cassandra.db.monitoring.AbortedOperationException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.FlowablePartition;
@@ -65,7 +67,6 @@ import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.exceptions.ClientWriteException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -584,14 +585,14 @@ public class SelectStatement implements CQLStatement
     /**
      * Execute the query by pushing multiple pages to the client continuously, as soon as they become available.
      *
-     * @param state - the query state
-     * @param options - the query options
+     * @param queryState - the query state
+     * @param queryOptions - the query options
      * @param queryStartNanoTime - the timestamp returned by System.nanoTime() when this statement was received
-     * @return - a void message, the results will be sent asynchronously by the async paging service
+     * @return - a void message that will be discarded, the results will be sent asynchronously by the async paging service
      * @throws RequestExecutionException
      * @throws RequestValidationException
      */
-    private Single<ResultMessage.Rows> executeContinuous(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime)
+    private Single<ResultMessage.Rows> executeContinuous(QueryState queryState, QueryOptions queryOptions, int nowInSec, long queryStartNanoTime)
     throws RequestValidationException, RequestExecutionException
     {
         ContinuousPagingService.metrics.requests.mark();
@@ -600,26 +601,34 @@ public class SelectStatement implements CQLStatement
                    "Cannot page queries with both ORDER BY and a IN restriction on the partition key;"
                    + " you must either remove the ORDER BY or the IN and sort client side, or avoid async paging for this query");
 
-        Selectors selectors = selection.newSelectors(options);
-        AggregationSpecification aggregationSpec = getAggregationSpec(options);
+        Selectors selectors = selection.newSelectors(queryOptions);
+        AggregationSpecification aggregationSpec = getAggregationSpec(queryOptions);
 
-        int userLimit = getLimit(options);
-        int userPerPartitionLimit = getPerPartitionLimit(options);
-        PageSize pageSize = getPageSize(options);
+        int userLimit = getLimit(queryOptions);
+        int userPerPartitionLimit = getPerPartitionLimit(queryOptions);
+        PageSize pageSize = getPageSize(queryOptions);
         DataLimits limit = getDataLimits(userLimit, userPerPartitionLimit, pageSize, aggregationSpec);
 
-        ReadQuery query = getQuery(state, options, selectors.getColumnFilter(), nowInSec, limit);
-        ContinuousPagingExecutor executor = new ContinuousPagingExecutor(this, options, state, query, queryStartNanoTime, pageSize);
-        ResultBuilder builder = ContinuousPagingService.makeBuilder(this, executor, state, options, DatabaseDescriptor.getContinuousPaging());
+        ReadQuery query = getQuery(queryState, queryOptions, selectors.getColumnFilter(), nowInSec, limit);
+        ContinuousPagingState continuousPagingState = new ContinuousPagingState(DatabaseDescriptor.getContinuousPaging(),
+                                                                                new ContinuousPagingExecutor(this, queryOptions, queryState, query, queryStartNanoTime, pageSize),
+                                                                                () -> queryState.getConnection().channel(),
+                                                                                ResultSet.estimatedRowSize(table, getSelection().getColumnMapping()));
+        ResultBuilder builder = ContinuousPagingService.createSession(getSelection().newSelectors(queryOptions),
+                                                                      aggregationSpec == null ? null : aggregationSpec.newGroupMaker(),
+                                                                      getResultMetadata(),
+                                                                      continuousPagingState,
+                                                                      queryState,
+                                                                      queryOptions);
 
-        executor.schedule(options.getPagingOptions().state(), builder);
+        continuousPagingState.executor.schedule(queryOptions.getPagingOptions().state(), builder);
         return Single.just(new ResultMessage.Rows(new ResultSet(getResultMetadata(), Collections.emptyList()), false));
     }
 
     /**
      * A class for executing queries with continuous paging.
      */
-    public final static class ContinuousPagingExecutor
+    public final static class ContinuousPagingExecutor implements org.apache.cassandra.cql3.continuous.paging.ContinuousPagingExecutor
     {
         final SelectStatement statement;
         final QueryOptions options;
@@ -628,19 +637,23 @@ public class SelectStatement implements CQLStatement
         final PageSize pageSize;
         final ReadQuery query;
         final boolean isLocalQuery;
-        final long queryStartNanoTime;
+        final long queryStartNanos;
+        final int coreId;
 
         // Not final because it is recreated every time we reschedule
         Pager pager;
 
-        // Not final because it is updated every time we schedule a task
-        long schedulingTimeNano;
+        // The time at which the next task was scheduled, updated every time we schedule a task
+        long schedulingTimeNanos;
+
+        // The time at which the task actually starts running, updated every time we start a new query
+        long taskStartMillis;
 
         private ContinuousPagingExecutor(SelectStatement statement,
                                          QueryOptions options,
                                          QueryState state,
                                          ReadQuery query,
-                                         long queryStartNanoTime,
+                                         long queryStartNanos,
                                          PageSize pageSize)
         {
             this.statement = statement;
@@ -651,7 +664,8 @@ public class SelectStatement implements CQLStatement
             this.pageSize = pageSize;
             this.query = query;
             this.isLocalQuery = options.getConsistency().isSingleNode() && query.queriesOnlyLocalData();
-            this.queryStartNanoTime = queryStartNanoTime;
+            this.queryStartNanos = queryStartNanos;
+            this.coreId = TPC.getNextCore();
         }
 
         public PagingState state(boolean inclusive)
@@ -659,10 +673,36 @@ public class SelectStatement implements CQLStatement
             return pager == null || pager.isExhausted() ? null : pager.state(inclusive);
         }
 
-        public void retrieveMultiplePages(PagingState pagingState, ResultBuilder builder)
+        public boolean isLocalQuery()
         {
+            return isLocalQuery;
+        }
+
+        public long queryStartTimeInNanos()
+        {
+            return queryStartNanos;
+        }
+
+        /**
+         * @return the current time in milliseconds when we launch a task to retrieve pages, but only
+         *         for local queries, -1 otherwise. For local queries we need to periodically pause them
+         *         in order to release resources. {@link ContinuousPagingService.ContinuousPagingSession}
+         *         checks the start time every time a page is sent, and if the query has been running for
+         *         longer than {@link org.apache.cassandra.config.ContinuousPagingConfig#max_local_query_time_ms},
+         *         it is paused so that it can be rescheduled later, see
+         *         {@link ContinuousPagingService.ContinuousPagingSession#maybePause()}.
+         */
+        public long localStartTimeInMillis()
+        {
+            return isLocalQuery ? taskStartMillis : -1;
+        }
+
+        void retrieveMultiplePages(PagingState pagingState, ResultBuilder builder)
+        {
+            taskStartMillis = System.currentTimeMillis();
+
             // update the metrics with how long we were waiting since scheduling this task
-            ContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNano);
+            ContinuousPagingService.metrics.waitingTime.addNano(System.nanoTime() - schedulingTimeNanos);
 
             if (logger.isTraceEnabled())
                 logger.trace("{} - retrieving multiple pages with paging state {}",
@@ -680,7 +720,7 @@ public class SelectStatement implements CQLStatement
             // the entire query duration in the metrics, so we should not reset queryStartNanoTime, further we
             // should query all available data, not just page size rows
             PageSize pageSize = isLocalQuery ? PageSize.rowsSize(pager.maxRemaining()) : this.pageSize;
-            long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
+            long queryStart = isLocalQuery ? queryStartNanos : System.nanoTime();
 
             Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStart);
 
@@ -698,35 +738,22 @@ public class SelectStatement implements CQLStatement
 
         private void handleError(Throwable error, ResultBuilder builder)
         {
-            if (error instanceof AbortedOperationException)
+            if (error instanceof ContinuousBackPressureException)
             {
                 if (logger.isTraceEnabled())
-                    logger.trace("Continuous paging aborted, rescheduling? {}", !builder.isCompleted());
+                    logger.trace("{} paused: {}", builder, error.getMessage());
 
-                // An aborted exception will only reach here in the case of local queries (otherwise it stays inside
-                // MessagingService) and it means we should re-schedule the query (we use the monitor to ensure we
-                // don't hold OpOrder for too long).
-                if (!builder.isCompleted())
-                {
-                    schedule(pager.state(false), builder);
-                    return;
-                }
-
-            }
-            else if (error instanceof ClientWriteException)
-            {
-                logger.debug("Continuous paging client did not keep up: {}", error.getMessage());
-                builder.complete(error);
+                // ContinuousPagingSession will reschedule when ready, since the session itself throws this
+                // exception, we know that the builder is not completed
+                assert !builder.isCompleted() : "session should not have been paused if already completed";
             }
             else
             {
                 JVMStabilityInspector.inspectThrowable(error);
-                logger.error("Continuous paging failed with unexpected error: {}", error.getMessage(), error);
+                logger.error("{} failed with unexpected error: {}", builder, error.getMessage(), error);
 
                 builder.complete(error);
             }
-
-            ContinuousPagingService.metrics.addTotalDuration(isLocalQuery, System.nanoTime() - queryStartNanoTime);
         }
 
         /**
@@ -748,18 +775,19 @@ public class SelectStatement implements CQLStatement
             if (pager.isExhausted())
             {
                 builder.complete();
-                ContinuousPagingService.metrics.addTotalDuration(isLocalQuery, System.nanoTime() - queryStartNanoTime);
             }
-            else
+            else if (!builder.isCompleted())
             {
-                if (!builder.isCompleted())
-                    schedule(pager.state(false), builder);
-                else
-                    ContinuousPagingService.metrics.addTotalDuration(isLocalQuery, System.nanoTime() - queryStartNanoTime);
+                schedule(pager.state(false), builder);
             }
         }
 
-        private void schedule(PagingState pagingState, ResultBuilder builder)
+        public Scheduler getScheduler()
+        {
+            return TPC.getForCore(coreId);
+        }
+
+        public void schedule(PagingState pagingState, ResultBuilder builder)
         {
             if (logger.isTraceEnabled())
                 logger.trace("{} - scheduling retrieving of multiple pages with paging state {}",
@@ -769,8 +797,8 @@ public class SelectStatement implements CQLStatement
             // case the pager depends on the execution controller, which will be released when this method returns
             pager = null;
 
-            schedulingTimeNano = System.nanoTime();
-            StageManager.getStage(Stage.CONTINUOUS_PAGING).submit(() -> retrieveMultiplePages(pagingState, builder));
+            schedulingTimeNanos = System.nanoTime();
+            getScheduler().scheduleDirect(() -> retrieveMultiplePages(pagingState, builder));
         }
     }
 
