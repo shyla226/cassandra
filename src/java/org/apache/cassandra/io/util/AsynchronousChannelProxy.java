@@ -114,6 +114,11 @@ public final class AsynchronousChannelProxy extends AbstractChannelProxy<Asynchr
         super(copy);
     }
 
+    boolean requiresAlignment()
+    {
+        return channel instanceof AIOEpollFileChannel;
+    }
+
     public void read(ByteBuffer dest, long offset, CompletionHandler<Integer, ByteBuffer> onComplete)
     {
         try

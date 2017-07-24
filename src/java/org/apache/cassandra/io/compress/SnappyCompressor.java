@@ -116,6 +116,6 @@ public class SnappyCompressor implements ICompressor
     {
         // Snappy can't deal with different input and output buffer types.
         // To avoid possible problems, pretend it can't support array-backed at all.
-        return bufferType == BufferType.OFF_HEAP;
+        return bufferType != BufferType.ON_HEAP;
     }
 }

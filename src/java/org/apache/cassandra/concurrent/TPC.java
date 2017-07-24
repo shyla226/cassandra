@@ -71,6 +71,7 @@ public class TPC
     public static final boolean USE_AIO = Boolean.parseBoolean(System.getProperty("cassandra.native.aio.enabled", "true"))
                                           && Aio.isAvailable() && USE_EPOLL &&
                                           (Boolean.parseBoolean(System.getProperty("cassandra.native.aio.force", "false")) || FileUtils.isSSD());
+    public static final int AIO_BLOCK_SIZE = 512;
 
     // monotonically increased in order to distribute in a round robin fashion the next core for scheduling a task
     private final static AtomicLong roundRobinIndex = new AtomicLong(0);
@@ -416,4 +417,14 @@ public class TPC
         return command -> TPC.bestTPCScheduler().getExecutor().execute(command);
     }
 
+
+    public static int roundUpToBlockSize(int size)
+    {
+        return (size + AIO_BLOCK_SIZE - 1) & -AIO_BLOCK_SIZE;
+    }
+
+    public static long roundDownToBlockSize(long size)
+    {
+        return size & -AIO_BLOCK_SIZE;
+    }
 }

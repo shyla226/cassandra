@@ -82,8 +82,6 @@ public class FileHandle extends SharedCloseableImpl
     @Nullable
     private MmappedRegions regions;
 
-    private final boolean mmapped;
-
     private FileHandle(Cleanup cleanup,
                        AsynchronousChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
@@ -97,7 +95,6 @@ public class FileHandle extends SharedCloseableImpl
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
         this.onDiskLength = onDiskLength;
         this.regions = regions;
-        this.mmapped = regions != null;
     }
 
     private FileHandle(FileHandle copy)
@@ -108,7 +105,6 @@ public class FileHandle extends SharedCloseableImpl
         compressionMetadata = copy.compressionMetadata;
         onDiskLength = copy.onDiskLength;
         regions = copy.regions;
-        mmapped = copy.mmapped;
     }
 
     /**
@@ -121,7 +117,7 @@ public class FileHandle extends SharedCloseableImpl
 
     public boolean mmapped()
     {
-        return mmapped;
+        return regions != null;
     }
 
     public long dataLength()

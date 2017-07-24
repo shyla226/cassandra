@@ -19,7 +19,7 @@ package org.apache.cassandra.io.compress;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public enum BufferType
 {
@@ -34,7 +34,14 @@ public enum BufferType
     {
         public ByteBuffer allocate(int size)
         {
-            return BufferPool.allocateDirectAligned(size);
+            return ByteBuffer.allocateDirect(size);
+        }
+    },
+    OFF_HEAP_ALIGNED
+    {
+        public ByteBuffer allocate(int size)
+        {
+            return allocateDirectAligned(size);
         }
     };
 
@@ -42,6 +49,34 @@ public enum BufferType
 
     public static BufferType typeOf(ByteBuffer buffer)
     {
-        return buffer.isDirect() ? OFF_HEAP : ON_HEAP;
+        return buffer.isDirect()
+               ? ((MemoryUtil.getAddress(buffer) & -MemoryUtil.pageSize()) == 0
+                  ? OFF_HEAP_ALIGNED
+                  : OFF_HEAP)
+               : ON_HEAP;
+    }
+
+    private static ByteBuffer allocateDirectAligned(int capacity)
+    {
+        int align = MemoryUtil.pageSize();
+        if (Integer.bitCount(align) != 1)
+            throw new IllegalArgumentException("Alignment must be a power of 2");
+
+        ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + align);
+        long address = MemoryUtil.getAddress(buffer);
+        long offset = address & (align -1); // (address % align)
+
+        if (offset == 0)
+        { // already aligned
+            buffer.limit(capacity);
+        }
+        else
+        { // shift by offset
+            int pos = (int)(align - offset);
+            buffer.position(pos);
+            buffer.limit(pos + capacity);
+        }
+
+        return buffer.slice();
     }
 }

@@ -20,10 +20,12 @@ package org.apache.cassandra.cql3;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 import java.util.stream.Collectors;
 
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cache.ChunkCache;
@@ -37,8 +39,16 @@ import org.apache.cassandra.io.util.RebuffererFactory;
  */
 public class AsyncReadTest extends CQLTester
 {
-    final int BASE_COUNT = 3000;
-    final int REPS = 100;
+    final int BASE_COUNT = 2000;
+    final int REPS = 50;
+
+    Random rand;
+
+    @Before
+    public void setUp()
+    {
+        rand = new Random(1);
+    }
 
     @Test
     public void testWideIndexingForward() throws Throwable
@@ -70,12 +80,7 @@ public class AsyncReadTest extends CQLTester
 
         for (int i = 0; i < COUNT; i++)
             execute("INSERT INTO %s (k, c, v, d) VALUES (?, ?, ?, ?)", 1, i, i, generateString(10 << (i % 12)));
-
-        Assert.assertEquals(243, getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? and c < ? ORDER BY c DESC", 395, 638)).length);
         flush();
-
-        // known bad example
-        Assert.assertEquals(243, getRows(execute("SELECT v FROM %s WHERE k = 1 and c >= ? and c < ? ORDER BY c DESC", 395, 638)).length);
 
         interceptCache();
         for (int rep = 0; rep < REPS; ++rep)
@@ -210,8 +215,6 @@ public class AsyncReadTest extends CQLTester
         return s;
     }
 
-    Random rand = new Random();
-
     public void interceptCache()
     {
         ChunkCache.instance.intercept(rf -> new TestRebuffererFactory(rf));
@@ -299,10 +302,16 @@ public class AsyncReadTest extends CQLTester
 
         public BufferHolder rebuffer(long position, ReaderConstraint constraint)
         {
-            if (constraint == ReaderConstraint.IN_CACHE_ONLY && rand.nextDouble() > 0.75)
+            if (constraint == ReaderConstraint.IN_CACHE_ONLY && rand.nextDouble() < 0.25)
             {
                 CompletableFuture<ChunkCache.Buffer> buf = new CompletableFuture<ChunkCache.Buffer>();
-                buf.complete(null); // mark ready, so that reload starts immediately
+
+                if (rand.nextDouble() < 0.5)
+                    buf.complete(null); // mark ready, so that reload starts immediately
+                else
+                    ForkJoinPool.commonPool().submit(() -> buf.complete(null)); // switch thread from time to time
+                                                                                      // to avoid stack overflow
+
                 throw new NotInCacheException(buf);
             }
             return wrapped.rebuffer(position, constraint);
