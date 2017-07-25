@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import com.google.common.base.Optional;
 import com.google.common.collect.Lists;
@@ -56,15 +57,34 @@ public class PartitionIndexTest
     IPartitioner partitioner = Util.testPartitioner();
     static final int COUNT = 245256;
 
+
+    /**
+     * Tests last-nodes-sizing failure uncovered during code review.
+     */
     @Test
-    public void testGetEq() throws IOException
+    public void testSizingBug() throws IOException, InterruptedException
     {
-        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
-        List<DecoratedKey> keys = random.left;
-        try (PartitionIndex summary = random.right;
+        for (int i = 1; i < COUNT; i *= 10)
+        {
+            testGetEq(generateRandomIndex(i));
+            testGetEq(generateSequentialIndex(i));
+        }
+    }
+
+    @Test
+    public void testGetEq() throws IOException, InterruptedException
+    {
+        testGetEq(generateRandomIndex(COUNT));
+        testGetEq(generateSequentialIndex(COUNT));
+    }
+
+    private void testGetEq(Pair<List<DecoratedKey>, PartitionIndex> data)
+    {
+        List<DecoratedKey> keys = data.left;
+        try (PartitionIndex summary = data.right;
              PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
         {
-            for (int i = 0; i < COUNT; i++)
+            for (int i = 0; i < data.left.size(); i++)
             {
                 assertEquals(i, reader.exactCandidate(keys.get(i)));
                 DecoratedKey key = generateRandomKey();
@@ -76,14 +96,19 @@ public class PartitionIndexTest
     @Test
     public void testGetGt() throws IOException
     {
-        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
-        List<DecoratedKey> keys = random.left;
-        try (PartitionIndex summary = random.right;
+        testGetGt(generateRandomIndex(COUNT));
+        testGetGt(generateSequentialIndex(COUNT));
+    }
+
+    private void testGetGt(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
+    {
+        List<DecoratedKey> keys = data.left;
+        try (PartitionIndex summary = data.right;
              PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
         {
-            for (int i = 0; i < COUNT; i++)
+            for (int i = 0; i < data.left.size(); i++)
             {
-                assertEquals(i < COUNT - 1 ? i + 1 : -1, gt(keys, keys.get(i), reader));
+                assertEquals(i < data.left.size() - 1 ? i + 1 : -1, gt(keys, keys.get(i), reader));
                 DecoratedKey key = generateRandomKey();
                 assertEquals(gt(keys, key), gt(keys, key, reader));
             }
@@ -93,12 +118,17 @@ public class PartitionIndexTest
     @Test
     public void testGetGe() throws IOException
     {
-        Pair<List<DecoratedKey>, PartitionIndex> random = generateRandomIndex(COUNT);
-        List<DecoratedKey> keys = random.left;
-        try (PartitionIndex summary = random.right;
+        testGetGe(generateRandomIndex(COUNT));
+        testGetGe(generateSequentialIndex(COUNT));
+    }
+
+    public void testGetGe(Pair<List<DecoratedKey>, PartitionIndex> data) throws IOException
+    {
+        List<DecoratedKey> keys = data.left;
+        try (PartitionIndex summary = data.right;
              PartitionIndex.Reader reader = summary.openReader(Rebufferer.ReaderConstraint.NONE))
         {
-            for (int i = 0; i < COUNT; i++)
+            for (int i = 0; i < data.left.size(); i++)
             {
                 assertEquals(i, ge(keys, keys.get(i), reader));
                 DecoratedKey key = generateRandomKey();
@@ -210,7 +240,7 @@ public class PartitionIndexTest
         PartitionIndex summary = random.right;
         List<DecoratedKey> keys = random.left;
         Random rand = new Random();
-        
+
         for (int i = 0; i < 1000; ++i)
         {
             boolean exactLeft = rand.nextBoolean();
@@ -278,58 +308,59 @@ public class PartitionIndexTest
     {
         for (int reps = 0; reps < 10; ++reps)
         {
-        File file = File.createTempFile("ColumnTrieReaderTest", "");
-        SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.newBuilder().finishOnClose(true).build());
-        List<DecoratedKey> list = Lists.newArrayList();
-        int parts = 5;
-        try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
-                .bufferSize(PageAware.PAGE_SIZE)
-                .withChunkCache(ChunkCache.instance)
-                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
-             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
+            File file = File.createTempFile("ColumnTrieReaderTest", "");
+            SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.newBuilder().finishOnClose(true).build());
+            List<DecoratedKey> list = Lists.newArrayList();
+            int parts = 5;
+            try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
+                                                .bufferSize(PageAware.PAGE_SIZE)
+                                                .withChunkCache(ChunkCache.instance)
+                                                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
+                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
             )
-        {
-            writer.setPostFlushListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
-            for (int i = 0; i < COUNT; i++)
             {
-                DecoratedKey key = generateRandomKey();
-                list.add(key);
-            }
-            Collections.sort(list);
-            AtomicInteger callCount = new AtomicInteger();
+                writer.setPostFlushListener(() -> builder.markPartitionIndexSynced(writer.getLastFlushOffset()));
+                for (int i = 0; i < COUNT; i++)
+                {
+                    DecoratedKey key = generateRandomKey();
+                    list.add(key);
+                }
+                Collections.sort(list);
+                AtomicInteger callCount = new AtomicInteger();
 
-            int i = 0;
-            for (int part = 1; part <= parts; ++part)
-            {
-                for (; i < COUNT * part / parts; i++)
+                int i = 0;
+                for (int part = 1; part <= parts; ++part)
+                {
+                    for (; i < COUNT * part / parts; i++)
+                        builder.addEntry(list.get(i), i);
+
+                    final int addedSize = i;
+                    builder.buildPartial(index ->
+                                         {
+                                             int indexSize = Collections.binarySearch(list, index.lastKey()) + 1;
+                                             assert indexSize >= addedSize - 1;
+                                             checkIteration(list, indexSize, index);
+                                             index.close();
+                                             callCount.incrementAndGet();
+                                         }, 0, i * 1024);
+                    builder.markDataSynced(i * 1024);
+                    // verifier will be called when the sequentialWriter finishes a chunk
+                }
+
+                for (; i < COUNT; ++i)
                     builder.addEntry(list.get(i), i);
-
-                final int addedSize = i;
-                builder.buildPartial(index -> {
-                    int indexSize = Collections.binarySearch(list, index.lastKey()) + 1;
-                    assert indexSize >= addedSize - 1;
-                    checkIteration(list, indexSize, index);
-                    index.close();
-                    callCount.incrementAndGet();
-                }, 0, i * 1024);
-                builder.markDataSynced(i * 1024);
-                // verifier will be called when the sequentialWriter finishes a chunk
+                builder.complete();
+                try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE))
+                {
+                    checkIteration(list, list.size(), index);
+                }
+                if (COUNT / parts > 16000)
+                    assertEquals(parts - 1, callCount.get());
             }
-
-            for (; i < COUNT; ++i)
-                builder.addEntry(list.get(i), i);
-            builder.complete();
-            try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, false, Rebufferer.ReaderConstraint.NONE))
+            catch (IOException e)
             {
-                checkIteration(list, list.size(), index);
+                throw new RuntimeException(e);
             }
-            if (COUNT / parts > 16000)
-                assertEquals(parts - 1, callCount.get());
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
         }
     }
 
@@ -495,19 +526,36 @@ public class PartitionIndexTest
 
     private Pair<List<DecoratedKey>, PartitionIndex> generateRandomIndex(int size) throws IOException
     {
+        return generateIndex(size, this::generateRandomKey);
+    }
+
+    private Pair<List<DecoratedKey>, PartitionIndex> generateSequentialIndex(int size) throws IOException
+    {
+        return generateIndex(size, new Supplier<DecoratedKey>()
+        {
+            long i = 0;
+            public DecoratedKey get()
+            {
+                return sequentialKey(i++);
+            }
+        });
+    }
+
+    private Pair<List<DecoratedKey>, PartitionIndex> generateIndex(int size, Supplier<DecoratedKey> generateKey) throws IOException
+    {
         File file = File.createTempFile("ColumnTrieReaderTest", "");
         SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.newBuilder().finishOnClose(true).build());
         List<DecoratedKey> list = Lists.newArrayList();
         try (FileHandle.Builder fhBuilder = new FileHandle.Builder(file.getPath())
-                                                .bufferSize(PageAware.PAGE_SIZE)
-                                                .withChunkCache(ChunkCache.instance)
-                                                .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
+                                            .bufferSize(PageAware.PAGE_SIZE)
+                                            .withChunkCache(ChunkCache.instance)
+                                            .mmapped(DatabaseDescriptor.getIndexAccessMode() == Config.DiskAccessMode.mmap);
              PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder);
-            )
+        )
         {
             for (int i = 0; i < size; i++)
             {
-                DecoratedKey key = generateRandomKey();
+                DecoratedKey key = generateKey.get();
                 list.add(key);
             }
             Collections.sort(list);
@@ -526,7 +574,20 @@ public class PartitionIndexTest
     DecoratedKey generateRandomKey()
     {
         UUID uuid = UUID.randomUUID();
-        DecoratedKey key = partitioner.decorateKey(ByteBufferUtil.bytes(uuid));
-        return key;
+        return partitioner.decorateKey(ByteBufferUtil.bytes(uuid));
+    }
+
+    private static final String alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    DecoratedKey sequentialKey(long i)
+    {
+        String s = "";
+        for (int j = 50; j >= 0 ; j--)
+        {
+            int p = (int) Math.pow(10, j);
+            int idx = (int) ((j + i) / p);
+            s += alphabet.charAt(idx % alphabet.length());
+        }
+        return partitioner.decorateKey(ByteBufferUtil.bytes(s));
     }
 }

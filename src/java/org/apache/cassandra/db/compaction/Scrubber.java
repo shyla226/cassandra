@@ -225,6 +225,15 @@ public class Scrubber implements Closeable
                     if (indexIterator != null && rowStart != rowStartFromIndex)
                         outputHandler.warn(String.format("Data file row position %d differs from index file row position %d", rowStart, rowStartFromIndex));
 
+                    if (indexIterator != null && rowSizeFromIndex > 0 && (dataStart - rowStart) >= rowSizeFromIndex)
+                        throw new IOException(String.format("Reading key with length %d at position %d already makes row longer than size from index %d. Key read is %s\n" +
+                                                            "This most probably indicates a corrupted row, thus scrub will continue assuming the index file contains the correct data.",
+                                                            key.getKey().remaining(),
+                                                            rowStart,
+                                                            rowSizeFromIndex,
+                                                            ByteBufferUtil.bytesToHex(key.getKey())));
+
+
                     if (tryAppend(prevKey, key, writer))
                         prevKey = key;
                 }
@@ -264,7 +273,7 @@ public class Scrubber implements Closeable
                         badRows++;
                         if (indexIterator != null)
                         {
-                            outputHandler.warn("Row starting at position " + dataStart + " is unreadable; skipping to next");
+                            outputHandler.warn("Row starting at position " + rowStart + " is unreadable; skipping to next");
                             seekToNextRow();
                         }
                         else
@@ -304,7 +313,7 @@ public class Scrubber implements Closeable
                 finished.forEach(sstable -> sstable.selfRef().release());
         }
 
-        if (completed)
+        if (!completed)
         {
             if (badRows > 0)
                 outputHandler.warn("No valid rows found while scrubbing " + sstable + "; it is marked for deletion now. If you want to attempt manual recovery, you can find a copy in the pre-scrub snapshot");

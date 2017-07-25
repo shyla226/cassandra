@@ -116,7 +116,7 @@ implements IncrementalTrieWriter<Value>
     abstract void complete(Node value) throws IOException;
     abstract public PartialTail makePartialRoot() throws IOException;
 
-    class PTail implements PartialTail
+    static class PTail implements PartialTail
     {
         long root;
         long cutoff;
@@ -199,11 +199,6 @@ implements IncrementalTrieWriter<Value>
         public byte transition(int i)
         {
             return children.get(i).transition;
-        }
-
-        public long serializedPosition(int i)
-        {
-            return children.get(i).filePos;
         }
 
         @Override

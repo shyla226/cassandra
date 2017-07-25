@@ -34,6 +34,7 @@ import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.SizedInts;
 import org.apache.cassandra.utils.concurrent.Ref;
 
 /**
@@ -96,22 +97,8 @@ public class PartitionIndex implements Closeable
     {
         public int sizeofNode(SerializationNode<Payload> node, long nodePosition)
         {
-            return TrieNode.typeFor(node, nodePosition).sizeofNode(node) + (node.payload() != null ? 1 + size(node.payload().position) : 0);
-        }
-
-        @Override
-        public int inpageSizeofNode(SerializationNode<Payload> node, long nodePosition)
-        {
-            return TrieNode.inpageTypeFor(node).sizeofNode(node) + (node.payload() != null ? 1 + size(node.payload().position) : 0);
-        }
-
-        /** Returns the number of bytes we need to store the given position. */
-        private int size(long indexPos)
-        {
-            if (indexPos < 0)
-                indexPos = ~indexPos;
-            int lz = Long.numberOfLeadingZeros(indexPos);       // 1 <= lz <= 64
-            return (64 - lz + 1 + 7) / 8;   // significant bits, +1 for sign, rounded up. At least 1, at most 8.
+            return TrieNode.typeFor(node, nodePosition).sizeofNode(node) +
+                   (node.payload() != null ? 1 + SizedInts.nonZeroSize(node.payload().position) : 0);
         }
 
         @Override
@@ -120,24 +107,17 @@ public class PartitionIndex implements Closeable
             write(dest, TrieNode.typeFor(node, nodePosition), node, nodePosition);
         }
 
-        @Override
-        public void inpageWrite(DataOutputPlus dest, SerializationNode<Payload> node, long nodePosition) throws IOException
-        {
-            write(dest, TrieNode.inpageTypeFor(node), node, nodePosition);
-        }
-
         public void write(DataOutputPlus dest, TrieNode type, SerializationNode<Payload> node, long nodePosition) throws IOException
         {
             Payload payload = node.payload();
             if (payload != null)
             {
                 int payloadBits = 0;
-                int size = size(payload.position);
+                int size = SizedInts.nonZeroSize(payload.position);
                 payloadBits = 7 + size;
                 type.serialize(dest, node, payloadBits, nodePosition);
                 dest.writeByte(payload.hashBits);
-                for (int i = size - 1; i >= 0; --i)
-                    dest.writeByte((int) (payload.position >> (i * 8)));
+                SizedInts.write(dest, payload.position, size);
             }
             else
                 type.serialize(dest, node, 0, nodePosition);
@@ -239,45 +219,9 @@ public class PartitionIndex implements Closeable
             ++payloadPos;
             bytes -= 7;
         }
-        switch (bytes)
-        {
-        case 0:
+        if (bytes == 0)
             return NOT_FOUND;
-        case 1:
-            return contents.get(payloadPos);
-        case 2:
-            return contents.getShort(payloadPos);
-        case 3:
-            {
-                // we are guaranteed to have one previous readable byte (the flags and type byte)
-                long v = contents.getInt(payloadPos - 1);
-                int shift = (8 - bytes) * 8;
-                return (v << shift) >> shift;   // sign extend
-            }
-        case 4:
-            return contents.getInt(payloadPos);
-        case 5:
-            {
-                long high = contents.get(payloadPos);
-                return (high << 32L) | (contents.getInt(payloadPos + 1) & 0xFFFFFFFFL);
-            }
-        case 6:
-            {
-                long high = contents.getShort(payloadPos);
-                return (high << 32L) | (contents.getInt(payloadPos + 2) & 0xFFFFFFFFL);
-            }
-        case 7:
-            {
-                // we are guaranteed to have one previous readable byte (the flags and type byte)
-                long v = contents.getLong(payloadPos - 1);
-                int shift = (8 - bytes) * 8;
-                return (v << shift) >> shift;   // sign extend
-            }
-        case 8:
-            return contents.getLong(payloadPos);
-        default:
-            throw new AssertionError();
-        }
+        return SizedInts.read(contents, payloadPos, bytes);
     }
 
     public interface Acceptor<ArgType, ResultType>

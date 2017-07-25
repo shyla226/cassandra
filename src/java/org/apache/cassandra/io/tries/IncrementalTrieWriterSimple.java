@@ -19,6 +19,7 @@ package org.apache.cassandra.io.tries;
 
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.Arrays;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 
@@ -31,8 +32,12 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
  * The completed nodes can be written to disk and discarded, keeping only a pointer to their location in the file
  * (this pointer will be discarded too when the parent node is completed). This ensures that a very limited amount of
  * data is kept in memory at all times.
+ *
+ * Note: This class is currently unused and stands only as form of documentation for {@link IncrementalTrieWriterPageAware}.
  */
-public class IncrementalTrieWriterSimple<Value> extends IncrementalTrieWriterBase<Value, DataOutput, IncrementalTrieWriterSimple.Node<Value>>
+public class IncrementalTrieWriterSimple<Value>
+extends IncrementalTrieWriterBase<Value, DataOutput, IncrementalTrieWriterSimple.Node<Value>>
+implements IncrementalTrieWriter<Value>
 {
     private long position = 0;
 
@@ -88,6 +93,23 @@ public class IncrementalTrieWriterSimple<Value> extends IncrementalTrieWriterBas
         Node<Value> newNode(byte transition)
         {
             return new Node<Value>(transition);
+        }
+
+        public long serializedPositionDelta(int i, long nodePosition)
+        {
+            assert children.get(i).filePos != -1;
+            return children.get(i).filePos - nodePosition;
+        }
+
+        public long maxPositionDelta(long nodePosition)
+        {
+            long min = 0;
+            for (Node<Value> child : children)
+            {
+                if (child.filePos != -1)
+                    min = Math.min(min, child.filePos - nodePosition);
+            }
+            return min;
         }
     }
 }

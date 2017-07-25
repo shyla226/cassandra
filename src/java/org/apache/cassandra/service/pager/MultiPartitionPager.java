@@ -152,6 +152,7 @@ public class MultiPartitionPager implements QueryPager
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
+
         return new MultiPartitions(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
     }
 
@@ -159,6 +160,7 @@ public class MultiPartitionPager implements QueryPager
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
+
         return new MultiPartitions(toQuery, null, null, System.nanoTime(), false).partitions();
     }
 
