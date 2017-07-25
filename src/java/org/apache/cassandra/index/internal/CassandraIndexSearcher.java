@@ -26,7 +26,7 @@ import java.util.NavigableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.TableMetadata;
@@ -56,17 +56,17 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
 
     @SuppressWarnings("resource") // Both the OpOrder and 'indexIter' are closed on exception, or through the closing of the result
     // of this method.
-    public CsFlow<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
+    public Flow<FlowableUnfilteredPartition> search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table
         DecoratedKey indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
-        CsFlow<FlowableUnfilteredPartition> indexIter = queryIndex(indexKey, command, executionController);
+        Flow<FlowableUnfilteredPartition> indexIter = queryIndex(indexKey, command, executionController);
 
         return indexIter.flatMap(
             i -> queryDataFromIndex(indexKey, FlowablePartitions.filter(i, command.nowInSec()), command, executionController));
     }
 
-    private CsFlow<FlowableUnfilteredPartition> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
+    private Flow<FlowableUnfilteredPartition> queryIndex(DecoratedKey indexKey, ReadCommand command, ReadExecutionController executionController)
     {
         ClusteringIndexFilter filter = makeIndexFilter(command);
         ColumnFamilyStore indexCfs = index.getBackingTable().get();
@@ -179,8 +179,8 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return index.buildIndexClusteringPrefix(rowKey, clustering, null).build();
     }
 
-    protected abstract CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(DecoratedKey indexKey,
-                                                                                FlowablePartition indexHits,
-                                                                                ReadCommand command,
-                                                                                ReadExecutionController executionController);
+    protected abstract Flow<FlowableUnfilteredPartition> queryDataFromIndex(DecoratedKey indexKey,
+                                                                            FlowablePartition indexHits,
+                                                                            ReadCommand command,
+                                                                            ReadExecutionController executionController);
 }

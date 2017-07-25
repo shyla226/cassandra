@@ -22,13 +22,12 @@ import com.google.common.base.Throwables;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.transform.BaseIterator;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
 
 /**
- * Base class for the CsFlow versions of partitions.
+ * Base class for the Flow versions of partitions.
  */
 public abstract class FlowablePartitionBase<T> implements PartitionTrait
 {
@@ -44,14 +43,14 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
     public final Row staticRow;
 
     /**
-     * The partition's contents as a CsFlow. This must be subscribed to exactly once, and will close all
+     * The partition's contents as a Flow. This must be subscribed to exactly once, and will close all
      * associated resources when the subscription completes (complete/error/cancel).
      */
-    public final CsFlow<T> content;
+    public final Flow<T> content;
 
     public FlowablePartitionBase(PartitionHeader header,
                                  Row staticRow,
-                                 CsFlow<T> content)
+                                 Flow<T> content)
     {
         this.header = header;
         this.staticRow = staticRow;
@@ -75,7 +74,7 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      *
      * @return the partition with the new content
      */
-    public abstract FlowablePartitionBase<T> withContent(CsFlow<T> content);
+    public abstract FlowablePartitionBase<T> withContent(Flow<T> content);
 
     /**
      * Apply the mapper to the partition content
@@ -84,7 +83,7 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
      *
      * @return a new identical partition with the content mapped
      */
-    public abstract FlowablePartitionBase<T> mapContent(CsFlow.MappingOp<T, T> mappingOp);
+    public abstract FlowablePartitionBase<T> mapContent(Flow.MappingOp<T, T> mappingOp);
 
     /**
      * Only to be called on requested but unused partitions (e.g. when aborting).
@@ -94,7 +93,7 @@ public abstract class FlowablePartitionBase<T> implements PartitionTrait
     {
         try
         {
-            content.subscribe(new CsSubscriber<T>()
+            content.subscribe(new FlowSubscriber<T>()
             {
                 public void onNext(T item)
                 {

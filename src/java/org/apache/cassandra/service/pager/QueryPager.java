@@ -23,7 +23,7 @@ import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Perform a query, paging it by page of a given size.
@@ -48,14 +48,14 @@ public interface QueryPager
 {
     QueryPager EMPTY = new QueryPager()
     {
-        public CsFlow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
+        public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestValidationException, RequestExecutionException
         {
-            return CsFlow.empty();
+            return Flow.empty();
         }
 
-        public CsFlow<FlowablePartition> fetchPageInternal(int pageSize) throws RequestValidationException, RequestExecutionException
+        public Flow<FlowablePartition> fetchPageInternal(int pageSize) throws RequestValidationException, RequestExecutionException
         {
-            return CsFlow.empty();
+            return Flow.empty();
         }
 
         public boolean isExhausted()
@@ -91,11 +91,11 @@ public interface QueryPager
      *
      * @return he page of result as an asynchronous flow of partitions
      */
-    public CsFlow<FlowablePartition> fetchPage(int pageSize,
-                                               ConsistencyLevel consistency,
-                                               ClientState clientState,
-                                               long queryStartNanoTime,
-                                               boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize,
+                                             ConsistencyLevel consistency,
+                                             ClientState clientState,
+                                             long queryStartNanoTime,
+                                             boolean forContinuousPaging)
     throws RequestValidationException, RequestExecutionException;
 
     /**
@@ -104,7 +104,7 @@ public interface QueryPager
      * @param pageSize the maximum number of elements to return in the next page.
      * @return the page of result as an asynchronous flow of partitions
      */
-    public CsFlow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     throws RequestValidationException, RequestExecutionException;
 
     /**

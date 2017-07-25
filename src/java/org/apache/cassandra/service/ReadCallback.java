@@ -48,8 +48,8 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.net.Response;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.flow.CsDeferredFlow;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.DeferredFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 
 public class ReadCallback implements MessageCallback<ReadResponse>
@@ -70,7 +70,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
     private final Keyspace keyspace; // TODO push this into ConsistencyLevel?
     private final AtomicBoolean responsesProcessed = new AtomicBoolean(false);
-    private final CsDeferredFlow<FlowablePartition> result;
+    private final DeferredFlow<FlowablePartition> result;
 
     /**
      * Constructor when response count has to be calculated and blocked for.
@@ -99,7 +99,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
 
         long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(command.getTimeout());
         Supplier<Throwable> timeoutExceptionSupplier = () -> new ReadTimeoutException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent());
-        this.result = CsDeferredFlow.create(queryStartNanoTime + timeoutNanos, timeoutExceptionSupplier);
+        this.result = DeferredFlow.create(queryStartNanoTime + timeoutNanos, timeoutExceptionSupplier);
 
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockfor >= endpoints.size();
@@ -108,7 +108,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
             logger.trace("Blockfor is {}; setting up requests to {}", blockfor, StringUtils.join(this.endpoints, ","));
     }
 
-    public CsFlow<FlowablePartition> result()
+    public Flow<FlowablePartition> result()
     {
         return result;
     }
@@ -135,15 +135,15 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         {
             try
             {
-                result.onSource(CsFlow.concat(blockfor == 1 ? resolver.getData() : resolver.resolve(),
-                                              resolver.completeOnReadRepairAnswersReceived())
-                                      .doOnError(this::onError));
+                result.onSource(Flow.concat(blockfor == 1 ? resolver.getData() : resolver.resolve(),
+                                            resolver.completeOnReadRepairAnswersReceived())
+                                    .doOnError(this::onError));
             }
             catch (Throwable e)
             { // typically DigestMismatchException, but safer to report all errors to the subscriber
                 if (logger.isTraceEnabled())
                     logger.trace("Got error: {}/{}", e.getClass().getName(), e.getMessage());
-                result.onSource(CsFlow.error(e));
+                result.onSource(Flow.error(e));
                 return;
             }
 
@@ -167,7 +167,7 @@ public class ReadCallback implements MessageCallback<ReadResponse>
     @Override
     public void onTimeout(InetAddress host)
     {
-        result.onSource(CsFlow.error(new ReadTimeoutException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent())));
+        result.onSource(Flow.error(new ReadTimeoutException(consistencyLevel, received.get(), blockfor, resolver.isDataPresent())));
     }
 
     /**
@@ -233,11 +233,11 @@ public class ReadCallback implements MessageCallback<ReadResponse>
         failureReasonByEndpoint.put(failureResponse.from(), failureResponse.reason());
 
         if (blockfor + n > endpoints.size() && responsesProcessed.compareAndSet(false, true))
-            result.onSource(CsFlow.error(new ReadFailureException(consistencyLevel,
-                                                                  received.get(),
-                                                                  blockfor,
-                                                                  resolver.isDataPresent(),
-                                                                  failureReasonByEndpoint)));
+            result.onSource(Flow.error(new ReadFailureException(consistencyLevel,
+                                                                received.get(),
+                                                                blockfor,
+                                                                resolver.isDataPresent(),
+                                                                failureReasonByEndpoint)));
     }
 
     private Throwable onError(Throwable error)

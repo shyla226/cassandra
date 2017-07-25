@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.Reducer;
 
 import static org.junit.Assert.fail;
 
-public class CsFlowTest
+public class FlowTest
 {
     @BeforeClass
     public static void init() throws Exception
@@ -42,22 +42,22 @@ public class CsFlowTest
         DatabaseDescriptor.daemonInitialization();
     }
 
-    CsFlow.MappingOp<Integer, Integer> inc = (i) -> i + 1;
-    CsFlow.MappingOp<Integer, Integer> multiplyByTwo = (i) -> i * 2;
-    CsFlow.MappingOp<Integer, Integer> multiplyByThree = (i) -> i * 3;
-    CsFlow.MappingOp<Integer, Integer> divideByZero = (i) -> i / 0;
-    CsFlow.ReduceFunction<Integer, Integer> reduceToSum = (l, r) -> l + r;
+    Flow.MappingOp<Integer, Integer> inc = (i) -> i + 1;
+    Flow.MappingOp<Integer, Integer> multiplyByTwo = (i) -> i * 2;
+    Flow.MappingOp<Integer, Integer> multiplyByThree = (i) -> i * 3;
+    Flow.MappingOp<Integer, Integer> divideByZero = (i) -> i / 0;
+    Flow.ReduceFunction<Integer, Integer> reduceToSum = (l, r) -> l + r;
 
     @Test
     public void reduceBlockingErrorHandlingTest() throws Exception
     {
         try
         {
-            CsFlow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
-                  .map(inc)
-                  .map(multiplyByTwo)
-                  .map(divideByZero)
-                  .reduceBlocking(0, reduceToSum);
+            Flow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
+                .map(inc)
+                .map(multiplyByTwo)
+                .map(divideByZero)
+                .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -71,12 +71,12 @@ public class CsFlowTest
     {
         try
         {
-            CsFlow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
-                  .map(inc)
-                  .map(multiplyByTwo)
-                  .map(divideByZero)
-                  .reduceToFuture(0, reduceToSum)
-                  .get();
+            Flow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
+                .map(inc)
+                .map(multiplyByTwo)
+                .map(divideByZero)
+                .reduceToFuture(0, reduceToSum)
+                .get();
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -90,14 +90,14 @@ public class CsFlowTest
     public void divergingTopologiesErrorHandlingTest() throws Exception
     {
         // Test that diverging topologies do not pollute the stack
-        CsFlow<Integer> intFlow = CsFlow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
-                                        .map(inc);
+        Flow<Integer> intFlow = Flow.fromIterable(Arrays.asList(1, 2, 3, 4, 5))
+                                    .map(inc);
 
-        CsFlow<Integer> intFlow2 =  intFlow.map(multiplyByTwo)
-                                           .map(divideByZero);
+        Flow<Integer> intFlow2 =  intFlow.map(multiplyByTwo)
+                                         .map(divideByZero);
 
-        CsFlow<Integer> intFlow3 =  intFlow.map(multiplyByThree)
-                                           .map(divideByZero);
+        Flow<Integer> intFlow3 =  intFlow.map(multiplyByThree)
+                                         .map(divideByZero);
 
         try
         {
@@ -130,12 +130,12 @@ public class CsFlowTest
         // failure happening before flatmap
         try
         {
-            CsFlow.fromIterable(range(5))
-                  .map(inc)
-                  .map(divideByZero)
-                  .flatMap((i) -> CsFlow.fromIterable(range(i)))
-                  .map(multiplyByTwo)
-                  .reduceBlocking(0, reduceToSum);
+            Flow.fromIterable(range(5))
+                .map(inc)
+                .map(divideByZero)
+                .flatMap((i) -> Flow.fromIterable(range(i)))
+                .map(multiplyByTwo)
+                .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -146,12 +146,12 @@ public class CsFlowTest
         // failure happening after flatmap
         try
         {
-            CsFlow.fromIterable(range(5))
-                  .map(inc)
-                  .map(multiplyByTwo)
-                  .flatMap((i) -> CsFlow.fromIterable(range(i)))
-                  .map(divideByZero)
-                  .reduceBlocking(0, reduceToSum);
+            Flow.fromIterable(range(5))
+                .map(inc)
+                .map(multiplyByTwo)
+                .flatMap((i) -> Flow.fromIterable(range(i)))
+                .map(divideByZero)
+                .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -162,16 +162,16 @@ public class CsFlowTest
         // failure happening in flatmap operation itself
         try
         {
-            CsFlow.fromIterable(range(5))
-                  .map(inc)
-                  .map(multiplyByTwo)
-                  .flatMap((i) -> {
+            Flow.fromIterable(range(5))
+                .map(inc)
+                .map(multiplyByTwo)
+                .flatMap((i) -> {
                       if (true)
                           throw new RuntimeException();
-                      return CsFlow.fromIterable(range(i));
+                      return Flow.fromIterable(range(i));
                   })
-                  .map(divideByZero)
-                  .reduceBlocking(0, reduceToSum);
+                .map(divideByZero)
+                .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -213,11 +213,11 @@ public class CsFlowTest
 
         try
         {
-            CsFlow.fromIterable(range(5))
-                  .map(inc)
-                  .group(failingGroupOp)
-                  .map(multiplyByTwo)
-                  .reduceBlocking(1, reduceToSum);
+            Flow.fromIterable(range(5))
+                .map(inc)
+                .group(failingGroupOp)
+                .map(multiplyByTwo)
+                .reduceBlocking(1, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -227,12 +227,12 @@ public class CsFlowTest
 
         try
         {
-            CsFlow.fromIterable(range(5))
-                  .map(inc)
-                  .map(divideByZero)
-                  .group(failingGroupOp)
-                  .map(multiplyByTwo)
-                  .reduceBlocking(1, reduceToSum);
+            Flow.fromIterable(range(5))
+                .map(inc)
+                .map(divideByZero)
+                .group(failingGroupOp)
+                .map(multiplyByTwo)
+                .reduceBlocking(1, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -242,12 +242,12 @@ public class CsFlowTest
 
         try
         {
-            CsFlow.fromIterable(range(5))
-                  .map(inc)
-                  .group(groupOp)
-                  .map(divideByZero)
-                  .map(multiplyByTwo)
-                  .reduceBlocking(1, reduceToSum);
+            Flow.fromIterable(range(5))
+                .map(inc)
+                .group(groupOp)
+                .map(divideByZero)
+                .map(multiplyByTwo)
+                .reduceBlocking(1, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -275,16 +275,16 @@ public class CsFlowTest
 
         try
         {
-            CsFlow.merge(Arrays.asList(CsFlow.fromIterable(range(5))
-                                             .map((i) -> i),
-                                       CsFlow.fromIterable(range(5, 10))
-                                             .map(multiplyByTwo)
-                                             .map(divideByZero)),
-                         Ordering.natural(),
-                         reducer)
-                  .map(inc)
-                  .map(multiplyByThree)
-                  .reduceBlocking(0, reduceToSum);
+            Flow.merge(Arrays.asList(Flow.fromIterable(range(5))
+                                         .map((i) -> i),
+                                     Flow.fromIterable(range(5, 10))
+                                         .map(multiplyByTwo)
+                                         .map(divideByZero)),
+                       Ordering.natural(),
+                       reducer)
+                .map(inc)
+                .map(multiplyByThree)
+                .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -294,16 +294,16 @@ public class CsFlowTest
 
         try
         {
-            CsFlow.merge(Arrays.asList(CsFlow.fromIterable(range(5))
-                                             .map((i) -> i),
-                                       CsFlow.fromIterable(range(5, 10))
-                                             .map(multiplyByTwo)
-                                             .map(multiplyByThree)),
-                         Ordering.natural(),
-                         reducer)
-                  .map(inc)
-                  .map(divideByZero)
-                  .reduceBlocking(0, reduceToSum);
+            Flow.merge(Arrays.asList(Flow.fromIterable(range(5))
+                                         .map((i) -> i),
+                                     Flow.fromIterable(range(5, 10))
+                                         .map(multiplyByTwo)
+                                         .map(multiplyByThree)),
+                       Ordering.natural(),
+                       reducer)
+                .map(inc)
+                .map(divideByZero)
+                .reduceBlocking(0, reduceToSum);
             fail("Failing operation should have resulted into the topology failure");
         }
         catch (Exception e)
@@ -317,7 +317,7 @@ public class CsFlowTest
         for (Object tag : tags)
         {
             Assert.assertTrue(msg.contains(tag.toString()));
-            Pair<String, Integer> line = CsFlow.LINE_NUMBERS.getLine(tag.getClass());
+            Pair<String, Integer> line = Flow.LINE_NUMBERS.getLine(tag.getClass());
             Assert.assertNotSame("Expected to have a defined source", line, LineNumberInference.UNKNOWN_SOURCE);
             Assert.assertTrue(msg.contains(line.left + ":" + line.right));
         }

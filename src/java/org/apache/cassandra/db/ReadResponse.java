@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
-import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -31,11 +30,10 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Serializer;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.Versioned;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -86,7 +84,7 @@ public abstract class ReadResponse
     {
     }
 
-    public static Single<ReadResponse> createDataResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command, boolean forLocalDelivery)
+    public static Single<ReadResponse> createDataResponse(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command, boolean forLocalDelivery)
     {
         return forLocalDelivery
                ? LocalResponse.build(partitions)
@@ -94,7 +92,7 @@ public abstract class ReadResponse
     }
 
     @VisibleForTesting
-    public static ReadResponse createRemoteDataResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
+    public static ReadResponse createRemoteDataResponse(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
         final EncodingVersion version = EncodingVersion.last();
         return UnfilteredPartitionsSerializer.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
@@ -102,17 +100,17 @@ public abstract class ReadResponse
                                              .blockingSingle();
     }
 
-    public static Single<ReadResponse> createDigestResponse(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
+    public static Single<ReadResponse> createDigestResponse(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
         return makeDigest(partitions, command).map(digest -> new DigestResponse(digest));
     }
 
-    public abstract CsFlow<FlowableUnfilteredPartition> data(ReadCommand command);
+    public abstract Flow<FlowableUnfilteredPartition> data(ReadCommand command);
     public abstract Single<ByteBuffer> digest(ReadCommand command);
 
     public abstract boolean isDigestResponse();
 
-    protected static Single<ByteBuffer> makeDigest(CsFlow<FlowableUnfilteredPartition> partitions, ReadCommand command)
+    protected static Single<ByteBuffer> makeDigest(Flow<FlowableUnfilteredPartition> partitions, ReadCommand command)
     {
         MessageDigest digest = FBUtilities.newMessageDigest("MD5");
         return UnfilteredPartitionIterators.digest(partitions,
@@ -134,7 +132,7 @@ public abstract class ReadResponse
             this.digest = digest;
         }
 
-        public CsFlow<FlowableUnfilteredPartition> data(ReadCommand command)
+        public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
             throw new UnsupportedOperationException();
         }
@@ -169,21 +167,21 @@ public abstract class ReadResponse
             this.partitions = partitions;
         }
 
-        public static Single<ReadResponse> build(CsFlow<FlowableUnfilteredPartition> partitions)
+        public static Single<ReadResponse> build(Flow<FlowableUnfilteredPartition> partitions)
         {
             return ImmutableBTreePartition.create(partitions)
                                           .toList()
                                           .mapToRxSingle(LocalResponse::new);
         }
 
-        public CsFlow<FlowableUnfilteredPartition> data(ReadCommand command)
+        public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
-            return new CsFlow<FlowableUnfilteredPartition>()
+            return new Flow<FlowableUnfilteredPartition>()
             {
                 private int idx = 0;
-                public CsSubscription subscribe(CsSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+                public FlowSubscription subscribe(FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
                 {
-                    return new CsSubscription()
+                    return new FlowSubscription()
                     {
                         public void request()
                         {
@@ -202,12 +200,12 @@ public abstract class ReadResponse
 
                         public Throwable addSubscriberChainFromSource(Throwable throwable)
                         {
-                            return CsFlow.wrapException(throwable, this);
+                            return Flow.wrapException(throwable, this);
                         }
 
                         public String toString()
                         {
-                            return CsFlow.formatTrace("LocalResponse", subscriber);
+                            return Flow.formatTrace("LocalResponse", subscriber);
                         }
                     };
                 }
@@ -236,7 +234,7 @@ public abstract class ReadResponse
             super(data, version, SerializationHelper.Flag.LOCAL);
         }
 
-        private static Single<ReadResponse> build(CsFlow<FlowableUnfilteredPartition> partitions, EncodingVersion version, ReadCommand command)
+        private static Single<ReadResponse> build(Flow<FlowableUnfilteredPartition> partitions, EncodingVersion version, ReadCommand command)
         {
             return UnfilteredPartitionsSerializer.serializerForIntraNode(version).serialize(partitions, command.columnFilter())
                                                  .mapToRxSingle(buffer -> new LocalDataResponse(buffer, version));
@@ -274,7 +272,7 @@ public abstract class ReadResponse
             this.flag = flag;
         }
 
-        public CsFlow<FlowableUnfilteredPartition> data(ReadCommand command)
+        public Flow<FlowableUnfilteredPartition> data(ReadCommand command)
         {
             // Note that the command parameter shadows the 'command' field and this is intended because
             // the later can be null (for RemoteDataResponse as those are created in the serializers and

@@ -57,7 +57,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class CacheService implements CacheServiceMBean
 {
@@ -420,7 +420,7 @@ public class CacheService implements CacheServiceMBean
                     SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fullPartitionRead(cfs.metadata(), nowInSec, key);
                     try (ReadExecutionController controller = cmd.executionController())
                     {
-                        CsFlow<FlowableUnfilteredPartition> flow = cmd.deferredQuery(cfs, controller);
+                        Flow<FlowableUnfilteredPartition> flow = cmd.deferredQuery(cfs, controller);
                         try (UnfilteredRowIterator iter = FlowablePartitions.toIterator(DataLimits.cqlLimits(rowsToCache)
                                                                                                   .truncateUnfiltered(flow.blockingSingle(), nowInSec, true)))
                         {

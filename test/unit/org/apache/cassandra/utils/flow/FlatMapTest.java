@@ -19,8 +19,6 @@
 package org.apache.cassandra.utils.flow;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
@@ -60,10 +58,10 @@ public class FlatMapTest
             Random rand = new Random(typeSeed);
             for (int seed = 3; seed < 155; seed += 8)
             {
-                CsFlow<Integer> immediate = makeRecursive(() -> 0, seed);
+                Flow<Integer> immediate = makeRecursive(() -> 0, seed);
                 List<Integer> immValues = immediate.toList().blockingSingle();
                 System.out.println("Sequence length: " + immValues.size());
-                CsFlow<Integer> one = makeRecursive(rand::nextInt, seed);
+                Flow<Integer> one = makeRecursive(rand::nextInt, seed);
                 List<Integer> oneValues = one.toList().blockingSingle();
                 assertEquals(immValues, oneValues);
             }
@@ -73,9 +71,9 @@ public class FlatMapTest
     // TODO:
     // - onError thrown instead of onNext
 
-    CsFlow<Integer> makeRecursive(IntSupplier typeRand, int seed)
+    Flow<Integer> makeRecursive(IntSupplier typeRand, int seed)
     {
-        CsFlow<Integer> fl = make(typeRand, seed);
+        Flow<Integer> fl = make(typeRand, seed);
         switch (seed % 8)
         {
             case 3:
@@ -85,9 +83,9 @@ public class FlatMapTest
         }
     }
 
-    CsFlow<? extends Object> makeTest(IntSupplier typeRand, int seed)
+    Flow<? extends Object> makeTest(IntSupplier typeRand, int seed)
     {
-        CsFlow<Integer> fl = make(typeRand, seed);
+        Flow<Integer> fl = make(typeRand, seed);
         switch (seed % 8)
         {
             case 3:
@@ -121,53 +119,53 @@ public class FlatMapTest
     List<Integer> makeListWithCompletable(IntSupplier typeRand, int seed)
     {
         List<Integer> ret = new ArrayList<>();
-        CsFlow<Integer> fl = make(typeRand, seed);
+        Flow<Integer> fl = make(typeRand, seed);
         fl.flatMapCompletable(i -> { ret.add(i); return CompletableObserver::onComplete; })
           .blockingAwait();
         return ret;
     }
 
-    CsFlow<Integer> make(IntSupplier typeRand, int seed)
+    Flow<Integer> make(IntSupplier typeRand, int seed)
     {
         switch (typeRand.getAsInt() % 11)
         {
             case 2:
             case 3:
-                return new CsFlow<Integer>()
+                return new Flow<Integer>()
                 {
-                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
+                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
                     {
                         return new SpinningGenerator(subscriber, seed);
                     }
                 };
             case 4:
-                return new CsFlow<Integer>()
+                return new Flow<Integer>()
                 {
-                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
+                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
                     {
                         return (new YieldingGenerator(subscriber, seed));
                     }
                 };
             case 5:
-                return new CsFlow<Integer>()
+                return new Flow<Integer>()
                 {
-                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
+                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
                     {
                         return (new ParkingGenerator(subscriber, seed));
                     }
                 };
             case 6:
-                return new CsFlow<Integer>()
+                return new Flow<Integer>()
                 {
-                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
+                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
                     {
                         return (new SleepingGenerator(subscriber, seed));
                     }
                 };
             default:
-                return new CsFlow<Integer>()
+                return new Flow<Integer>()
                 {
-                    public CsSubscription subscribe(CsSubscriber<Integer> subscriber)
+                    public FlowSubscription subscribe(FlowSubscriber<Integer> subscriber)
                     {
                         return (new ImmediateGenerator(subscriber, seed));
                     }
@@ -175,14 +173,14 @@ public class FlatMapTest
         }
     }
 
-    static class ImmediateGenerator implements CsSubscription
+    static class ImmediateGenerator implements FlowSubscription
     {
-        final CsSubscriber<Integer> sub;
+        final FlowSubscriber<Integer> sub;
         final Random rand;
         volatile boolean closed = false;
         volatile boolean done = false;
 
-        ImmediateGenerator(CsSubscriber<Integer> sub, int seed)
+        ImmediateGenerator(FlowSubscriber<Integer> sub, int seed)
         {
             this.sub = sub;
             this.rand = new Random(seed);
@@ -226,7 +224,7 @@ public class FlatMapTest
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
         {
-            return CsFlow.wrapException(throwable, this);
+            return Flow.wrapException(throwable, this);
         }
 
         public String toString()
@@ -247,7 +245,7 @@ public class FlatMapTest
         volatile Runnable call = null;
         AtomicInteger iteration = new AtomicInteger(0);
 
-        SpinningGenerator(CsSubscriber<Integer> sub, int seed)
+        SpinningGenerator(FlowSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
@@ -282,7 +280,7 @@ public class FlatMapTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        YieldingGenerator(CsSubscriber<Integer> sub, int seed)
+        YieldingGenerator(FlowSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
@@ -317,7 +315,7 @@ public class FlatMapTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        ParkingGenerator(CsSubscriber<Integer> sub, int seed)
+        ParkingGenerator(FlowSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
@@ -353,7 +351,7 @@ public class FlatMapTest
         final Thread spinner;
         volatile Runnable call = null;
 
-        SleepingGenerator(CsSubscriber<Integer> sub, int seed)
+        SleepingGenerator(FlowSubscriber<Integer> sub, int seed)
         {
             super(sub, seed);
             spinner = new Thread()
@@ -387,9 +385,9 @@ public class FlatMapTest
     public void testFilterOpDoesntOverflowStack() throws Exception
     {
         final int size = 100000;
-        final long result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-                                 .flatMap(x -> CsFlow.<Integer>empty())
-                                 .countBlocking();
+        final long result = Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+                                .flatMap(x -> Flow.<Integer>empty())
+                                .countBlocking();
 
         assertEquals(0L, result);
     }

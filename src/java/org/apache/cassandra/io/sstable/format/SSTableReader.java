@@ -81,7 +81,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 
@@ -1045,7 +1045,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;
     public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
 
-    public CsFlow<FlowableUnfilteredPartition> flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    public Flow<FlowableUnfilteredPartition> flow(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
         return AsyncPartitionReader.create(this, listener, key, slices, selectedColumns, reversed);
     }

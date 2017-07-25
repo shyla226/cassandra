@@ -22,18 +22,18 @@ import io.reactivex.functions.Function;
 import org.apache.cassandra.utils.Throwables;
 
 /**
- * Implementation of {@link CsFlow#flatMap(FlatMapper)}, which applies a method to a flow and concatenates the results.
+ * Implementation of {@link Flow#flatMap(FlatMapper)}, which applies a method to a flow and concatenates the results.
  * <p>
  * This is done in depth-first fashion, i.e. one item is requested from the flow, and the result of the conversion
  * is issued to the downstream subscriber completely before requesting the next item.
  */
-public class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription, CsSubscriber<I>
+public class FlatMap<I, O> extends Flow.RequestLoop implements FlowSubscription, FlowSubscriber<I>
 {
-    public static <I, O> CsFlow<O> flatMap(CsFlow<I> source, FlatMapper<I, O> op)
+    public static <I, O> Flow<O> flatMap(Flow<I> source, FlatMapper<I, O> op)
     {
-        class FlatMapFlow extends CsFlow<O>
+        class FlatMapFlow extends Flow<O>
         {
-            public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
             {
                 return new FlatMap<I, O>(subscriber, op, source);
             }
@@ -44,25 +44,25 @@ public class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription,
     /**
      * The downstream subscriber which will receive the flow using the onXXXX() methods.
      */
-    private final CsSubscriber<O> subscriber;
+    private final FlowSubscriber<O> subscriber;
 
 
     /**
-     * The mapper converts each input (upstream) item into a CsFlow of output (downstream) items
+     * The mapper converts each input (upstream) item into a Flow of output (downstream) items
      */
     private final FlatMapper<I, O> mapper;
 
     /**
      * Upstream subscription which will be requested to supply source items.
      */
-    private final CsSubscription source;
+    private final FlowSubscription source;
 
     /**
      * If an item is active, this holds our subscription to the resulting flow.
      */
     volatile FlatMapChild current;
 
-    FlatMap(CsSubscriber<O> subscriber, FlatMapper<I, O> mapper, CsFlow<I> source) throws Exception
+    FlatMap(FlowSubscriber<O> subscriber, FlatMapper<I, O> mapper, Flow<I> source) throws Exception
     {
         this.subscriber = subscriber;
         this.mapper = mapper;
@@ -102,7 +102,7 @@ public class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription,
 
         try
         {
-            CsFlow<O> child = mapper.apply(next);
+            Flow<O> child = mapper.apply(next);
             current = new FlatMapChild(child);
         }
         catch (Throwable t)
@@ -139,14 +139,14 @@ public class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription,
 
     public String toString()
     {
-        return CsFlow.formatTrace("flatMap", mapper, subscriber);
+        return Flow.formatTrace("flatMap", mapper, subscriber);
     }
 
-    class FlatMapChild implements CsSubscriber<O>
+    class FlatMapChild implements FlowSubscriber<O>
     {
-        final CsSubscription source;
+        final FlowSubscription source;
 
-        FlatMapChild(CsFlow<O> source) throws Exception
+        FlatMapChild(Flow<O> source) throws Exception
         {
             this.source = source.subscribe(this);
         }
@@ -193,7 +193,7 @@ public class FlatMap<I, O> extends CsFlow.RequestLoop implements CsSubscription,
         }
     }
 
-    public interface FlatMapper<I, O> extends Function<I, CsFlow<O>>
+    public interface FlatMapper<I, O> extends Function<I, Flow<O>>
     {
     }
 }

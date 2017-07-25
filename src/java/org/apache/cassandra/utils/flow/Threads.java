@@ -27,12 +27,12 @@ import org.apache.cassandra.concurrent.TPCScheduler;
 
 public class Threads
 {
-    static class RequestOnCore implements CsSubscription
+    static class RequestOnCore implements FlowSubscription
     {
         final int coreId;
-        final CsSubscription source;
+        final FlowSubscription source;
 
-        <T> RequestOnCore(CsSubscriber<T> subscriber, int coreId, CsFlow<T> source) throws Exception
+        <T> RequestOnCore(FlowSubscriber<T> subscriber, int coreId, Flow<T> source) throws Exception
         {
             this.coreId = coreId;
             this.source = source.subscribe(subscriber);
@@ -58,14 +58,14 @@ public class Threads
         }
     }
 
-    final static CsFlow.Operator<?, ?> REQUEST_ON_CORE[] = new CsFlow.Operator[TPC.getNumCores()];
+    final static Flow.Operator<?, ?> REQUEST_ON_CORE[] = new Flow.Operator[TPC.getNumCores()];
     static
     {
         for (int i = 0; i < REQUEST_ON_CORE.length; ++i)
             REQUEST_ON_CORE[i] = constructRequestOnCore(i);
     }
 
-    private static CsFlow.Operator<Object, Object> constructRequestOnCore(int coreId)
+    private static Flow.Operator<Object, Object> constructRequestOnCore(int coreId)
     {
         return (source, subscriber) -> new RequestOnCore(subscriber, coreId, source);
     }
@@ -75,17 +75,17 @@ public class Threads
      * If execution is already on this thread, the request is called directly, otherwise it is given to the scheduler
      * for async execution.
      */
-    public static <T> CsFlow.Operator<T, T> requestOnCore(int coreId)
+    public static <T> Flow.Operator<T, T> requestOnCore(int coreId)
     {
-        return (CsFlow.Operator<T, T>) REQUEST_ON_CORE[coreId];
+        return (Flow.Operator<T, T>) REQUEST_ON_CORE[coreId];
     }
 
-    static class RequestOn implements CsSubscription
+    static class RequestOn implements FlowSubscription
     {
         final Scheduler scheduler;
-        final CsSubscription source;
+        final FlowSubscription source;
 
-        <T> RequestOn(CsSubscriber<T> subscriber, Scheduler scheduler, CsFlow<T> source) throws Exception
+        <T> RequestOn(FlowSubscriber<T> subscriber, Scheduler scheduler, Flow<T> source) throws Exception
         {
             this.scheduler = scheduler;
             this.source = source.subscribe(subscriber);
@@ -113,7 +113,7 @@ public class Threads
      * If we are already on that scheduler, whether the request is called directly or scheduled depends on the specific
      * scheduler.
      */
-    public static <T> CsFlow.Operator<T, T> requestOn(Scheduler scheduler)
+    public static <T> Flow.Operator<T, T> requestOn(Scheduler scheduler)
     {
         if (scheduler instanceof TPCScheduler)
             return requestOnCore(((TPCScheduler) scheduler).coreId());
@@ -123,30 +123,30 @@ public class Threads
             return createRequestOn(scheduler);
     }
 
-    private static <T> CsFlow.Operator<T, T> createRequestOn(Scheduler scheduler)
+    private static <T> Flow.Operator<T, T> createRequestOn(Scheduler scheduler)
     {
         return (source, subscriber) -> new RequestOn(subscriber, scheduler, source);
     }
 
-    static final CsFlow.Operator<?, ?> REQUEST_ON_IO = createRequestOn(Schedulers.io());
+    static final Flow.Operator<?, ?> REQUEST_ON_IO = createRequestOn(Schedulers.io());
 
     /**
      * Returns an operator to perform each request() on the given flow on the IO scheduler.
      * Used for operations that can block (e.g. sync reads off disk).
      */
-    public static <T> CsFlow.Operator<T, T> requestOnIo()
+    public static <T> Flow.Operator<T, T> requestOnIo()
     {
-        return (CsFlow.Operator<T, T>) REQUEST_ON_IO;
+        return (Flow.Operator<T, T>) REQUEST_ON_IO;
     }
 
-    static class EvaluateOn<T> implements CsSubscription
+    static class EvaluateOn<T> implements FlowSubscription
     {
-        final CsSubscriber<T> subscriber;
+        final FlowSubscriber<T> subscriber;
         final Callable<T> source;
         final int coreId;
 
         private volatile int requested = 0;
-        EvaluateOn(CsSubscriber<T> subscriber, Callable<T> source, int coreId)
+        EvaluateOn(FlowSubscriber<T> subscriber, Callable<T> source, int coreId)
         {
             this.subscriber = subscriber;
             this.source = source;
@@ -188,12 +188,12 @@ public class Threads
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
         {
-            return CsFlow.wrapException(throwable, this);
+            return Flow.wrapException(throwable, this);
         }
 
         public String toString()
         {
-            return CsFlow.formatTrace("evaluateOn " + coreId, source, subscriber);
+            return Flow.formatTrace("evaluateOn " + coreId, source, subscriber);
         }
     }
 
@@ -202,18 +202,18 @@ public class Threads
      * If execution is already on this thread, the evaluation is called directly, otherwise it is given to the scheduler
      * for async execution.
      */
-    public static <T> CsFlow<T> evaluateOnCore(Callable<T> callable, int coreId)
+    public static <T> Flow<T> evaluateOnCore(Callable<T> callable, int coreId)
     {
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber)
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
             {
                 return new EvaluateOn<T>(subscriber, callable, coreId);
             }
         };
     }
 
-    public static <T> CsFlow<T> deferOnCore(Callable<CsFlow<T>> source, int coreId)
+    public static <T> Flow<T> deferOnCore(Callable<Flow<T>> source, int coreId)
     {
         return evaluateOnCore(source, coreId).flatMap(x -> x);
     }

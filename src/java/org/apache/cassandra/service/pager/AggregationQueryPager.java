@@ -29,7 +29,7 @@ import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * {@code QueryPager} that takes care of fetching the pages for aggregation queries.
@@ -55,11 +55,11 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public CsFlow<FlowablePartition> fetchPage(int pageSize,
-                                               ConsistencyLevel consistency,
-                                               ClientState clientState,
-                                               long queryStartNanoTime,
-                                               boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize,
+                                             ConsistencyLevel consistency,
+                                             ClientState clientState,
+                                             long queryStartNanoTime,
+                                             boolean forContinuousPaging)
     {
         if (limits.isGroupByLimit())
             return new GroupByPartitions(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
@@ -68,7 +68,7 @@ public final class AggregationQueryPager implements QueryPager
     }
 
     @Override
-    public CsFlow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     {
         if (limits.isGroupByLimit())
             return new GroupByPartitions(pageSize, null, System.nanoTime()).partitions();
@@ -178,10 +178,10 @@ public final class AggregationQueryPager implements QueryPager
          *
          * @return the partitions for this query.
          */
-        CsFlow<FlowablePartition> partitions()
+        Flow<FlowablePartition> partitions()
         {
             initialMaxRemaining = subPager.maxRemaining();
-            CsFlow<FlowablePartition> ret = fetchSubPage(pageSize);
+            Flow<FlowablePartition> ret = fetchSubPage(pageSize);
 
             // the existing iterator based approach would merge partitions with the same key across two different pages
             // however it looks like we don't need to do this, because we create a new pager with a grouping state
@@ -215,7 +215,7 @@ public final class AggregationQueryPager implements QueryPager
             return pageSize <= 0 ? DataLimits.NO_LIMIT : pageSize;
         }
 
-        private CsFlow<FlowablePartition> moreContents()
+        private Flow<FlowablePartition> moreContents()
         {
             int counted = initialMaxRemaining - subPager.maxRemaining();
 
@@ -282,7 +282,7 @@ public final class AggregationQueryPager implements QueryPager
          * @param subPageSize the sub-page size in number of groups
          * @return the next sub-page
          */
-        private CsFlow<FlowablePartition> fetchSubPage(int subPageSize)
+        private Flow<FlowablePartition> fetchSubPage(int subPageSize)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Fetching sub-page with consistency {}", consistency);

@@ -88,7 +88,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
@@ -380,7 +380,7 @@ public class SelectStatement implements CQLStatement
                                                int userLimit,
                                                long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        CsFlow<FlowablePartition> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime, false);
+        Flow<FlowablePartition> data = query.execute(options.getConsistency(), state.getClientState(), queryStartNanoTime, false);
         return processResults(data, options, selectors, nowInSec, userLimit, null);
     }
 
@@ -423,7 +423,7 @@ public class SelectStatement implements CQLStatement
             return pager.maxRemaining();
         }
 
-        public abstract CsFlow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime);
+        public abstract Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime);
 
         /**
          * The pager for ordinary queries.
@@ -442,7 +442,7 @@ public class SelectStatement implements CQLStatement
                 this.forContinuousPaging = forContinuousPaging;
             }
 
-            public CsFlow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
+            public Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime, forContinuousPaging);
             }
@@ -458,7 +458,7 @@ public class SelectStatement implements CQLStatement
                 super(pager);
             }
 
-            public CsFlow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
+            public Flow<FlowablePartition> fetchPage(int pageSize, long queryStartNanoTime)
             {
                 return pager.fetchPageInternal(pageSize);
             }
@@ -493,7 +493,7 @@ public class SelectStatement implements CQLStatement
                    + " you must either remove the ORDER BY or the IN and sort client side, or disable paging for this query");
 
         final Single<ResultMessage.Rows> msg;
-        final CsFlow<FlowablePartition> page = pager.fetchPage(pageSize, queryStartNanoTime);
+        final Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStartNanoTime);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
@@ -513,7 +513,7 @@ public class SelectStatement implements CQLStatement
         ClientWarn.instance.warn(msg);
     }
 
-    private Single<ResultMessage.Rows> processResults(CsFlow<FlowablePartition> partitions,
+    private Single<ResultMessage.Rows> processResults(Flow<FlowablePartition> partitions,
                                                       QueryOptions options,
                                                       Selectors selectors,
                                                       int nowInSec,
@@ -696,7 +696,7 @@ public class SelectStatement implements CQLStatement
             int pageSize = isLocalQuery ? pager.maxRemaining() : this.pageSize;
             long queryStart = isLocalQuery ? queryStartNanoTime : System.nanoTime();
 
-            CsFlow<FlowablePartition> page = pager.fetchPage(pageSize, queryStart);
+            Flow<FlowablePartition> page = pager.fetchPage(pageSize, queryStart);
 
             page.takeUntil(builder::isCompleted)
                 .flatMap(partition -> statement.processPartition(partition, options, builder, query.nowInSec()))
@@ -828,7 +828,7 @@ public class SelectStatement implements CQLStatement
      *
      * @return - a single of a result set with the results
      */
-    public Single<ResultSet> process(CsFlow<FlowablePartition> partitions, int nowInSec)
+    public Single<ResultSet> process(Flow<FlowablePartition> partitions, int nowInSec)
     {
         return process(partitions,
                        QueryOptions.DEFAULT,
@@ -1152,7 +1152,7 @@ public class SelectStatement implements CQLStatement
         return filter;
     }
 
-    private Single<ResultSet> process(CsFlow<FlowablePartition> partitions,
+    private Single<ResultSet> process(Flow<FlowablePartition> partitions,
                                       QueryOptions options,
                                       Selectors selectors,
                                       int nowInSec,
@@ -1197,7 +1197,7 @@ public class SelectStatement implements CQLStatement
     }
 
     // Used by ModificationStatement for CAS operations
-    <T extends ResultBuilder> CsFlow<T> processPartition(FlowablePartition partition, QueryOptions options, T result, int nowInSec)
+    <T extends ResultBuilder> Flow<T> processPartition(FlowablePartition partition, QueryOptions options, T result, int nowInSec)
     throws InvalidRequestException
     {
         final ProtocolVersion protocolVersion = options.getProtocolVersion();

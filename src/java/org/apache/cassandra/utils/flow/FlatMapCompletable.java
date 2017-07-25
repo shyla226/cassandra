@@ -31,7 +31,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
 
 /**
- * Implementation of {@link CsFlow#flatMapCompletable(Function)}, which applies a method to
+ * Implementation of {@link Flow#flatMapCompletable(Function)}, which applies a method to
  * each item in a flow, where that method will return an rx java completable. Each completable is
  * subscribed to, and no further item in the flow is requested until the current completable successfully
  * completes (depth-first).
@@ -42,9 +42,9 @@ import org.apache.cassandra.utils.Throwables;
  * The completable returned by the flatMap will actually be completed when the flow is consumed and all
  * inner completables have completed.
  */
-class FlatMapCompletable<I> extends CsFlow.RequestLoop implements CsSubscriber<I>, Disposable
+class FlatMapCompletable<I> extends Flow.RequestLoop implements FlowSubscriber<I>, Disposable
 {
-    public static <I> Completable flatMap(CsFlow<I> source, Function<? super I, ? extends CompletableSource> mapper)
+    public static <I> Completable flatMap(Flow<I> source, Function<? super I, ? extends CompletableSource> mapper)
     {
         class FlatMapCompletableCompletable extends Completable
         {
@@ -79,7 +79,7 @@ class FlatMapCompletable<I> extends CsFlow.RequestLoop implements CsSubscriber<I
     /**
      * Upstream subscription which will be requested to supply source items.
      */
-    private final CsSubscription source;
+    private final FlowSubscription source;
 
     /**
      * Set to true when the outer completable has been disposed. In this case then next
@@ -94,7 +94,7 @@ class FlatMapCompletable<I> extends CsFlow.RequestLoop implements CsSubscriber<I
 
     private FlatMapCompletable(CompletableObserver observer,
                                Function<? super I, ? extends CompletableSource> mapper,
-                               CsFlow<I> source) throws Exception
+                               Flow<I> source) throws Exception
     {
         this.observer = observer;
         this.mapper = mapper;
@@ -180,7 +180,7 @@ class FlatMapCompletable<I> extends CsFlow.RequestLoop implements CsSubscriber<I
 
     public String toString()
     {
-        return CsFlow.formatTrace("flatMapCompletable", mapper);
+        return Flow.formatTrace("flatMapCompletable", mapper);
     }
 
     public void dispose()

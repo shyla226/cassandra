@@ -29,9 +29,9 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -88,12 +88,12 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
     }
 
     // Should only be used for the on-wire format.
-    public CsFlow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out) throws IOException
+    public Flow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out) throws IOException
     {
         return serialize(partition, selection, out, -1);
     }
 
-    public CsFlow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
+    public Flow<Void> serialize(FlowableUnfilteredPartition partition, ColumnFilter selection, DataOutputPlus out, int rowEstimate) throws IOException
     {
         SerializationHeader header = new SerializationHeader(false,
                                                              partition.header.metadata,
@@ -289,16 +289,16 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         };
     }
 
-    private class DeserializePartitionSubscription implements CsSubscription
+    private class DeserializePartitionSubscription implements FlowSubscription
     {
         private final Row.Builder builder;
         private final SerializationHelper helper;
         private final SerializationHeader sHeader;
         private final DataInputPlus in;
-        private final CsSubscriber<Unfiltered> subscriber;
+        private final FlowSubscriber<Unfiltered> subscriber;
         private volatile boolean completed;
 
-        private DeserializePartitionSubscription(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header, CsSubscriber<Unfiltered> subscriber)
+        private DeserializePartitionSubscription(DataInputPlus in, TableMetadata metadata, SerializationHelper.Flag flag, Header header, FlowSubscriber<Unfiltered> subscriber)
         {
             this.builder = BTreeRow.sortedBuilder();
             this.in = in;
@@ -352,13 +352,13 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
         {
-            return CsFlow.wrapException(throwable, this);
+            return Flow.wrapException(throwable, this);
         }
 
         @Override
         public String toString()
         {
-            return CsFlow.formatTrace("deserialize-partition", subscriber);
+            return Flow.formatTrace("deserialize-partition", subscriber);
         }
     }
 
@@ -367,11 +367,11 @@ public class UnfilteredPartitionSerializer extends VersionDependent<EncodingVers
         if (header.isEmpty)
             return FlowablePartitions.empty(metadata, header.key, header.isReversed);
 
-        CsFlow<Unfiltered> content = new CsFlow<Unfiltered>()
+        Flow<Unfiltered> content = new Flow<Unfiltered>()
         {
-            private CsSubscriber<Unfiltered> subscriber;
+            private FlowSubscriber<Unfiltered> subscriber;
 
-            public CsSubscription subscribe(CsSubscriber<Unfiltered> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<Unfiltered> subscriber) throws Exception
             {
                 // we don't own the buffer behind DataInputPlus and so we must enforce a single subscriber
                 assert this.subscriber == null : "Expected only one subscriber";

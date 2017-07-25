@@ -53,7 +53,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.versioning.Version;
 
 import static org.junit.Assert.*;
@@ -277,13 +277,13 @@ public class ReadCommandTest
 
             ReadQuery query = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-            CsFlow<FlowableUnfilteredPartition> partitions = FlowablePartitions.skipEmptyPartitions(query.executeLocally());
+            Flow<FlowableUnfilteredPartition> partitions = FlowablePartitions.skipEmptyPartitions(query.executeLocally());
             UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
             buffers.addAll(serializer.serialize(partitions, columnFilter).toList().blockingSingle());
         }
 
         // deserialize, merge and check the results are all there
-        List<CsFlow<FlowableUnfilteredPartition>> partitions = new ArrayList<>();
+        List<Flow<FlowableUnfilteredPartition>> partitions = new ArrayList<>();
 
         UnfilteredPartitionsSerializer.Serializer serializer = UnfilteredPartitionsSerializer.serializerForIntraNode(version);
         for (ByteBuffer buffer : buffers)
@@ -294,9 +294,9 @@ public class ReadCommandTest
                                                   SerializationHelper.Flag.LOCAL));
         }
 
-        CsFlow<FlowablePartition> merged = FlowablePartitions.mergeAndFilter(partitions,
-                                                                             nowInSeconds,
-                                                                             FlowablePartitions.MergeListener.NONE);
+        Flow<FlowablePartition> merged = FlowablePartitions.mergeAndFilter(partitions,
+                                                                           nowInSeconds,
+                                                                           FlowablePartitions.MergeListener.NONE);
 
 
         int i = 0;

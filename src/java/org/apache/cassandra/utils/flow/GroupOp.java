@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Operator for grouping elements of a CsFlow. Used with {@link CsFlow#group(GroupOp)}.
+ * Operator for grouping elements of a Flow. Used with {@link Flow#group(GroupOp)}.
  * <p>
  * Stream is broken up in selections of consecutive elements where {@link #inSameGroup} returns true, passing each
  * collection through {@link #map(List)}.
@@ -42,11 +42,11 @@ public interface GroupOp<I, O>
      */
     O map(List<I> inputs);
 
-    public static <I, O> CsFlow<O> group(CsFlow<I> source, GroupOp<I, O> op)
+    public static <I, O> Flow<O> group(Flow<I> source, GroupOp<I, O> op)
     {
-        class GroupFlow extends CsFlow<O>
+        class GroupFlow extends Flow<O>
         {
-            public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
             {
                 return new Subscription<>(subscriber, op, source);
             }
@@ -54,17 +54,17 @@ public interface GroupOp<I, O>
         return new GroupFlow();
     }
 
-    static class Subscription<I, O> extends CsFlow.RequestLoop
-    implements CsSubscriber<I>, CsSubscription
+    static class Subscription<I, O> extends Flow.RequestLoop
+    implements FlowSubscriber<I>, FlowSubscription
     {
-        final CsSubscriber<O> subscriber;
+        final FlowSubscriber<O> subscriber;
         final GroupOp<I, O> mapper;
-        final CsSubscription source;
+        final FlowSubscription source;
         volatile boolean completeOnNextRequest;
         I first;
         List<I> entries;
 
-        public Subscription(CsSubscriber<O> subscriber, GroupOp<I, O> mapper, CsFlow<I> source) throws Exception
+        public Subscription(FlowSubscriber<O> subscriber, GroupOp<I, O> mapper, Flow<I> source) throws Exception
         {
             this.subscriber = subscriber;
             this.mapper = mapper;
@@ -135,7 +135,7 @@ public interface GroupOp<I, O>
 
         public String toString()
         {
-            return CsFlow.formatTrace("group", mapper, subscriber);
+            return Flow.formatTrace("group", mapper, subscriber);
         }
     }
 }

@@ -7,7 +7,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterators.MergeListener;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
- * A header for CsFlow partition containers. Contains partition-level data that isn't expected to change with
+ * A header for Flow partition containers. Contains partition-level data that isn't expected to change with
  * transformations, to avoid having to copy/repeat it every time a transformation is applied to the partition content.
  */
 public class PartitionHeader

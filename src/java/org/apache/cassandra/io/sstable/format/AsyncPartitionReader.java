@@ -36,17 +36,17 @@ import org.apache.cassandra.io.sstable.RowIndexEntry;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.Rebufferer.NotInCacheException;
 import org.apache.cassandra.io.util.Rebufferer.ReaderConstraint;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /**
  * Asynchronous partition reader.
  *
  * This is only used to asyncronously create a {@link FlowableUnfilteredPartition}
  * via the {@link #create(SSTableReader, SSTableReadsListener, DecoratedKey, Slices, ColumnFilter, boolean)} method below.
- * This creates a CsFlow<FlowableUnfilteredPartition> which when requested reads the header and static row of the
- * partition and constructs a CsFlow<Unfiltered> which can retrieve the partition rows.
+ * This creates a Flow<FlowableUnfilteredPartition> which when requested reads the header and static row of the
+ * partition and constructs a Flow<Unfiltered> which can retrieve the partition rows.
  *
  * All reads proceed optimistically, i.e. they first proceed as if all data is already in the chunk cache. If this is the
  * case, the read can complete without delay and the requested data is passed on immediately. Otherwise the read will
@@ -54,12 +54,12 @@ import org.apache.cassandra.utils.flow.CsSubscription;
  * from disk.  This requires, on retry, first calling the {@link AbstractSSTableIterator#resetReaderState()}
  * In order to start from the last finished item.
  *
- * The state logic is very straight fwd since CsFlow gives us guarantees that
+ * The state logic is very straight fwd since Flow gives us guarantees that
  * request/close will not be called until after a previous call finishes.
  *
  * We only need to track if we are waiting for data since we need to reset the reader state in that case.
  */
-class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
+class AsyncPartitionReader extends Flow<FlowableUnfilteredPartition>
 {
     private static final Logger logger = LoggerFactory.getLogger(AsyncPartitionReader.class);
 
@@ -94,27 +94,27 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
      *
      * This is the only supported accessor of this class.
      */
-    public static CsFlow<FlowableUnfilteredPartition> create(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
+    public static Flow<FlowableUnfilteredPartition> create(SSTableReader table, SSTableReadsListener listener, DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reverse)
     {
         return new AsyncPartitionReader(table, listener, key, slices, selectedColumns, reverse);
     }
 
-    public CsSubscription subscribe(CsSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+    public FlowSubscription subscribe(FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
     {
         assert indexEntry == null;
         return new PartitionReader(subscriber);
     }
 
-    abstract class Base<T> implements CsSubscription
+    abstract class Base<T> implements FlowSubscription
     {
-        CsSubscriber<T> subscriber;
+        FlowSubscriber<T> subscriber;
 
         //Force all disk callbacks through the same thread
         private final Executor onReadyExecutor = TPC.bestTPCScheduler().getExecutor();
 
         abstract void performRead(boolean isRetry) throws Exception;
 
-        Base(CsSubscriber<T> s)
+        Base(FlowSubscriber<T> s)
         {
             this.subscriber = s;
         }
@@ -153,7 +153,7 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
         {
-            return CsFlow.wrapException(throwable, this);
+            return Flow.wrapException(throwable, this);
         }
     }
 
@@ -161,7 +161,7 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
     {
         boolean issued = false;
 
-        PartitionReader(CsSubscriber<FlowableUnfilteredPartition> subscriber)
+        PartitionReader(FlowSubscriber<FlowableUnfilteredPartition> subscriber)
         {
             super(subscriber);
         }
@@ -208,9 +208,9 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
                                                          ssTableIterator.isReverseOrder(),
                                                          ssTableIterator.stats());
 
-            CsFlow<Unfiltered> content = new CsFlow<Unfiltered>()
+            Flow<Unfiltered> content = new Flow<Unfiltered>()
             {
-                public CsSubscription subscribe(CsSubscriber<Unfiltered> subscriber) throws Exception
+                public FlowSubscription subscribe(FlowSubscriber<Unfiltered> subscriber) throws Exception
                 {
                     return new PartitionSubscription(subscriber);
                 }
@@ -239,7 +239,7 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
 
         public String toString()
         {
-            return CsFlow.formatTrace("PartitionReader:" + table, subscriber);
+            return Flow.formatTrace("PartitionReader:" + table, subscriber);
         }
     }
 
@@ -249,7 +249,7 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
         //Since we could have an async break in either place
         volatile boolean needsHasNextCheck = true;
 
-        PartitionSubscription(CsSubscriber<Unfiltered> s)
+        PartitionSubscription(FlowSubscriber<Unfiltered> s)
         {
             super(s);
         }
@@ -313,7 +313,7 @@ class AsyncPartitionReader extends CsFlow<FlowableUnfilteredPartition>
 
         public String toString()
         {
-            return CsFlow.formatTrace("PartitionSubscription:" + table, subscriber);
+            return Flow.formatTrace("PartitionSubscription:" + table, subscriber);
         }
     }
 }

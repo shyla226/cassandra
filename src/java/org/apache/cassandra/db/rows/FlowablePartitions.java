@@ -38,7 +38,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Reducer;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 
 /**
@@ -115,7 +115,7 @@ public class FlowablePartitions
     {
         try
         {
-            CloseableIterator<Unfiltered> iterator = CsFlow.toIterator(partition.content);
+            CloseableIterator<Unfiltered> iterator = Flow.toIterator(partition.content);
 
             class URI extends BaseRowIterator<Unfiltered> implements UnfilteredRowIterator
             {
@@ -138,7 +138,7 @@ public class FlowablePartitions
     {
         try
         {
-            CloseableIterator<Row> iterator = CsFlow.toIterator(partition.content);
+            CloseableIterator<Row> iterator = Flow.toIterator(partition.content);
 
             class RI extends BaseRowIterator<Row> implements RowIterator
             {
@@ -158,7 +158,7 @@ public class FlowablePartitions
 
     public static FlowableUnfilteredPartition fromIterator(UnfilteredRowIterator iter, Scheduler callOn)
     {
-        CsFlow<Unfiltered> data = CsFlow.fromIterable(() -> iter);
+        Flow<Unfiltered> data = Flow.fromIterable(() -> iter);
         if (callOn != null)
             data = data.lift(Threads.requestOn(callOn));
         Row staticRow = iter.staticRow();
@@ -169,7 +169,7 @@ public class FlowablePartitions
 
     public static FlowablePartition fromIterator(RowIterator iter, Scheduler callOn)
     {
-        CsFlow<Row> data = CsFlow.fromIterable(() -> iter);
+        Flow<Row> data = Flow.fromIterable(() -> iter);
         if (callOn != null)
             data = data.lift(Threads.requestOn(callOn));
 
@@ -183,7 +183,7 @@ public class FlowablePartitions
     {
         return new FlowableUnfilteredPartition(PartitionHeader.empty(metadata, partitionKey, reversed),
                                                Rows.EMPTY_STATIC_ROW,
-                                               CsFlow.empty());
+                                               Flow.empty());
     }
 
     public static FlowableUnfilteredPartition merge(List<FlowableUnfilteredPartition> flowables, int nowInSec, UnfilteredRowIterators.MergeListener listener)
@@ -196,7 +196,7 @@ public class FlowablePartitions
             return first;
 
         List<PartitionHeader> headers = new ArrayList<>(flowables.size());
-        List<CsFlow<Unfiltered>> contents = new ArrayList<>(flowables.size());
+        List<Flow<Unfiltered>> contents = new ArrayList<>(flowables.size());
         for (FlowableUnfilteredPartition flowable : flowables)
         {
             headers.add(flowable.header);
@@ -216,9 +216,9 @@ public class FlowablePartitions
             comparator = comparator.reversed();
 
 
-        CsFlow<Unfiltered> content = CsFlow.merge(contents,
-                                                  comparator,
-                                                  reducer);
+        Flow<Unfiltered> content = Flow.merge(contents,
+                                              comparator,
+                                              reducer);
         if (listener != null)
             content = content.doOnClose(listener::close);
 
@@ -259,15 +259,15 @@ public class FlowablePartitions
 
     private static final Comparator<FlowableUnfilteredPartition> flowablePartitionComparator = Comparator.comparing(x -> x.header.partitionKey);
 
-    public static CsFlow<FlowableUnfilteredPartition> mergePartitions(final List<CsFlow<FlowableUnfilteredPartition>> sources,
-                                                                      final int nowInSec,
-                                                                      final MergeListener listener)
+    public static Flow<FlowableUnfilteredPartition> mergePartitions(final List<Flow<FlowableUnfilteredPartition>> sources,
+                                                                    final int nowInSec,
+                                                                    final MergeListener listener)
     {
         assert !sources.isEmpty();
         if (sources.size() == 1 && listener == null)
             return sources.get(0);
 
-        CsFlow<FlowableUnfilteredPartition> merge = CsFlow.merge(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
+        Flow<FlowableUnfilteredPartition> merge = Flow.merge(sources, flowablePartitionComparator, new Reducer<FlowableUnfilteredPartition, FlowableUnfilteredPartition>()
         {
             private final FlowableUnfilteredPartition[] toMerge = new FlowableUnfilteredPartition[sources.size()];
             private PartitionHeader header;
@@ -338,30 +338,30 @@ public class FlowablePartitions
         };
     }
 
-    public static CsFlow<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
+    public static Flow<FlowableUnfilteredPartition> fromPartitions(UnfilteredPartitionIterator iter, Scheduler scheduler)
     {
-        CsFlow<FlowableUnfilteredPartition> flow = CsFlow.fromIterable(() -> iter)
-                                                         .map(i -> fromIterator(i, scheduler));
+        Flow<FlowableUnfilteredPartition> flow = Flow.fromIterable(() -> iter)
+                                                     .map(i -> fromIterator(i, scheduler));
         if (scheduler != null)
             flow = flow.lift(Threads.requestOn(scheduler));
         return flow;
     }
 
-    public static CsFlow<FlowablePartition> fromPartitions(PartitionIterator iter, Scheduler scheduler)
+    public static Flow<FlowablePartition> fromPartitions(PartitionIterator iter, Scheduler scheduler)
     {
-        CsFlow<FlowablePartition> flow = CsFlow.fromIterable(() -> iter)
-                                               .map(i -> fromIterator(i, scheduler));
+        Flow<FlowablePartition> flow = Flow.fromIterable(() -> iter)
+                                           .map(i -> fromIterator(i, scheduler));
         if (scheduler != null)
             flow = flow.lift(Threads.requestOn(scheduler));
         return flow;
     }
 
     @SuppressWarnings("resource") // caller to close
-    public static UnfilteredPartitionIterator toPartitions(CsFlow<FlowableUnfilteredPartition> partitions, TableMetadata metadata)
+    public static UnfilteredPartitionIterator toPartitions(Flow<FlowableUnfilteredPartition> partitions, TableMetadata metadata)
     {
         try
         {
-            CloseableIterator<FlowableUnfilteredPartition> iterator = CsFlow.toIterator(partitions);
+            CloseableIterator<FlowableUnfilteredPartition> iterator = Flow.toIterator(partitions);
 
             return new UnfilteredPartitionIterator()
             {
@@ -393,11 +393,11 @@ public class FlowablePartitions
     }
 
     @SuppressWarnings("resource") // caller to close
-    public static PartitionIterator toPartitionsFiltered(CsFlow<FlowablePartition> partitions)
+    public static PartitionIterator toPartitionsFiltered(Flow<FlowablePartition> partitions)
     {
         try
         {
-            CloseableIterator<FlowablePartition> iterator = CsFlow.toIterator(partitions);
+            CloseableIterator<FlowablePartition> iterator = Flow.toIterator(partitions);
 
             return new PartitionIterator()
             {
@@ -435,29 +435,29 @@ public class FlowablePartitions
     public static FlowablePartition filter(FlowableUnfilteredPartition data, int nowInSec)
     {
         Row staticRow = data.staticRow.purge(DeletionPurger.PURGE_ALL, nowInSec);
-        CsFlow<Row> content = filteredContent(data, nowInSec);
+        Flow<Row> content = filteredContent(data, nowInSec);
 
         return new FlowablePartition(data.header,
                                      filterStaticRow(staticRow, nowInSec),
                                      content);
     }
 
-    public static CsFlow<FlowablePartition> filterAndSkipEmpty(FlowableUnfilteredPartition data, int nowInSec)
+    public static Flow<FlowablePartition> filterAndSkipEmpty(FlowableUnfilteredPartition data, int nowInSec)
     {
         Row staticRow = filterStaticRow(data.staticRow, nowInSec);
-        CsFlow<Row> content = filteredContent(data, nowInSec);
+        Flow<Row> content = filteredContent(data, nowInSec);
 
         if (!staticRow.isEmpty())
-            return CsFlow.just(new FlowablePartition(data.header,
-                                                     staticRow,
-                                                     content));
+            return Flow.just(new FlowablePartition(data.header,
+                                                   staticRow,
+                                                   content));
         else
             return content.skipMapEmpty(c -> new FlowablePartition(data.header,
                                                                    Rows.EMPTY_STATIC_ROW,
                                                                    c));
     }
 
-    private static CsFlow<Row> filteredContent(FlowableUnfilteredPartition data, int nowInSec)
+    private static Flow<Row> filteredContent(FlowableUnfilteredPartition data, int nowInSec)
     {
         return data.content.skippingMap(unfiltered -> unfiltered.isRow()
                                                       ? ((Row) unfiltered).purge(DeletionPurger.PURGE_ALL, nowInSec)
@@ -467,7 +467,7 @@ public class FlowablePartitions
     /**
      * Filters the given partition stream, removing all partitions that become empty after filtering.
      */
-    public static CsFlow<FlowablePartition> filterAndSkipEmpty(CsFlow<FlowableUnfilteredPartition> data, int nowInSec)
+    public static Flow<FlowablePartition> filterAndSkipEmpty(Flow<FlowableUnfilteredPartition> data, int nowInSec)
     {
         return data.flatMap(p -> filterAndSkipEmpty(p, nowInSec));
     }
@@ -476,22 +476,22 @@ public class FlowablePartitions
      * Skips empty partitions. This is not terribly efficient as it has to cache the first row of the partition and
      * reconstruct the FlowableUnfilteredPartition object.
      */
-    public static CsFlow<FlowableUnfilteredPartition> skipEmptyPartitions(CsFlow<FlowableUnfilteredPartition> partitions)
+    public static Flow<FlowableUnfilteredPartition> skipEmptyPartitions(Flow<FlowableUnfilteredPartition> partitions)
     {
         return partitions.flatMap(partition ->
                 partition.staticRow().isEmpty() && partition.partitionLevelDeletion().isLive() ?
-                        partition.content.skipMapEmpty(content -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, content)) :
-                        CsFlow.just(partition));
+                partition.content.skipMapEmpty(content -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, content)) :
+                Flow.just(partition));
     }
     
-    public static CsFlow<FlowablePartition> mergeAndFilter(List<CsFlow<FlowableUnfilteredPartition>> results,
-                                                           int nowInSec,
-                                                           MergeListener listener)
+    public static Flow<FlowablePartition> mergeAndFilter(List<Flow<FlowableUnfilteredPartition>> results,
+                                                         int nowInSec,
+                                                         MergeListener listener)
     {
         return filterAndSkipEmpty(mergePartitions(results, nowInSec, listener), nowInSec);
     }
 
-    public static CsFlow<Row> allRows(CsFlow<FlowablePartition> data)
+    public static Flow<Row> allRows(Flow<FlowablePartition> data)
     {
         return data.flatMap(partition -> partition.content);
     }

@@ -22,7 +22,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class Monitor
 {
@@ -232,9 +232,9 @@ public class Monitor
             abort();
     }
 
-    public CsFlow<FlowableUnfilteredPartition> withMonitoring(CsFlow<FlowableUnfilteredPartition> partitions)
+    public Flow<FlowableUnfilteredPartition> withMonitoring(Flow<FlowableUnfilteredPartition> partitions)
     {
-        CsFlow.MappingOp<Unfiltered, Unfiltered> checkForAbort = unfiltered ->
+        Flow.MappingOp<Unfiltered, Unfiltered> checkForAbort = unfiltered ->
         {
             if (isTesting()) // delay for testing
                 FBUtilities.sleepQuietly(TEST_ITERATION_DELAY_MILLIS);

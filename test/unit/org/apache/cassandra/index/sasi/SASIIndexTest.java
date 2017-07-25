@@ -98,7 +98,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ByteSource;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.junit.Assert.*;
 
@@ -2437,7 +2437,7 @@ public class SASIIndexTest
 
     private static Set<DecoratedKey> getPaged(ColumnFamilyStore store, int pageSize, Expression... expressions)
     {
-        CsFlow<FlowableUnfilteredPartition> currentPage;
+        Flow<FlowableUnfilteredPartition> currentPage;
         Set<DecoratedKey> uniqueKeys = new TreeSet<>();
 
         DecoratedKey lastKey = null;
@@ -2471,7 +2471,7 @@ public class SASIIndexTest
         return uniqueKeys;
     }
 
-    private static CsFlow<FlowableUnfilteredPartition> getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
+    private static Flow<FlowableUnfilteredPartition> getIndexed(ColumnFamilyStore store, ColumnFilter columnFilter, DecoratedKey startKey, int maxResults, Expression... expressions)
     {
         DataRange range = (startKey == null)
                             ? DataRange.allData(PARTITIONER)
@@ -2508,9 +2508,9 @@ public class SASIIndexTest
         return rm;
     }
 
-    private static Set<String> getKeys(final CsFlow<FlowableUnfilteredPartition> rows)
+    private static Set<String> getKeys(final Flow<FlowableUnfilteredPartition> rows)
     {
-        CsFlow<DecoratedKey> fs = rows.flatMap(Util::nonEmptyKeys);
+        Flow<DecoratedKey> fs = rows.flatMap(Util::nonEmptyKeys);
 
         try
         {

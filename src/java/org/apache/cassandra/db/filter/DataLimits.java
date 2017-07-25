@@ -34,7 +34,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -229,7 +229,7 @@ public abstract class DataLimits
      *
      * @return the same flow but with the counter operations applied
      */
-    public static CsFlow<FlowableUnfilteredPartition> countUnfiltered(CsFlow<FlowableUnfilteredPartition> partitions, Counter counter)
+    public static Flow<FlowableUnfilteredPartition> countUnfiltered(Flow<FlowableUnfilteredPartition> partitions, Counter counter)
     {
         return partitions.doOnClose(counter::endOfIteration)
                          .map(partition -> countUnfiltered(counter, partition));
@@ -239,7 +239,7 @@ public abstract class DataLimits
     {
         counter.newPartition(partition.partitionKey(), partition.staticRow);
 
-        CsFlow<Unfiltered> content = partition.content
+        Flow<Unfiltered> content = partition.content
                                               .doOnClose(counter::endOfPartition)
                                               .map(unfiltered ->
                                                    {
@@ -264,13 +264,13 @@ public abstract class DataLimits
      *
      * @return the truncated flow
      */
-    public CsFlow<FlowableUnfilteredPartition> truncateUnfiltered(CsFlow<FlowableUnfilteredPartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    public Flow<FlowableUnfilteredPartition> truncateUnfiltered(Flow<FlowableUnfilteredPartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
     {
         Counter counter = this.newCounter(nowInSec, false, countPartitionsWithOnlyStaticData);
         return truncateUnfiltered(partitions, counter);
     }
 
-    public static CsFlow<FlowableUnfilteredPartition> truncateUnfiltered(CsFlow<FlowableUnfilteredPartition> partitions, Counter counter)
+    public static Flow<FlowableUnfilteredPartition> truncateUnfiltered(Flow<FlowableUnfilteredPartition> partitions, Counter counter)
     {
         return partitions.takeUntilAndDoOnClose(counter::isDone,
                                                 counter::endOfIteration)
@@ -287,7 +287,7 @@ public abstract class DataLimits
     {
         counter.newPartition(partition.partitionKey(), partition.staticRow);
 
-        CsFlow<Unfiltered> content = partition.content
+        Flow<Unfiltered> content = partition.content
                                               .takeUntilAndDoOnClose(counter::isDoneForPartition,
                                                                      counter::endOfPartition)
                                               .skippingMap(unfiltered ->
@@ -309,13 +309,13 @@ public abstract class DataLimits
      *
      * @return the truncated flow
      */
-    public CsFlow<FlowablePartition> truncateFiltered(CsFlow<FlowablePartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
+    public Flow<FlowablePartition> truncateFiltered(Flow<FlowablePartition> partitions, int nowInSec, boolean countPartitionsWithOnlyStaticData)
     {
         Counter counter = this.newCounter(nowInSec, true, countPartitionsWithOnlyStaticData);
         return truncateFiltered(partitions, counter);
     }
 
-    public static CsFlow<FlowablePartition> truncateFiltered(CsFlow<FlowablePartition> partitions, Counter counter)
+    public static Flow<FlowablePartition> truncateFiltered(Flow<FlowablePartition> partitions, Counter counter)
     {
         return partitions.takeUntilAndDoOnClose(counter::isDone,
                                                 counter::endOfIteration)
@@ -332,9 +332,9 @@ public abstract class DataLimits
     {
         counter.newPartition(partition.partitionKey(), partition.staticRow);
 
-        CsFlow<Row> content = partition.content.takeUntilAndDoOnClose(counter::isDoneForPartition,
-                                                                      counter::endOfPartition)
-                                               .skippingMap(counter::newRow);
+        Flow<Row> content = partition.content.takeUntilAndDoOnClose(counter::isDoneForPartition,
+                                                                    counter::endOfPartition)
+                                             .skippingMap(counter::newRow);
         return new FlowablePartition(partition.header,
                                      counter.newStaticRow(partition.staticRow),
                                      content);

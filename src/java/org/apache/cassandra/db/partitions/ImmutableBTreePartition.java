@@ -29,7 +29,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class ImmutableBTreePartition extends AbstractBTreePartition
 {
@@ -134,7 +134,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions)
+    public static Flow<ImmutableBTreePartition> create(Flow<FlowableUnfilteredPartition> partitions)
     {
         return create(partitions, INITIAL_ROW_CAPACITY);
     }
@@ -147,7 +147,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions, boolean ordered)
+    public static Flow<ImmutableBTreePartition> create(Flow<FlowableUnfilteredPartition> partitions, boolean ordered)
     {
         return create(partitions, INITIAL_ROW_CAPACITY, ordered);
     }
@@ -161,7 +161,7 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions, int initialRowCapacity)
+    public static Flow<ImmutableBTreePartition> create(Flow<FlowableUnfilteredPartition> partitions, int initialRowCapacity)
     {
         return create(partitions, initialRowCapacity, true);
     }
@@ -176,12 +176,12 @@ public class ImmutableBTreePartition extends AbstractBTreePartition
      *
      * @return a single that will create the partition on subscribing.
      */
-    public static CsFlow<ImmutableBTreePartition> create(CsFlow<FlowableUnfilteredPartition> partitions, int initialRowCapacity, boolean ordered)
+    public static Flow<ImmutableBTreePartition> create(Flow<FlowableUnfilteredPartition> partitions, int initialRowCapacity, boolean ordered)
     {
         return partitions.flatMap(partition -> create(partition, initialRowCapacity, ordered));
     }
 
-    public static CsFlow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
+    public static Flow<ImmutableBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
         return build(partition, initialRowCapacity, ordered)
                .map(holder -> new ImmutableBTreePartition(partition.metadata(), partition.partitionKey(), holder));

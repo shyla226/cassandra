@@ -51,7 +51,7 @@ import org.apache.cassandra.net.*;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.Util.assertClustering;
 import static org.apache.cassandra.Util.assertColumn;
@@ -141,7 +141,7 @@ public class DataResolverTest
      * Checks that the provided data resolver has the expected number of repair futures created.
      * This method also "release" those future by faking replica responses to those repair, which is necessary or
      * every test would timeout before closing or checking if the partition iterator has still data (since the
-     * underlying csflow delays the final onComplete by waiting on the repair results future).
+     * underlying flow delays the final onComplete by waiting on the repair results future).
      */
     private void assertRepairFuture(DataResolver resolver, int expectedRepairs)
     {
@@ -1122,7 +1122,7 @@ public class DataResolverTest
 
     private Response<ReadResponse> readResponseMessage(InetAddress from, UnfilteredPartitionIterator partitionIterator, ReadCommand cmd)
     {
-        final CsFlow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
+        final Flow<FlowableUnfilteredPartition> partitions = cmd.applyController(controller -> FlowablePartitions.fromPartitions(partitionIterator, null));
         return Response.testResponse(from,
                                      FBUtilities.getBroadcastAddress(),
                                      Verbs.READS.READ,
@@ -1256,7 +1256,7 @@ public class DataResolverTest
         return new SingletonUnfilteredPartitionIterator(rowIter);
     }
 
-    private static PartitionIterator toPartitions(CsFlow<FlowablePartition> source)
+    private static PartitionIterator toPartitions(Flow<FlowablePartition> source)
     {
         return FlowablePartitions.toPartitionsFiltered(source);
     }

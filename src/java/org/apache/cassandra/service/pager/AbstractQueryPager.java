@@ -30,7 +30,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
 {
@@ -76,22 +76,22 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             logger.trace("{} - created with {}/{}/{}", hashCode(), limits, remaining, remainingInPartition);
     }
 
-    public CsFlow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
     {
         return innerFetch(pageSize, (pageCommand) -> pageCommand.execute(consistency, clientState, queryStartNanoTime, forContinuousPaging));
     }
 
-    public CsFlow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     {
         return innerFetch(pageSize, (pageCommand) -> pageCommand.executeInternal());
     }
 
-    public CsFlow<FlowableUnfilteredPartition> fetchPageUnfiltered(int pageSize, TableMetadata metadata)
+    public Flow<FlowableUnfilteredPartition> fetchPageUnfiltered(int pageSize, TableMetadata metadata)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
-            return CsFlow.empty();
+            return Flow.empty();
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
@@ -99,12 +99,12 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
         return ((UnfilteredPager)internalPager).apply(pageCommand.executeLocally());
     }
 
-    private CsFlow<FlowablePartition> innerFetch(int pageSize, Function<ReadCommand, CsFlow<FlowablePartition>> dataSupplier)
+    private Flow<FlowablePartition> innerFetch(int pageSize, Function<ReadCommand, Flow<FlowablePartition>> dataSupplier)
     {
         assert internalPager == null : "only one iteration at a time is supported";
 
         if (isExhausted())
-            return CsFlow.empty();
+            return Flow.empty();
 
         final int toFetch = Math.min(pageSize, remaining);
         final ReadCommand pageCommand = nextPageReadCommand(toFetch);
@@ -119,7 +119,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             super(pageLimits, nowInSec);
         }
 
-        CsFlow<FlowableUnfilteredPartition> apply(CsFlow<FlowableUnfilteredPartition> source)
+        Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> source)
         {
             return source.flatMap(partition ->{
                 // If this is the first partition of this page, this could be the continuation of a partition we've started
@@ -134,7 +134,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                         return partition.content.skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
                 }
 
-                return CsFlow.just(applyToPartition(partition));
+                return Flow.just(applyToPartition(partition));
 
             }).doOnClose(this::onClose);
         }
@@ -165,7 +165,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
             super(pageLimits, nowInSec);
         }
 
-        CsFlow<FlowablePartition> apply(CsFlow<FlowablePartition> source)
+        Flow<FlowablePartition> apply(Flow<FlowablePartition> source)
         {
             return source.flatMap(partition ->{
                 // If this is the first partition of this page, this could be the continuation of a partition we've started
@@ -180,7 +180,7 @@ abstract class AbstractQueryPager<T extends ReadCommand> implements QueryPager
                         return partition.content.skipMapEmpty(c -> applyToPartition(partition.withContent(c)));
                 }
 
-                return CsFlow.just(applyToPartition(partition));
+                return Flow.just(applyToPartition(partition));
 
             }).doOnClose(this::onClose);
         }

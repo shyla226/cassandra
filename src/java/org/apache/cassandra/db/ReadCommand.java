@@ -28,7 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.reactivex.functions.Function;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
 import org.apache.cassandra.concurrent.Scheduleable;
 import org.apache.cassandra.config.*;
@@ -253,7 +253,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     public abstract ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key);
 
     @VisibleForTesting
-    public abstract CsFlow<FlowableUnfilteredPartition> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
+    public abstract Flow<FlowableUnfilteredPartition> queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
     protected abstract int oldestUnrepairedTombstone();
 
@@ -276,7 +276,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      * @param forLocalDelivery - if the response is to be delivered locally (optimized path)
      * @return An appropriate response, either of type digest or data.
      */
-    public Single<ReadResponse> createResponse(CsFlow<FlowableUnfilteredPartition> partitions, boolean forLocalDelivery)
+    public Single<ReadResponse> createResponse(Flow<FlowableUnfilteredPartition> partitions, boolean forLocalDelivery)
     {
         return isDigestQuery()
                ? ReadResponse.createDigestResponse(partitions, this)
@@ -341,7 +341,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     @SuppressWarnings("resource")
     @Override
-    public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+    public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
     {
         long startTimeNanos = System.nanoTime();
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
@@ -358,10 +358,10 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         }
 
         Index.Searcher searcher = pickSearcher;
-        CsFlow<FlowableUnfilteredPartition> flow = applyController(
+        Flow<FlowableUnfilteredPartition> flow = applyController(
             controller ->
             {
-                CsFlow<FlowableUnfilteredPartition> r = searcher == null
+                Flow<FlowableUnfilteredPartition> r = searcher == null
                                                         ? queryStorage(cfs, controller)
                                                         : searcher.search(controller);
 
@@ -388,16 +388,16 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
         return flow;
     }
 
-    public CsFlow<FlowableUnfilteredPartition> applyController(Function<ReadExecutionController, CsFlow<FlowableUnfilteredPartition>> op)
+    public Flow<FlowableUnfilteredPartition> applyController(Function<ReadExecutionController, Flow<FlowableUnfilteredPartition>> op)
     {
-        return CsFlow.using(() -> ReadExecutionController.forCommand(this),
-                            op,
+        return Flow.using(() -> ReadExecutionController.forCommand(this),
+                          op,
                             controller -> controller.close());
     }
 
     protected abstract void recordLatency(TableMetrics metric, long latencyNanos);
 
-    public CsFlow<FlowablePartition> executeInternal(Monitor monitor)
+    public Flow<FlowablePartition> executeInternal(Monitor monitor)
     {
         return FlowablePartitions.filterAndSkipEmpty(executeLocally(monitor), nowInSec());
     }
@@ -411,9 +411,9 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
      * Wraps the provided iterator so that metrics on what is scanned by the command are recorded.
      * This also log warning/trow TombstoneOverwhelmingException if appropriate.
      */
-    private CsFlow<FlowableUnfilteredPartition> withMetricsRecording(CsFlow<FlowableUnfilteredPartition> partitions,
-                                                                     final TableMetrics metric,
-                                                                     final long startTimeNanos)
+    private Flow<FlowableUnfilteredPartition> withMetricsRecording(Flow<FlowableUnfilteredPartition> partitions,
+                                                                   final TableMetrics metric,
+                                                                   final long startTimeNanos)
     {
         class MetricRecording
         {
@@ -542,7 +542,7 @@ public abstract class ReadCommand implements ReadQuery, Scheduleable
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwidth, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artifact of compaction lagging behind and hence counting them is somewhat unintuitive).
-    protected CsFlow<FlowableUnfilteredPartition> withoutPurgeableTombstones(CsFlow<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
+    protected Flow<FlowableUnfilteredPartition> withoutPurgeableTombstones(Flow<FlowableUnfilteredPartition> iterator, ColumnFamilyStore cfs)
     {
         return iterator.map(new PurgeOp(nowInSec(),
                                         cfs.gcBefore(nowInSec()),

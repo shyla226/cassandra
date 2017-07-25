@@ -63,7 +63,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class SASIIndex implements Index, INotificationConsumer
 {
@@ -316,7 +316,7 @@ public class SASIIndex implements Index, INotificationConsumer
         return newWriter(baseCfs.metadata().partitionKeyType, descriptor, indexes, opType);
     }
 
-    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand command)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command)
     {
         return (partitions, readCommand) -> partitions;
     }

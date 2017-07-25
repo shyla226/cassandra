@@ -36,7 +36,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Static methods to work with atom iterators.
@@ -162,7 +162,7 @@ public abstract class UnfilteredRowIterators
      * @param digest the {@code MessageDigest} to use for the digest.
      * @param version the version to use when producing the digest.
      */
-    public static CsFlow<Void> digest(FlowableUnfilteredPartition partition, MessageDigest digest, DigestVersion version)
+    public static Flow<Void> digest(FlowableUnfilteredPartition partition, MessageDigest digest, DigestVersion version)
     {
         digestPartition(partition, digest, version);
         return partition.content.process(unfiltered -> digestUnfiltered(unfiltered, digest));

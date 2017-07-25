@@ -34,9 +34,9 @@ import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /** a utility for doing internal cql-based queries */
 public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
@@ -65,7 +65,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
     public abstract int size();
     public abstract Row one();
-    public abstract CsFlow<Row> rows();
+    public abstract Flow<Row> rows();
 
     // No implemented by all subclasses, but we use it when we know it's there (for tests)
     public abstract List<ColumnSpecification> metadata();
@@ -91,10 +91,10 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return new Row(cqlRows.metadata.requestNames(), cqlRows.rows.get(0));
         }
 
-        public CsFlow<Row> rows()
+        public Flow<Row> rows()
         {
             final List<ColumnSpecification> columns = cqlRows.metadata.requestNames();
-            return CsFlow.fromIterable(cqlRows.rows).map(r -> new Row(columns, r));
+            return Flow.fromIterable(cqlRows.rows).map(r -> new Row(columns, r));
         }
 
         public Iterator<Row> iterator()
@@ -139,9 +139,9 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             return new Row(cqlRows.get(0));
         }
 
-        public CsFlow<Row> rows()
+        public Flow<Row> rows()
         {
-            return CsFlow.fromIterable(cqlRows).map(r -> new Row(r));
+            return Flow.fromIterable(cqlRows).map(r -> new Row(r));
         }
 
         public Iterator<Row> iterator()
@@ -190,15 +190,15 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
             throw new UnsupportedOperationException();
         }
 
-        public CsFlow<Row> rows()
+        public Flow<Row> rows()
         {
-            class Subscription extends CsFlow.RequestLoop implements CsSubscription
+            class Subscription extends Flow.RequestLoop implements FlowSubscription
             {
                 private Iterator<List<ByteBuffer>> currentPage;
                 private final int nowInSec = FBUtilities.nowInSeconds();
-                private final CsSubscriber<Row> subscriber;
+                private final FlowSubscriber<Row> subscriber;
 
-                Subscription(CsSubscriber<Row> subscriber)
+                Subscription(FlowSubscriber<Row> subscriber)
                 {
                     this.subscriber = subscriber;
                 }
@@ -243,13 +243,13 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
 
                 public Throwable addSubscriberChainFromSource(Throwable throwable)
                 {
-                    return CsFlow.wrapException(throwable, this);
+                    return Flow.wrapException(throwable, this);
                 }
             }
 
-            return new CsFlow<Row>()
+            return new Flow<Row>()
             {
-                public CsSubscription subscribe(CsSubscriber<Row> subscriber) throws Exception
+                public FlowSubscription subscribe(FlowSubscriber<Row> subscriber) throws Exception
                 {
                    return new Subscription(subscriber);
                 }
@@ -273,7 +273,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                         if (pager.isExhausted())
                             return endOfData();
 
-                        CsFlow<FlowablePartition> iter = pager.fetchPageInternal(pageSize);
+                        Flow<FlowablePartition> iter = pager.fetchPageInternal(pageSize);
                         currentPage = select.process(iter, nowInSec).blockingGet().rows.iterator(); // iter will be closed by select.process()
 
                     }

@@ -29,7 +29,7 @@ import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
 
@@ -292,7 +292,7 @@ public abstract class UnfilteredPartitionIterators
      * @param digest the {@code MessageDigest} to use for the digest.
      * @param version the version to use when producing the digest.
      */
-    public static CsFlow<Void> digest(CsFlow<FlowableUnfilteredPartition> partitions, MessageDigest digest, DigestVersion version)
+    public static Flow<Void> digest(Flow<FlowableUnfilteredPartition> partitions, MessageDigest digest, DigestVersion version)
     {
         return partitions.flatProcess(partition -> UnfilteredRowIterators.digest(partition, digest, version));
     }

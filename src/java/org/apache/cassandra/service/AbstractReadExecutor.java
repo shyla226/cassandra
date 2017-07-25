@@ -45,8 +45,7 @@ import org.apache.cassandra.net.Verbs;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Sends a read request to the replicas needed to satisfy a given ConsistencyLevel.
@@ -125,7 +124,7 @@ public abstract class AbstractReadExecutor
      * wait for an answer.  Blocks until success or timeout, so it is caller's
      * responsibility to call maybeTryAdditionalReplicas first.
      */
-    public CsFlow<FlowablePartition> result()
+    public Flow<FlowablePartition> result()
     {
             return handler.result().doOnError(e ->
                                               {

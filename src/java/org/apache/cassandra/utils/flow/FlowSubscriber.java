@@ -19,11 +19,11 @@
 package org.apache.cassandra.utils.flow;
 
 /**
- * Subscriber (push) component of the CsFlow machinery.
+ * Subscriber (push) component of the Flow machinery.
  * This interface is used by the subscription to push data back to the subscriber in response to a request.
  * Exactly one of the methods must be called for each Subscription.request().
  */
-public interface CsSubscriber<T>
+public interface FlowSubscriber<T>
 {
     /**
      * Next item in the flow. Called in response to Subscription.request().

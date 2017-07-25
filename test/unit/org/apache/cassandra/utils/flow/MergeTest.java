@@ -102,7 +102,7 @@ public class MergeTest
                 return r.nextInt(5 * LIST_LENGTH);
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
     
     @Test
@@ -119,7 +119,7 @@ public class MergeTest
                 return next++;
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -137,7 +137,7 @@ public class MergeTest
                 return r.nextBoolean() ? r.nextInt(5 * LIST_LENGTH) : next++;
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -194,7 +194,7 @@ public class MergeTest
                     return r.nextInt();
                 }
             }.result);
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -211,7 +211,7 @@ public class MergeTest
                 return "longish_prefix_" + r.nextInt(5 * LIST_LENGTH);
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
     
     @Test
@@ -228,7 +228,7 @@ public class MergeTest
                 return "longish_prefix_" + next++;
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -245,7 +245,7 @@ public class MergeTest
                 return "longish_prefix_" + (r.nextBoolean() ? r.nextInt(5 * LIST_LENGTH) : next++);
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -261,7 +261,7 @@ public class MergeTest
                 return UUIDGen.getTimeUUID();
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -277,7 +277,7 @@ public class MergeTest
                 return UUID.randomUUID();
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -294,7 +294,7 @@ public class MergeTest
                 return type.decompose(UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeCsFlow(reducer, lists, type);
+        testMergeFlow(reducer, lists, type);
     }
 
     @Test
@@ -311,7 +311,7 @@ public class MergeTest
                 return type.decompose(UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeCsFlow(reducer, lists, type);
+        testMergeFlow(reducer, lists, type);
     }
 
     
@@ -330,7 +330,7 @@ public class MergeTest
                 return new KeyedSet<>(r.nextInt(5 * LIST_LENGTH), UUIDGen.getTimeUUID());
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -350,7 +350,7 @@ public class MergeTest
                 return "longish_prefix_" + (id + list * LIST_LENGTH / 2);
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     @Test
@@ -370,7 +370,7 @@ public class MergeTest
                 return "longish_prefix_" + (id + list * LIST_LENGTH / 3);
             }
         }.result;
-        testMergeCsFlow(reducer, lists);
+        testMergeFlow(reducer, lists);
     }
 
     private static abstract class ListGenerator<T>
@@ -485,16 +485,17 @@ public class MergeTest
         }
     }
 
-    public <T extends Comparable<T>, AutoCloseable> void testMergeCsFlow(Reducer<T, ?> reducer, List<List<T>> lists)
+    public <T extends Comparable<T>, AutoCloseable> void testMergeFlow(Reducer<T, ?> reducer, List<List<T>> lists)
     {
-        testMergeCsFlow(reducer, lists, Ordering.natural());
+        testMergeFlow(reducer, lists, Ordering.natural());
     }
-    public <T, O> void testMergeCsFlow(Reducer<T, O> reducer, List<List<T>> lists, Comparator<T> comparator)
+
+    public <T, O> void testMergeFlow(Reducer<T, O> reducer, List<List<T>> lists, Comparator<T> comparator)
     {
         {
-            CsFlow<O> tested = Merge.get(flowables(lists),
-                                         comparator,
-                                         reducer);
+            Flow<O> tested = Merge.get(flowables(lists),
+                                       comparator,
+                                       reducer);
             MergeIteratorPQ<T,O> baseIter = new MergeIteratorPQ<>(closeableIterators(lists), comparator, reducer);
             List<O> base = new ArrayList<>();
             Iterators.addAll(base, baseIter);
@@ -517,12 +518,12 @@ public class MergeTest
         }
     }
 
-    <T> List<CsFlow<T>> flowables(List<List<T>> lists)
+    <T> List<Flow<T>> flowables(List<List<T>> lists)
     {
-        return lists.stream().map(list -> maybeDelayed(CsFlow.fromIterable(list))).collect(Collectors.toList());
+        return lists.stream().map(list -> maybeDelayed(Flow.fromIterable(list))).collect(Collectors.toList());
     }
     
-    <T> CsFlow<T> maybeDelayed(CsFlow<T> flow)
+    <T> Flow<T> maybeDelayed(Flow<T> flow)
     {
         if (rand.nextInt(DELAY_CHANCE) == 0)
             return flow.delayOnNext(rand.nextInt(15), TimeUnit.MICROSECONDS);
@@ -767,7 +768,7 @@ public class MergeTest
         boolean failed = false;
         try
         {
-            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("one"), CsFlow.just(null)), Ordering.natural(), new Counter<>()).countBlocking());
+            System.out.println(Flow.merge(ImmutableList.of(Flow.empty(), Flow.just("one"), Flow.just(null)), Ordering.natural(), new Counter<>()).countBlocking());
             failed = true;
         }
         catch (Throwable t)
@@ -784,9 +785,9 @@ public class MergeTest
         boolean failed = false;
         try
         {
-            CsFlow<String> bad = new BadCsFlow("a", new Object[]{"b", "c"}, null);
+            Flow<String> bad = new BadFlow("a", new Object[]{ "b", "c"}, null);
 
-            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            System.out.println(Flow.merge(ImmutableList.of(Flow.empty(), Flow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
             failed = true;
         }
         catch (Throwable t)
@@ -803,9 +804,9 @@ public class MergeTest
         boolean failed = false;
         try
         {
-            CsFlow<String> bad = new BadCsFlow("a", new Object[]{"b", null});
+            Flow<String> bad = new BadFlow("a", new Object[]{ "b", null});
 
-            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            System.out.println(Flow.merge(ImmutableList.of(Flow.empty(), Flow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
             failed = true;
         }
         catch (Throwable t)
@@ -822,9 +823,9 @@ public class MergeTest
         boolean failed = false;
         try
         {
-            CsFlow<String> bad = new BadCsFlow("a", new Object[]{new AssertionError(), "b"}, null);
+            Flow<String> bad = new BadFlow("a", new Object[]{ new AssertionError(), "b"}, null);
 
-            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            System.out.println(Flow.merge(ImmutableList.of(Flow.empty(), Flow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
             failed = true;
         }
         catch (Throwable t)
@@ -845,9 +846,9 @@ public class MergeTest
         boolean failed = false;
         try
         {
-            CsFlow<String> bad = new BadCsFlow("a", new MyException(), null);
+            Flow<String> bad = new BadFlow("a", new MyException(), null);
 
-            System.out.println(CsFlow.merge(ImmutableList.of(CsFlow.empty(), CsFlow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
+            System.out.println(Flow.merge(ImmutableList.of(Flow.empty(), Flow.just("a"), bad), Ordering.natural(), new Counter<>()).countBlocking());
             failed = true;
         }
         catch (Throwable t)
@@ -859,19 +860,19 @@ public class MergeTest
         assertFalse(failed);
     }
 
-    class BadCsFlow extends CsFlow<String>
+    class BadFlow extends Flow<String>
     {
         Object[] inputs;
 
-        public BadCsFlow(Object... inputs)
+        public BadFlow(Object... inputs)
         {
             this.inputs = inputs;
         }
 
 
-        public CsSubscription subscribe(CsSubscriber<String> subscriber) throws Exception
+        public FlowSubscription subscribe(FlowSubscriber<String> subscriber) throws Exception
         {
-            return new CsSubscription()
+            return new FlowSubscription()
             {
                 int pos = 0;
                 public void request()
@@ -886,12 +887,12 @@ public class MergeTest
 
                 public Throwable addSubscriberChainFromSource(Throwable throwable)
                 {
-                    return CsFlow.wrapException(throwable, this);
+                    return Flow.wrapException(throwable, this);
                 }
 
                 public String toString()
                 {
-                    return "\tBadCsFlow " + Arrays.toString(inputs) + "\n" + subscriber;
+                    return "\tBadFlow " + Arrays.toString(inputs) + "\n" + subscriber;
                 }
 
                 private void process(Object o)
@@ -913,9 +914,9 @@ public class MergeTest
     @Test
     public void testRejectingReducerDoesntOverflowStack() throws Exception
     {
-        CsFlow<Integer> f1 = CsFlow.fromIterable(() -> IntStream.range(0, 100000).iterator());
-        CsFlow<Integer> f2 = CsFlow.fromIterable(() -> IntStream.range(0, 10000).iterator());
-        CsFlow<Integer> merge = Merge.get(ImmutableList.of(f1, f2), Ordering.natural(), new Reducer<Integer, Integer>()
+        Flow<Integer> f1 = Flow.fromIterable(() -> IntStream.range(0, 100000).iterator());
+        Flow<Integer> f2 = Flow.fromIterable(() -> IntStream.range(0, 10000).iterator());
+        Flow<Integer> merge = Merge.get(ImmutableList.of(f1, f2), Ordering.natural(), new Reducer<Integer, Integer>()
         {
             public void reduce(int idx, Integer current)
             {

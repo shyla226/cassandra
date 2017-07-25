@@ -63,9 +63,9 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * An asynchronous flow of items modelled similarly to Java 9's Flow and RxJava's Flowable with some simplifications.
  */
-public abstract class CsFlow<T>
+public abstract class Flow<T>
 {
-    private static final Logger logger = LoggerFactory.getLogger(CsFlow.class);
+    private static final Logger logger = LoggerFactory.getLogger(Flow.class);
 
     public final static LineNumberInference LINE_NUMBERS = new LineNumberInference();
 
@@ -77,11 +77,11 @@ public abstract class CsFlow<T>
      * When done with the content (regardless of whether onComplete or onError was received), the subscriber must
      * close the subscription.
      */
-    abstract public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception;
+    abstract public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception;
 
     // Flow manipulation methods and implementations follow
 
-    public static final boolean DEBUG_ENABLED = Boolean.getBoolean("cassandra.debugcsflow");
+    public static final boolean DEBUG_ENABLED = Boolean.getBoolean("cassandra.debugflow");
 
     /**
      * Interface for abstracting away the gory details of operations with flowables. Used with {@link #apply}.
@@ -93,7 +93,7 @@ public abstract class CsFlow<T>
          * complete, throw an error using error, or decide to ignore input and request another.
          * For some usage ideas, see {@link SkippingOp} and {@link StoppingOp} below.
          */
-        abstract void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next);
+        abstract void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next);
 
         /**
          * Called on error
@@ -117,21 +117,21 @@ public abstract class CsFlow<T>
         }
     }
 
-    public <O> CsFlow<O> apply(FlowableOp<T, O> op)
+    public <O> Flow<O> apply(FlowableOp<T, O> op)
     {
         return apply(this, "apply", op);
     }
 
-    public <O> CsFlow<O> apply(FlowableOp<T, O> op, String prefix)
+    public <O> Flow<O> apply(FlowableOp<T, O> op, String prefix)
     {
         return apply(this, prefix, op);
     }
 
-    public static <I, O> CsFlow<O> apply(CsFlow<I> source, String prefix, FlowableOp<I, O> op)
+    public static <I, O> Flow<O> apply(Flow<I> source, String prefix, FlowableOp<I, O> op)
     {
-        class ApplyFlow extends CsFlow<O>
+        class ApplyFlow extends Flow<O>
         {
-            public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
             {
                 return !DEBUG_ENABLED
                        ? new ApplyOpSubscriptionImpl(prefix, subscriber, op, source)
@@ -142,13 +142,13 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Extends {@link CsSubscription} with the ability to request an item in a loop, which
+     * Extends {@link FlowSubscription} with the ability to request an item in a loop, which
      * is required by {@link FilterOp} and {@link SkippingOp}.
      *
      * This is implemented by the "apply" concreate subscriptions, see {@link ApplyOpSubscriptionImpl}
      * and {@link ApplyOpSubscriptionCheckedImpl}.
      */
-    private interface ApplyOpSubscription extends CsSubscription
+    private interface ApplyOpSubscription extends FlowSubscription
     {
         public void requestInLoop();
     }
@@ -156,17 +156,17 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation.
      */
-    private static class ApplyOpSubscriptionImpl<I, O> extends RequestLoop implements ApplyOpSubscription, CsSubscriber<I>
+    private static class ApplyOpSubscriptionImpl<I, O> extends RequestLoop implements ApplyOpSubscription, FlowSubscriber<I>
     {
-        final CsSubscriber<O> subscriber;
-        final CsSubscription source;
+        final FlowSubscriber<O> subscriber;
+        final FlowSubscription source;
         final FlowableOp<I, O> mapper;
         final String prefix;
 
         private ApplyOpSubscriptionImpl(String prefix,
-                                        CsSubscriber<O> subscriber,
+                                        FlowSubscriber<O> subscriber,
                                         FlowableOp<I, O> mapper,
-                                        CsFlow<I> source) throws Exception
+                                        Flow<I> source) throws Exception
         {
             this.subscriber = subscriber;
             this.mapper = mapper;
@@ -244,11 +244,11 @@ public abstract class CsFlow<T>
     /**
      * Apply implementation that checks the subscriptions are used correctly (e.g. without concurrent requests).
      */
-    private static class ApplyOpSubscriptionCheckedImpl<I, O> extends DebugRequestLoop implements ApplyOpSubscription, CsSubscriber<I>
+    private static class ApplyOpSubscriptionCheckedImpl<I, O> extends DebugRequestLoop implements ApplyOpSubscription, FlowSubscriber<I>
     {
-        final CsSubscriber<O> subscriber;
+        final FlowSubscriber<O> subscriber;
         final FlowableOp<I, O> mapper;
-        final CsSubscription source;
+        final FlowSubscription source;
         final String prefix;
 
         enum State
@@ -289,7 +289,7 @@ public abstract class CsFlow<T>
                                                        this));
         }
 
-        private ApplyOpSubscriptionCheckedImpl(String prefix, CsSubscriber<O> subscriber, FlowableOp<I, O> mapper, CsFlow<I> source) throws Exception
+        private ApplyOpSubscriptionCheckedImpl(String prefix, FlowSubscriber<O> subscriber, FlowableOp<I, O> mapper, Flow<I> source) throws Exception
         {
             super(subscriber);
             this.subscriber = subscriber;
@@ -393,7 +393,7 @@ public abstract class CsFlow<T>
      */
     public interface MappingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
     {
-        default void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next)
+        default void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -411,7 +411,7 @@ public abstract class CsFlow<T>
     /**
      * Tranforms each item in the flow using the specified mapper.
      */
-    public <O> CsFlow<O> map(MappingOp<T, O> mapper)
+    public <O> Flow<O> map(MappingOp<T, O> mapper)
     {
         return apply(mapper, "map");
     }
@@ -424,7 +424,7 @@ public abstract class CsFlow<T>
      */
     public interface SkippingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
     {
-        default void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next)
+        default void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -445,7 +445,7 @@ public abstract class CsFlow<T>
     /**
      * Like map, but permits mapper to return null, which is treated as an intention to skip the item.
      */
-    public <O> CsFlow<O> skippingMap(SkippingOp<T, O> mapper)
+    public <O> Flow<O> skippingMap(SkippingOp<T, O> mapper)
     {
         return apply(mapper);
     }
@@ -457,7 +457,7 @@ public abstract class CsFlow<T>
      */
     public interface StoppingOp<I, O> extends Function<I, O>, FlowableOp<I, O>
     {
-        default void onNext(CsSubscriber<O> subscriber, ApplyOpSubscription source, I next)
+        default void onNext(FlowSubscriber<O> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -478,7 +478,7 @@ public abstract class CsFlow<T>
     /**
      * Like map, but permits mapper to return null, which is treated as indication that the flow should stop.
      */
-    public <O> CsFlow<O> stoppingMap(StoppingOp<T, O> mapper)
+    public <O> Flow<O> stoppingMap(StoppingOp<T, O> mapper)
     {
         return apply(mapper);
     }
@@ -490,7 +490,7 @@ public abstract class CsFlow<T>
      */
     public interface TakeWhileOp<I> extends Predicate<I>, FlowableOp<I, I>
     {
-        default void onNext(CsSubscriber<I> subscriber, ApplyOpSubscription source, I next)
+        default void onNext(FlowSubscriber<I> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -513,7 +513,7 @@ public abstract class CsFlow<T>
      * This applies on the onNext phase of execution, after the item has been produced. If the item holds resources,
      * tester must release these resources as the item will not be passed on downstream.
      */
-    public CsFlow<T> takeWhile(TakeWhileOp<T> tester)
+    public Flow<T> takeWhile(TakeWhileOp<T> tester)
     {
         return apply(tester);
     }
@@ -523,7 +523,7 @@ public abstract class CsFlow<T>
      */
     public interface SubscriptionLifter<T>
     {
-        CsSubscription apply(CsSubscription source, CsSubscriber<T> subscriber);
+        FlowSubscription apply(FlowSubscription source, FlowSubscriber<T> subscriber);
     }
 
     /**
@@ -533,16 +533,16 @@ public abstract class CsFlow<T>
      * Note: This does not insert any corresponding operation on the subscriber chain, passing the previous subscriber
      * directly to the upstream generator. As a result this operator will not be shown in the subscriber's chain.
      */
-    public CsFlow<T> liftSubscription(SubscriptionLifter<T> lifter)
+    public Flow<T> liftSubscription(SubscriptionLifter<T> lifter)
     {
         return liftSubscription(this, lifter);
     }
 
-    public static <T> CsFlow<T> liftSubscription(CsFlow<T> source, SubscriptionLifter<T> lifter)
+    public static <T> Flow<T> liftSubscription(Flow<T> source, SubscriptionLifter<T> lifter)
     {
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
                 return lifter.apply(source.subscribe(subscriber), subscriber);
             }
@@ -555,7 +555,7 @@ public abstract class CsFlow<T>
      * Unlike takeWhile, this applies on the request phase of execution, before anything has been produced (and as such
      * cannot be given the next item in the flow as argument).
      */
-    public CsFlow<T> takeUntil(BooleanSupplier tester)
+    public Flow<T> takeUntil(BooleanSupplier tester)
     {
         return takeUntilAndDoOnClose(tester, Runnables.doNothing());
     }
@@ -563,7 +563,7 @@ public abstract class CsFlow<T>
     /**
      * Apply the operation when the flow is closed.
      */
-    public CsFlow<T> doOnClose(Runnable onClose)
+    public Flow<T> doOnClose(Runnable onClose)
     {
         return takeUntilAndDoOnClose(() -> false, onClose);
     }
@@ -574,9 +574,9 @@ public abstract class CsFlow<T>
      *
      * Stops requesting items when the supplied tester returns true, and executes the runnable when the flow is closed.
      */
-    public CsFlow<T> takeUntilAndDoOnClose(BooleanSupplier tester, Runnable onClose)
+    public Flow<T> takeUntilAndDoOnClose(BooleanSupplier tester, Runnable onClose)
     {
-        return liftSubscription((source, subscriber) -> new CsSubscription()
+        return liftSubscription((source, subscriber) -> new FlowSubscription()
         {
             public void request()
             {
@@ -623,7 +623,7 @@ public abstract class CsFlow<T>
      */
     public interface FilterOp<I> extends Predicate<I>, FlowableOp<I, I>
     {
-        default void onNext(CsSubscriber<I> subscriber, ApplyOpSubscription source, I next)
+        default void onNext(FlowSubscriber<I> subscriber, ApplyOpSubscription source, I next)
         {
             try
             {
@@ -643,7 +643,7 @@ public abstract class CsFlow<T>
     /**
      * Take only the items from from the flow that pass the supplied tester.
      */
-    public CsFlow<T> filter(FilterOp<T> tester)
+    public Flow<T> filter(FilterOp<T> tester)
     {
         return apply(tester, "filter");
     }
@@ -655,7 +655,7 @@ public abstract class CsFlow<T>
      */
     public interface OnErrorOp<T> extends FlowableOp<T, T>
     {
-        default void onNext(CsSubscriber<T> subscriber, ApplyOpSubscription source, T next)
+        default void onNext(FlowSubscriber<T> subscriber, ApplyOpSubscription source, T next)
         {
             subscriber.onNext(next);
         }
@@ -666,7 +666,7 @@ public abstract class CsFlow<T>
     /**
      * Apply the operation when the flow errors out. If handler throws, exception will be added as suppressed.
      */
-    public CsFlow<T> doOnError(OnErrorOp<T> onError)
+    public Flow<T> doOnError(OnErrorOp<T> onError)
     {
         return apply(onError, "doOnError");
     }
@@ -678,7 +678,7 @@ public abstract class CsFlow<T>
      */
     public interface OnCompleteOp<T> extends FlowableOp<T, T>
     {
-        default void onNext(CsSubscriber<T> subscriber, ApplyOpSubscription source, T next)
+        default void onNext(FlowSubscriber<T> subscriber, ApplyOpSubscription source, T next)
         {
             subscriber.onNext(next);
         }
@@ -690,7 +690,7 @@ public abstract class CsFlow<T>
      * Apply the operation when the flow completes. If handler throws, subscriber's onNext will be called instead
      * of onComplete.
      */
-    public CsFlow<T> doOnComplete(OnCompleteOp<T> onComplete)
+    public Flow<T> doOnComplete(OnCompleteOp<T> onComplete)
     {
         return apply(onComplete, "doOnComplete");
     }
@@ -698,7 +698,7 @@ public abstract class CsFlow<T>
     /**
      * Group items using the supplied group op. See {@link GroupOp}
      */
-    public <O> CsFlow<O> group(GroupOp<T, O> op)
+    public <O> Flow<O> group(GroupOp<T, O> op)
     {
         return GroupOp.group(this, op);
     }
@@ -706,12 +706,12 @@ public abstract class CsFlow<T>
     /**
      * Pass all elements through the given transformation, then concatenate the results together.
      */
-    public <O> CsFlow<O> flatMap(FlatMap.FlatMapper<T, O> op)
+    public <O> Flow<O> flatMap(FlatMap.FlatMapper<T, O> op)
     {
         return FlatMap.flatMap(this, op);
     }
 
-    public static <T> CsFlow<T> concat(CsFlow<CsFlow<T>> source)
+    public static <T> Flow<T> concat(Flow<Flow<T>> source)
     {
         return Concat.concat(source);
     }
@@ -722,12 +722,12 @@ public abstract class CsFlow<T>
      * This is currently implemented with {@link #fromIterable(Iterable)} and {@link #flatMap(FlatMap.FlatMapper)},
      * to be optimized later.
      *
-     * @param sources - an iterable of CsFlow<O></O>
+     * @param sources - an iterable of Flow<O></O>
      * @param <T> - the type of the flow items
      *
      * @return a concatenated flow of items
      */
-    public static <T> CsFlow<T> concat(Iterable<CsFlow<T>> sources)
+    public static <T> Flow<T> concat(Iterable<Flow<T>> sources)
     {
         return Concat.concat(sources);
     }
@@ -735,12 +735,12 @@ public abstract class CsFlow<T>
     /**
      * Concatenate the input flows one after another and return a flow of items.
      *
-     * @param o - an array of CsFlow<O></O>
+     * @param o - an array of Flow<O></O>
      * @param <O> - the type of the flow items
      *
      * @return a concatenated flow of items
      */
-    public static <O> CsFlow<O> concat(CsFlow<O> ... o)
+    public static <O> Flow<O> concat(Flow<O>... o)
     {
         return Concat.concat(o);
     }
@@ -754,7 +754,7 @@ public abstract class CsFlow<T>
      * @return a flow that will complete when this and all the flows produced by the supplier have
      * completed.
      */
-    public CsFlow<T> concatWith(Supplier<CsFlow<T>> supplier)
+    public Flow<T> concatWith(Supplier<Flow<T>> supplier)
     {
         return Concat.concatWith(this, supplier);
     }
@@ -777,11 +777,11 @@ public abstract class CsFlow<T>
      *
      * onNext() is called synchronously with the next item from the iterator for each request().
      */
-    public static <O> CsFlow<O> fromIterable(Iterable<O> o)
+    public static <O> Flow<O> fromIterable(Iterable<O> o)
     {
-        class IterableToFlow extends CsFlow<O>
+        class IterableToFlow extends Flow<O>
         {
-            public CsSubscription subscribe(CsSubscriber<O> subscriber)
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber)
             {
                 return new IteratorSubscription(subscriber, o.iterator());
             }
@@ -797,17 +797,17 @@ public abstract class CsFlow<T>
      *
      * @return a flow that on error will subscribe to the flow provided by the next source supplier.
      */
-    public CsFlow<T> onErrorResumeNext(Function<Throwable, CsFlow<T>> nextSourceSupplier)
+    public Flow<T> onErrorResumeNext(Function<Throwable, Flow<T>> nextSourceSupplier)
     {
-        final CsFlow<T> source = this;
+        final Flow<T> source = this;
 
-        class OnErrorResultNextSubscriber implements CsSubscriber<T>, CsSubscription
+        class OnErrorResultNextSubscriber implements FlowSubscriber<T>, FlowSubscription
         {
-            private CsSubscriber subscriber;
-            private CsSubscription subscription;
+            private FlowSubscriber subscriber;
+            private FlowSubscription subscription;
             private boolean nextSubscribed = false;
 
-            OnErrorResultNextSubscriber(CsSubscriber<T> subscriber) throws Exception
+            OnErrorResultNextSubscriber(FlowSubscriber<T> subscriber) throws Exception
             {
                 this.subscriber = subscriber;
                 this.subscription = source.subscribe(this);
@@ -855,10 +855,10 @@ public abstract class CsFlow<T>
                     return;
                 }
 
-                CsSubscription prevSubscription = subscription;
+                FlowSubscription prevSubscription = subscription;
                 try
                 {
-                    CsFlow<T> nextSource = nextSourceSupplier.apply(error);
+                    Flow<T> nextSource = nextSourceSupplier.apply(error);
                     subscription = nextSource.subscribe(subscriber);
                     nextSubscribed = true;
 
@@ -883,27 +883,27 @@ public abstract class CsFlow<T>
             }
         }
 
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
                 return new OnErrorResultNextSubscriber(subscriber);
             }
         };
     }
 
-    public CsFlow<T> mapError(Function<Throwable, Throwable> mapper)
+    public Flow<T> mapError(Function<Throwable, Throwable> mapper)
     {
         // TODO implement directly
         return onErrorResumeNext(e -> error(mapper.apply(e)));
     }
 
-    static class IteratorSubscription<O> implements CsSubscription
+    static class IteratorSubscription<O> implements FlowSubscription
     {
         final Iterator<O> iter;
-        final CsSubscriber<O> subscriber;
+        final FlowSubscriber<O> subscriber;
 
-        IteratorSubscription(CsSubscriber<O> subscriber, Iterator<O> iter)
+        IteratorSubscription(FlowSubscriber<O> subscriber, Iterator<O> iter)
         {
             this.iter = iter;
             this.subscriber = subscriber;
@@ -973,7 +973,7 @@ public abstract class CsFlow<T>
         static final AtomicReferenceFieldUpdater<RequestLoop, RequestLoopState> stateUpdater =
             AtomicReferenceFieldUpdater.newUpdater(RequestLoop.class, RequestLoopState.class, "state");
 
-        public void requestInLoop(CsSubscription source)
+        public void requestInLoop(FlowSubscription source)
         {
             // See DebugRequestLoop below for a more precise description of the state transitions on which this is built.
 
@@ -995,16 +995,16 @@ public abstract class CsFlow<T>
 
     static class DebugRequestLoop extends RequestLoop
     {
-        final CsSubscriber<?> errorRecepient;
+        final FlowSubscriber<?> errorRecepient;
 
-        public DebugRequestLoop(CsSubscriber<?> errorRecepient)
+        public DebugRequestLoop(FlowSubscriber<?> errorRecepient)
         {
             super();
             this.errorRecepient = errorRecepient;
         }
 
         @Override
-        public void requestInLoop(CsSubscription source)
+        public void requestInLoop(FlowSubscription source)
         {
             if (stateUpdater.compareAndSet(this, RequestLoopState.IN_LOOP_READY, RequestLoopState.IN_LOOP_REQUESTED))
                 // Another call (concurrent or in the call chain) has the loop and we successfully told it to continue.
@@ -1047,14 +1047,14 @@ public abstract class CsFlow<T>
      * Implementation of the reduce operation, used with small variations in {@link #reduceBlocking(Object, ReduceFunction)},
      * {@link #reduce(Object, ReduceFunction)} and {@link #reduceToFuture(Object, ReduceFunction)}.
      */
-    abstract static private class ReduceSubscriber<T, O> extends RequestLoop implements CsSubscriber<T>, CsSubscription
+    abstract static private class ReduceSubscriber<T, O> extends RequestLoop implements FlowSubscriber<T>, FlowSubscription
     {
         final BiFunction<O, T, O> reducer;
         O current;
         private StackTraceElement[] stackTrace;
-        private CsSubscription source;
+        private FlowSubscription source;
 
-        ReduceSubscriber(O seed, CsFlow<T> source, BiFunction<O, T, O> reducer) throws Exception
+        ReduceSubscriber(O seed, Flow<T> source, BiFunction<O, T, O> reducer) throws Exception
         {
             this.reducer = reducer;
             current = seed;
@@ -1129,7 +1129,7 @@ public abstract class CsFlow<T>
         {
             Throwable error = null;
 
-            ReduceBlockingSubscription(CsFlow<T> source, ReduceFunction<O, T> reducer) throws Exception
+            ReduceBlockingSubscription(Flow<T> source, ReduceFunction<O, T> reducer) throws Exception
             {
                 super(seed, source, reducer);
             }
@@ -1169,7 +1169,7 @@ public abstract class CsFlow<T>
 
         class ReduceToFutureSubscription extends ReduceSubscriber<T, O>
         {
-            ReduceToFutureSubscription(O seed, CsFlow<T> source, ReduceFunction<O, T> reducer) throws Exception
+            ReduceToFutureSubscription(O seed, Flow<T> source, ReduceFunction<O, T> reducer) throws Exception
             {
                 super(seed, source, reducer);
             }
@@ -1219,7 +1219,7 @@ public abstract class CsFlow<T>
         return result;
     }
 
-    public CsFlow<T> last()
+    public Flow<T> last()
     {
         return reduce(null, (prev, next) -> next);
     }
@@ -1235,7 +1235,7 @@ public abstract class CsFlow<T>
         private static AtomicIntegerFieldUpdater<DisposableReduceSubscriber> isClosedUpdater =
                 AtomicIntegerFieldUpdater.newUpdater(DisposableReduceSubscriber.class, "isClosed");
 
-        DisposableReduceSubscriber(O seed, CsFlow<T> source, ReduceFunction<O, T> reducer) throws Exception
+        DisposableReduceSubscriber(O seed, Flow<T> source, ReduceFunction<O, T> reducer) throws Exception
         {
             super(seed, source, reducer);
             isDisposed = false;
@@ -1330,7 +1330,7 @@ public abstract class CsFlow<T>
      */
     public <O> Single<O> reduceToRxSingle(O seed, ReduceFunction<O, T> reducerToSingle)
     {
-        class SingleFromCsFlow extends Single<O>
+        class SingleFromFlow extends Single<O>
         {
             protected void subscribeActual(SingleObserver<? super O> observer)
             {
@@ -1338,7 +1338,7 @@ public abstract class CsFlow<T>
                 {
                     ReduceToSingle() throws Exception
                     {
-                        super(seed, CsFlow.this, reducerToSingle);
+                        super(seed, Flow.this, reducerToSingle);
                     }
 
                     @Override
@@ -1370,7 +1370,7 @@ public abstract class CsFlow<T>
             }
         }
 
-        return new SingleFromCsFlow();
+        return new SingleFromFlow();
     }
 
     public interface RxSingleMapper<I, O> extends Function<I, O>, ReduceFunction<O, I>
@@ -1384,7 +1384,7 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Maps a CsFlow holding a single value into an Rx Single using the supplied mapper.
+     * Maps a Flow holding a single value into an Rx Single using the supplied mapper.
      */
     public <O> Single<O> mapToRxSingle(RxSingleMapper<T, O> mapper)
     {
@@ -1392,7 +1392,7 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Maps a CsFlow holding a single value into an Rx Single using the supplied mapper.
+     * Maps a Flow holding a single value into an Rx Single using the supplied mapper.
      */
     public Single<T> mapToRxSingle()
     {
@@ -1402,15 +1402,15 @@ public abstract class CsFlow<T>
     // Not fully tested -- this is not meant for long-term use
     public Completable processToRxCompletable(ConsumingOp<T> consumer)
     {
-        class CompletableFromCsFlow extends Completable
+        class CompletableFromFlow extends Completable
         {
             protected void subscribeActual(CompletableObserver observer)
             {
-                class CompletableFromCsFlowSubscriber extends DisposableReduceSubscriber<T, Void>
+                class CompletableFromFlowSubscriber extends DisposableReduceSubscriber<T, Void>
                 {
-                    public CompletableFromCsFlowSubscriber() throws Exception
+                    public CompletableFromFlowSubscriber() throws Exception
                     {
-                        super(null, CsFlow.this, consumer);
+                        super(null, Flow.this, consumer);
                     }
 
                     @Override
@@ -1426,10 +1426,10 @@ public abstract class CsFlow<T>
                     }
                 }
 
-                CompletableFromCsFlowSubscriber cs;
+                CompletableFromFlowSubscriber cs;
                 try
                 {
-                    cs = new CompletableFromCsFlowSubscriber();
+                    cs = new CompletableFromFlowSubscriber();
                 }
                 catch (Throwable t)
                 {
@@ -1440,7 +1440,7 @@ public abstract class CsFlow<T>
                 cs.request();
             }
         }
-        return new CompletableFromCsFlow();
+        return new CompletableFromFlow();
     }
 
     public Completable processToRxCompletable()
@@ -1449,7 +1449,7 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Reduce the flow and return a CsFlow containing the result.
+     * Reduce the flow and return a Flow containing the result.
      *
      * Note: the reduced should not hold resources that need to be released, as the content will be lost on error.
      *
@@ -1458,12 +1458,12 @@ public abstract class CsFlow<T>
      *          returned by the previous call) and the next item.
      * @return The final reduced value.
      */
-    public <O> CsFlow<O> reduce(O seed, ReduceFunction<O, T> reducer)
+    public <O> Flow<O> reduce(O seed, ReduceFunction<O, T> reducer)
     {
-        CsFlow<T> self = this;
-        return new CsFlow<O>()
+        Flow<T> self = this;
+        return new Flow<O>()
         {
-            public CsSubscription subscribe(CsSubscriber<O> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<O> subscriber) throws Exception
             {
                 return new ReduceSubscriber<T, O>(seed, self, reducer)
                 {
@@ -1498,7 +1498,7 @@ public abstract class CsFlow<T>
         };
     }
 
-    public <I, O, F> CsFlow<F> flatReduce(O seed, BiFunction<O, T, CsFlow<I>> mapper, ReduceFunction<O, I> reducer, MappingOp<O, F> onComplete)
+    public <I, O, F> Flow<F> flatReduce(O seed, BiFunction<O, T, Flow<I>> mapper, ReduceFunction<O, I> reducer, MappingOp<O, F> onComplete)
     {
         return this.flatMap(x -> mapper.apply(seed, x))
                    .reduce(seed,
@@ -1523,18 +1523,18 @@ public abstract class CsFlow<T>
         return (ConsumingOp<T>) NO_OP_CONSUMER;
     }
 
-    public CsFlow<Void> process(ConsumingOp<T> consumer)
+    public Flow<Void> process(ConsumingOp<T> consumer)
     {
         return reduce(null,
                       consumer);
     }
 
-    public CsFlow<Void> process()
+    public Flow<Void> process()
     {
         return process(noOp());
     }
 
-    public <O> CsFlow<Void> flatProcess(FlatMap.FlatMapper<T, O> mapper)
+    public <O> Flow<Void> flatProcess(FlatMap.FlatMapper<T, O> mapper)
     {
         return this.flatMap(mapper)
                    .process();
@@ -1543,16 +1543,16 @@ public abstract class CsFlow<T>
     /**
      * If the contents are empty, replaces them with the given singleton value.
      */
-    public CsFlow<T> ifEmpty(T value)
+    public Flow<T> ifEmpty(T value)
     {
         return ifEmpty(this, value);
     }
 
-    public static <T> CsFlow<T> ifEmpty(CsFlow<T> source, T value)
+    public static <T> Flow<T> ifEmpty(Flow<T> source, T value)
     {
-        class IfEmptyFlow extends CsFlow<T>
+        class IfEmptyFlow extends Flow<T>
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
                 return new IfEmptySubscription<>(subscriber, value, source);
             }
@@ -1560,15 +1560,15 @@ public abstract class CsFlow<T>
         return new IfEmptyFlow();
     }
 
-    static class IfEmptySubscription<T> implements CsSubscription, CsSubscriber<T>
+    static class IfEmptySubscription<T> implements FlowSubscription, FlowSubscriber<T>
     {
-        final CsSubscription source;
-        final CsSubscriber<T> subscriber;
+        final FlowSubscription source;
+        final FlowSubscriber<T> subscriber;
         final T value;
         boolean hadItem;
         boolean completed;
 
-        IfEmptySubscription(CsSubscriber<T> subscriber, T value, CsFlow<T> source) throws Exception
+        IfEmptySubscription(FlowSubscriber<T> subscriber, T value, Flow<T> source) throws Exception
         {
             this.subscriber = subscriber;
             this.value = value;
@@ -1623,7 +1623,7 @@ public abstract class CsFlow<T>
     /**
      * Converts the flow to singleton flow of the list of items.
      */
-    public CsFlow<List<T>> toList()
+    public Flow<List<T>> toList()
     {
         return group(new GroupOp<T, List<T>>(){
             public boolean inSameGroup(T l, T r)
@@ -1675,11 +1675,11 @@ public abstract class CsFlow<T>
         blockingLast(null);
     }
 
-    static private CsFlow<?> EMPTY = new CsFlow<Object>()
+    static private Flow<?> EMPTY = new Flow<Object>()
     {
-        public CsSubscription subscribe(CsSubscriber subscriber) throws Exception
+        public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
         {
-            return new CsSubscription()
+            return new FlowSubscription()
             {
 
                 public void request()
@@ -1693,7 +1693,7 @@ public abstract class CsFlow<T>
 
                 public Throwable addSubscriberChainFromSource(Throwable throwable)
                 {
-                    return CsFlow.wrapException(throwable, this);
+                    return Flow.wrapException(throwable, this);
                 }
 
                 @Override
@@ -1708,9 +1708,9 @@ public abstract class CsFlow<T>
     /**
      * Returns an empty flow.
      */
-    public static <T> CsFlow<T> empty()
+    public static <T> Flow<T> empty()
     {
-        return (CsFlow<T>) EMPTY;
+        return (Flow<T>) EMPTY;
     }
 
     /**
@@ -1721,13 +1721,13 @@ public abstract class CsFlow<T>
      *
      * @return a flow that emits the error immediately on request
      */
-    public static <T> CsFlow<T> error(Throwable t)
+    public static <T> Flow<T> error(Throwable t)
     {
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
             {
-                return new CsSubscription()
+                return new FlowSubscription()
                 {
 
                     public void request()
@@ -1741,7 +1741,7 @@ public abstract class CsFlow<T>
 
                     public Throwable addSubscriberChainFromSource(Throwable throwable)
                     {
-                        return CsFlow.wrapException(throwable, this);
+                        return Flow.wrapException(throwable, this);
                     }
 
                     @Override
@@ -1755,23 +1755,23 @@ public abstract class CsFlow<T>
     }
 
     /**
-     * Return a CsFlow that will subscribe to the completable once the first request is received and,
+     * Return a Flow that will subscribe to the completable once the first request is received and,
      * when the completable completes, it actually subscribes and passes on the first request to the source flow.
      *
      * @param completable - the completable to execute first
      * @param source - the flow that should execute once the completable has completed
      *
      * @param <T> - the type of the source items
-     * @return a CsFlow that executes the completable, followed by the source flow
+     * @return a Flow that executes the completable, followed by the source flow
      */
-    public static <T> CsFlow<T> concat(Completable completable, CsFlow<T> source)
+    public static <T> Flow<T> concat(Completable completable, Flow<T> source)
     {
-        class CompletableCsFlowSubscriber implements CsSubscription
+        class CompletableFlowSubscriber implements FlowSubscription
         {
-            private final CsSubscriber<T> subscriber;
-            private CsSubscription subscription;
+            private final FlowSubscriber<T> subscriber;
+            private FlowSubscription subscription;
 
-            CompletableCsFlowSubscriber(CsSubscriber<T> subscriber)
+            CompletableFlowSubscriber(FlowSubscriber<T> subscriber)
             {
                 this.subscriber = subscriber;
             }
@@ -1822,33 +1822,33 @@ public abstract class CsFlow<T>
                 return formatTrace("concatCompletableFlow", completable, subscriber);
             }
         }
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
-                return new CompletableCsFlowSubscriber(subscriber);
+                return new CompletableFlowSubscriber(subscriber);
             }
         };
     }
 
     /**
-     * Return a CsFlow that will subscribe to the source flow first and then it will delay
+     * Return a Flow that will subscribe to the source flow first and then it will delay
      * the final onComplete() by executing the completable first.
      *
      * @param completable - the completable to execute before the final onComplete of the source
      * @param source - the flow that should execute before the final completable
      *
      * @param <T> - the type of the source items
-     * @return a CsFlow that executes the source flow, then the completable
+     * @return a Flow that executes the source flow, then the completable
      */
-    public static <T> CsFlow<T> concat(CsFlow<T> source, Completable completable)
+    public static <T> Flow<T> concat(Flow<T> source, Completable completable)
     {
-        class CsFlowCompletableSubscriber implements CsSubscriber<T>, CsSubscription
+        class FlowCompletableSubscriber implements FlowSubscriber<T>, FlowSubscription
         {
-            private CsSubscriber subscriber;
-            private CsSubscription subscription;
+            private FlowSubscriber subscriber;
+            private FlowSubscription subscription;
 
-            CsFlowCompletableSubscriber(CsSubscriber<T> subscriber) throws Exception
+            FlowCompletableSubscriber(FlowSubscriber<T> subscriber) throws Exception
             {
                 this.subscriber = subscriber;
                 this.subscription = source.subscribe(this);
@@ -1892,11 +1892,11 @@ public abstract class CsFlow<T>
             }
         }
 
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
-                return new CsFlowCompletableSubscriber(subscriber);
+                return new FlowCompletableSubscriber(subscriber);
             }
         };
     }
@@ -1904,24 +1904,24 @@ public abstract class CsFlow<T>
     /**
      * Returns a singleton flow with the given value.
      */
-    public static <T> CsFlow<T> just(T value)
+    public static <T> Flow<T> just(T value)
     {
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
                 return new SingleSubscription<>(subscriber, value);
             }
         };
     }
 
-    static class SingleSubscription<T> implements CsSubscription
+    static class SingleSubscription<T> implements FlowSubscription
     {
-        final CsSubscriber<T> subscriber;
+        final FlowSubscriber<T> subscriber;
         final T value;
         boolean supplied = false;
 
-        SingleSubscription(CsSubscriber<T> subscriber, T value)
+        SingleSubscription(FlowSubscriber<T> subscriber, T value)
         {
             this.subscriber = subscriber;
             this.value = value;
@@ -1951,21 +1951,21 @@ public abstract class CsFlow<T>
     /**
      * Performs an ordered merge of the given flows. See {@link Merge}
      */
-    public static <I, O> CsFlow<O> merge(List<CsFlow<I>> flows,
-                                         Comparator<? super I> comparator,
-                                         Reducer<I, O> reducer)
+    public static <I, O> Flow<O> merge(List<Flow<I>> flows,
+                                       Comparator<? super I> comparator,
+                                       Reducer<I, O> reducer)
     {
         return Merge.get(flows, comparator, reducer);
     }
 
 
     /**
-     * Materializes a list of CsFlow<I> into a CsFlow with a single List of I
+     * Materializes a list of Flow<I> into a Flow with a single List of I
      */
-    public static <I> CsFlow<List<I>> zipToList(List<CsFlow<I>> flows)
+    public static <I> Flow<List<I>> zipToList(List<Flow<I>> flows)
     {
-        return CsFlow.merge(flows, Comparator.comparing((c) -> 0),
-                            new Reducer<I, List<I>>()
+        return Flow.merge(flows, Comparator.comparing((c) -> 0),
+                          new Reducer<I, List<I>>()
                             {
                                 List<I> list = new ArrayList<>(flows.size());
 
@@ -1983,18 +1983,18 @@ public abstract class CsFlow<T>
 
     public interface Operator<I, O>
     {
-        CsSubscription subscribe(CsFlow<I> source, CsSubscriber<O> subscriber) throws Exception;
+        FlowSubscription subscribe(Flow<I> source, FlowSubscriber<O> subscriber) throws Exception;
     }
 
     /**
      * Used to apply Operators. See {@link Threads} for usages.
      */
-    public <O> CsFlow<O> lift(Operator<T, O> operator)
+    public <O> Flow<O> lift(Operator<T, O> operator)
     {
-        CsFlow<T> self = this;
-        return new CsFlow<O>()
+        Flow<T> self = this;
+        return new Flow<O>()
         {
-            public CsSubscription subscribe(CsSubscriber subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
             {
                 return operator.subscribe(self, subscriber);
             }
@@ -2007,11 +2007,11 @@ public abstract class CsFlow<T>
      * The resource supplier is called on subscription, the flow is constructed, and the resource disposer is called
      * when the subscription is closed.
      */
-    public static <T, R> CsFlow<T> using(Supplier<R> resourceSupplier, Function<R, CsFlow<T>> flowSupplier, Consumer<R> resourceDisposer)
+    public static <T, R> Flow<T> using(Supplier<R> resourceSupplier, Function<R, Flow<T>> flowSupplier, Consumer<R> resourceDisposer)
     {
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
                 R resource = resourceSupplier.get();
                 try
@@ -2032,7 +2032,7 @@ public abstract class CsFlow<T>
     /**
      * Take no more than the first count items from the flow.
      */
-    public CsFlow<T> take(long count)
+    public Flow<T> take(long count)
     {
         AtomicLong cc = new AtomicLong(count);
         return takeUntil(() -> cc.decrementAndGet() < 0);
@@ -2042,7 +2042,7 @@ public abstract class CsFlow<T>
      * Delays the execution of each onNext by the given time.
      * Used for testing.
      */
-    public CsFlow<T> delayOnNext(long sleepFor, TimeUnit timeUnit)
+    public Flow<T> delayOnNext(long sleepFor, TimeUnit timeUnit)
     {
         return apply(((subscriber, source, next) ->
                       Schedulers.computation().scheduleDirect(() -> subscriber.onNext(next),
@@ -2072,7 +2072,7 @@ public abstract class CsFlow<T>
      *
      * Note: Both resulting flows are single-use.
      */
-    public CsFlow<CsFlow<T>> skipEmpty()
+    public Flow<Flow<T>> skipEmpty()
     {
         return SkipEmpty.skipEmpty(this);
     }
@@ -2084,26 +2084,26 @@ public abstract class CsFlow<T>
      *
      * Note: The flow passed to the mapper, as well as the returned result, are single-use.
      */
-    public <U> CsFlow<U> skipMapEmpty(Function<CsFlow<T>, U> mapper)
+    public <U> Flow<U> skipMapEmpty(Function<Flow<T>, U> mapper)
     {
         return SkipEmpty.skipMapEmpty(this, mapper);
     }
 
-    public static <T> CloseableIterator<T> toIterator(CsFlow<T> source) throws Exception
+    public static <T> CloseableIterator<T> toIterator(Flow<T> source) throws Exception
     {
         return new ToIteratorSubscription<T>(source);
     }
 
-    static class ToIteratorSubscription<T> implements CloseableIterator<T>, CsSubscriber<T>
+    static class ToIteratorSubscription<T> implements CloseableIterator<T>, FlowSubscriber<T>
     {
         static final Object POISON_PILL = new Object();
 
-        final CsSubscription subscription;
+        final FlowSubscription subscription;
         BlockingQueue<Object> queue = new ArrayBlockingQueue<>(1);
         Throwable error = null;
         Object next = null;
 
-        public ToIteratorSubscription(CsFlow<T> source) throws Exception
+        public ToIteratorSubscription(Flow<T> source) throws Exception
         {
             subscription = source.subscribe(this);
         }
@@ -2182,7 +2182,7 @@ public abstract class CsFlow<T>
      */
     public interface Tee<T>
     {
-        public CsFlow<T> child(int index);
+        public Flow<T> child(int index);
     }
 
     /**
@@ -2225,7 +2225,7 @@ public abstract class CsFlow<T>
 
     public static StackTraceElement[] maybeGetStackTrace()
     {
-        if (CsFlow.DEBUG_ENABLED)
+        if (Flow.DEBUG_ENABLED)
             return Thread.currentThread().getStackTrace();
         return null;
     }
@@ -2240,13 +2240,13 @@ public abstract class CsFlow<T>
         // Avoid re-wrapping an exception if it was already added
         for (Throwable t : throwable.getSuppressed())
         {
-            if (t instanceof CsFlowException)
+            if (t instanceof FlowException)
                 return throwable;
         }
 
         // Load lambdas before calling `toString` on the object
         LINE_NUMBERS.preloadLambdas();
-        throwable.addSuppressed(new CsFlowException(tag.toString()));
+        throwable.addSuppressed(new FlowException(tag.toString()));
         return throwable;
     }
 
@@ -2261,11 +2261,11 @@ public abstract class CsFlow<T>
 
     }
 
-    private static class CsFlowException extends RuntimeException
+    private static class FlowException extends RuntimeException
     {
-        private CsFlowException(Object tag)
+        private FlowException(Object tag)
         {
-            super("CsFlow call chain:\n" + tag.toString());
+            super("Flow call chain:\n" + tag.toString());
         }
     }
 
@@ -2294,15 +2294,15 @@ public abstract class CsFlow<T>
 
     public static String formatTrace(String prefix, Object tag)
     {
-        return String.format("\t%-20s%s", prefix, CsFlow.withLineNumber(tag));
+        return String.format("\t%-20s%s", prefix, Flow.withLineNumber(tag));
     }
 
-    public static String formatTrace(String prefix, Object tag, CsSubscriber subscriber)
+    public static String formatTrace(String prefix, Object tag, FlowSubscriber subscriber)
     {
-        return String.format("\t%-20s%s\n%s", prefix, CsFlow.withLineNumber(tag), subscriber);
+        return String.format("\t%-20s%s\n%s", prefix, Flow.withLineNumber(tag), subscriber);
     }
 
-    public static String formatTrace(String prefix, CsSubscriber subscriber)
+    public static String formatTrace(String prefix, FlowSubscriber subscriber)
     {
         return String.format("\t%-20s\n%s", prefix, subscriber);
     }

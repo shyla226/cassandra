@@ -22,8 +22,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
- * This class is a bridge between the CsFlow<T> that we return to clients and the one
- * that we receive when {@link #onSource(CsFlow)} is called. It converts
+ * This class is a bridge between the Flow<T> that we return to clients and the one
+ * that we receive when {@link #onSource(Flow)} is called. It converts
  * client requests into requests to the source flow.
  * <p>
  * If no source flow is available when the client subscribes, the request is recorded and
@@ -32,12 +32,12 @@ import java.util.function.Supplier;
  * See {@link org.apache.cassandra.service.ReadCallback#result} for an example on how this class
  * is used to set a source flow when a sufficient number of responses have been received.
  * <p>
- * The implementation is in {@link CsDeferredFlowImpl}.
+ * The implementation is in {@link DeferredFlowImpl}.
  */
-public abstract class CsDeferredFlow<T> extends CsFlow<T>
+public abstract class DeferredFlow<T> extends Flow<T>
 {
     /** Called when the source flow is available */
-    public abstract void onSource(CsFlow<T> value);
+    public abstract void onSource(Flow<T> value);
 
     /** Indicates if the source flow is available */
     public abstract boolean hasSource();
@@ -51,7 +51,7 @@ public abstract class CsDeferredFlow<T> extends CsFlow<T>
      *
      * @return a deferred flow implementation
      */
-    public static <T> CsDeferredFlow<T> createWithTimeout(long timeoutNanos)
+    public static <T> DeferredFlow<T> createWithTimeout(long timeoutNanos)
     {
         return create(System.nanoTime() + timeoutNanos, TimeoutException::new);
     }
@@ -66,8 +66,8 @@ public abstract class CsDeferredFlow<T> extends CsFlow<T>
      *
      * @return a deferred flow implementation
      */
-    public static <T> CsDeferredFlow<T> create(long deadlineNanos, Supplier<Throwable> timeoutSupplier)
+    public static <T> DeferredFlow<T> create(long deadlineNanos, Supplier<Throwable> timeoutSupplier)
     {
-        return new CsDeferredFlowImpl<>(deadlineNanos, timeoutSupplier);
+        return new DeferredFlowImpl<>(deadlineNanos, timeoutSupplier);
     }
 }

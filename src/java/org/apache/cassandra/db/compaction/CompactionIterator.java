@@ -22,9 +22,6 @@ import java.util.function.Predicate;
 
 import com.google.common.collect.Ordering;
 
-import org.apache.cassandra.utils.flow.CsFlow;
-import io.reactivex.Observable;
-import io.reactivex.Single;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;

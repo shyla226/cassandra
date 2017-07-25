@@ -34,7 +34,7 @@ import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.service.pager.QueryPager;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Generic abstraction for read queries.
@@ -59,22 +59,22 @@ public interface ReadQuery extends Monitorable
             return ReadExecutionController.empty();
         }
 
-        public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency,
-                                         ClientState clientState,
-                                         long queryStartNanoTime,
-                                         boolean forContinuousPaging) throws RequestExecutionException
+        public Flow<FlowablePartition> execute(ConsistencyLevel consistency,
+                                               ClientState clientState,
+                                               long queryStartNanoTime,
+                                               boolean forContinuousPaging) throws RequestExecutionException
         {
-            return CsFlow.empty();
+            return Flow.empty();
         }
 
-        public CsFlow<FlowablePartition> executeInternal(Monitor monitor)
+        public Flow<FlowablePartition> executeInternal(Monitor monitor)
         {
-            return CsFlow.empty();
+            return Flow.empty();
         }
 
-        public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+        public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
-            return CsFlow.empty();
+            return Flow.empty();
         }
 
         public DataLimits limits()
@@ -160,10 +160,10 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the query as as asynchronous flow of {@link FlowablePartition}
      */
-    public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency,
-                                             ClientState clientState,
-                                             long queryStartNanoTime,
-                                             boolean forContinuousPaging) throws RequestExecutionException;
+    public Flow<FlowablePartition> execute(ConsistencyLevel consistency,
+                                           ClientState clientState,
+                                           long queryStartNanoTime,
+                                           boolean forContinuousPaging) throws RequestExecutionException;
 
     /**
      * Execute the query for internal queries.
@@ -172,9 +172,9 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the query.
      */
-    public CsFlow<FlowablePartition> executeInternal(@Nullable Monitor monitor);
+    public Flow<FlowablePartition> executeInternal(@Nullable Monitor monitor);
 
-    public default CsFlow<FlowablePartition> executeInternal()
+    public default Flow<FlowablePartition> executeInternal()
     {
         return executeInternal(null);
     }
@@ -189,9 +189,9 @@ public interface ReadQuery extends Monitorable
      *
      * @return the result of the read query.
      */
-    public CsFlow<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
+    public Flow<FlowableUnfilteredPartition> executeLocally(@Nullable Monitor monitor);
 
-    default public CsFlow<FlowableUnfilteredPartition> executeLocally()
+    default public Flow<FlowableUnfilteredPartition> executeLocally()
     {
         return executeLocally(null);
     }

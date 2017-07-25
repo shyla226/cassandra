@@ -23,51 +23,51 @@ import java.util.function.Supplier;
 
 import org.apache.cassandra.utils.Throwables;
 
-import static org.apache.cassandra.utils.flow.CsFlow.formatTrace;
+import static org.apache.cassandra.utils.flow.Flow.formatTrace;
 
 /**
  * Implementation of methods relating to the concatenation of flows.
  */
 class Concat
 {
-    static <T> CsFlow<T> concat(CsFlow<CsFlow<T>> source)
+    static <T> Flow<T> concat(Flow<Flow<T>> source)
     {
         return source.flatMap(x -> x);
     }
 
-    static <T> CsFlow<T> concat(Iterable<CsFlow<T>> sources)
+    static <T> Flow<T> concat(Iterable<Flow<T>> sources)
     {
-        return concat(CsFlow.fromIterable(sources));
+        return concat(Flow.fromIterable(sources));
     }
 
-    static <O> CsFlow<O> concat(CsFlow<O>[] sources)
+    static <O> Flow<O> concat(Flow<O>[] sources)
     {
         return concat(Arrays.asList(sources));
     }
 
-    static <T> CsFlow<T> concatWith(CsFlow<T> source, Supplier<CsFlow<T>> supplier)
+    static <T> Flow<T> concatWith(Flow<T> source, Supplier<Flow<T>> supplier)
     {
         // Implement directly rather than creating an iterable and calling concat, because this is used by short reads,
         // where most of the time the supplier will return null. This direct implementation should
         // be a little be lighter than having to create an iterable and a subsequent flat-map. It also
         // helps a bit in reading stack traces in JFR or flame graphs, since flatMap is used ubiquitously.
 
-        return new CsFlow<T>()
+        return new Flow<T>()
         {
-            public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+            public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
             {
                 return new ConcatWithSubscription<>(source, supplier, subscriber);
             }
         };
     }
 
-    private static class ConcatWithSubscription<T> extends CsFlow.RequestLoop implements CsSubscription, CsSubscriber<T>
+    private static class ConcatWithSubscription<T> extends Flow.RequestLoop implements FlowSubscription, FlowSubscriber<T>
     {
-        private final Supplier<CsFlow<T>> supplier;
-        private final CsSubscriber<T> subscriber;
-        private CsSubscription subscription;
+        private final Supplier<Flow<T>> supplier;
+        private final FlowSubscriber<T> subscriber;
+        private FlowSubscription subscription;
 
-        ConcatWithSubscription(CsFlow<T> source, Supplier<CsFlow<T>> supplier, CsSubscriber<T> subscriber) throws Exception
+        ConcatWithSubscription(Flow<T> source, Supplier<Flow<T>> supplier, FlowSubscriber<T> subscriber) throws Exception
         {
             this.supplier = supplier;
             this.subscriber = subscriber;
@@ -116,7 +116,7 @@ class Concat
             // subscribing to the next one so we don't call close twice
             subscription = null;
 
-            CsFlow<T> next = supplier.get();
+            Flow<T> next = supplier.get();
             if (next == null)
             {
                 subscriber.onComplete();

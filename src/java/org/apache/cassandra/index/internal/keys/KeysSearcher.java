@@ -35,7 +35,7 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class KeysSearcher extends CassandraIndexSearcher
 {
@@ -46,10 +46,10 @@ public class KeysSearcher extends CassandraIndexSearcher
         super(command, expression, indexer);
     }
 
-    protected CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
-                                                                       final FlowablePartition indexHits,
-                                                                       final ReadCommand command,
-                                                                       final ReadExecutionController executionController)
+    protected Flow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+                                                                   final FlowablePartition indexHits,
+                                                                   final ReadCommand command,
+                                                                   final ReadExecutionController executionController)
     {
         assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
         return indexHits.content
@@ -57,7 +57,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                {
                    DecoratedKey key = index.baseCfs.decorateKey(hit.clustering().get(0));
                    if (!command.selectsKey(key))
-                       return CsFlow.<FlowableUnfilteredPartition>empty();
+                       return Flow.<FlowableUnfilteredPartition>empty();
 
                    ColumnFilter extendedFilter = getExtendedFilter(command.columnFilter());
                    SinglePartitionReadCommand dataCmd = SinglePartitionReadCommand.create(
@@ -69,7 +69,7 @@ public class KeysSearcher extends CassandraIndexSearcher
                        key,
                        command.clusteringIndexFilter(key));
 
-                   CsFlow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+                   Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
                    return partition.skippingMap(p -> filterIfStale(p,
                                                                    hit,
                                                                    indexKey.getKey(),

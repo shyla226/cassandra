@@ -23,16 +23,16 @@ import io.reactivex.functions.Function;
 /**
  * Functionality for skipping over empty flows.
  * For usage example, see
- * {@link org.apache.cassandra.db.filter.RowFilter.CQLFilter#filter(org.apache.cassandra.utils.flow.CsFlow, org.apache.cassandra.schema.TableMetadata, int)}
+ * {@link org.apache.cassandra.db.filter.RowFilter.CQLFilter#filter(Flow, org.apache.cassandra.schema.TableMetadata, int)}
  */
 public class SkipEmpty
 {
-    public static <T> CsFlow<CsFlow<T>> skipEmpty(CsFlow<T> flow)
+    public static <T> Flow<Flow<T>> skipEmpty(Flow<T> flow)
     {
         return new SkipEmptyContent<>(flow, x -> x);
     }
 
-    public static <T, U> CsFlow<U> skipMapEmpty(CsFlow<T> flow, Function<CsFlow<T>, U> mapper)
+    public static <T, U> Flow<U> skipMapEmpty(Flow<T> flow, Function<Flow<T>, U> mapper)
     {
         return new SkipEmptyContent<>(flow, mapper);
     }
@@ -41,11 +41,11 @@ public class SkipEmpty
      * This is both flow and subscription. Done this way as we can only subscribe to these implementations once
      * and thus it doesn't make much sense to create subscription-specific instances.
      */
-    static class SkipEmptyContent<T, U> extends CsFlow<U> implements CsSubscription
+    static class SkipEmptyContent<T, U> extends Flow<U> implements FlowSubscription
     {
-        final Function<CsFlow<T>, U> mapper;
-        CsSubscriber<U> subscriber;
-        CsFlow<T> content;
+        final Function<Flow<T>, U> mapper;
+        FlowSubscriber<U> subscriber;
+        Flow<T> content;
         SkipEmptyContentSubscriber<T> child;
 
         private enum State
@@ -59,13 +59,13 @@ public class SkipEmpty
         }
         State state = State.READY;
 
-        public SkipEmptyContent(CsFlow<T> content, Function<CsFlow<T>, U> mapper)
+        public SkipEmptyContent(Flow<T> content, Function<Flow<T>, U> mapper)
         {
             this.content = content;
             this.mapper = mapper;
         }
 
-        public CsSubscription subscribe(CsSubscriber<U> subscriber)
+        public FlowSubscription subscribe(FlowSubscriber<U> subscriber)
         {
             if (state != State.READY)
                 throw new AssertionError("skipEmpty partitions can only be subscribed to once. State was " + state);
@@ -109,7 +109,7 @@ public class SkipEmpty
             }
         }
 
-        void onContent(CsFlow<T> child)
+        void onContent(Flow<T> child)
         {
             if (!verifyTransition(State.REQUESTED, State.SUPPLIED))
                 return;
@@ -162,12 +162,12 @@ public class SkipEmpty
 
         public Throwable addSubscriberChainFromSource(Throwable throwable)
         {
-            return child != null ? child.addSubscriberChainFromSource(throwable) : CsFlow.wrapException(throwable, this);
+            return child != null ? child.addSubscriberChainFromSource(throwable) : Flow.wrapException(throwable, this);
         }
 
         public String toString()
         {
-            return CsFlow.formatTrace("skipEmpty", mapper, subscriber);
+            return Flow.formatTrace("skipEmpty", mapper, subscriber);
         }
     }
 
@@ -175,15 +175,15 @@ public class SkipEmpty
      * This is both flow and subscription. Done this way as we can only subscribe to these implementations once
      * and thus it doesn't make much sense to create subscription-specific instances.
      */
-    private static class SkipEmptyContentSubscriber<T> extends CsFlow<T> implements CsSubscriber<T>, CsSubscription
+    private static class SkipEmptyContentSubscriber<T> extends Flow<T> implements FlowSubscriber<T>, FlowSubscription
     {
         final SkipEmptyContent parent;
-        final CsSubscription upstream;
+        final FlowSubscription upstream;
 
-        CsSubscriber<T> downstream = null;
+        FlowSubscriber<T> downstream = null;
         T first = null;
 
-        public SkipEmptyContentSubscriber(CsFlow<T> content,
+        public SkipEmptyContentSubscriber(Flow<T> content,
                                           SkipEmptyContent parent) throws Exception
         {
             this.parent = parent;
@@ -191,7 +191,7 @@ public class SkipEmpty
             upstream.request();
         }
 
-        public CsSubscription subscribe(CsSubscriber<T> subscriber)
+        public FlowSubscription subscribe(FlowSubscriber<T> subscriber)
         {
             assert downstream == null : "skipEmpty content can only be subscribed to once, " + parent.toString();
             assert first != null;
@@ -276,7 +276,7 @@ public class SkipEmpty
 
         public String toString()
         {
-            return CsFlow.formatTrace("skipEmpty", parent.mapper, downstream);
+            return Flow.formatTrace("skipEmpty", parent.mapper, downstream);
         }
     }
 }

@@ -29,7 +29,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.versioning.Version;
 
 public class CachedBTreePartition extends ImmutableBTreePartition implements CachedPartition
@@ -121,7 +121,7 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
      *
      * @return the created partition.
      */
-    public static CsFlow<CachedBTreePartition> create(FlowableUnfilteredPartition partition, int nowInSec)
+    public static Flow<CachedBTreePartition> create(FlowableUnfilteredPartition partition, int nowInSec)
     {
         return create(partition, 16, nowInSec);
     }
@@ -136,7 +136,7 @@ public class CachedBTreePartition extends ImmutableBTreePartition implements Cac
      *
      * @return the created partition.
      */
-    public static CsFlow<CachedBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, int nowInSec)
+    public static Flow<CachedBTreePartition> create(FlowableUnfilteredPartition partition, int initialRowCapacity, int nowInSec)
     {
         return AbstractBTreePartition.build(partition, initialRowCapacity, true).map(holder -> {
 

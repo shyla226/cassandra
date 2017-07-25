@@ -39,8 +39,8 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.*;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.flow.CsDeferredFlow;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.DeferredFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class DataResolver extends ResponseResolver
 {
@@ -54,18 +54,18 @@ public class DataResolver extends ResponseResolver
         this.queryStartNanoTime = queryStartNanoTime;
     }
 
-    public CsFlow<FlowablePartition> getData()
+    public Flow<FlowablePartition> getData()
     {
         ReadResponse response = responses.iterator().next().payload();
         return FlowablePartitions.filterAndSkipEmpty(response.data(command), command.nowInSec());
     }
 
-    public CsFlow<FlowablePartition> resolve()
+    public Flow<FlowablePartition> resolve()
     {
         // We could get more responses while this method runs, which is ok (we're happy to ignore any response not here
         // at the beginning of this method), so grab the response count once and use that through the method.
         int count = responses.size();
-        List<CsFlow<FlowableUnfilteredPartition>> results = new ArrayList<>(count);
+        List<Flow<FlowableUnfilteredPartition>> results = new ArrayList<>(count);
         InetAddress[] sources = new InetAddress[count];
         for (int i = 0; i < count; i++)
         {
@@ -111,9 +111,9 @@ public class DataResolver extends ResponseResolver
                                  .andThen(completeOnReadRepairAnswersReceived());
     }
 
-    private CsFlow<FlowablePartition> mergeWithShortReadProtection(List<CsFlow<FlowableUnfilteredPartition>> results,
-                                                                   InetAddress[] sources,
-                                                                   DataLimits.Counter resultCounter)
+    private Flow<FlowablePartition> mergeWithShortReadProtection(List<Flow<FlowableUnfilteredPartition>> results,
+                                                                 InetAddress[] sources,
+                                                                 DataLimits.Counter resultCounter)
     {
         // If we have only one results, there is no read repair to do and we can't get short reads
         if (results.size() == 1)
@@ -407,9 +407,9 @@ public class DataResolver extends ResponseResolver
         }
     }
 
-    private CsFlow<FlowableUnfilteredPartition> withShortReadProtection(InetAddress source,
-                                                                        CsFlow<FlowableUnfilteredPartition> data,
-                                                                        DataLimits.Counter counter)
+    private Flow<FlowableUnfilteredPartition> withShortReadProtection(InetAddress source,
+                                                                      Flow<FlowableUnfilteredPartition> data,
+                                                                      DataLimits.Counter counter)
     {
         ShortReadProtection shortReadProtection = new ShortReadProtection(source, counter, queryStartNanoTime);
         return shortReadProtection.apply(data);
@@ -437,7 +437,7 @@ public class DataResolver extends ResponseResolver
             this.queryStartNanoTime = queryStartNanoTime;
         }
 
-        CsFlow<FlowableUnfilteredPartition> apply(CsFlow<FlowableUnfilteredPartition> data)
+        Flow<FlowableUnfilteredPartition> apply(Flow<FlowableUnfilteredPartition> data)
         {
             return DataLimits.countUnfiltered(data, counter).map(this::applyPartition);
         }
@@ -462,7 +462,7 @@ public class DataResolver extends ResponseResolver
             return unfiltered;
         }
 
-        private CsFlow<Unfiltered> moreContents()
+        private Flow<Unfiltered> moreContents()
         {
             // We have a short read if the node this is the result of has returned the requested number of
             // rows for that partition (i.e. it has stopped returning results due to the limit), but some of
@@ -540,11 +540,11 @@ public class DataResolver extends ResponseResolver
             return counter.countedInCurrentPartition();
         }
 
-        private CsFlow<FlowableUnfilteredPartition> doShortReadRetry(SinglePartitionReadCommand retryCommand)
+        private Flow<FlowableUnfilteredPartition> doShortReadRetry(SinglePartitionReadCommand retryCommand)
         {
             final long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(command.getTimeout());
             final Supplier<Throwable> timeoutExceptionSupplier = () -> new ReadTimeoutException(ConsistencyLevel.ONE, 0, 1, false);
-            final CsDeferredFlow<FlowableUnfilteredPartition> result = CsDeferredFlow.create(queryStartNanoTime + timeoutNanos, timeoutExceptionSupplier);
+            final DeferredFlow<FlowableUnfilteredPartition> result = DeferredFlow.create(queryStartNanoTime + timeoutNanos, timeoutExceptionSupplier);
 
             MessagingService.instance().send(Verbs.READS.READ.newRequest(source, retryCommand), new MessageCallback<ReadResponse>()
             {
@@ -555,7 +555,7 @@ public class DataResolver extends ResponseResolver
 
                 public void onFailure(FailureResponse<ReadResponse> response)
                 {
-                    result.onSource(CsFlow.error(new ReadFailureException(ConsistencyLevel.ONE, 0, 1, false, Collections.singletonMap(response.from(), response.reason()))));
+                    result.onSource(Flow.error(new ReadFailureException(ConsistencyLevel.ONE, 0, 1, false, Collections.singletonMap(response.from(), response.reason()))));
                 }
             });
 

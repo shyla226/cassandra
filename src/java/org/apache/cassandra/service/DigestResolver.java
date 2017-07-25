@@ -27,7 +27,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.net.Response;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class DigestResolver extends ResponseResolver
 {
@@ -49,7 +49,7 @@ public class DigestResolver extends ResponseResolver
     /**
      * Special case of resolve() so that CL.ONE reads never throw DigestMismatchException in the foreground
      */
-    public CsFlow<FlowablePartition> getData()
+    public Flow<FlowablePartition> getData()
     {
         assert isDataPresent();
         return FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec());
@@ -65,7 +65,7 @@ public class DigestResolver extends ResponseResolver
      * b) we're checking additional digests that arrived after the minimum to handle
      *    the requested ConsistencyLevel, i.e. asynchronous read repair check
      */
-    public CsFlow<FlowablePartition> resolve() throws DigestMismatchException
+    public Flow<FlowablePartition> resolve() throws DigestMismatchException
     {
         if (responses.size() == 1)
             return getData();
@@ -73,8 +73,8 @@ public class DigestResolver extends ResponseResolver
         if (logger.isTraceEnabled())
             logger.trace("resolving {} responses", responses.size());
 
-        return CsFlow.concat(compareResponses(),
-                             FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec()));
+        return Flow.concat(compareResponses(),
+                           FlowablePartitions.filterAndSkipEmpty(dataResponse.data(command), command.nowInSec()));
     }
 
     public Completable completeOnReadRepairAnswersReceived()

@@ -59,7 +59,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.index.internal.CassandraIndex.getFunctions;
 import static org.apache.cassandra.index.internal.CassandraIndex.indexCfsMetadata;
@@ -212,7 +212,7 @@ public class CustomCassandraIndex implements Index
     /**
      * No post processing of query results, just return them unchanged
      */
-    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand command)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command)
     {
         return (partitions, readCommand) -> partitions;
     }

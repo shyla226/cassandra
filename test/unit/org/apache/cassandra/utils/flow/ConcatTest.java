@@ -37,18 +37,18 @@ public class ConcatTest
     @Test
     public void testConcatFlows() throws Exception
     {
-        CsFlow<Integer> flow1 = CsFlow.fromIterable(() -> IntStream.range(0, 10).iterator());
-        CsFlow<Integer> flow2 = CsFlow.fromIterable(() -> IntStream.range(10, 20).iterator());
-        CsFlow<Integer> flow3 = CsFlow.fromIterable(() -> IntStream.range(20, 30).iterator());
+        Flow<Integer> flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
+        Flow<Integer> flow2 = Flow.fromIterable(() -> IntStream.range(10, 20).iterator());
+        Flow<Integer> flow3 = Flow.fromIterable(() -> IntStream.range(20, 30).iterator());
 
-        long res = CsFlow.concat(flow1, flow2, flow3).countBlocking();
+        long res = Flow.concat(flow1, flow2, flow3).countBlocking();
         assertEquals(30, res);
 
-        class MoreContents implements Supplier<CsFlow<Integer>>
+        class MoreContents implements Supplier<Flow<Integer>>
         {
-            List<CsFlow<Integer>> flows = new ArrayList<>(Arrays.asList(flow2, flow3));
+            List<Flow<Integer>> flows = new ArrayList<>(Arrays.asList(flow2, flow3));
 
-            public CsFlow<Integer> get()
+            public Flow<Integer> get()
             {
                 return flows.isEmpty() ? null : flows.remove(0);
             }
@@ -62,15 +62,15 @@ public class ConcatTest
     public void testConcatWithCompletables() throws Exception
     {
         AtomicBoolean completed = new AtomicBoolean(false);
-        CsFlow<Integer> flow1 = CsFlow.fromIterable(() -> IntStream.range(0, 10).iterator());
+        Flow<Integer> flow1 = Flow.fromIterable(() -> IntStream.range(0, 10).iterator());
         Completable completable = Completable.fromRunnable(() -> assertTrue(completed.compareAndSet(false, true)));
 
-        long res = CsFlow.concat(completable, flow1).countBlocking();
+        long res = Flow.concat(completable, flow1).countBlocking();
         assertEquals(10, res);
         assertTrue(completed.get());
 
         completed.set(false);
-        res = CsFlow.concat(flow1, completable).countBlocking();
+        res = Flow.concat(flow1, completable).countBlocking();
         assertEquals(10, res);
         assertTrue(completed.get());
     }

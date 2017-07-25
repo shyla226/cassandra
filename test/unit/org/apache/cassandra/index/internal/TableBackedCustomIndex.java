@@ -17,7 +17,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -151,7 +151,7 @@ public class TableBackedCustomIndex implements Index
 
     public long getEstimatedResultRows() { throw new UnsupportedOperationException(); }
 
-    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand command)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command)
     {
         return (partitions, rowFilter) -> partitions;
     }

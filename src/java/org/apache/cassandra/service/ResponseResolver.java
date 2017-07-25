@@ -25,7 +25,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.FlowablePartition;
 import org.apache.cassandra.net.Response;
 import org.apache.cassandra.utils.concurrent.Accumulator;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public abstract class ResponseResolver
 {
@@ -46,8 +46,8 @@ public abstract class ResponseResolver
         this.responses = new Accumulator<>(maxResponseCount);
     }
 
-    public abstract CsFlow<FlowablePartition> getData();
-    public abstract CsFlow<FlowablePartition> resolve() throws DigestMismatchException;
+    public abstract Flow<FlowablePartition> getData();
+    public abstract Flow<FlowablePartition> resolve() throws DigestMismatchException;
     public abstract Completable completeOnReadRepairAnswersReceived();
 
     /**

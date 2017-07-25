@@ -82,7 +82,7 @@ import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
@@ -416,7 +416,7 @@ public abstract class ModificationStatement implements CQLStatement
 
         SinglePartitionReadCommand.Group group = new SinglePartitionReadCommand.Group(commands, DataLimits.NONE);
 
-        CsFlow<FlowablePartition> partitions = local
+        Flow<FlowablePartition> partitions = local
                                                ? group.executeInternal()
                                                : group.execute(cl, null, queryStartNanoTime, false);
 

@@ -30,7 +30,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.sasi.plan.Operation.OperationType;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.FlatMap;
 import org.apache.cassandra.utils.flow.Threads;
 
@@ -67,7 +67,7 @@ public class QueryPlan
         }
     }
 
-    public CsFlow<FlowableUnfilteredPartition> execute(ReadExecutionController executionController) throws RequestTimeoutException
+    public Flow<FlowableUnfilteredPartition> execute(ReadExecutionController executionController) throws RequestTimeoutException
     {
         return new ResultRetriever(analyze(), controller, executionController).getPartitions();
     }
@@ -87,16 +87,16 @@ public class QueryPlan
             this.executionController = executionController;
         }
 
-        public CsFlow<FlowableUnfilteredPartition> getPartitions()
+        public Flow<FlowableUnfilteredPartition> getPartitions()
         {
             if (operationTree == null)
-                return CsFlow.empty();
+                return Flow.empty();
 
             operationTree.skipTo((Long) keyRange.left.getToken().getTokenValue());
 
-            CsFlow<DecoratedKey> keys = CsFlow.fromIterable(() -> operationTree)
-                                              .lift(Threads.requestOnIo())
-                                              .flatMap(CsFlow::fromIterable);
+            Flow<DecoratedKey> keys = Flow.fromIterable(() -> operationTree)
+                                          .lift(Threads.requestOnIo())
+                                          .flatMap(Flow::fromIterable);
 
             if (!keyRange.right.isMinimum())
                 keys = keys.takeWhile(key -> keyRange.right.compareTo(key) >= 0);
@@ -108,14 +108,14 @@ public class QueryPlan
                        .doOnClose(this::close);
         }
 
-        public CsFlow<FlowableUnfilteredPartition> apply(DecoratedKey key)
+        public Flow<FlowableUnfilteredPartition> apply(DecoratedKey key)
         {
-            CsFlow<FlowableUnfilteredPartition> fp = controller.getPartition(key, executionController);
+            Flow<FlowableUnfilteredPartition> fp = controller.getPartition(key, executionController);
             return fp.map(partition ->
             {
                 Row staticRow = partition.staticRow;
 
-                CsFlow<Unfiltered> filteredContent = partition.content
+                Flow<Unfiltered> filteredContent = partition.content
                     .filter(row -> operationTree.satisfiedBy(row, staticRow, true));
 
                 return new FlowableUnfilteredPartition(partition.header, partition.staticRow, filteredContent);

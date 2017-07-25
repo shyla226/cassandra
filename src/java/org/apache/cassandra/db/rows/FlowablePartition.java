@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.db.rows;
 
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * A partition container providing access to the rows of the partition together with deletion informations.
@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.flow.CsFlow;
 public class FlowablePartition extends FlowablePartitionBase<Row>
 {
 
-    public FlowablePartition(PartitionHeader header, Row staticRow, CsFlow<Row> content)
+    public FlowablePartition(PartitionHeader header, Row staticRow, Flow<Row> content)
     {
         super(header, staticRow, content);
     }
@@ -45,7 +45,7 @@ public class FlowablePartition extends FlowablePartitionBase<Row>
     }
 
     @Override
-    public FlowablePartition withContent(CsFlow<Row> content)
+    public FlowablePartition withContent(Flow<Row> content)
     {
         return new FlowablePartition(header,
                                      staticRow,
@@ -53,7 +53,7 @@ public class FlowablePartition extends FlowablePartitionBase<Row>
     }
 
     @Override
-    public FlowablePartition mapContent(CsFlow.MappingOp<Row, Row> mappingOp)
+    public FlowablePartition mapContent(Flow.MappingOp<Row, Row> mappingOp)
     {
         return withContent(content.map(mappingOp));
     }

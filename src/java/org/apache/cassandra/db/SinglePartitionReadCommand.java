@@ -60,7 +60,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.Threads;
 
 /**
@@ -365,7 +365,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                               clusteringIndexFilter);
     }
 
-    public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+    public Flow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
     {
         return StorageProxy.read(Group.one(this), consistency, clientState, queryStartNanoTime, forContinuousPaging);
     }
@@ -386,7 +386,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @SuppressWarnings("resource") // we close the created iterator through closing the result of this method (and SingletonUnfilteredPartitionIterator ctor cannot fail)
-    public CsFlow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public Flow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         //Resets our mutable state for short reads
         //Since this object can be re-used
@@ -399,7 +399,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             return deferredQuery(cfs, executionController);
     }
 
-    public CsFlow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public Flow<FlowableUnfilteredPartition> deferredQuery(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         //Resets our mutable state for short reads
         //Since this object can be re-used
@@ -429,7 +429,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * If the partition is is not cached, we figure out what filter is "biggest", read
      * that from disk, then filter the result and either cache that or return it.
      */
-    private CsFlow<FlowableUnfilteredPartition> getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
+    private Flow<FlowableUnfilteredPartition> getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert !cfs.isIndex(); // CASSANDRA-5732
         assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
@@ -457,7 +457,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                 Tracing.trace("Row cache hit");
                 FlowableUnfilteredPartition ret = clusteringIndexFilter().getFlowableUnfilteredPartition(columnFilter(), cachedPartition);
                 cfs.metric.updateSSTableIterated(0);
-                return CsFlow.just(ret);
+                return Flow.just(ret);
             }
 
             cfs.metric.rowCacheHitOutOfRange.inc();
@@ -490,28 +490,28 @@ public class SinglePartitionReadCommand extends ReadCommand
             {
                 int rowsToCache = metadata().params.caching.rowsPerPartitionToCache();
                 @SuppressWarnings("resource") // we close on exception or upon closing the result of this method
-                CsFlow<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(),
-                                                                                                        nowInSec(),
-                                                                                                        partitionKey())
-                                                                                     .deferredQuery(cfs,
+                Flow<FlowableUnfilteredPartition> iter = SinglePartitionReadCommand.fullPartitionRead(metadata(),
+                                                                                                      nowInSec(),
+                                                                                                      partitionKey())
+                                                                                   .deferredQuery(cfs,
                                                                                                     executionController);
 
                 return iter.flatMap(partition -> {
 
-                    CsFlow.Tee<Unfiltered> tee;
+                    Flow.Tee<Unfiltered> tee;
                     try
                     {
                         tee = partition.content.tee();
                     }
                     catch (Throwable t)
                     {
-                        return CsFlow.error(t);
+                        return Flow.error(t);
                     }
                     FlowableUnfilteredPartition toCache = partition.withContent(tee.child(0));
                     FlowableUnfilteredPartition toReturn = partition.withContent(tee.child(1));
 
                     toCache = DataLimits.cqlLimits(rowsToCache).truncateUnfiltered(toCache, nowInSec(), false);
-                    CsFlow<CachedBTreePartition> cachedPartition = CachedBTreePartition.create(toCache, nowInSec());
+                    Flow<CachedBTreePartition> cachedPartition = CachedBTreePartition.create(toCache, nowInSec());
 
                     // reduceToFuture initiates processing on this branch. It will immediately return until we have a request
                     // from the other branch of the tee. When that closes, the rest of the cache processing will be done.
@@ -530,7 +530,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                         });
 
                     // We now return the other branch of the tee, filtered to what the query wants.
-                    return CsFlow.just(clusteringIndexFilter().filterNotIndexed(columnFilter(), toReturn));
+                    return Flow.just(clusteringIndexFilter().filterNotIndexed(columnFilter(), toReturn));
                 });
             }
         }
@@ -555,8 +555,8 @@ public class SinglePartitionReadCommand extends ReadCommand
      * Also note that one must have created a {@code ReadExecutionController} on the queried table and we require it as
      * a parameter to enforce that fact, even though it's not explicitlly used by the method.
      */
-    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDisk(ColumnFamilyStore cfs,
-                                                                     ReadExecutionController executionController)
+    private Flow<FlowableUnfilteredPartition> queryMemtableAndDisk(ColumnFamilyStore cfs,
+                                                                   ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
 
@@ -587,7 +587,7 @@ public class SinglePartitionReadCommand extends ReadCommand
     }
 
     @SuppressWarnings("resource")
-    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
+    private Flow<FlowableUnfilteredPartition> queryMemtableAndDiskInternal()
     {
         // We now build a flow of FlowableUnfilteredPartition sourced from three separate lists:
         // - memtables
@@ -599,15 +599,15 @@ public class SinglePartitionReadCommand extends ReadCommand
             Tracing.trace("Acquiring sstable references");
             ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
 
-            List<CsFlow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(3);
+            List<Flow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(3);
 
-            iterators.add(CsFlow.fromIterable(view.memtables)
-                                .flatMap(memtable ->
+            iterators.add(Flow.fromIterable(view.memtables)
+                              .flatMap(memtable ->
                                 {
                                     minTimestamp = Math.min(minTimestamp, memtable.getMinTimestamp());
                                     return memtable.getPartition(partitionKey());
                                 })
-                                .skippingMap(p ->
+                              .skippingMap(p ->
                                 {
                                     if (p == null)
                                         return null;
@@ -659,9 +659,9 @@ public class SinglePartitionReadCommand extends ReadCommand
             // Operating over this flow executes the operations in each takeWhile below only after the preceding items have
             // been processed, which ensures that the relevant fields are properly set.
 
-            iterators.add(CsFlow.fromIterable(filteredSSTables)
-                                .takeWhile(sstable -> sstable.getMaxTimestamp() >= mostRecentPartitionTombstone)
-                                .flatMap(sstable ->
+            iterators.add(Flow.fromIterable(filteredSSTables)
+                              .takeWhile(sstable -> sstable.getMaxTimestamp() >= mostRecentPartitionTombstone)
+                              .flatMap(sstable ->
                                 {
                                     minTimestamp = Math.min(minTimestamp, sstable.getMinTimestamp());
 
@@ -671,7 +671,7 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                                     return makeFlowable(sstable);
                                 })
-                                .map(fup -> {
+                              .map(fup -> {
                                     mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
                                                                             fup.header.partitionLevelDeletion.markedForDeleteAt());
                                     return fup;
@@ -681,9 +681,9 @@ public class SinglePartitionReadCommand extends ReadCommand
             // is calculated correctly for them.
             if (skippedSSTablesWithTombstones != null)
             {
-                iterators.add(CsFlow.fromIterable(skippedSSTablesWithTombstones)
-                                    .takeWhile(sstable -> sstable.getMaxTimestamp() > minTimestamp)
-                                    .flatMap(sstable ->
+                iterators.add(Flow.fromIterable(skippedSSTablesWithTombstones)
+                                  .takeWhile(sstable -> sstable.getMaxTimestamp() > minTimestamp)
+                                  .flatMap(sstable ->
                                     {
                                         // This has no sliced data so we no longer need to update minTimestamp
 
@@ -697,9 +697,9 @@ public class SinglePartitionReadCommand extends ReadCommand
                                     }));
             }
 
-            return CsFlow.concat(iterators)
-                         .toList()
-                         .map(this::mergeResult);
+            return Flow.concat(iterators)
+                       .toList()
+                       .map(this::mergeResult);
         }
         catch (Throwable t)
         {
@@ -734,12 +734,12 @@ public class SinglePartitionReadCommand extends ReadCommand
         return clusteringIndexFilter().shouldInclude(sstable);
     }
 
-    private CsFlow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable, final ClusteringIndexNamesFilter clusterFilter)
+    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable, final ClusteringIndexNamesFilter clusterFilter)
     {
         return sstable.flow(partitionKey(), clusterFilter.getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
 
-    private CsFlow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable)
+    private Flow<FlowableUnfilteredPartition> makeFlowable(final SSTableReader sstable)
     {
         return sstable.flow(partitionKey(), clusteringIndexFilter().getSlices(metadata()), columnFilter(), isReversed(), metricsCollector);
     }
@@ -767,7 +767,7 @@ public class SinglePartitionReadCommand extends ReadCommand
      * This method assumes the filter is a {@code ClusteringIndexNamesFilter}.
      */
     @SuppressWarnings("resource")
-    private CsFlow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(final ClusteringIndexNamesFilter initFilter)
+    private Flow<FlowableUnfilteredPartition> queryMemtableAndSSTablesInTimestampOrder(final ClusteringIndexNamesFilter initFilter)
     {
         try
         {
@@ -775,7 +775,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             ColumnFamilyStore.ViewFragment view = cfs.select(View.select(SSTableSet.LIVE, partitionKey()));
 
             namesFilter = initFilter;
-            List<CsFlow<Void>> memtableList = new ArrayList<>(Iterables.size(view.memtables));
+            List<Flow<Void>> memtableList = new ArrayList<>(Iterables.size(view.memtables));
 
             Tracing.trace("Merging memtable contents");
             for (Memtable memtable : view.memtables)
@@ -800,8 +800,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                 /* sort the SSTables on disk */
                 Collections.sort(view.sstables, SSTableReader.maxTimestampComparator);
 
-                memtableList.add(CsFlow.fromIterable(view.sstables)
-                                       .takeWhile(sstable ->
+                memtableList.add(Flow.fromIterable(view.sstables)
+                                     .takeWhile(sstable ->
                                                   {
                                                       // if we've already seen a partition tombstone with a timestamp greater
                                                       // than the most recent update to this sstable, we're done, since the rest of the sstables
@@ -815,12 +815,12 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                                                  timeOrderedResult, currentMaxTs);
                                                       return (namesFilter != null);
                                                   })
-                                       .flatMap(this::processSSTableInTimeOrder));
+                                     .flatMap(this::processSSTableInTimeOrder));
             }
 
-            return CsFlow.concat(memtableList)
-                         .last()
-                         .map(v -> outputTimeOrderedResult(cfs));
+            return Flow.concat(memtableList)
+                       .last()
+                       .map(v -> outputTimeOrderedResult(cfs));
         }
         catch (Exception e)
         {
@@ -829,14 +829,14 @@ public class SinglePartitionReadCommand extends ReadCommand
         }
     }
 
-    private CsFlow<Void> processSSTableInTimeOrder(SSTableReader sstable)
+    private Flow<Void> processSSTableInTimeOrder(SSTableReader sstable)
     {
         if (!shouldInclude(sstable))
         {
             // This means that nothing queried by the filter can be in the sstable, but tombstones can still span over
             // queried data. We can completely skip a table that doesn't have any tombstones, though.
             if (!sstable.mayHaveTombstones())
-                return CsFlow.empty();
+                return Flow.empty();
 
             ++includedDueToTombstones;
         }
@@ -850,7 +850,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                             if (sstable.isRepaired())
                                 onlyUnrepaired = false;
 
-                            //TODO: replace with CsFlow.create when implemented.
+                            //TODO: replace with Flow.create when implemented.
                             return fup.content.toList()
                                               .map(u ->
                                                    {
@@ -1069,7 +1069,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             return new Group(Collections.singletonList(command), command.limits());
         }
 
-        public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+        public Flow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
         {
             return StorageProxy.read(this, consistency, clientState, queryStartNanoTime, forContinuousPaging);
         }
@@ -1107,7 +1107,7 @@ public class SinglePartitionReadCommand extends ReadCommand
             return commands.get(0).executionController();
         }
 
-        public CsFlow<FlowablePartition> executeInternal(Monitor monitor)
+        public Flow<FlowablePartition> executeInternal(Monitor monitor)
         {
             return limits.truncateFiltered(FlowablePartitions.filterAndSkipEmpty(executeLocally(monitor, false),
                                                                                  nowInSec()),
@@ -1115,7 +1115,7 @@ public class SinglePartitionReadCommand extends ReadCommand
                                                          selectsFullPartitions);
         }
 
-        public CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
+        public Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor)
         {
             return executeLocally(monitor, true);
         }
@@ -1130,7 +1130,7 @@ public class SinglePartitionReadCommand extends ReadCommand
          *
          * @return - the iterator that can be used to retrieve the query result.
          */
-        private CsFlow<FlowableUnfilteredPartition> executeLocally(Monitor monitor, boolean sort)
+        private Flow<FlowableUnfilteredPartition> executeLocally(Monitor monitor, boolean sort)
         {
             if (commands.size() == 1)
                 return commands.get(0).executeLocally(monitor);
@@ -1142,8 +1142,8 @@ public class SinglePartitionReadCommand extends ReadCommand
                 commands.sort(Comparator.comparing(SinglePartitionReadCommand::partitionKey));
             }
 
-            return CsFlow.fromIterable(commands)
-                         .flatMap(command -> command.executeLocally(monitor));
+            return Flow.fromIterable(commands)
+                       .flatMap(command -> command.executeLocally(monitor));
         }
 
         public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)

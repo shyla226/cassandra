@@ -19,9 +19,9 @@
 package org.apache.cassandra.utils.flow;
 
 /**
- * Subscription (pull) component of the CsFlow async machinery.
+ * Subscription (pull) component of the Flow async machinery.
  */
-public interface CsSubscription extends AutoCloseable
+public interface FlowSubscription extends AutoCloseable
 {
     /**
      * Requests exactly one item from the subscription.
@@ -44,13 +44,13 @@ public interface CsSubscription extends AutoCloseable
      * <p>
      * This method is required for debugging purposes only. If the subscription owns a source subscription, simply
      * implement this method by calling {@link #addSubscriberChainFromSource(Throwable)} on the source subscription.
-     * Otherwise, if the flow is a source, call {@link CsFlow#wrapException(Throwable, Object)} passing the error and
+     * Otherwise, if the flow is a source, call {@link Flow#wrapException(Throwable, Object)} passing the error and
      * this as the second parameter (so the subscription itself is the second parameter).
      * <p>
-     * {@link CsFlow#wrapException(Throwable, Object)} will add a {@link org.apache.cassandra.utils.flow.CsFlow.CsFlowException},
-     * as a suppressed exception to the original error. {@link org.apache.cassandra.utils.flow.CsFlow.CsFlowException} relies
+     * {@link Flow#wrapException(Throwable, Object)} will add a {@link Flow.FlowException},
+     * as a suppressed exception to the original error. {@link Flow.FlowException} relies
      * on calling {@link Object#toString()} on the subscription in order to create a chain of subscribers. If all subscriptions
-     * in the chain call {@link CsFlow#formatTrace(String, Object, CsSubscriber)} in their toString implementations, where the second
+     * in the chain call {@link Flow#formatTrace(String, Object, FlowSubscriber)} in their toString implementations, where the second
      * parameter is a mapping operation, typically a lambda, if available, and the subscriber is the actual subscriber.
      * The second parameter (the tag) will output the line number of the associated lambda (see {@link org.apache.cassandra.utils.LineNumberInference}),
      * whilst the subscriber recursively calls toString(), which in turn recurses to its own subscribers and so on.

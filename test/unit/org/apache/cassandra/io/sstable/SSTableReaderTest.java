@@ -32,7 +32,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -479,7 +479,7 @@ public class SSTableReaderTest
         assertNotNull(searcher);
         try (ReadExecutionController executionController = rc.executionController())
         {
-            CsFlow<FlowableUnfilteredPartition> partitions = searcher.search(executionController);
+            Flow<FlowableUnfilteredPartition> partitions = searcher.search(executionController);
             assertEquals(1,
                          Util.size(partitions, rc.nowInSec()));
         }

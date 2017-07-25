@@ -26,7 +26,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 public class FilteredPartition extends ImmutableBTreePartition
 {
@@ -65,7 +65,7 @@ public class FilteredPartition extends ImmutableBTreePartition
     /**
      * Create a FilteredPartition holding all the rows of the provided partition.
      */
-    public static CsFlow<FilteredPartition> create(FlowablePartition partition)
+    public static Flow<FilteredPartition> create(FlowablePartition partition)
     {
         return build(partition, DeletionInfo.LIVE, false, 16)
                .map(holder -> new FilteredPartition(partition.header, holder));

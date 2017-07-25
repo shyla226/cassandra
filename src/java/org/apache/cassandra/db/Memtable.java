@@ -31,7 +31,7 @@ import com.google.common.base.Throwables;
 
 import org.apache.cassandra.concurrent.TPC;
 import org.apache.cassandra.concurrent.TPCBoundaries;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import io.reactivex.Single;
 
 import org.slf4j.Logger;
@@ -49,7 +49,6 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.db.rows.FlowablePartitions;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.*;
@@ -423,7 +422,7 @@ public class Memtable implements Comparable<Memtable>
                              100 * allocator.onHeap().ownershipRatio(), 100 * allocator.offHeap().ownershipRatio());
     }
 
-    public CsFlow<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
+    public Flow<FlowableUnfilteredPartition> makePartitionIterator(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
 
@@ -464,9 +463,9 @@ public class Memtable implements Comparable<Memtable>
             }));
         }
 
-        return CsFlow.fromIterable(all)
-                     .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
-                     .flatMap(list -> CsFlow.fromIterable(list));
+        return Flow.fromIterable(all)
+                   .flatMap(pair -> Threads.evaluateOnCore(pair.right, pair.left))
+                   .flatMap(list -> Flow.fromIterable(list));
     }
 
     // IMPORTANT: this method is not thread safe and should only be called when flushing, after the write barrier has
@@ -496,7 +495,7 @@ public class Memtable implements Comparable<Memtable>
         return ret;
     }
 
-    public CsFlow<Partition> getPartition(DecoratedKey key)
+    public Flow<Partition> getPartition(DecoratedKey key)
     {
         int coreId = getCoreFor(key);
         return Threads.evaluateOnCore(() -> partitions.get(coreId).get(key), coreId);

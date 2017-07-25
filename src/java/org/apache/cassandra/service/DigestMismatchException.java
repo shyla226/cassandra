@@ -21,10 +21,10 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 @SuppressWarnings("serial")
-public class DigestMismatchException extends Exception implements CsFlow.NonWrappableException
+public class DigestMismatchException extends Exception implements Flow.NonWrappableException
 {
     public DigestMismatchException(DecoratedKey key, ByteBuffer digest1, ByteBuffer digest2)
     {

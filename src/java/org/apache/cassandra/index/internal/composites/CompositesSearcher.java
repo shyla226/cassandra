@@ -43,7 +43,7 @@ import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.index.internal.IndexEntry;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.flow.GroupOp;
 
 
@@ -67,21 +67,21 @@ public class CompositesSearcher extends CassandraIndexSearcher
             return null;
     }
 
-    protected CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
-                                                                       final FlowablePartition indexHits,
-                                                                       final ReadCommand command,
-                                                                       final ReadExecutionController executionController)
+    protected Flow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+                                                                   final FlowablePartition indexHits,
+                                                                   final ReadCommand command,
+                                                                   final ReadExecutionController executionController)
     {
         assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
 
-        class Collector implements GroupOp<IndexEntry, CsFlow<FlowableUnfilteredPartition>>
+        class Collector implements GroupOp<IndexEntry, Flow<FlowableUnfilteredPartition>>
         {
             public boolean inSameGroup(IndexEntry l, IndexEntry r)
             {
                 return l.indexedKey.equals(r.indexedKey);
             }
 
-            public CsFlow<FlowableUnfilteredPartition> map(List<IndexEntry> entries)
+            public Flow<FlowableUnfilteredPartition> map(List<IndexEntry> entries)
             {
                 DecoratedKey partitionKey = index.baseCfs.decorateKey(entries.get(0).indexedKey);
                 BTreeSet.Builder clusterings = BTreeSet.builder(index.baseCfs.getComparator());
@@ -97,7 +97,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
                                                                                        DataLimits.NONE,
                                                                                        partitionKey,
                                                                                        filter);
-                CsFlow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+                Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
 
                 return partition.map(p -> filterStaleEntries(p,
                                                              indexKey.getKey(), entries,
@@ -134,7 +134,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
         }
 
         ClusteringComparator comparator = dataIter.header.metadata.comparator;
-        class Transform implements CsFlow.SkippingOp<Unfiltered, Unfiltered>
+        class Transform implements Flow.SkippingOp<Unfiltered, Unfiltered>
         {
             private int entriesIdx;
 
@@ -184,7 +184,7 @@ public class CompositesSearcher extends CassandraIndexSearcher
             }
         }
 
-        CsFlow<Unfiltered> content = dataIter.content.skippingMap(new Transform());
+        Flow<Unfiltered> content = dataIter.content.skippingMap(new Transform());
         return new FlowableUnfilteredPartition(dataIter.header,
                                                dataIter.staticRow,
                                                content);

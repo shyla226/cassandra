@@ -34,7 +34,6 @@ import org.apache.cassandra.db.ReadVerbs.ReadVersion;
 import org.apache.cassandra.db.context.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -43,7 +42,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -139,7 +138,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * @param nowInSec the time of query in seconds.
      * @return the filtered iterator.
      */
-    public abstract CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> publisher, TableMetadata metadata, int nowInSec);
+    public abstract Flow<FlowableUnfilteredPartition> filter(Flow<FlowableUnfilteredPartition> publisher, TableMetadata metadata, int nowInSec);
 
     /**
      * Whether the provided row in the provided partition satisfies this filter.
@@ -260,7 +259,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         }
 
         @Override
-        public CsFlow<FlowableUnfilteredPartition> filter(CsFlow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
+        public Flow<FlowableUnfilteredPartition> filter(Flow<FlowableUnfilteredPartition> iter, TableMetadata metadata, int nowInSec)
         {
             if (expressions.isEmpty())
                 return iter;
@@ -288,13 +287,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     if (!e.isSatisfiedBy(metadata, pk, partition.staticRow))
                     {
                         partition.unused();
-                        return CsFlow.empty();
+                        return Flow.empty();
                     }
 
                 // TODO: This method has some odd behavior. It purges deletions when they are on their own
                 // but leaves them in if they are together with a live cell, leading to potential changes in content
                 // before and after compacting data.
-                CsFlow<Unfiltered> content = partition.content.skippingMap(unfiltered ->
+                Flow<Unfiltered> content = partition.content.skippingMap(unfiltered ->
                 {
                     if (unfiltered.isRow())
                     {
@@ -324,7 +323,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 if (filterNonStaticColumns)
                     return content.skipMapEmpty(c -> new FlowableUnfilteredPartition(partition.header, partition.staticRow, c));
                 else
-                    return CsFlow.just(new FlowableUnfilteredPartition(partition.header, partition.staticRow, content));
+                    return Flow.just(new FlowableUnfilteredPartition(partition.header, partition.staticRow, content));
             });
         }
 

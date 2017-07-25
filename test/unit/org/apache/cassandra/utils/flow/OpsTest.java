@@ -52,9 +52,9 @@ public class OpsTest
     public void testSkippingOpDoesntOverflowStack()
     {
         final int size = 100000;
-        final int result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-                                 .skippingMap(i -> i == size - 1 ? i : null)
-                                 .blockingSingle();
+        final int result = Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+                               .skippingMap(i -> i == size - 1 ? i : null)
+                               .blockingSingle();
 
         assertEquals(size -1, result);
     }
@@ -63,9 +63,9 @@ public class OpsTest
     public void testFilterOpDoesntOverflowStack()
     {
         final int size = 100000;
-        final int result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-                                 .filter(i -> i == size - 1)
-                                 .blockingSingle();
+        final int result = Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+                               .filter(i -> i == size - 1)
+                               .blockingSingle();
 
         assertEquals(size -1, result);
     }
@@ -74,9 +74,9 @@ public class OpsTest
     public void testGroupOpDoesntOverflowStack()
     {
         final int size = 100000;
-        final List<Integer> result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-                                           .toList()
-                                           .blockingSingle();
+        final List<Integer> result = Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+                                         .toList()
+                                         .blockingSingle();
 
         assertEquals(size, result.size());
     }
@@ -87,9 +87,9 @@ public class OpsTest
         final AtomicInteger result = new AtomicInteger(0);
         final int size = 1000;
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .processToRxCompletable(result::addAndGet)
-              .blockingAwait();
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .processToRxCompletable(result::addAndGet)
+            .blockingAwait();
 
         assertEquals((size-1) * size / 2, result.get()); // n(a1 + an) / 2
     }
@@ -102,9 +102,9 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .processToRxCompletable(result::addAndGet)
-              .subscribe(new CompletableObserver()
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .processToRxCompletable(result::addAndGet)
+            .subscribe(new CompletableObserver()
               {
                   public void onSubscribe(Disposable d)
                   {
@@ -134,9 +134,9 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .processToRxCompletable(i -> {throw new RuntimeException("TestException");})
-              .subscribe(new CompletableObserver()
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .processToRxCompletable(i -> {throw new RuntimeException("TestException");})
+            .subscribe(new CompletableObserver()
               {
                   public void onSubscribe(Disposable d)
                   {
@@ -162,9 +162,9 @@ public class OpsTest
     public void testReduceToSingle()
     {
         final int size = 1000;
-        final int result = CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-                                 .reduceToRxSingle(0, (r, i) -> r + i)
-                                 .blockingGet();
+        final int result = Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+                               .reduceToRxSingle(0, (r, i) -> r + i)
+                               .blockingGet();
 
         assertEquals((size-1) * size / 2, result); // n(a1 + an) / 2
     }
@@ -176,9 +176,9 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduceToRxSingle(0, (r, i) -> r + i)
-              .subscribe(new SingleObserver<Integer>()
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .reduceToRxSingle(0, (r, i) -> r + i)
+            .subscribe(new SingleObserver<Integer>()
               {
                   public void onSubscribe(Disposable d)
                   {
@@ -208,9 +208,9 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .reduceToRxSingle(0, (r, i) -> { throw new RuntimeException("TestException"); })
-              .subscribe(new SingleObserver<Integer>()
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .reduceToRxSingle(0, (r, i) -> { throw new RuntimeException("TestException"); })
+            .subscribe(new SingleObserver<Integer>()
               {
                   public void onSubscribe(Disposable d)
                   {
@@ -238,9 +238,9 @@ public class OpsTest
         final AtomicInteger result = new AtomicInteger(0);
         final int size = 1000;
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .flatMapCompletable(i -> { result.addAndGet(i); return Completable.complete(); })
-              .blockingAwait();
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .flatMapCompletable(i -> { result.addAndGet(i); return Completable.complete(); })
+            .blockingAwait();
 
         assertEquals((size-1) * size / 2, result.get()); // n(a1 + an) / 2
     }
@@ -253,9 +253,9 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .flatMapCompletable(i -> { result.addAndGet(i); return Completable.complete(); })
-              .subscribe(new CompletableObserver()
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .flatMapCompletable(i -> { result.addAndGet(i); return Completable.complete(); })
+            .subscribe(new CompletableObserver()
               {
                   public void onSubscribe(Disposable d)
                   {
@@ -285,9 +285,9 @@ public class OpsTest
         final AtomicBoolean completed = new AtomicBoolean(false);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, size).iterator())
-              .flatMapCompletable(i -> {throw new RuntimeException("TestException");})
-              .subscribe(new CompletableObserver()
+        Flow.fromIterable(() -> IntStream.range(0, size).iterator())
+            .flatMapCompletable(i -> {throw new RuntimeException("TestException");})
+            .subscribe(new CompletableObserver()
               {
                   public void onSubscribe(Disposable d)
                   {
@@ -316,9 +316,9 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
         final AtomicBoolean closed = new AtomicBoolean(false);
 
-        CsFlow.fromIterable(() -> IntStream.range(0, 10).iterator())
-              .doOnClose(() -> assertTrue(closed.compareAndSet(false, true)))
-              .doOnError(e -> assertTrue(error.compareAndSet(null, e))).countBlocking();
+        Flow.fromIterable(() -> IntStream.range(0, 10).iterator())
+            .doOnClose(() -> assertTrue(closed.compareAndSet(false, true)))
+            .doOnError(e -> assertTrue(error.compareAndSet(null, e))).countBlocking();
 
         assertTrue(closed.get());
         assertNull(error.get());
@@ -327,14 +327,14 @@ public class OpsTest
 
         try
         {
-            CsFlow.fromIterable(() -> IntStream.range(0, 10).iterator())
-                  .map(i ->
+            Flow.fromIterable(() -> IntStream.range(0, 10).iterator())
+                .map(i ->
                        {
                            if (i == 5) throw new RuntimeException("Test ex");
                            return i;
                        })
-                  .doOnClose(() -> assertTrue(closed.compareAndSet(false, true)))
-                  .doOnError(e -> assertTrue(error.compareAndSet(null, e))).countBlocking();
+                .doOnClose(() -> assertTrue(closed.compareAndSet(false, true)))
+                .doOnError(e -> assertTrue(error.compareAndSet(null, e))).countBlocking();
 
             fail("Exception expected");
         }
@@ -357,8 +357,8 @@ public class OpsTest
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
         final AtomicBoolean completed = new AtomicBoolean(false);
 
-        final CsSubscription subscription = CsFlow.fromIterable(() -> IntStream.range(0, 1).iterator())
-                                                  .onErrorResumeNext(e -> CsFlow.error(ex2)).subscribe(new CsSubscriber<Integer>()
+        final FlowSubscription subscription = Flow.fromIterable(() -> IntStream.range(0, 1).iterator())
+                                                  .onErrorResumeNext(e -> Flow.error(ex2)).subscribe(new FlowSubscriber<Integer>()
         {
             public void onNext(Integer item)
             {

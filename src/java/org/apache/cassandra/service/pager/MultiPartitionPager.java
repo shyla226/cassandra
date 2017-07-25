@@ -30,7 +30,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Pager over a list of ReadCommand.
@@ -148,14 +148,14 @@ public class MultiPartitionPager implements QueryPager
         return true;
     }
 
-    public CsFlow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
+    public Flow<FlowablePartition> fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging)
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
         return new MultiPartitions(toQuery, consistency, clientState, queryStartNanoTime, forContinuousPaging).partitions();
     }
 
-    public CsFlow<FlowablePartition> fetchPageInternal(int pageSize)
+    public Flow<FlowablePartition> fetchPageInternal(int pageSize)
     throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
@@ -191,13 +191,13 @@ public class MultiPartitionPager implements QueryPager
             this.pagerMaxRemaining = pagers[current].maxRemaining();
         }
 
-        CsFlow<FlowablePartition> partitions()
+        Flow<FlowablePartition> partitions()
         {
             return fetchSubPage(pageSize).concatWith(this::moreContents)
                                          .doOnClose(this::close);
         }
 
-        protected CsFlow<FlowablePartition> moreContents()
+        protected Flow<FlowablePartition> moreContents()
         {
             counted += pagerMaxRemaining - pagers[current].maxRemaining();
 
@@ -219,7 +219,7 @@ public class MultiPartitionPager implements QueryPager
 
         }
 
-        private CsFlow<FlowablePartition> fetchSubPage(int toQuery)
+        private Flow<FlowablePartition> fetchSubPage(int toQuery)
         {
             return consistency == null
                    ? pagers[current].fetchPageInternal(toQuery)

@@ -81,7 +81,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -437,17 +437,17 @@ public class Util
         }
     }
 
-    public static CsFlow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
+    public static Flow<DecoratedKey> nonEmptyKeys(FlowablePartitionBase partition)
     {
         if (!partition.staticRow.isEmpty() || !partition.header.partitionLevelDeletion.isLive())
         {
             partition.unused();
-            return CsFlow.just(partition.header.partitionKey);
+            return Flow.just(partition.header.partitionKey);
         }
         return partition.content.take(1).map(x -> partition.header.partitionKey);
     }
 
-    public static long size(CsFlow<FlowableUnfilteredPartition> partitions, int nowInSec)
+    public static long size(Flow<FlowableUnfilteredPartition> partitions, int nowInSec)
     {
         try
         {
@@ -668,9 +668,9 @@ public class Util
         }
     }
 
-    public static CsFlow<FlowableUnfilteredPartition> executeLocally(PartitionRangeReadCommand command,
-                                                                       ColumnFamilyStore cfs,
-                                                                       ReadExecutionController controller)
+    public static Flow<FlowableUnfilteredPartition> executeLocally(PartitionRangeReadCommand command,
+                                                                   ColumnFamilyStore cfs,
+                                                                   ReadExecutionController controller)
     {
         return new InternalPartitionRangeReadCommand(command).queryStorageInternal(cfs, controller);
     }
@@ -690,8 +690,8 @@ public class Util
                   Optional.empty());
         }
 
-        private CsFlow<FlowableUnfilteredPartition> queryStorageInternal(ColumnFamilyStore cfs,
-                                                                           ReadExecutionController controller)
+        private Flow<FlowableUnfilteredPartition> queryStorageInternal(ColumnFamilyStore cfs,
+                                                                       ReadExecutionController controller)
         {
             return queryStorage(cfs, controller);
         }

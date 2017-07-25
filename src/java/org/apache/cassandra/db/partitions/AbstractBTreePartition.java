@@ -28,7 +28,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.btree.BTreeSearchIterator;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
@@ -331,7 +331,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return new Holder(columns, builder.build(), deletionBuilder.build(), iterator.staticRow(), iterator.stats());
     }
 
-    protected static CsFlow<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
+    protected static Flow<Holder> build(FlowableUnfilteredPartition partition, int initialRowCapacity, boolean ordered)
     {
         PartitionHeader header = partition.header;
         ClusteringComparator comparator = header.metadata.comparator;
@@ -386,7 +386,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return new Holder(columns, tree, deletion, staticRow, stats);
     }
 
-    protected static CsFlow<Holder> build(FlowablePartition partition, DeletionInfo deletion, boolean buildEncodingStats, int initialRowCapacity)
+    protected static Flow<Holder> build(FlowablePartition partition, DeletionInfo deletion, boolean buildEncodingStats, int initialRowCapacity)
     {
         TableMetadata metadata = partition.metadata();
         RegularAndStaticColumns columns = partition.columns();

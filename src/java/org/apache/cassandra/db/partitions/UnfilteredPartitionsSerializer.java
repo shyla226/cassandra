@@ -29,9 +29,9 @@ import org.apache.cassandra.db.rows.UnfilteredPartitionSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 import org.apache.cassandra.utils.versioning.VersionDependent;
 import org.apache.cassandra.utils.versioning.Versioned;
 
@@ -56,7 +56,7 @@ public class UnfilteredPartitionsSerializer
         }
 
         @SuppressWarnings("resource") // DataOutputBuffer does not need closing.
-        public CsFlow<ByteBuffer> serialize(CsFlow<FlowableUnfilteredPartition> partitions, ColumnFilter selection)
+        public Flow<ByteBuffer> serialize(Flow<FlowableUnfilteredPartition> partitions, ColumnFilter selection)
         {
             final DataOutputBuffer out = new DataOutputBuffer();
             // Previously, a boolean indicating if this was for a thrift query.
@@ -83,13 +83,13 @@ public class UnfilteredPartitionsSerializer
                                   });
         }
 
-        private class DeserializePartitionsSubscription implements CsSubscription
+        private class DeserializePartitionsSubscription implements FlowSubscription
         {
             private final DataInputBuffer in;
             private final TableMetadata metadata;
             private final ColumnFilter selection;
             private final SerializationHelper.Flag flag;
-            private final CsSubscriber<FlowableUnfilteredPartition> subscriber;
+            private final FlowSubscriber<FlowableUnfilteredPartition> subscriber;
 
             private volatile FlowableUnfilteredPartition current;
 
@@ -98,7 +98,7 @@ public class UnfilteredPartitionsSerializer
                                                       TableMetadata metadata,
                                                       ColumnFilter selection,
                                                       SerializationHelper.Flag flag,
-                                                      CsSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
+                                                      FlowSubscriber<FlowableUnfilteredPartition> subscriber) throws Exception
             {
                 this.in = new DataInputBuffer(buffer, true);
                 this.metadata = metadata;
@@ -143,24 +143,24 @@ public class UnfilteredPartitionsSerializer
 
             public Throwable addSubscriberChainFromSource(Throwable throwable)
             {
-                return CsFlow.wrapException(throwable, this);
+                return Flow.wrapException(throwable, this);
             }
 
             @Override
             public String toString()
             {
-                return CsFlow.formatTrace("deserialize-partitions", subscriber);
+                return Flow.formatTrace("deserialize-partitions", subscriber);
             }
         }
 
-        public CsFlow<FlowableUnfilteredPartition> deserialize(final ByteBuffer buffer,
-                                                               final TableMetadata metadata,
-                                                               final ColumnFilter selection,
-                                                               final SerializationHelper.Flag flag)
+        public Flow<FlowableUnfilteredPartition> deserialize(final ByteBuffer buffer,
+                                                             final TableMetadata metadata,
+                                                             final ColumnFilter selection,
+                                                             final SerializationHelper.Flag flag)
         {
-            return new CsFlow<FlowableUnfilteredPartition>()
+            return new Flow<FlowableUnfilteredPartition>()
             {
-                public CsSubscription subscribe(CsSubscriber subscriber) throws Exception
+                public FlowSubscription subscribe(FlowSubscriber subscriber) throws Exception
                 {
                     return new DeserializePartitionsSubscription(buffer, metadata, selection, flag, subscriber);
                 }

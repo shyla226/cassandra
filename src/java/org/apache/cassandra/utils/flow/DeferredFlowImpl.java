@@ -30,7 +30,7 @@ import io.reactivex.schedulers.Schedulers;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
- * Implementation of {@link CsDeferredFlow}.
+ * Implementation of {@link DeferredFlow}.
  *
  * Record the source flow into an atomic reference and when, both subscriber and source flow
  * are available start requesting items, provided the subscriber has made a request. Once both
@@ -45,16 +45,16 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
  *
  * @param <T> - the type of the items for the flow
  */
-class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
+class DeferredFlowImpl<T> extends DeferredFlow<T>
 {
-    private static final Logger logger = LoggerFactory.getLogger(CsDeferredFlowImpl.class);
+    private static final Logger logger = LoggerFactory.getLogger(DeferredFlowImpl.class);
 
-    private final AtomicReference<CsFlow<T>> source;
+    private final AtomicReference<Flow<T>> source;
     private final long deadlineNanos;
     private final Supplier<Throwable> timeoutSupplier;
 
-    private volatile CsSubscriber<T> subscriber;
-    private volatile CsSubscription subscription;
+    private volatile FlowSubscriber<T> subscriber;
+    private volatile FlowSubscription subscription;
     private volatile Throwable subscriptionError;
     private volatile Disposable timeoutTask;
 
@@ -71,14 +71,14 @@ class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
     private final AtomicReference<RequestStatus> requestStatus = new AtomicReference<>(RequestStatus.NONE);
     private final AtomicReference<SubscribeStatus> subscribeStatus = new AtomicReference<>(SubscribeStatus.NONE);
 
-    CsDeferredFlowImpl(long deadlineNanos, Supplier<Throwable> timeoutSupplier)
+    DeferredFlowImpl(long deadlineNanos, Supplier<Throwable> timeoutSupplier)
     {
         this.source = new AtomicReference<>(null);
         this.deadlineNanos = deadlineNanos;
         this.timeoutSupplier = timeoutSupplier;
     }
 
-    public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+    public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
     {
         assert this.subscriber == null : "Only one subscriber is supported";
         this.subscriber = subscriber;
@@ -103,7 +103,7 @@ class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
             subscription.request();
     }
 
-    private class Subscription implements CsSubscription
+    private class Subscription implements FlowSubscription
     {
         public void request()
         {
@@ -167,20 +167,20 @@ class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
      * Disable the timer task if any, and try to subscribe unless already closed.
      **/
     @Override
-    public void onSource(CsFlow<T> value)
+    public void onSource(Flow<T> value)
     {
         if (this.source.compareAndSet(null, value))
         {
             if (logger.isTraceEnabled())
-                logger.trace("{} - got source", CsDeferredFlowImpl.this.hashCode());
+                logger.trace("{} - got source", DeferredFlowImpl.this.hashCode());
 
             maybeSubscribe();
         }
         // else
         // {
-        // TODO - Are we at risk of resource leaks if a timeout beats a real source? We shouldn't be, since CsFlow
+        // TODO - Are we at risk of resource leaks if a timeout beats a real source? We shouldn't be, since Flow
         // is not closeable and therefore implementors should not allocate resurces until there is a subscription
-        // but we should probably review the code at some point and possibly merge CsFlow and CsSubscription.
+        // but we should probably review the code at some point and possibly merge Flow and FlowSubscription.
         // }
     }
 
@@ -194,7 +194,7 @@ class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
         long timeoutNanos = this.deadlineNanos - System.nanoTime();
         if (timeoutNanos <= 0)
         { // deadline already passed
-            onSource(CsFlow.error(timeoutSupplier.get()));
+            onSource(Flow.error(timeoutSupplier.get()));
             return;
         }
 
@@ -202,7 +202,7 @@ class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
 
             timeoutTask = null;
             if (!hasSource()) // important to check because it is expensive to create an exception, due to the callstack
-                onSource(CsFlow.error(timeoutSupplier.get()));
+                onSource(Flow.error(timeoutSupplier.get()));
 
         }, timeoutNanos, TimeUnit.NANOSECONDS);
     }
@@ -232,10 +232,10 @@ class CsDeferredFlowImpl<T> extends CsDeferredFlow<T>
     {
         if (logger.isTraceEnabled())
             logger.trace("{} - maybeSubscribe {}/{}",
-                                      CsDeferredFlowImpl.this.hashCode(), source, subscription);
+                         DeferredFlowImpl.this.hashCode(), source, subscription);
 
         if (subscriber == null || source.get() == null)
-            return; // we need both subscriber and CsFlow before attempting to subscribe
+            return; // we need both subscriber and Flow before attempting to subscribe
 
         if (!subscribeStatus.compareAndSet(SubscribeStatus.NONE, SubscribeStatus.SUBSCRIBING))
             return; // the other thread raced us

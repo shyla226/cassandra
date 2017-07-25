@@ -28,7 +28,7 @@ import java.util.function.BiFunction;
 
 import io.reactivex.Completable;
 import org.apache.cassandra.db.rows.FlowablePartition;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 import org.apache.cassandra.db.rows.FlowableUnfilteredPartition;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
@@ -525,7 +525,7 @@ public interface Index
      * and reconciled, along with the command being executed. It returns another flow containing the results
      * of the transformation (which may be the same as the input if the transformation is a no-op).
      */
-    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand command);
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand command);
 
     /**
      * Factory method for query time search helper.
@@ -546,6 +546,6 @@ public interface Index
          * @param executionController the collection of OpOrder.Groups which the ReadCommand is being performed under.
          * @return partitions from the base table matching the criteria of the search.
          */
-        public CsFlow<FlowableUnfilteredPartition> search(ReadExecutionController executionController);
+        public Flow<FlowableUnfilteredPartition> search(ReadExecutionController executionController);
     }
 }

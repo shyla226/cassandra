@@ -52,7 +52,7 @@ import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * A read command that selects a (part of a) range of partitions.
@@ -193,7 +193,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
-    public CsFlow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
+    public Flow<FlowablePartition> execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime, boolean forContinuousPaging) throws RequestExecutionException
     {
         return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime, forContinuousPaging);
     }
@@ -208,18 +208,18 @@ public class PartitionRangeReadCommand extends ReadCommand
         metric.rangeLatency.addNano(latencyNanos);
     }
 
-    public CsFlow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
+    public Flow<FlowableUnfilteredPartition> queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         ColumnFamilyStore.ViewFragment view = cfs.select(View.selectLive(dataRange().keyRange()));
         Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), dataRange().keyRange().getString(metadata().partitionKeyType));
 
         // fetch data from current memtable, historical memtables, and SSTables in the correct order.
-        final List<CsFlow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
+        final List<Flow<FlowableUnfilteredPartition>> iterators = new ArrayList<>(Iterables.size(view.memtables) + view.sstables.size());
 
         for (Memtable memtable : view.memtables)
         {
             @SuppressWarnings("resource") // We close on exception and on closing the result returned by this method
-            CsFlow<FlowableUnfilteredPartition> iter = memtable.makePartitionIterator(columnFilter(), dataRange());
+            Flow<FlowableUnfilteredPartition> iter = memtable.makePartitionIterator(columnFilter(), dataRange());
             oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, memtable.getMinLocalDeletionTime());
             iterators.add(iter);
         }
@@ -236,7 +236,7 @@ public class PartitionRangeReadCommand extends ReadCommand
 
         // iterators can be empty for offline tools
         if (iterators.isEmpty())
-            return CsFlow.empty();
+            return Flow.empty();
 
         // TODO: open and close when subscribed -- make sure no resource allocated on create
         return FlowablePartitions.mergePartitions(iterators, nowInSec(), null);
@@ -311,7 +311,7 @@ public class PartitionRangeReadCommand extends ReadCommand
             sb.append(dataRange.toCQLString(metadata()));
     }
 
-    public CsFlow<FlowablePartition> withLimitsAndPostReconciliation(CsFlow<FlowablePartition> partitions)
+    public Flow<FlowablePartition> withLimitsAndPostReconciliation(Flow<FlowablePartition> partitions)
     {
         return limits().truncateFiltered(postReconciliationProcessing(partitions), nowInSec(), selectsFullPartition());
     }
@@ -322,7 +322,7 @@ public class PartitionRangeReadCommand extends ReadCommand
      *
      * See CASSANDRA-8717 for why this exists.
      */
-    public CsFlow<FlowablePartition> postReconciliationProcessing(CsFlow<FlowablePartition> partitions)
+    public Flow<FlowablePartition> postReconciliationProcessing(Flow<FlowablePartition> partitions)
     {
         ColumnFamilyStore cfs = Keyspace.open(metadata().keyspace).getColumnFamilyStore(metadata().name);
         Index index = getIndex(cfs);

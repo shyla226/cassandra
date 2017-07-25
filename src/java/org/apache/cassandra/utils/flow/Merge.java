@@ -29,14 +29,14 @@ import org.apache.cassandra.utils.Throwables;
 /**
  * Merges sorted input flows which individually contain unique items.
  */
-public class Merge<In, Out> extends CsFlow<Out>
+public class Merge<In, Out> extends Flow<Out>
 {
     protected final Reducer<In,Out> reducer;
-    protected final List<? extends CsFlow<In>> iterators;
+    protected final List<? extends Flow<In>> iterators;
     protected final Comparator<? super In> comparator;
 
-    public static <In, Out> CsFlow<Out> get(
-                                           List<? extends CsFlow<In>> sources,
+    public static <In, Out> Flow<Out> get(
+                                           List<? extends Flow<In>> sources,
                                            Comparator<? super In> comparator,
                                            Reducer<In, Out> reducer)
     {
@@ -51,13 +51,13 @@ public class Merge<In, Out> extends CsFlow<Out>
                                           });
 
             @SuppressWarnings("unchecked")
-            CsFlow<Out> converted = (CsFlow<Out>) sources.get(0);
+            Flow<Out> converted = (Flow<Out>) sources.get(0);
             return converted;
         }
         return new Merge<>(sources, comparator, reducer);
     }
 
-    public Merge(List<? extends CsFlow<In>> iters,
+    public Merge(List<? extends Flow<In>> iters,
                  Comparator<? super In> comparator,
                  Reducer<In, Out> reducer)
     {
@@ -67,7 +67,7 @@ public class Merge<In, Out> extends CsFlow<Out>
     }
 
     @Override
-    public CsSubscription subscribe(CsSubscriber<Out> subscriber) throws Exception
+    public FlowSubscription subscribe(FlowSubscriber<Out> subscriber) throws Exception
     {
         ManyToOne<In, Out> merger = new ManyToOne<>(subscriber, reducer);
         merger.subscribe(iterators, comparator);
@@ -123,11 +123,11 @@ public class Merge<In, Out> extends CsFlow<Out>
     // the candidates are stashed back onto the heap and closed when close() is called,
     // Eclipse Warnings cannot work it out and complains in several places
     @SuppressWarnings("resource")
-    static final class ManyToOne<In, Out> extends RequestLoop implements CsSubscription
+    static final class ManyToOne<In, Out> extends RequestLoop implements FlowSubscription
     {
         protected Candidate<In>[] heap;
         private final Reducer<In, Out> reducer;
-        CsSubscriber<Out> subscriber;
+        FlowSubscriber<Out> subscriber;
         AtomicInteger advancing = new AtomicInteger();
 
         /** Number of non-exhausted iterators. */
@@ -146,13 +146,13 @@ public class Merge<In, Out> extends CsFlow<Out>
          */
         static final int SORTED_SECTION_SIZE = 4;
 
-        public ManyToOne(CsSubscriber<Out> subscriber, Reducer<In, Out> reducer)
+        public ManyToOne(FlowSubscriber<Out> subscriber, Reducer<In, Out> reducer)
         {
             this.subscriber = subscriber;
             this.reducer = reducer;
         }
 
-        void subscribe(List<? extends CsFlow<In>> iters, Comparator<? super In> comp) throws Exception
+        void subscribe(List<? extends Flow<In>> iters, Comparator<? super In> comp) throws Exception
         {
             @SuppressWarnings("unchecked")
             Candidate<In>[] heap = new Candidate[iters.size()];
@@ -176,12 +176,12 @@ public class Merge<In, Out> extends CsFlow<Out>
 
         public Throwable addSubscriberChainFromSource(Throwable error)
         {
-            return CsFlow.wrapException(error, this);
+            return Flow.wrapException(error, this);
         }
 
         public String toString()
         {
-            return CsFlow.formatTrace("merge", reducer, subscriber);
+            return Flow.formatTrace("merge", reducer, subscriber);
         }
 
         /**
@@ -432,10 +432,10 @@ public class Merge<In, Out> extends CsFlow<Out>
     }
 
     // Holds and is comparable by the head item of an flow it has subscribed to
-    protected final static class Candidate<In> implements Comparable<Candidate<In>>, CsSubscriber<In>, AutoCloseable
+    protected final static class Candidate<In> implements Comparable<Candidate<In>>, FlowSubscriber<In>, AutoCloseable
     {
         private final ManyToOne<In, ?> merger;
-        private CsSubscription source;
+        private FlowSubscription source;
         private final Comparator<? super In> comp;
         private final int idx;
         private In item;
@@ -452,7 +452,7 @@ public class Merge<In, Out> extends CsFlow<Out>
 
         boolean equalParent;
 
-        public Candidate(final ManyToOne<In, ?> merger, int idx, CsFlow<In> iter, Comparator<? super In> comp) throws Exception
+        public Candidate(final ManyToOne<In, ?> merger, int idx, Flow<In> iter, Comparator<? super In> comp) throws Exception
         {
             this.merger = merger;
             this.comp = comp;

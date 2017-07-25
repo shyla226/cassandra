@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.db.monitoring;
 
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
-public class AbortedOperationException extends RuntimeException implements CsFlow.NonWrappableException
+public class AbortedOperationException extends RuntimeException implements Flow.NonWrappableException
 {
 }

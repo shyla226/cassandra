@@ -38,7 +38,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 /**
  * Basic custom index implementation for testing.
@@ -217,7 +217,7 @@ public class StubIndex implements Index
         return (controller) -> Util.executeLocally((PartitionRangeReadCommand)command, baseCfs, controller);
     }
 
-    public BiFunction<CsFlow<FlowablePartition>, ReadCommand, CsFlow<FlowablePartition>> postProcessorFor(ReadCommand readCommand)
+    public BiFunction<Flow<FlowablePartition>, ReadCommand, Flow<FlowablePartition>> postProcessorFor(ReadCommand readCommand)
     {
         return (partitions, command) -> partitions;
     }

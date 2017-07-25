@@ -36,7 +36,7 @@ import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.internal.CassandraIndexSearcher;
 import org.apache.cassandra.index.internal.IndexEntry;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.flow.CsFlow;
+import org.apache.cassandra.utils.flow.Flow;
 
 
 public class StaticColumnsSearcher extends CassandraIndexSearcher
@@ -49,10 +49,10 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
         assert index.getIndexedColumn().isStatic();
     }
 
-    protected CsFlow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
-                                                                       final FlowablePartition indexHits,
-                                                                       final ReadCommand command,
-                                                                       final ReadExecutionController executionController)
+    protected Flow<FlowableUnfilteredPartition> queryDataFromIndex(final DecoratedKey indexKey,
+                                                                   final FlowablePartition indexHits,
+                                                                   final ReadCommand command,
+                                                                   final ReadExecutionController executionController)
     {
         assert indexHits.staticRow == Rows.EMPTY_STATIC_ROW;
 
@@ -64,7 +64,7 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
             DecoratedKey partitionKey = index.baseCfs.decorateKey(nextEntry.indexedKey);
 
             if (!command.selectsKey(partitionKey) || !command.selectsClustering(partitionKey, nextEntry.indexedEntryClustering))
-                return CsFlow.<FlowableUnfilteredPartition>empty();  // CASSANDRA-13277
+                return Flow.<FlowableUnfilteredPartition>empty();  // CASSANDRA-13277
 
             // If the index is on a static column, we just need to do a full read on the partition.
             // Note that we want to re-use the command.columnFilter() in case of future change.
@@ -76,7 +76,7 @@ public class StaticColumnsSearcher extends CassandraIndexSearcher
                                                         partitionKey,
                                                         new ClusteringIndexSliceFilter(Slices.ALL, false));
 
-            CsFlow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
+            Flow<FlowableUnfilteredPartition> partition = dataCmd.queryStorage(index.baseCfs, executionController); // one or less
             return partition.skippingMap(p -> filterStaleEntry(p,
                                                                indexKey.getKey(),
                                                                nextEntry,

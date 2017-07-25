@@ -32,9 +32,9 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTreeSet;
-import org.apache.cassandra.utils.flow.CsFlow;
-import org.apache.cassandra.utils.flow.CsSubscriber;
-import org.apache.cassandra.utils.flow.CsSubscription;
+import org.apache.cassandra.utils.flow.Flow;
+import org.apache.cassandra.utils.flow.FlowSubscriber;
+import org.apache.cassandra.utils.flow.FlowSubscription;
 
 /**
  * A filter selecting rows given their clustering value.
@@ -174,11 +174,11 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
                                                                    reversed,
                                                                    partition.stats()),
                                                searcher.next(Clustering.STATIC_CLUSTERING),
-                                               new CsFlow<Unfiltered>() {
+                                               new Flow<Unfiltered>() {
                                                    final Iterator<Clustering> clusteringIter = clusteringsInQueryOrder.iterator();
-                                                   public CsSubscription subscribe(CsSubscriber<Unfiltered> subscriber) throws Exception
+                                                   public FlowSubscription subscribe(FlowSubscriber<Unfiltered> subscriber) throws Exception
                                                    {
-                                                       return new CsSubscription()
+                                                       return new FlowSubscription()
                                                        {
                                                            public void request()
                                                            {
@@ -202,7 +202,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
 
                                                            public Throwable addSubscriberChainFromSource(Throwable throwable)
                                                            {
-                                                               return CsFlow.wrapException(throwable, this);
+                                                               return Flow.wrapException(throwable, this);
                                                            }
                                                        };
                                                    }

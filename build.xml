@@ -1329,8 +1329,8 @@
         <jvmarg value="-ea"/>
         <!--Disable ref count debugging as it is very slow (uses getStackTrace)-->
         <!--jvmarg value="-Dcassandra.debugrefcount=true"/-->
-        <!--Temporarily disable debugcsflow until stack overflow fixed, also I want to test ApplyOpSubscription on Jenkins-->
-        <!--jvmarg value="-Dcassandra.debugcsflow=true"/-->
+        <!--Temporarily disable debugflow until stack overflow fixed, also I want to test ApplyOpSubscription on Jenkins-->
+        <!--jvmarg value="-Dcassandra.debugflow=true"/-->
         <jvmarg value="-Xss256k"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>

@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
- * Implementation of {@link CsFlow.Tee} based on waiting for all clients to make requests before sending one upstream
+ * Implementation of {@link Flow.Tee} based on waiting for all clients to make requests before sending one upstream
  * and forwarding the onNext call to all clients.
  * Clients can individually close their stream, in which case a request from them is no longer necessary.
  *
@@ -46,17 +46,17 @@ import java.util.stream.Collectors;
  * requests and onNexts of the second client. If the second client closes, this would trigger execution of the remainder
  * of the requests of the first client.
  */
-public class TeeImpl<T> implements CsSubscriber<T>, CsFlow.Tee<T>
+public class TeeImpl<T> implements FlowSubscriber<T>, Flow.Tee<T>
 {
-    private final CsFlow<T> sourceFlow;
-    private CsSubscription source;
+    private final Flow<T> sourceFlow;
+    private FlowSubscription source;
     private final TeeSubscription[] children;
 
     private final AtomicInteger requests = new AtomicInteger();
     private final AtomicInteger closed = new AtomicInteger();
     private final AtomicInteger subscribed = new AtomicInteger();
 
-    TeeImpl(CsFlow<T> source, int count) throws Exception
+    TeeImpl(Flow<T> source, int count) throws Exception
     {
         this.sourceFlow = source;
         children = new TeeImpl.TeeSubscription[count];
@@ -64,7 +64,7 @@ public class TeeImpl<T> implements CsSubscriber<T>, CsFlow.Tee<T>
             children[i] = new TeeSubscription(i);
     }
 
-    public CsFlow<T> child(int i)
+    public Flow<T> child(int i)
     {
         return children[i];
     }
@@ -123,16 +123,16 @@ public class TeeImpl<T> implements CsSubscriber<T>, CsFlow.Tee<T>
 
     public String toString()
     {
-        return CsFlow.formatTrace("tee " + children.length + " ways") +
+        return Flow.formatTrace("tee " + children.length + " ways") +
                Arrays.stream(children)
-                     .map(child -> CsFlow.formatTrace("tee child", child.subscriber))
+                     .map(child -> Flow.formatTrace("tee child", child.subscriber))
                      .collect(Collectors.joining("\n"));
     }
 
-    class TeeSubscription extends CsFlow<T> implements CsSubscription
+    class TeeSubscription extends Flow<T> implements FlowSubscription
     {
         final int index;
-        CsSubscriber<T> subscriber = null;
+        FlowSubscriber<T> subscriber = null;
         volatile boolean closed = false;
 
         TeeSubscription(int index)
@@ -151,7 +151,7 @@ public class TeeImpl<T> implements CsSubscriber<T>, CsFlow.Tee<T>
             closeOne();
         }
 
-        public CsSubscription subscribe(CsSubscriber<T> subscriber) throws Exception
+        public FlowSubscription subscribe(FlowSubscriber<T> subscriber) throws Exception
         {
             assert this.subscriber == null : "Tee is single-use.";
             subscribeOne();
