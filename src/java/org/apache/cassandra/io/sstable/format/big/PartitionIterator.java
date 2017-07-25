@@ -109,7 +109,7 @@ public class PartitionIterator implements PartitionIndexIterator
     @Override
     public void advance() throws IOException
     {
-        if (entry == null)
+        if (entry == null && key != null && !reader.isEOF())
             BigRowIndexEntry.Serializer.skip(reader, version);
 
         entry = null;

@@ -40,6 +40,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -49,6 +50,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Type;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.StreamPlan;
@@ -170,6 +172,7 @@ public class LegacySSTableTest
             logger.info("Loading legacy version: {}", legacyVersion);
             truncateLegacyTables(legacyVersion);
             loadLegacyTables(legacyVersion);
+            createAndVerifyIndex(legacyVersion);
             CacheService.instance.invalidateKeyCache();
             long startCount = CacheService.instance.keyCache.size();
             verifyReads(legacyVersion);
@@ -225,7 +228,17 @@ public class LegacySSTableTest
             Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple_counter%s", legacyVersion, getCompactNameSuffix(compact))).truncateBlocking();
             Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_clust%s", legacyVersion, getCompactNameSuffix(compact))).truncateBlocking();
             Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_clust_counter%s", legacyVersion, getCompactNameSuffix(compact))).truncateBlocking();
+        
+            dropIndexes(legacyVersion, compact);
         }
+    }
+
+    private static void dropIndexes(String legacyVersion, int compact)
+    {
+        String keyspace = "legacy_tables";
+        String table = String.format("legacy_%s_simple%s", legacyVersion, getCompactNameSuffix(compact));
+        String index = table + "_val_idx";
+        QueryProcessor.executeInternal(String.format("DROP INDEX IF EXISTS %s.%s", keyspace, index));
     }
 
     private static void compactLegacyTables(String legacyVersion) throws Exception
@@ -353,6 +366,29 @@ public class LegacySSTableTest
             QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_simple_counter%s (pk text PRIMARY KEY, val counter)%s", legacyVersion, compactSuffix, tableSuffix));
             QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust%s (pk text, ck text, val text, PRIMARY KEY (pk, ck))%s", legacyVersion, compactSuffix, tableSuffix));
             QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust_counter%s (pk text, ck text, val counter, PRIMARY KEY (pk, ck))%s", legacyVersion, compactSuffix, tableSuffix));
+        }
+    }
+    
+    private static void createAndVerifyIndex(String legacyVersion) throws InterruptedException
+    {
+        for (int i = 0; i <= 1; i++)
+        {
+            String compactSuffix = getCompactNameSuffix(i);
+            String keyspace = "legacy_tables";
+            String table = String.format("legacy_%s_simple%s", legacyVersion, compactSuffix);
+            String index = table + "_val_idx";
+            QueryProcessor.executeInternal(String.format("CREATE INDEX ON %s.%s(val)", keyspace, table));
+            boolean verified = false;
+            for (int j = 0; j < 10; j++)
+            {
+                UntypedResultSet result = QueryProcessor.executeInternal(String.format("SELECT * FROM %s.\"%s\" WHERE table_name='%s' AND index_name='%s'", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BUILT_INDEXES, keyspace, index));
+                verified = !result.isEmpty();
+                if (verified)
+                    break;
+                else
+                    Thread.sleep(1000);
+            }
+            Assert.assertTrue(String.format("Index %s is not built!", index), verified);
         }
     }
 
