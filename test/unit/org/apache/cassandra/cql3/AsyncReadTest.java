@@ -39,7 +39,7 @@ import org.apache.cassandra.io.util.RebuffererFactory;
  */
 public class AsyncReadTest extends CQLTester
 {
-    final int BASE_COUNT = 2000;
+    final int BASE_COUNT = 1400;
     final int REPS = 50;
 
     Random rand;

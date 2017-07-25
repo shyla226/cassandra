@@ -36,7 +36,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-public class CsDeferredFlowTest
+public class DeferredFlowTest
 {
     @BeforeClass
     public static void init() throws Exception
