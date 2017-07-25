@@ -22,15 +22,7 @@ import java.io.IOException;
 public interface TrieSerializer<Value, Dest>
 {
     int sizeofNode(SerializationNode<Value> node, long nodePosition);
-    default int inpageSizeofNode(SerializationNode<Value> node, long nodePosition)
-    {
-        return sizeofNode(node, nodePosition);
-    }
 
     // Only called after all children's serializedPositions have been set.
     void write(Dest dest, SerializationNode<Value> node, long nodePosition) throws IOException;
-    default void inpageWrite(Dest dest, SerializationNode<Value> node, long nodePosition) throws IOException
-    {
-        write(dest, node, nodePosition);
-    }
 }

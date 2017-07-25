@@ -31,6 +31,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteSource;
+import org.apache.cassandra.utils.SizedInts;
 
 /**
  * Reader class for row index files.
@@ -46,9 +47,7 @@ import org.apache.cassandra.utils.ByteSource;
  */
 class RowIndexReader extends Walker<RowIndexReader>
 {
-    private static final int FLAG_LONG_OFFSET = 4;
-    private static final int FLAG_OPEN_MARKER = 2;
-    private static final int FLAG_PAYLOAD = 1;
+    private static final int FLAG_OPEN_MARKER = 8;
 
     static class IndexInfo
     {
@@ -115,17 +114,10 @@ class RowIndexReader extends Walker<RowIndexReader>
         long dataOffset; 
         if (bits == 0)
             return null;
-        if ((bits & FLAG_LONG_OFFSET) != 0)
-        {
-            dataOffset = buf.getLong(ppos);
-            ppos += 8;
-        }
-        else
-        {
-            dataOffset = buf.getInt(ppos);
-            ppos += 4;
-        }
-        DeletionTime deletion = (bits & FLAG_OPEN_MARKER) != 0 
+        int bytes = bits & ~FLAG_OPEN_MARKER;
+        dataOffset = SizedInts.read(buf, ppos, bytes);
+        ppos += bytes;
+        DeletionTime deletion = (bits & FLAG_OPEN_MARKER) != 0
                 ? DeletionTime.serializer.deserialize(buf, ppos)
                 : null;
         return new IndexInfo(dataOffset, deletion);
@@ -142,30 +134,17 @@ class RowIndexReader extends Walker<RowIndexReader>
         }
 
         @Override
-        public int inpageSizeofNode(SerializationNode<IndexInfo> node, long nodePosition)
-        {
-            return TrieNode.inpageTypeFor(node).sizeofNode(node) + sizeof(node.payload());
-        }
-
-        @Override
         public void write(DataOutputPlus dest, SerializationNode<IndexInfo> node, long nodePosition) throws IOException
         {
             write(dest, TrieNode.typeFor(node, nodePosition), node, nodePosition);
         }
-
-        @Override
-        public void inpageWrite(DataOutputPlus dest, SerializationNode<IndexInfo> node, long nodePosition) throws IOException
-        {
-            write(dest, TrieNode.inpageTypeFor(node), node, nodePosition);
-        }
-
 
         public int sizeof(IndexInfo payload)
         {
             int size = 0;
             if (payload != null)
             {
-                size += (payload.offset != (int) payload.offset) ? 8 : 4;
+                size += SizedInts.nonZeroSize(payload.offset);
                 if (!payload.openDeletion.isLive())
                     size += DeletionTime.serializer.serializedSize(payload.openDeletion);
             }
@@ -175,23 +154,20 @@ class RowIndexReader extends Walker<RowIndexReader>
         public void write(DataOutputPlus dest, TrieNode type, SerializationNode<IndexInfo> node, long nodePosition) throws IOException
         {
             IndexInfo payload = node.payload();
-            int bits = 0;
+            int bytes = 0;
+            int hasOpenMarker = 0;
             if (payload != null)
             {
-                bits |= FLAG_PAYLOAD;
+                bytes = SizedInts.nonZeroSize(payload.offset);
                 if (!payload.openDeletion.isLive())
-                    bits |= FLAG_OPEN_MARKER;
-                if (payload.offset != (int) payload.offset)
-                    bits |= FLAG_LONG_OFFSET;
+                    hasOpenMarker = FLAG_OPEN_MARKER;
             }
-            type.serialize(dest, node, bits, nodePosition);
+            type.serialize(dest, node, bytes | hasOpenMarker, nodePosition);
             if (payload != null)
             {
-                if ((bits & FLAG_LONG_OFFSET) != 0)
-                    dest.writeLong(payload.offset);
-                else
-                    dest.writeInt((int) payload.offset);
-                if ((bits & FLAG_OPEN_MARKER) != 0)
+                SizedInts.write(dest, payload.offset, bytes);
+
+                if (hasOpenMarker != 0)
                     DeletionTime.serializer.serialize(payload.openDeletion, dest);
             }
         }

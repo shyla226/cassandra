@@ -118,9 +118,9 @@ public class IndexRewriter
 
     static class KeyIterator extends IndexPosIterator implements CloseableIterator<DecoratedKey>
     {
-        private PartitionIndex index;
-        private FileHandle dFile;
-        private FileHandle riFile;
+        private final PartitionIndex index;
+        private final FileHandle dFile;
+        private final FileHandle riFile;
         private final IPartitioner partitioner;
 
         private long indexPosition;
@@ -151,6 +151,7 @@ public class IndexRewriter
             this.partitioner = partitioner;
             this.dFile = dFile;
             this.riFile = riFile;
+            this.index = index;
         }
 
         @Override
